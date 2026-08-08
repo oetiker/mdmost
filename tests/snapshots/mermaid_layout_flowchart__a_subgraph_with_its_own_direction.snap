@@ -1,0 +1,15 @@
+---
+source: tests/mermaid_layout_flowchart.rs
+expression: "render(&chart, 60)"
+---
+                          ╭────╮                            
+                          │ In │                            
+                          ╰──┬─╯                            
+                             ▼                              
+                   ╭ Pipeline ╌╌╌╌╌╌╌╌╌╮                    
+                   ╎                   ╎                    
+                   ╎ ┌─────┐   ┌─────┐ ╎                    
+                   ╎ │ One ├──▶│ Two │ ╎                    
+                   ╎ └─────┘   └─────┘ ╎                    
+                   ╎                   ╎                    
+                   ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯

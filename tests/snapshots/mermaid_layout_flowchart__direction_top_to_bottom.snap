@@ -1,0 +1,22 @@
+---
+source: tests/mermaid_layout_flowchart.rs
+expression: "render(&decision(Direction::TopToBottom), 70)"
+---
+                                      ╭───────╮                       
+                                      ( Start )                       
+                                      ╰───┬───╯                       
+                                          ▼                           
+                                     ╱─────────╲                      
+                                    │ Is it OK? │                     
+                                     ╲────┬────╱                      
+                           ╭──────────────┤                           
+                           │yes           │no                         
+                           ▼              ▼                           
+                     ┌───────────┐   ┌────────┐                       
+                     │ Handle it │   │ Report │                       
+                     └─────┬─────┘   └────┬───┘                       
+                           ╰────────────╮ ╰╮                          
+                                        ▼  ▼                          
+                                      ╭──────╮                        
+                                      ( Done )                        
+                                      ╰──────╯

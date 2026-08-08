@@ -1,0 +1,21 @@
+---
+source: tests/mermaid_layout_flowchart.rs
+expression: "render(&chart(Direction::TopToBottom, nodes, edges), 60)"
+---
+                               ┌─────┐                      
+                               │ One │                      
+                               └─┬─┬─┘                      
+                          ╭──────╯╭╯                        
+                          ▼       │                         
+                       ┌─────┐    │                         
+                       │ Two │    │                         
+                       └──┬──┘    │                         
+                          ▼       │                         
+                      ┌───────┐   │                         
+                      │ Three │   │                         
+                      └───┬───┘   │                         
+                          ╰─────╮ ╰╮                        
+                                ▼  ▼                        
+                              ┌──────┐                      
+                              │ Four │                      
+                              └──────┘

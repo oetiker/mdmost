@@ -1,0 +1,8 @@
+---
+source: tests/mermaid_layout_flowchart.rs
+expression: "render(&chart(Direction::TopToBottom, nodes, Vec::new()), 30)"
+---
+          ┌────────┐          
+          │ first  │          
+          │ second │          
+          └────────┘

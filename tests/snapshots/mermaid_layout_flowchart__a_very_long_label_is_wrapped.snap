@@ -1,0 +1,12 @@
+---
+source: tests/mermaid_layout_flowchart.rs
+expression: "render(&chart(Direction::TopToBottom, nodes, vec![edge(0, 1)]), 34)"
+---
+┌────────────────────────────────┐
+│ A node whose label is far too  │
+│ long for the width it is given │
+└────────────────┬───────────────┘
+                 ▼                
+             ┌───────┐            
+             │ Short │            
+             └───────┘

@@ -1,0 +1,32 @@
+---
+source: tests/mermaid_layout_flowchart.rs
+expression: "render(&chart(Direction::TopToBottom, nodes, edges), 60)"
+---
+                          ┌──────┐                          
+                          │ Rect │                          
+                          └───┬──┘                          
+                              ▼                             
+                          ╭───────╮                         
+                          │ Round │                         
+                          ╰───┬───╯                         
+                              ▼                             
+                         ╭─────────╮                        
+                         ( Stadium )                        
+                         ╰────┬────╯                        
+                              ▼                             
+                          ╱───────╲                         
+                         │ Rhombus │                        
+                          ╲───┬───╱                         
+                              ▼                             
+                       ╭────────────╮                       
+                       ((  Circle  ))                       
+                       ╰──────┬─────╯                       
+                              ▼                             
+                     ┌─┬────────────┬─┐                     
+                     │ │ Subroutine │ │                     
+                     └─┴──────┬─────┴─┘                     
+                              ▼                             
+                        ╭──────────╮                        
+                        ├──────────┤                        
+                        │ Cylinder │                        
+                        ╰──────────╯
