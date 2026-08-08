@@ -48,11 +48,11 @@ struct Cli {
     #[arg(long, value_name = "NAME")]
     theme: Option<String>,
 
-    /// Use plain Unicode instead of Nerd Font glyphs. This is the default.
+    /// Use plain Unicode instead of Nerd Font glyphs, at the same display width.
     #[arg(long)]
     no_icons: bool,
 
-    /// Use Nerd Font glyphs. Needs a terminal font that has them.
+    /// Use Nerd Font glyphs. This is the default; needs a font that has them.
     #[arg(long, conflicts_with = "no_icons")]
     icons: bool,
 

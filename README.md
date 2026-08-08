@@ -71,8 +71,8 @@ mdless --render-once --width 80 --no-icons doc.md > snapshot.txt
 | `--render-once` | Render one frame to stdout and exit. Needs no terminal. |
 | `--width N` | Render at this width instead of the terminal's. |
 | `--theme NAME` | The theme to start in. |
-| `--no-icons` | Use plain Unicode instead of Nerd Font glyphs. **This is the default.** |
-| `--icons` | Use Nerd Font glyphs. Needs a terminal font that has them. |
+| `--no-icons` | Use plain Unicode instead of Nerd Font glyphs, at the same display width. |
+| `--icons` | Use Nerd Font glyphs. **This is the default.** |
 | `--mouse` | Capture the mouse: wheel scrolls, clicks select in the contents pane. |
 | `--toc` | Start with the table-of-contents pane open. |
 | `--config PATH` | Read configuration from this file instead of the default. |
@@ -80,13 +80,16 @@ mdless --render-once --width 80 --no-icons doc.md > snapshot.txt
 Exit codes: `0` success, `1` unreadable input, `2` bad arguments. There is no `--color`
 flag — the truecolour decision is made from whether stdout is a terminal.
 
-## Nerd Fonts are optional
+## Nerd Fonts
 
-**Plain Unicode is the default.** `mdless` ships two glyph vocabularies of identical
-display width, so turning icons on or off never changes the layout — only the glyphs.
-Nerd Font icons are opt-in via `--icons` or `icons = true`, because there is no way to
-ask a terminal whether it has a patched font, and guessing wrong fills the screen with
-replacement boxes.
+**`mdless` expects a Nerd Font, and uses one by default.** Headings, list bullets, code
+fences and the status bar are drawn with Nerd Font glyphs unless you say otherwise.
+
+If your terminal font is not patched, those glyphs come out as replacement boxes. Pass
+`--no-icons`, or set `icons = false` in the configuration, and every one of them is
+substituted with a plain Unicode equivalent **of the same display width** — so the escape
+hatch changes the glyphs and never the layout. Nothing shifts, nothing reflows, and no
+feature is lost.
 
 ## Keys
 
@@ -163,7 +166,7 @@ binding costs you that binding and nothing else.
 
 ```toml
 theme        = "dark"    # name of a built-in or a [themes.*] table
-icons        = false     # Nerd Font glyphs
+icons        = true      # Nerd Font glyphs; false substitutes plain Unicode
 line_numbers = false     # line-number gutter in fenced code blocks
 toc_open     = false     # start with the contents pane open
 toc_width    = 32        # width of the contents pane, in columns
