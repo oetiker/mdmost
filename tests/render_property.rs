@@ -17,6 +17,7 @@ use mdless::text::display_width;
 use mdless::theme::Theme;
 
 use proptest::prelude::*;
+use proptest::test_runner::FileFailurePersistence;
 
 /// Every combination of the render options.
 const OPTION_SETS: [RenderOptions; 4] = [
@@ -58,7 +59,12 @@ fn check(markdown: &str, width: u16) {
 /// Random bytes alone rarely produce a table or a nested list; a fragment grammar
 /// reaches the interesting layout paths far more often.
 fn fragment() -> impl Strategy<Value = String> {
-    let text = "[ -~\u{00e9}\u{4e2d}\u{1f600}]{0,40}";
+    // Design spec §13.1 names five hard categories; the class must contain all of
+    // them or a "passing" property test proves nothing about any of them. In order:
+    // ASCII, Latin-1, CJK (double width), emoji, ZWJ (emoji joiner), a combining mark,
+    // a zero-width space, Hebrew and Arabic (RTL), and a Tangut base plus a *spacing*
+    // Tai Tham mark — the pair that draws three columns and broke the canvas contract.
+    let text = "[ -~\u{00e9}\u{4e2d}\u{1f600}\u{200d}\u{0301}\u{200b}\u{05d0}\u{0627}\u{17000}\u{1a57}]{0,40}";
     prop_oneof![
         text.prop_map(|t| t),
         text.prop_map(|t| format!("# {t}")),
@@ -84,7 +90,16 @@ fn document() -> impl Strategy<Value = String> {
 }
 
 proptest! {
-    #![proptest_config(ProptestConfig { cases: 96, ..ProptestConfig::default() })]
+    // Persistence is pinned to an explicit path. Proptest cannot resolve a source
+    // root for a test under `tests/`, so with the default the failing seed is silently
+    // not written and the gate goes green or red on the luck of the seed.
+    #![proptest_config(ProptestConfig {
+        cases: 96,
+        failure_persistence: Some(Box::new(FileFailurePersistence::Direct(
+            "tests/render_property.proptest-regressions",
+        ))),
+        ..ProptestConfig::default()
+    })]
 
     /// Generated Markdown renders cleanly at any terminal width.
     #[test]

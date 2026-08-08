@@ -149,6 +149,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         );
     }
 
+    let config_toc_open = config.toc_open;
     let mut app = App::new(
         doc,
         config,
@@ -156,7 +157,8 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             title,
             icons,
             theme: theme_name,
-            toc_open: cli.toc,
+            // `[toc] open` in the configuration file counts as much as `--toc` does.
+            toc_open: cli.toc || config_toc_open,
             width: cli.width,
         },
     );

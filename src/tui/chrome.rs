@@ -10,14 +10,15 @@ use ratatui::style::Style as TermStyle;
 use ratatui::text::{Line as TermLine, Span as TermSpan};
 use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
+use crate::canvas::meter::meter;
 use crate::search::SearchMode;
-use crate::text::{display_width, truncate_to_width};
+use crate::text::{Align, display_width, truncate_to_width};
 use crate::theme::Theme;
 
 use super::app::{App, Focus, Overlay};
 use super::draw::term_style;
 use super::help;
-use super::icons::{Icons, meter};
+use super::icons::Icons;
 
 /// Shortens `text` to `width` columns, marking the cut with an ellipsis.
 ///
@@ -111,12 +112,18 @@ pub fn draw_toc(buffer: &mut Buffer, area: Rect, app: &App) {
         } else {
             icons.unselected
         };
-        let indent = "  ".repeat(entry.depth.min(4));
-        let prefix = format!("{marker}{indent} ");
         // One column of right padding, so entries never weld themselves to the border.
-        let room = usize::from(inner.width)
-            .saturating_sub(display_width(&prefix))
-            .saturating_sub(1);
+        // The indent gives way before the text does: a deep heading in a narrow pane
+        // must still say *something*, and an entry indented off the edge is a blank
+        // row the reader cannot tell from a bug.
+        let usable = usize::from(inner.width).saturating_sub(1);
+        let fixed = display_width(marker) + 1;
+        let depth = entry
+            .depth
+            .min(4)
+            .min(usable.saturating_sub(fixed + MIN_TOC_TEXT) / 2);
+        let prefix = format!("{marker}{}{}", "  ".repeat(depth), " ");
+        let room = usable.saturating_sub(display_width(&prefix));
         let mut spans = vec![TermSpan::styled(prefix, term_style(base))];
         spans.extend(highlighted(
             &fit(&entry.text, room),
@@ -130,6 +137,11 @@ pub fn draw_toc(buffer: &mut Buffer, area: Rect, app: &App) {
 }
 
 /// Splits `text` into spans so that fuzzy-match positions stand out.
+///
+/// Walks grapheme clusters, not `char`s. [`crate::toc::FilterHit::positions`] are
+/// character indices, so a cluster counts as matched when any of its characters does —
+/// which keeps a base character and its combining marks in the same span. Splitting
+/// them across two spans is how a highlighted accented heading loses its accent.
 fn highlighted(
     text: &str,
     positions: &[usize],
@@ -144,8 +156,11 @@ fn highlighted(
     let mut spans = Vec::new();
     let mut run = String::new();
     let mut run_matched = false;
-    for (index, ch) in text.chars().enumerate() {
-        let is_match = positions.contains(&index);
+    let mut index = 0usize;
+    for cluster in crate::text::graphemes(text) {
+        let chars = cluster.chars().count();
+        let is_match = (index..index + chars).any(|at| positions.contains(&at));
+        index += chars;
         if is_match != run_matched && !run.is_empty() {
             spans.push(TermSpan::styled(
                 std::mem::take(&mut run),
@@ -153,7 +168,7 @@ fn highlighted(
             ));
         }
         run_matched = is_match;
-        run.push(ch);
+        run.push_str(cluster);
     }
     if !run.is_empty() {
         spans.push(TermSpan::styled(
@@ -228,7 +243,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     // The meter sits on a visible trough: eight blank cells at 0 % read as a hole in
     // the bar rather than as an empty gauge (visual review P9), and both halves take
     // the bar's own background so the gauge is part of the bar, not a patch on it.
-    let (filled, trough) = meter(app.progress(), METER_WIDTH);
+    let (filled, trough) = meter(f64::from(app.progress()), METER_WIDTH);
     left.push(Segment::new(
         Drop::Meter,
         vec![
@@ -447,6 +462,9 @@ const HELP_PADDING: u16 = 2;
 /// The gap between two help columns.
 const HELP_GUTTER: u16 = 3;
 
+/// The narrowest a table-of-contents entry's text is ever squeezed to.
+const MIN_TOC_TEXT: usize = 6;
+
 /// The clear space kept between the overlay and the edge of the document area.
 const HELP_MARGIN: u16 = 2;
 /// Below this many rows the overlay gives up on being a panel.
@@ -627,8 +645,11 @@ fn draw_help_column(
             }
             help::HelpLine::Row(row) => {
                 let text = TermLine::from(vec![
+                    // Padded by display columns, not by `char` count: the key column
+                    // is measured with `display_width`, and a wide-character binding
+                    // would otherwise ragged-edge every row in the column.
                     TermSpan::styled(
-                        format!("{:>width$}", row.keys, width = key_width),
+                        crate::text::pad_to_width(&row.keys, key_width, Align::Right),
                         term_style(theme.ui.status_key),
                     ),
                     TermSpan::styled("  ", TermStyle::default()),

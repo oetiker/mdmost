@@ -12,7 +12,7 @@
 
 use crate::canvas::{Canvas, SearchSpan};
 use crate::doc::{Node, NodeKind, SourceSpan};
-use crate::text::{Line, Span, display_width, grapheme_width, graphemes, wrap_spans};
+use crate::text::{Line, Span, display_width, graphemes, wrap_spans};
 use crate::theme::Style;
 
 use super::Ctx;
@@ -123,10 +123,7 @@ fn render_pieces(pieces: &[Piece], width: u16, base: Style) -> Canvas {
         .map(|piece| Span::new(piece.text.clone(), piece.style))
         .collect();
     let lines = wrap(&spans, usize::from(width));
-    let mut canvas = Canvas::new(width, lines.len(), base);
-    for (row, line) in lines.iter().enumerate() {
-        canvas.write_line(row, 0, line, base);
-    }
+    let mut canvas = Canvas::from_lines(width, &lines, base);
     for span in reconcile(&lines, &flatten(pieces)) {
         canvas.add_span(span);
     }
@@ -167,7 +164,12 @@ fn reconcile(lines: &[Line], flat: &[Anchored<'_>]) -> Vec<SearchSpan> {
             }
             let origin = flat.get(cursor).and_then(|entry| entry.origin);
             cursor = cursor.saturating_add(1);
-            let cols = u16::from(grapheme_width(cluster));
+            // The cluster must be charged the columns it actually draws, not the
+            // one-or-two a single cell can hold: `Canvas::write_str` splits a cluster
+            // wider than a cell across several cells, so a clamped width here would
+            // walk the cursor left of the text it is describing and drag every
+            // following search span with it.
+            let cols = u16::try_from(display_width(cluster)).unwrap_or(u16::MAX);
             match (origin, run.as_mut()) {
                 (Some(start), Some(current))
                     if current.source_end == start && current.col + current.cols == col =>
@@ -297,8 +299,12 @@ fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>
         .iter()
         .map(|piece| piece.text.as_str())
         .collect();
-    // An autolink renders its own target as its text; showing it twice is noise.
-    if text.trim() == url.trim() || url.is_empty() {
+    // An autolink renders its own target as its text; showing it twice is noise. A
+    // bare e-mail address is the same case wearing a scheme: comrak gives `a@b.c` the
+    // target `mailto:a@b.c`, and `a@b.c (mailto:a@b.c)` tells the reader nothing.
+    let target = url.trim();
+    if target.is_empty() || text.trim() == target || text.trim() == target.trim_start_matches("mailto:")
+    {
         return;
     }
     if ctx.table_depth > 0 && !text.trim().is_empty() {
@@ -312,8 +318,9 @@ fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>
 
 /// Shortens `text` to `budget` display columns by replacing its middle with `…`.
 ///
-/// Both ends are kept because a URL carries its meaning there: the host at the front
-/// and the document name at the back.
+/// The end-elided sibling of this is [`crate::text::ellipsize`]; a URL needs the
+/// *middle* dropped instead, because it carries its meaning at both ends — the host at
+/// the front and the document name at the back.
 pub(crate) fn elide_middle(text: &str, budget: usize) -> String {
     if display_width(text) <= budget || budget < 3 {
         return text.to_string();

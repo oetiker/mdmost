@@ -299,8 +299,9 @@ impl Doc {
     /// bodies framed as code (usability review P17). A stream carrying any Markdown
     /// markup at all still takes the full Markdown path.
     pub fn parse_auto(source: &str) -> Self {
-        if plain::looks_like_markdown(source) {
-            Self::parse(source)
+        let markdown = Self::parse(source);
+        if plain::has_markup(markdown.root()) {
+            markdown
         } else {
             Self::parse_plain(source)
         }

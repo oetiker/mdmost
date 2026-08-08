@@ -44,9 +44,12 @@ pub struct Config {
     pub theme: String,
     /// Whether Nerd Font glyphs may be used.
     ///
-    /// Off by default, because the glyphs come out as replacement boxes on a terminal
-    /// without a patched font and there is no way to ask the terminal whether it has
-    /// one. Turn them on with `--icons` or `icons = true`.
+    /// On by default: design spec §2 fixes the terminal floor at truecolour, full
+    /// Unicode and a Nerd Font. There is no way to ask a terminal whether it has a
+    /// patched font, so the fallback is a choice the reader makes rather than one
+    /// that can be detected — `--no-icons`, or `icons = false`, substitutes plain
+    /// Unicode of the same display width, and `--icons` overrides a config file that
+    /// turned them off.
     pub icons: bool,
     /// Whether fenced code blocks are drawn with a line-number gutter.
     pub line_numbers: bool,
@@ -73,7 +76,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             theme: "dark".to_string(),
-            icons: false,
+            icons: true,
             line_numbers: false,
             toc_open: false,
             toc_width: DEFAULT_TOC_WIDTH,
@@ -184,12 +187,20 @@ impl Config {
     }
 
     /// Every theme name that can be cycled through, configured themes last.
+    ///
+    /// Names are unique. A configuration theme may deliberately shadow a built-in by
+    /// reusing its name — [`Config::resolve_theme`] prefers the configured one — and
+    /// listing that name twice would stall the `t` cycle on it forever.
     pub fn theme_names(&self) -> Vec<String> {
         let mut names: Vec<String> = Theme::builtin_names()
             .iter()
             .map(|name| (*name).to_string())
             .collect();
-        names.extend(self.themes.keys().cloned());
+        for name in self.themes.keys() {
+            if !names.contains(name) {
+                names.push(name.clone());
+            }
+        }
         names
     }
 

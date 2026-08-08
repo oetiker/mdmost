@@ -37,10 +37,16 @@ pub fn render_table(node: &Node, width: u16, theme: &Theme, options: &RenderOpti
 
 /// Renders a table at its natural size, without clipping it to `width`.
 ///
-/// The viewport uses this for horizontal scrolling (design spec §7.3): the returned
-/// canvas may be wider than the terminal, and the viewport blits the column window the
-/// user has scrolled to. `width` is still the budget the columns are negotiated for,
-/// so scrolling only happens when the minimums genuinely do not fit.
+/// The returned canvas may be wider than `width`; `width` is still the budget the
+/// columns are negotiated for, so the surplus only appears when the minimums genuinely
+/// do not fit.
+///
+/// **Nothing in the viewport calls this.** Horizontal scrolling (design spec §7.3) is
+/// done by [`tui::wide::render_scrollable`](crate::tui::wide::render_scrollable), which
+/// re-renders every over-wide *block* — tables and code alike — at a larger budget. The
+/// doc comment here used to claim the viewport used this function, which was untrue for
+/// the whole of the project's life; it is kept for now because it is a reasonable
+/// public entry point and one test exercises it, but it has no production caller.
 pub fn render_table_full(
     node: &Node,
     width: u16,
@@ -156,17 +162,7 @@ fn border_row(
     set: BorderSet,
     style: Style,
 ) -> Canvas {
-    let mut text = String::new();
-    text.push(left);
-    for (index, width) in widths.iter().enumerate() {
-        if index > 0 {
-            text.push(middle);
-        }
-        for _ in 0..width + 2 {
-            text.push(set.horizontal);
-        }
-    }
-    text.push(right);
+    let text = Canvas::grid_border_row(widths, left, middle, right, set);
     let columns = u16::try_from(display_width(&text)).unwrap_or(u16::MAX);
     Canvas::from_text(columns, &text, style)
 }
@@ -250,12 +246,7 @@ fn align_canvas(src: &Canvas, align: Align, fill: Style) -> Canvas {
     let mut out = Canvas::new(src.width(), src.height(), fill);
     for row in 0..src.height() {
         let text = src.row_text(row);
-        let slack = width.saturating_sub(display_width(text.trim_end()));
-        let offset = match align {
-            Align::Right => slack,
-            Align::Center => slack / 2,
-            Align::Left => 0,
-        };
+        let offset = crate::canvas::align_offset(width, display_width(text.trim_end()), align);
         out.blit(row, offset, &src.slice_rows(row, 1), fill);
     }
     out

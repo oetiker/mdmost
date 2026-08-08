@@ -347,7 +347,12 @@ fn html_marker(width: u16, ctx: Ctx<'_>) -> Canvas {
 /// This is the hanging indent shared by list items, footnote definitions and
 /// headings; `content` must already have been rendered at the reduced width.
 pub(crate) fn hanging(marker: &Line, content: &Canvas, fill: Style) -> Canvas {
-    let indent = u16::try_from(marker.width()).unwrap_or(u16::MAX);
+    // Clamped, as `heading` and `list` already clamp their own marker fields: a
+    // pathological footnote label would otherwise allocate a canvas that wide before
+    // the caller resizes it back.
+    let indent = u16::try_from(marker.width())
+        .unwrap_or(u16::MAX)
+        .min(content.width());
     let mut out = content.indent(indent, 0, fill);
     if out.is_empty() {
         out.push_blank_row(fill);

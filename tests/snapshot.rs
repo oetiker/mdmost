@@ -8,16 +8,23 @@
 //! * accepted snapshots live in `tests/snapshots/` and are reviewed with
 //!   `cargo insta review` (or accepted wholesale with `INSTA_UPDATE=always cargo test`).
 //!
-//! Once `render::block` exists, `render_at` below is the only function that has to
-//! change: replace the placeholder rendering with the real document renderer and the
-//! snapshots become the real golden files.
+//! `render_at` calls the real document renderer, so the accepted snapshots are golden
+//! *layout*: a change to margins, table sizing, quote gutters or code padding shows up
+//! here as a reviewable diff over the whole adversarial corpus (design spec §13.2) —
+//! nested tables, Markdown inside cells, deep lists and mixed scripts included.
 
 use std::path::Path;
 
-use mdless::canvas::{BorderSet, Canvas};
+use mdless::canvas::Canvas;
 use mdless::doc::{Doc, NodeKind};
-use mdless::text::{Align, Line, Span, wrap_spans};
+use mdless::render::{RenderOptions, render_document};
 use mdless::theme::Theme;
+
+/// The options the snapshots are taken under.
+///
+/// Plain glyphs, because a Nerd Font code point in a golden file is unreadable and
+/// `render_property` already proves the two sets share a layout.
+const OPTIONS: RenderOptions = RenderOptions::new(false, false);
 
 /// The widths every fixture is rendered at.
 const WIDTHS: [u16; 3] = [40, 80, 120];
@@ -77,37 +84,14 @@ fn elide(text: &str) -> String {
     }
 }
 
-/// Renders a document at `width`.
-///
-/// **Placeholder.** The block renderer does not exist yet, so this shows the document
-/// outline in a framed box built from the foundation layer. It nevertheless exercises
-/// the real contract: the output is a [`Canvas`] whose every row is exactly `width`
-/// columns wide.
+/// Renders a document at `width` with the real renderer, checking the contract.
 fn render_at(doc: &Doc, width: u16, theme: &Theme) -> Canvas {
-    let inner_width = usize::from(width.saturating_sub(2));
-    let mut body = Canvas::empty(width.saturating_sub(2));
-    for heading in doc.headings() {
-        let bullet = "#".repeat(usize::from(heading.level));
-        let spans = vec![
-            Span::new(format!("{bullet} "), theme.block.heading_prefix),
-            Span::new(heading.text.clone(), theme.heading(heading.level)),
-        ];
-        for line in wrap_spans(&spans, inner_width) {
-            body.push_line(&line, Align::Left, theme.base());
-        }
-    }
-    let title = Line::styled("outline", theme.code.language);
-    let framed = body.framed(
-        BorderSet::ROUNDED,
-        theme.block.image_border,
-        Some(&title),
-        theme.base(),
-    );
-    assert_eq!(framed.width(), width);
-    framed
+    let canvas = render_document(doc, width, theme, &OPTIONS);
+    assert_eq!(canvas.width(), width);
+    canvas
         .check_invariants()
         .unwrap_or_else(|problem| panic!("canvas invariant violated at width {width}: {problem}"));
-    framed
+    canvas
 }
 
 #[test]

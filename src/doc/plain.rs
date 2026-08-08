@@ -12,55 +12,58 @@
 
 use super::{Node, NodeKind, SourceSpan};
 
-/// Whether `source` contains anything that reads as Markdown markup.
+/// Whether `root` — a document already parsed as Markdown — contains real markup.
 ///
-/// This is deliberately generous towards Markdown: a document with a single heading,
-/// fence, list, quote, table or link is treated as Markdown, and only a stream with
-/// none of those at all takes the plain-text path. Being wrong in this direction costs
-/// a plain-text stream nothing extra, while being wrong the other way would render a
-/// real document as flat text.
-pub(super) fn looks_like_markdown(source: &str) -> bool {
-    source.lines().any(|line| {
-        let trimmed = line.trim_start();
-        // Markup only counts at the left margin. A `git log` body is indented by four
-        // spaces and routinely contains `- ` bullets and `**` emphasis that the writer
-        // never meant as Markdown; Markdown's own block markup lives much further left
-        // (four spaces of indent is an indented code block, not a list).
-        if line.len() - trimmed.len() >= 4 {
-            return false;
+/// This asks the Markdown parser rather than scanning for `#` and `- ` with a growing
+/// pile of string rules. A hand-written signal list is wrong the moment a construct is
+/// added: it was, and a document whose only markup was a footnote (`[^a]`) was paged as
+/// flat text. Anything the parser recognises therefore counts — except the handful of
+/// constructs plain text produces *by accident*:
+///
+/// * an **indented** code block — four leading spaces is how `git log` sets a commit
+///   body, not how a writer opens a code block (a fenced one still counts);
+/// * an **autolink** — `Author: a@b.c` is an e-mail address in a header, not a link a
+///   writer typed;
+/// * a **hard line break** — two trailing spaces are lint in plain text, not intent;
+/// * a **thematic break** — a row of dashes is a separator in `--help` output as often
+///   as it is a Markdown rule;
+/// * **raw HTML** — a stray `<foo>` in prose is not a document with HTML in it.
+///
+/// Being wrong towards Markdown is cheap; being wrong the other way renders a real
+/// document as flat text, so the accidental list is kept deliberately short.
+pub(super) fn has_markup(root: &Node) -> bool {
+    match &root.kind {
+        NodeKind::Heading { .. }
+        | NodeKind::BlockQuote
+        | NodeKind::List(_)
+        | NodeKind::TaskItem { .. }
+        | NodeKind::Table(_)
+        | NodeKind::FootnoteDefinition { .. }
+        | NodeKind::FootnoteReference { .. }
+        | NodeKind::Code { .. }
+        | NodeKind::Emph
+        | NodeKind::Strong
+        | NodeKind::Strikethrough
+        | NodeKind::Image { .. } => return true,
+        NodeKind::CodeBlock { fenced, .. } => return *fenced,
+        NodeKind::Link { url, .. } => {
+            if !is_autolink(root, url) {
+                return true;
+            }
         }
-        let heading =
-            trimmed.starts_with('#') && trimmed.trim_start_matches('#').starts_with([' ', '\t']);
-        heading
-            || trimmed.starts_with("```")
-            || trimmed.starts_with("~~~")
-            || trimmed.starts_with("> ")
-            || trimmed.starts_with("- ")
-            || trimmed.starts_with("* ")
-            || trimmed.starts_with("+ ")
-            || is_ordered_item(trimmed)
-            || is_table_delimiter(trimmed)
-            || line.contains("](")
-            || line.contains("**")
-            || line.contains("__")
-    })
+        _ => {}
+    }
+    root.children.iter().any(has_markup)
 }
 
-/// Whether a line opens an ordered list item, as in `1. text`.
-fn is_ordered_item(line: &str) -> bool {
-    let digits = line.trim_start_matches(|c: char| c.is_ascii_digit());
-    digits.len() < line.len() && (digits.starts_with(". ") || digits.starts_with(") "))
-}
-
-/// Whether a line is a GFM table delimiter row, as in `|---|:--:|`.
-fn is_table_delimiter(line: &str) -> bool {
-    let trimmed = line.trim();
-    trimmed.starts_with('|')
-        && trimmed.len() > 2
-        && trimmed
-            .chars()
-            .all(|c| matches!(c, '|' | '-' | ':' | ' ' | '\t'))
-        && trimmed.contains('-')
+/// Whether a link is one the parser inferred from bare text rather than one written.
+///
+/// comrak gives a bare `a@b.c` the target `mailto:a@b.c`, so the scheme has to come off
+/// before the two can be compared.
+fn is_autolink(node: &Node, url: &str) -> bool {
+    let text = node.plain_text();
+    let text = text.trim();
+    url == text || url.trim_start_matches("mailto:") == text
 }
 
 /// Builds a document that reproduces `source` line for line.

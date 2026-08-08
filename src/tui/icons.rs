@@ -67,38 +67,3 @@ impl Icons {
         if nerd_font { Self::NERD } else { Self::PLAIN }
     }
 }
-
-/// The eighth-block glyphs, from empty to full.
-///
-/// Used to draw the status-bar progress meter with sub-cell precision, so a long
-/// document's position reads smoothly instead of jumping a whole column at a time.
-pub const EIGHTHS: [&str; 9] = [
-    " ", "\u{258f}", "\u{258e}", "\u{258d}", "\u{258c}", "\u{258b}", "\u{258a}", "\u{2589}",
-    "\u{2588}",
-];
-
-/// The glyph the unfilled part of a meter is drawn with.
-///
-/// A gauge needs a track. Left blank, an empty meter is eight cells of bar colour and
-/// reads as a hole rather than as "nothing yet" (visual review P9).
-pub const TROUGH: &str = "\u{2591}";
-
-/// Renders a fractional bar `width` cells wide as its filled and unfilled halves.
-///
-/// The two are returned separately because they are drawn in different colours; their
-/// display widths always add up to exactly `width`.
-pub fn meter(fraction: f32, width: usize) -> (String, String) {
-    let fraction = fraction.clamp(0.0, 1.0);
-    let eighths = (fraction * (width * 8) as f32).round() as usize;
-    let full = (eighths / 8).min(width);
-    let remainder = eighths % 8;
-    let mut filled = String::with_capacity(width * 3);
-    for _ in 0..full {
-        filled.push_str(EIGHTHS[8]);
-    }
-    if full < width && remainder > 0 {
-        filled.push_str(EIGHTHS[remainder]);
-    }
-    let drawn = full + usize::from(full < width && remainder > 0);
-    (filled, TROUGH.repeat(width - drawn))
-}

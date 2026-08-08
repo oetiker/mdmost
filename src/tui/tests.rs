@@ -8,7 +8,6 @@ use ratatui::layout::Rect;
 
 use super::app::{App, AppOptions, Focus, Overlay, PromptKind};
 use super::help;
-use super::icons::meter;
 use crate::config::{Action, Config, Key, KeyBindings, KeyCode};
 use crate::doc::Doc;
 use crate::search::SearchMode;
@@ -674,24 +673,6 @@ fn a_forced_width_overrides_the_terminal() {
     app.resize(120, 20);
     assert_eq!(app.content_width(), 40);
     assert_eq!(app.canvas().width(), 40);
-}
-
-#[test]
-fn the_meter_is_exactly_as_wide_as_asked() {
-    for fraction in [0.0, 0.01, 0.5, 0.999, 1.0] {
-        for width in [1usize, 4, 8, 20] {
-            let (filled, trough) = meter(fraction, width);
-            assert_eq!(
-                crate::text::display_width(&filled) + crate::text::display_width(&trough),
-                width,
-                "fraction {fraction} at width {width}"
-            );
-            assert!(
-                fraction > 0.0 || filled.is_empty(),
-                "an empty meter is all trough"
-            );
-        }
-    }
 }
 
 #[test]

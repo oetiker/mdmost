@@ -193,17 +193,15 @@ fn a_broken_config_is_reported_and_defaults_are_used() {
 }
 
 #[test]
-fn the_icon_flags_reach_the_renderer_not_just_the_chrome() {
+fn no_icons_reaches_the_renderer_not_just_the_chrome() {
     // `--render-once` draws no chrome at all, so any difference here is proof the
-    // flags reached the document renderer. Icons are off by default (usability
-    // review P18), so the comparison is `--icons` against `--no-icons` rather than
-    // against the default.
-    let with = run_with_stdin(&["--render-once", "--width", "60", "--icons"], SAMPLE);
+    // flag reached the document renderer.
+    let with = run_with_stdin(&["--render-once", "--width", "60"], SAMPLE);
     let without = run_with_stdin(&["--render-once", "--width", "60", "--no-icons"], SAMPLE);
     assert!(with.status.success() && without.status.success());
     assert_ne!(
         with.stdout, without.stdout,
-        "the icon flags must change the rendered document, not only the status bar"
+        "--no-icons must change the rendered document, not only the status bar"
     );
 
     // The fallback glyphs are the same display width, so the layout is untouched.

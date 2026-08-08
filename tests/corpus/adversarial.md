@@ -8,6 +8,8 @@ A paragraph with *emphasis*, **strong**, ~~strikethrough~~, `inline code`, a
 
 日本語のテキストと English が混ざった段落です。مرحبا بالعالم — नमस्ते दुनिया.
 Emoji: 👩‍💻 🇨🇭 👍🏽 and a combining sequence: café (decomposed) and café (precomposed).
+A cluster wider than a terminal cell: 𗀀ᩗ (a Tangut base plus a spacing
+Tai Tham mark: one grapheme, three columns) and a zero-width space: a​b.
 
 An unbreakable-token stress case:
 supercalifragilisticexpialidociousantidisestablishmentarianism

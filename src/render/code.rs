@@ -172,34 +172,8 @@ fn gutter_width(lines: usize, width: u16, numbered: bool) -> usize {
 
 /// How many columns the largest line number needs.
 fn digit_count(lines: usize) -> usize {
-    let mut digits = 1usize;
-    let mut value = lines;
-    while value >= 10 {
-        value /= 10;
-        digits += 1;
-    }
-    digits
+    lines.max(1).ilog10() as usize + 1
 }
-
-/// Mermaid diagram families that exist but that `mdless` does not draw yet.
-///
-/// The distinction matters for the caption: a reader who wrote `flowchart` deserves
-/// "not drawn yet", while a reader who wrote prose deserves "this is not a diagram" —
-/// not their own typo quoted back at them as if it were a diagram type.
-const KNOWN_FAMILIES: [&str; 12] = [
-    "flowchart",
-    "graph",
-    "sequencediagram",
-    "classdiagram",
-    "statediagram",
-    "statediagram-v2",
-    "erdiagram",
-    "journey",
-    "gantt",
-    "pie",
-    "gitgraph",
-    "mindmap",
-];
 
 /// The mermaid source shown as a framed code block, with the reason in its bottom edge.
 ///
@@ -226,7 +200,10 @@ fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Ca
     // The bottom edge is as long as the block; a caption longer than that is elided
     // rather than hard-cut, so it never ends mid-word against the corner glyph.
     let room = usize::from(width).saturating_sub(4);
-    let caption = Line::styled(elide_end(&caption(error), room), theme.block.caption);
+    let caption = Line::styled(
+        crate::text::ellipsize(&caption(error), room),
+        theme.block.caption,
+    );
     let mut out = inner.framed_captioned(
         BorderSet::ROUNDED,
         theme.code.frame,
@@ -239,35 +216,56 @@ fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Ca
     out
 }
 
+/// The diagram families `mdless` draws, spelled as a reader would write them.
+///
+/// Named in the caption when the first word of a block is not a family at all, because
+/// "unknown diagram type" alone leaves the reader no way to discover what *would* have
+/// worked. [`the_advertised_families_are_the_ones_that_actually_parse`] pins this list
+/// to what the parser accepts, so it cannot drift into advertising vapour.
+///
+/// [`the_advertised_families_are_the_ones_that_actually_parse`]: super::tests
+pub(crate) const FAMILIES: [&str; 7] = [
+    "flowchart",
+    "sequenceDiagram",
+    "classDiagram",
+    "erDiagram",
+    "stateDiagram-v2",
+    "pie",
+    "gantt",
+];
+
 /// What the bottom edge of an undrawable Mermaid block says.
+///
+/// Two things a reader needs kept apart: *mdless cannot draw this* and *this diagram is
+/// wrong*. The first is our failure and must never be phrased as a syntax complaint —
+/// that sends the reader hunting for a typo in a correct diagram. The second names the
+/// line and quotes the offending text, which is what a compiler would do.
 fn caption(error: &MermaidError) -> String {
     match error {
-        MermaidError::UnsupportedFamily(family) if is_known_family(family) => {
-            format!("{family} — not drawn yet")
+        // Every family in `FAMILIES` parses, so an unknown keyword is not a diagram we
+        // have yet to implement — it is not a diagram. Say what *is* one.
+        MermaidError::UnsupportedFamily(_) => {
+            format!("not a diagram type — mdless draws {}", FAMILIES.join(", "))
         }
-        MermaidError::UnsupportedFamily(_) => "not a mermaid diagram".to_string(),
-        MermaidError::TooNarrow { .. } => "too narrow to draw".to_string(),
-        MermaidError::Unsupported { line, message } | MermaidError::Syntax { line, message } => {
-            format!("line {line}: {message}")
+        MermaidError::TooNarrow { width } => {
+            format!("needs more than {width} columns to draw")
         }
+        MermaidError::Unsupported { line, message } => located(*line, message),
+        MermaidError::Syntax { line, message } => located(*line, message),
     }
 }
 
-/// Shortens `text` to `budget` display columns, marking the cut with an ellipsis.
-fn elide_end(text: &str, budget: usize) -> String {
-    if display_width(text) <= budget {
-        return text.to_string();
+/// Prefixes a message with its source line, when there is one.
+///
+/// Lines are 1-based to a reader, so a zero is not a location: it is an internal error
+/// with no line to offer, and printing "line 0" sends the reader looking for somewhere
+/// that cannot exist.
+fn located(line: usize, message: &str) -> String {
+    if line == 0 {
+        message.to_string()
+    } else {
+        format!("line {line}: {message}")
     }
-    if budget == 0 {
-        return String::new();
-    }
-    format!("{}…", crate::text::truncate_to_width(text, budget - 1))
-}
-
-/// Whether `family` names a real Mermaid diagram family.
-fn is_known_family(family: &str) -> bool {
-    let lowered = family.to_lowercase();
-    KNOWN_FAMILIES.contains(&lowered.as_str())
 }
 
 /// The natural width of a code block at these options: frame, padding and gutter
