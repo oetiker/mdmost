@@ -1,0 +1,43 @@
+[package]
+name = "mdless"
+version = "0.1.0"
+edition = "2024"
+description = "A full-screen terminal pager for a single Markdown document"
+license = "MIT"
+repository = "https://github.com/oetiker/mdless"
+
+[lib]
+name = "mdless"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mdless"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.6", features = ["derive"] }
+compact_str = "0.10.0"
+comrak = { version = "0.54.0", default-features = false }
+# Kept in lock step with the crossterm version ratatui 0.30 depends on.
+crossterm = "0.29.0"
+directories = "6.0.0"
+ratatui = "0.30.2"
+serde = { version = "1.0.229", features = ["derive"] }
+# `default-fancy` swaps oniguruma for the pure-Rust `fancy-regex` engine, so the build
+# needs no C toolchain. Same syntaxes, same themes, same API.
+syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
+thiserror = "2.0.20"
+toml = "1.1.4"
+unicode-segmentation = "1.13.3"
+unicode-width = "0.2.2"
+
+[dev-dependencies]
+insta = "1.48.0"
+portable-pty = "0.9.0"
+pretty_assertions = "1.4.1"
+proptest = "1.11.0"
+
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"

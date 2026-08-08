@@ -1,0 +1,163 @@
+---
+source: tests/snapshot.rs
+expression: outline(&doc)
+---
+Document
+  Heading(h1, #mdless-torture-test)
+    Text("mdless torture test")
+  Paragraph
+    Text("A paragraph with ")
+    Emph
+      Text("emphasis")
+    Text(", ")
+    Strong
+      Text("strong")
+    Text(", ")
+    Strikethrough
+      Text("strikethrough")
+    Text(", ")
+    Code
+    Text(", a")
+    SoftBreak
+    Link(https://example.com)
+      Text("link")
+    Text(" and an autolink")
+    SoftBreak
+    Link(https://example.org/very/long/path/that/will/not/fit/in/forty/columns)
+      Text("https://example.org/very/long/path/that/…")
+    Text(".")
+  Heading(h2, #mixed-scripts)
+    Text("Mixed scripts")
+  Paragraph
+    Text("日本語のテキストと English が混ざった段…")
+    SoftBreak
+    Text("Emoji: 👩\u{200d}💻 🇨🇭 👍🏽 and a combining sequence…")
+  Paragraph
+    Text("An unbreakable-token stress case:")
+    SoftBreak
+    Text("supercalifragilisticexpialidociousantidi…")
+  Heading(h2, #lists)
+    Text("Lists")
+  List(ordered=false)
+    Item
+      Paragraph
+        Text("level one")
+      List(ordered=false)
+        Item
+          Paragraph
+            Text("level two with a longer line that has to…")
+          List(ordered=false)
+            Item
+              Paragraph
+                Text("level three")
+              List(ordered=true)
+                Item
+                  Paragraph
+                    Text("ordered inside unordered")
+                Item
+                  Paragraph
+                    Text("second")
+    TaskItem(checked=true)
+      Paragraph
+        Text("a finished task")
+    TaskItem(checked=false)
+      Paragraph
+        Text("an unfinished task")
+  Heading(h2, #table-with-markdown-inside-cells)
+    Text("Table with Markdown inside cells")
+  Table(3 columns)
+    TableRow(header=true)
+      TableCell
+        Text("Left")
+      TableCell
+        Text("Centre")
+      TableCell
+        Text("Right")
+    TableRow(header=false)
+      TableCell
+        Emph
+          Text("em")
+      TableCell
+        Code
+      TableCell
+        Text("1")
+    TableRow(header=false)
+      TableCell
+        Text("a list:")
+        SkippedHtml(block=false)
+        Text("not html")
+      TableCell
+        Strong
+          Text("bold")
+        Text(" and a ")
+        Link(x.md)
+          Text("link")
+      TableCell
+        Text("1234567890")
+    TableRow(header=false)
+      TableCell
+        Text("日本語のセル")
+      TableCell
+        Text("👩\u{200d}💻")
+      TableCell
+        Text("-1")
+  Heading(h3, #nested-table)
+    Text("Nested table")
+  Table(1 columns)
+    TableRow(header=true)
+      TableCell
+        Text("outer")
+    TableRow(header=false)
+      TableCell
+        Text("a cell containing another table is legal…")
+  Heading(h3, #degenerate-tables)
+    Text("Degenerate tables")
+  Table(1 columns)
+    TableRow(header=true)
+      TableCell
+    TableRow(header=false)
+      TableCell
+  Heading(h2, #code)
+    Text("Code")
+  CodeBlock(rust)
+  CodeBlock(-)
+  Heading(h2, #mermaid)
+    Text("Mermaid")
+  CodeBlock(mermaid)
+  CodeBlock(mermaid)
+  Heading(h2, #html-is-not-supported)
+    Text("HTML is not supported")
+  SkippedHtml(block=true)
+  Paragraph
+    Text("Inline ")
+    SkippedHtml(block=false)
+    Text("html")
+    SkippedHtml(block=false)
+    Text(" is dropped too.")
+  Heading(h2, #quotes-and-rules)
+    Text("Quotes and rules")
+  BlockQuote
+    Paragraph
+      Text("A block quote")
+      SoftBreak
+      Text("spanning two lines.")
+    BlockQuote
+      Paragraph
+        Text("and a nested one.")
+  ThematicBreak
+  Heading(h2, #images-and-footnotes)
+    Text("Images and footnotes")
+  Paragraph
+    Image(picture.png)
+      Text("alt text for a picture")
+  Paragraph
+    Text("A statement needing a source")
+    FootnoteReference
+    Text(".")
+  Heading(h2, #duplicate-heading)
+    Text("Duplicate heading")
+  Heading(h2, #duplicate-heading-1)
+    Text("Duplicate heading")
+  FootnoteDefinition
+    Paragraph
+      Text("The footnote body.")

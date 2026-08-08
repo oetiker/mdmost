@@ -1,0 +1,19 @@
+---
+source: tests/snapshot.rs
+expression: canvas.plain_text()
+---
+╭ outline ─────────────────────────────╮
+│# mdless torture test                 │
+│## Mixed scripts                      │
+│## Lists                              │
+│## Table with Markdown inside cells   │
+│### Nested table                      │
+│### Degenerate tables                 │
+│## Code                               │
+│## Mermaid                            │
+│## HTML is not supported              │
+│## Quotes and rules                   │
+│## Images and footnotes               │
+│## Duplicate heading                  │
+│## Duplicate heading                  │
+╰──────────────────────────────────────╯
