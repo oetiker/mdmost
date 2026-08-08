@@ -198,7 +198,13 @@ fn plot(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidEr
         };
         let bar = chrome::eighth_bar(chrome::eighths_of(fraction, columns.bar), columns.bar);
         body.write_str(index, columns.bar_start(), &bar, accent);
-        write_share(&mut body, index, &columns, shares[index], theme.diagram.axis);
+        write_share(
+            &mut body,
+            index,
+            &columns,
+            shares[index],
+            theme.diagram.axis,
+        );
         if columns.value > 0 {
             body.write_field(
                 index,
@@ -359,19 +365,112 @@ mod tests {
         assert_eq!(grapheme_width(SWATCH), 1);
     }
 
+    /// Builds slices from bare values; labels do not affect any arithmetic here.
+    fn slices(values: &[f64]) -> Vec<PieSlice> {
+        values
+            .iter()
+            .map(|value| PieSlice {
+                label: String::new(),
+                value: *value,
+            })
+            .collect()
+    }
+
+    /// Applies [`apportion`] to a list of values.
+    fn shares(values: &[f64]) -> Vec<u32> {
+        let owned = slices(values);
+        apportion(&owned.iter().collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn rounding_is_half_away_from_zero() {
+        // The rule, asserted as a rule: an exact half always rounds away from zero,
+        // in both directions and at both precisions we use. Every case below is a
+        // dyadic rational, so the tie really is a tie — a literal such as `2.135` is
+        // stored as slightly *less* than 2.135 and is correctly not a tie at all.
+        for (value, decimals, expected) in [
+            (2.125f64, 2, 2.13f64),
+            (0.375, 2, 0.38),
+            (-2.125, 2, -2.13),
+            (-0.375, 2, -0.38),
+            (0.25, 1, 0.3),
+            (0.75, 1, 0.8),
+            (-0.25, 1, -0.3),
+        ] {
+            let rounded = round_half_away(value, decimals);
+            assert!(
+                (rounded - expected).abs() < 1e-9,
+                "round_half_away({value}, {decimals}) = {rounded}, expected {expected}"
+            );
+        }
+    }
+
     #[test]
     fn values_are_formatted_without_noise() {
         assert_eq!(format_value(245.0), "245");
         assert_eq!(format_value(2.5), "2.5");
-        // `2.125` is exactly representable, so formatting rounds half to even.
-        assert_eq!(format_value(2.125), "2.12");
+        assert_eq!(format_value(2.125), "2.13");
         assert_eq!(format_value(2.126), "2.13");
+        assert_eq!(format_value(2.124), "2.12");
         assert_eq!(format_value(f64::INFINITY), "—");
     }
 
     #[test]
-    fn percentages_survive_an_empty_total() {
-        assert_eq!(format_percent(1.0, 0.0), "0.0%");
-        assert_eq!(format_percent(1.0, 4.0), "25.0%");
+    fn percentages_are_formatted_from_tenths() {
+        assert_eq!(format_percent(0), "0.0%");
+        assert_eq!(format_percent(250), "25.0%");
+        assert_eq!(format_percent(412), "41.2%");
+        assert_eq!(format_percent(1000), "100.0%");
+    }
+
+    #[test]
+    fn shares_always_sum_to_exactly_one_hundred_percent() {
+        // Seven equal slices are the classic counter-example: rounding each one
+        // independently gives 14.3% × 7 = 100.1%.
+        for values in [
+            vec![1.0; 7],
+            vec![1.0; 3],
+            vec![1.0; 6],
+            vec![2.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            vec![99.0, 1.0],
+            vec![1e-9, 1.0],
+            vec![5.0],
+        ] {
+            let apportioned = shares(&values);
+            assert_eq!(
+                apportioned.iter().sum::<u32>(),
+                1000,
+                "shares for {values:?} were {apportioned:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shares_stay_close_to_the_exact_value() {
+        // Largest remainder never moves a slice by more than one tenth of a percent.
+        let values = [3.0, 3.0, 3.0, 1.0];
+        let total: f64 = values.iter().sum();
+        for (share, value) in shares(&values).iter().zip(values) {
+            let exact = value / total * 1000.0;
+            assert!(
+                (f64::from(*share) - exact).abs() <= 1.0,
+                "share {share} is too far from {exact}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_total_apportions_nothing_rather_than_dividing_by_zero() {
+        assert_eq!(shares(&[0.0, 0.0, 0.0]), vec![0, 0, 0]);
+        assert_eq!(shares(&[]), Vec::<u32>::new());
+    }
+
+    #[test]
+    fn apportionment_is_deterministic_for_ties() {
+        // Equal values must always hand the leftover tenth to the earliest slice.
+        for _ in 0..8 {
+            assert_eq!(shares(&[1.0; 3]), vec![334, 333, 333]);
+        }
     }
 }

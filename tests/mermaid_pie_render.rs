@@ -163,6 +163,52 @@ fn fractional_values_keep_their_precision() {
     );
 }
 
+/// The percentages actually printed in a rendered chart, in tenths of a percent.
+fn printed_shares(chart: &PieChart, width: u16) -> Vec<u32> {
+    let text = pie::draw(chart, width, &Theme::default_dark())
+        .expect("chart fits")
+        .plain_text();
+    text.lines()
+        .filter(|line| line.trim_start().starts_with('●'))
+        .filter_map(|line| {
+            let field = line.split_whitespace().find(|word| word.ends_with('%'))?;
+            let (whole, fraction) = field.trim_end_matches('%').split_once('.')?;
+            Some(whole.parse::<u32>().ok()? * 10 + fraction.parse::<u32>().ok()?)
+        })
+        .collect()
+}
+
+#[test]
+fn the_printed_percentages_sum_to_exactly_one_hundred() {
+    // Independently rounded percentages are a real reporting bug: seven equal slices
+    // would each print as 14.3% and the column would read 100.1%. The renderer
+    // apportions by largest remainder instead, so what a reader adds up is right.
+    for count in 1..=13usize {
+        let values: Vec<(&str, f64)> = (0..count).map(|_| ("s", 1.0)).collect();
+        let chart = chart(None, false, &values);
+        let printed = printed_shares(&chart, 80);
+        assert_eq!(printed.len(), count);
+        assert_eq!(
+            printed.iter().sum::<u32>(),
+            1000,
+            "{count} equal slices printed {printed:?}"
+        );
+    }
+
+    let lopsided = chart(
+        None,
+        true,
+        &[("a", 1.0), ("b", 1.0), ("c", 1.0), ("d", 1.0), ("e", 3.0)],
+    );
+    assert_eq!(printed_shares(&lopsided, 120).iter().sum::<u32>(), 1000);
+}
+
+#[test]
+fn a_chart_of_only_zeroes_prints_no_share_at_all() {
+    let chart = chart(None, true, &[("a", 0.0), ("b", 0.0)]);
+    assert_eq!(printed_shares(&chart, 80), vec![0, 0]);
+}
+
 #[test]
 fn a_chart_too_narrow_to_draw_reports_it() {
     let theme = Theme::default_dark();
