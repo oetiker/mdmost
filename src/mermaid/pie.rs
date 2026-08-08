@@ -164,6 +164,7 @@ fn plot(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidEr
     let total: f64 = slices.iter().map(|slice| slice.value).sum();
     let largest = slices.first().map_or(0.0, |slice| slice.value);
 
+    let shares = apportion(&slices);
     let values: Vec<String> = slices
         .iter()
         .map(|slice| format_value(slice.value))
@@ -197,14 +198,7 @@ fn plot(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidEr
         };
         let bar = chrome::eighth_bar(chrome::eighths_of(fraction, columns.bar), columns.bar);
         body.write_str(index, columns.bar_start(), &bar, accent);
-        write_share(
-            &mut body,
-            index,
-            &columns,
-            slice.value,
-            total,
-            theme.diagram.axis,
-        );
+        write_share(&mut body, index, &columns, shares[index], theme.diagram.axis);
         if columns.value > 0 {
             body.write_field(
                 index,
@@ -235,7 +229,15 @@ fn plot(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidEr
             Align::Left,
             theme.diagram.legend,
         );
-        write_share(&mut body, row, &columns, total, total, theme.diagram.axis);
+        // The apportioned shares are exact by construction, so the total row is the
+        // real sum of the column above it, not an assumed `100.0%`.
+        write_share(
+            &mut body,
+            row,
+            &columns,
+            shares.iter().sum::<u32>(),
+            theme.diagram.axis,
+        );
         if columns.value > 0 {
             body.write_field(
                 row,
@@ -251,20 +253,13 @@ fn plot(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidEr
     Ok(body)
 }
 
-/// Writes the percentage cell of one row.
-fn write_share(
-    body: &mut Canvas,
-    row: usize,
-    columns: &Columns,
-    value: f64,
-    total: f64,
-    style: Style,
-) {
+/// Writes the percentage cell of one row from a share in tenths of a percent.
+fn write_share(body: &mut Canvas, row: usize, columns: &Columns, tenths: u32, style: Style) {
     body.write_field(
         row,
         columns.percent_start(),
         PERCENT_COLS,
-        &format_percent(value, total),
+        &format_percent(tenths),
         Align::Right,
         style,
     );
@@ -279,6 +274,18 @@ fn sorted_slices(chart: &PieChart) -> Vec<&PieSlice> {
     slices
 }
 
+/// Rounds `value` to `decimals` places, half away from zero.
+///
+/// This is the rule a reader expects — `0.125` shows as `0.13`, not `0.12` — and it is
+/// chosen deliberately rather than inherited from the round-half-to-even that `{:.2}`
+/// applies to whichever binary value happens to be nearest the decimal literal.
+fn round_half_away(value: f64, decimals: i32) -> f64 {
+    let factor = 10f64.powi(decimals);
+    // `f64::round` is defined as half away from zero, which is exactly the rule we
+    // want; doing it here means the later `{:.n}` has nothing left to round.
+    (value * factor).round() / factor
+}
+
 /// Formats a slice value, dropping a pointless fractional part.
 fn format_value(value: f64) -> String {
     if !value.is_finite() {
@@ -287,16 +294,59 @@ fn format_value(value: f64) -> String {
     if value.fract() == 0.0 && value.abs() < 1e15 {
         return format!("{value:.0}");
     }
-    let text = format!("{value:.2}");
+    let text = format!("{:.2}", round_half_away(value, 2));
     text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-/// Formats `value` as a percentage of `total`, guarding against an empty chart.
-fn format_percent(value: f64, total: f64) -> String {
-    if total <= 0.0 || !total.is_finite() || !value.is_finite() {
-        return "0.0%".to_string();
+/// Formats a share given in tenths of a percent, e.g. `412` as `41.2%`.
+fn format_percent(tenths: u32) -> String {
+    format!("{}.{}%", tenths / 10, tenths % 10)
+}
+
+/// Splits `1000` tenths of a percent across the slices by largest remainder.
+///
+/// Rounding every slice independently is a real reporting bug: four slices of one
+/// seventh each print as `14.3%` and the column sums to `100.4%`. The largest-remainder
+/// (Hamilton) method instead hands the leftover tenths to the slices with the biggest
+/// truncated fractions, so **the printed percentages always sum to exactly `100.0%`**.
+/// Ties are broken by position, so the result stays deterministic.
+///
+/// A chart whose values sum to zero (or to something non-finite) gets all-zero shares
+/// rather than a division by zero; its total row then honestly reads `0.0%`.
+fn apportion(slices: &[&PieSlice]) -> Vec<u32> {
+    let total: f64 = slices.iter().map(|slice| slice.value).sum();
+    if !total.is_finite() || total <= 0.0 {
+        return vec![0; slices.len()];
     }
-    format!("{:.1}%", value / total * 100.0)
+    let exact: Vec<f64> = slices
+        .iter()
+        .map(|slice| {
+            if slice.value.is_finite() && slice.value > 0.0 {
+                slice.value / total * 1000.0
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    // `exact` values are non-negative and sum to at most 1000, so every floor fits.
+    let mut shares: Vec<u32> = exact.iter().map(|share| *share as u32).collect();
+    let assigned: u32 = shares.iter().sum();
+    let mut leftover = 1000u32.saturating_sub(assigned);
+
+    let mut order: Vec<usize> = (0..slices.len()).collect();
+    order.sort_by(|a, b| {
+        let fraction_a = exact[*a] - exact[*a].floor();
+        let fraction_b = exact[*b] - exact[*b].floor();
+        fraction_b.total_cmp(&fraction_a).then(a.cmp(b))
+    });
+    for index in order {
+        if leftover == 0 {
+            break;
+        }
+        shares[index] += 1;
+        leftover -= 1;
+    }
+    shares
 }
 
 #[cfg(test)]
