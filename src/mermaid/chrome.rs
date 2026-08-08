@@ -50,11 +50,8 @@ pub fn compose(
     }
     // `align_offset` saturates; the copy this replaced used a bare `width - body.width()`,
     // which panics whenever a body is wider than the frame it is being centred in.
-    let left = crate::canvas::align_offset(
-        usize::from(width),
-        usize::from(body.width()),
-        Align::Center,
-    );
+    let left =
+        crate::canvas::align_offset(usize::from(width), usize::from(body.width()), Align::Center);
     let top = out.height();
     out.blit(top, left, body, base);
     Ok(out)

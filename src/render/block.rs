@@ -311,11 +311,13 @@ fn image(node: &Node, url: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     let theme = ctx.theme;
     let text = node.plain_text();
     let alt = text.trim();
-    if width < 6 {
+    if width < 8 {
         let fallback = if alt.is_empty() { url } else { alt };
         return Canvas::from_text(width, fallback, theme.text.image_alt);
     }
-    let inner_width = width - 2;
+    // One column of interior padding on each side, the same as a code frame and a
+    // table cell: nothing in the document is welded to its own border.
+    let inner_width = width - 4;
     let mut inner = Canvas::empty(inner_width);
     // The frame's label already says "image"; repeating it as the body when there is
     // no alt text says nothing twice. With no alt, the target alone is the caption.
@@ -327,7 +329,7 @@ fn image(node: &Node, url: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     }
     inner.push_text_ellipsized(url, Align::Left, theme.text.link_url);
     let title = Line::styled("image", theme.block.caption);
-    inner.framed(
+    inner.indent(1, 1, ctx.base).framed(
         BorderSet::ROUNDED,
         theme.block.image_border,
         Some(&title),

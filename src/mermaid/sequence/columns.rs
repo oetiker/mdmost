@@ -14,7 +14,7 @@
 use crate::error::MermaidError;
 use crate::mermaid::ast::{NotePlacement, ParticipantKind, SequenceDiagram, SequenceItem};
 use crate::mermaid::chrome;
-use crate::text::display_width;
+use crate::text::{display_width, distribute_evenly};
 
 /// Columns a self-message hook reaches out from its lifeline.
 pub(super) const HOOK: usize = 3;
@@ -388,12 +388,7 @@ fn satisfy(distance: &mut [usize], spans: &[Span]) {
             let Some(deficit) = span.least.checked_sub(current).filter(|d| *d > 0) else {
                 continue;
             };
-            let gaps = range.len();
-            let share = deficit / gaps;
-            let extra = deficit % gaps;
-            for (offset, slot) in distance[range].iter_mut().enumerate() {
-                *slot += share + usize::from(offset < extra);
-            }
+            distribute_evenly(&mut distance[range], deficit);
             changed = true;
         }
         if !changed {

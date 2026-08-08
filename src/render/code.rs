@@ -223,7 +223,10 @@ fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Ca
         theme.code.background,
     );
     let title = Line::styled(MERMAID, theme.code.language);
-    let caption = Line::styled(caption(error), theme.block.caption);
+    // The bottom edge is as long as the block; a caption longer than that is elided
+    // rather than hard-cut, so it never ends mid-word against the corner glyph.
+    let room = usize::from(width).saturating_sub(4);
+    let caption = Line::styled(elide_end(&caption(error), room), theme.block.caption);
     let mut out = inner.framed_captioned(
         BorderSet::ROUNDED,
         theme.code.frame,
@@ -240,14 +243,25 @@ fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Ca
 fn caption(error: &MermaidError) -> String {
     match error {
         MermaidError::UnsupportedFamily(family) if is_known_family(family) => {
-            format!("{family} diagrams are not drawn yet — source shown")
+            format!("{family} — not drawn yet")
         }
-        MermaidError::UnsupportedFamily(_) => "not a diagram mdless recognises".to_string(),
-        MermaidError::TooNarrow { .. } => "too narrow to draw — source shown".to_string(),
+        MermaidError::UnsupportedFamily(_) => "not a mermaid diagram".to_string(),
+        MermaidError::TooNarrow { .. } => "too narrow to draw".to_string(),
         MermaidError::Unsupported { line, message } | MermaidError::Syntax { line, message } => {
             format!("line {line}: {message}")
         }
     }
+}
+
+/// Shortens `text` to `budget` display columns, marking the cut with an ellipsis.
+fn elide_end(text: &str, budget: usize) -> String {
+    if display_width(text) <= budget {
+        return text.to_string();
+    }
+    if budget == 0 {
+        return String::new();
+    }
+    format!("{}…", crate::text::truncate_to_width(text, budget - 1))
 }
 
 /// Whether `family` names a real Mermaid diagram family.

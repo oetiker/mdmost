@@ -18,16 +18,18 @@
 //!   somewhere to land.
 //!
 //! Notes (`note left of X`) are drawn as a box in the note ink, tied to their state by
-//! a dotted line. The engine chooses where to place it; the AST's left/right preference
-//! is not honoured, because the layered layout owns placement (design spec §3).
+//! a dotted line, on the side the author asked for where the layout has room for it.
+//! The side is semantic content the author wrote, not a layout decision taken from the
+//! AST, so consuming it here — at render time, with the width known — is exactly what
+//! design spec §3 permits.
 
 mod shape;
 
 use crate::canvas::Canvas;
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
-    Direction, StateDiagram, StateEndpoint, StateId, StateKind, StateNode, StateNote, StateScope,
-    Transition,
+    Direction, NotePlacement, StateDiagram, StateEndpoint, StateId, StateKind, StateNode,
+    StateNote, StateScope, Transition,
 };
 use crate::text::wrap_plain;
 use crate::theme::Theme;
@@ -202,6 +204,17 @@ impl Plan {
     }
 
     /// Adds a note box and the dotted line tying it to its state.
+    ///
+    /// `note left of X` / `note right of X` is the author's own words, not a layout
+    /// decision, so the side is honoured rather than discarded: the note is declared
+    /// immediately before or after its state, which is the order the engine seeds its
+    /// crossing reduction from, so the note comes out on the requested side of the
+    /// state whenever the layout has room for it there.
+    ///
+    /// It is a *preference*, not a guarantee, and it is horizontal only. The engine
+    /// ranks nodes by their edges, so a note tied to its state necessarily sits one
+    /// rank further along the flow rather than exactly beside it; pinning two nodes to
+    /// the same rank is not something the engine can currently express.
     fn note(&mut self, note: &StateNote, group: &mut GroupSpec, ends: &[Ends]) {
         let Some(target) = ends.get(note.target.0).and_then(|end| end.entry) else {
             return;
@@ -213,7 +226,11 @@ impl Plan {
             .flat_map(|line| wrap_plain(line, NOTE_WIDTH))
             .collect();
         let node = self.push(Slot::Note(lines));
-        group.nodes.push(node);
+        match group.nodes.iter().position(|&at| at == target) {
+            Some(at) if note.placement == NotePlacement::LeftOf => group.nodes.insert(at, node),
+            Some(at) => group.nodes.insert(at + 1, node),
+            None => group.nodes.push(node),
+        }
         self.edges.push(EdgeSpec {
             from: target,
             to: node,
@@ -477,6 +494,46 @@ mod tests {
         let plan = Plan::of(&diagram);
         assert!(plan.root.children.is_empty());
         assert_eq!(plan.slots, vec![Slot::State(StateId(0))]);
+    }
+
+    #[test]
+    fn a_note_is_declared_on_the_side_it_asked_for() {
+        use crate::mermaid::ast::NotePlacement;
+        let build = |placement| {
+            let diagram = StateDiagram {
+                direction: None,
+                states: vec![state("A", StateKind::Simple)],
+                root: StateScope {
+                    states: vec![StateId(0)],
+                    notes: vec![StateNote {
+                        placement,
+                        target: StateId(0),
+                        text: Label::line("careful"),
+                    }],
+                    ..StateScope::default()
+                },
+            };
+            let plan = Plan::of(&diagram);
+            let state_at = plan
+                .root
+                .nodes
+                .iter()
+                .position(|&n| plan.slots[n.0] == Slot::State(StateId(0)))
+                .expect("the state");
+            let note_at = plan
+                .root
+                .nodes
+                .iter()
+                .position(|&n| matches!(plan.slots[n.0], Slot::Note(_)))
+                .expect("the note");
+            (state_at, note_at)
+        };
+
+        let (state_at, note_at) = build(NotePlacement::LeftOf);
+        assert!(note_at < state_at, "a left note is declared first");
+
+        let (state_at, note_at) = build(NotePlacement::RightOf);
+        assert!(note_at > state_at, "a right note is declared after");
     }
 
     #[test]

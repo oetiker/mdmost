@@ -190,7 +190,11 @@ fn centred(canvas: Canvas, width: u16, theme: &Theme) -> Canvas {
         Align::Center,
     );
     let left = u16::try_from(left).unwrap_or(0);
-    let mut out = canvas.indent(left, width.saturating_sub(canvas.width() + left), theme.base());
+    let mut out = canvas.indent(
+        left,
+        width.saturating_sub(canvas.width() + left),
+        theme.base(),
+    );
     out.resize_width(width, theme.base());
     out
 }

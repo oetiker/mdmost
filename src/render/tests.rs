@@ -348,7 +348,7 @@ fn a_mermaid_fence_degrades_to_a_captioned_code_block() {
     // top edge, rather than as a stray log line under the box.
     let last = out.last().unwrap_or_else(|| panic!("no rows in {out:?}"));
     assert!(
-        last.starts_with("╰ not a diagram mdless recognises ─") && last.ends_with('╯'),
+        last.starts_with("╰ not a mermaid diagram ─") && last.ends_with('╯'),
         "{last:?}"
     );
     // The old caption said "unsupported" twice and quoted the reader's own typo back
@@ -381,8 +381,8 @@ fn an_image_becomes_a_framed_placeholder_with_alt_text_and_target() {
         out,
         [
             "╭ image ───────────╮",
-            "│the alt           │",
-            "│pic.png           │",
+            "│ the alt          │",
+            "│ pic.png          │",
             "╰──────────────────╯"
         ]
     );
@@ -848,10 +848,7 @@ fn search_spans_map_source_offsets_onto_the_canvas() {
         &source[span.source_start..span.source_end],
         "hello brave world"
     );
-    assert_eq!(
-        (span.row, span.col, span.cols),
-        (0, DOCUMENT_MARGIN, 17)
-    );
+    assert_eq!((span.row, span.col, span.cols), (0, DOCUMENT_MARGIN, 17));
 }
 
 #[test]

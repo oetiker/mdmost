@@ -281,22 +281,14 @@ fn draw_frame(canvas: &mut Canvas, columns: &Columns, frame: &Frame, top: usize,
     let first = top + frame.top;
     let last = top + frame.bottom;
 
-    canvas.write_str(first, left, &border.top_left.to_string(), style);
-    canvas.hline(
+    canvas.rect(
         first,
-        left + 1,
-        inner,
-        &border.horizontal.to_string(),
+        left,
+        last + 1 - first,
+        right + 1 - left,
+        border,
         style,
     );
-    canvas.write_str(first, right, &border.top_right.to_string(), style);
-    canvas.write_str(last, left, &border.bottom_left.to_string(), style);
-    canvas.hline(last, left + 1, inner, &border.horizontal.to_string(), style);
-    canvas.write_str(last, right, &border.bottom_right.to_string(), style);
-    for row in first + 1..last {
-        canvas.write_str(row, left, &border.vertical.to_string(), style);
-        canvas.write_str(row, right, &border.vertical.to_string(), style);
-    }
 
     for (index, branch) in frame.branches.iter().enumerate() {
         let row = top + branch.row;
