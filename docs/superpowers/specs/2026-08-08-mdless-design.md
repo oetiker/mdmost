@@ -49,6 +49,22 @@ Consequences that are binding on every module:
   performance detail, never a correctness one; dropping the cache must change nothing
   visible.
 
+### 3.1 Render options
+
+Two user-facing settings are capabilities rather than colours, so they travel beside
+the theme rather than inside it:
+
+```rust
+pub struct RenderOptions { pub icons: bool, pub line_numbers: bool }
+pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas
+```
+
+`icons: false` (from `--no-icons`) substitutes plain Unicode for every Nerd Font glyph,
+at the same display width so no layout shifts. `line_numbers` adds a themed gutter to
+fenced code blocks, outside the horizontally scrollable region. Options are threaded
+through every recursive render call, table cells included, and form part of the render
+cache key alongside document version, width and theme.
+
 ## 4. The `Canvas` contract
 
 `Canvas` is the single currency between renderers and the viewport.
@@ -182,7 +198,12 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
 
 ## 9. Look and feel
 
-- Signature dark theme plus a light theme built in; further themes definable in TOML.
+- Signature dark theme plus a light theme built in; further themes definable in TOML as
+  `[themes.<name>]` with `base = "dark" | "light"`, an optional `dark = bool`, and
+  per-slot palette colour overrides — so a custom theme can be a two-line tweak rather
+  than a full fifteen-colour palette. Config themes derive their semantic styles through
+  `Theme::from_palette`, the same single implementation the built-ins use, so they
+  cannot drift.
 - Nerd Font glyphs for heading bullets, list markers, code-fence language icons, and
   the status bar. `--no-icons` and `icons = false` substitute plain Unicode.
 - Headings are visually distinct by level (colour, weight, prefix glyph, rules under
@@ -206,9 +227,14 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
 | `Enter` | (in TOC) jump to heading |
 | `t` | cycle theme |
 | `[` `]` | previous / next heading |
+| `←` `→` | scroll horizontally (wide tables, long code lines) |
 | `h` `F1` | help overlay |
-| `q` `Esc` | quit |
+| `q` | quit, unconditionally |
+| `Esc` | cancel: closes an overlay or TOC focus first, quits from a bare document |
 | mouse wheel | scroll; click in TOC jumps |
+
+When the content is scrolled horizontally the status bar shows a horizontal offset
+indicator, so a reader who bumps `→` can see why the text moved.
 
 Bindings are remappable in config; the help overlay is generated from the live binding
 table so it can never drift.
@@ -218,7 +244,8 @@ table so it can never drift.
 ```
 mdless [FILE]              # file, or stdin when FILE is absent or "-"
   --render-once            # render one frame to stdout and exit (no TTY needed)
-  --width N                # force width (implies deterministic layout)
+  --width N                # force render width in BOTH modes; in the TUI the surplus
+                           # is reachable by horizontal scrolling
   --theme NAME
   --no-icons
   --toc                    # start with TOC pane open
@@ -228,7 +255,9 @@ mdless [FILE]              # file, or stdin when FILE is absent or "-"
 - When input is stdin, the process reopens `/dev/tty` for keyboard input so
   `cat x.md | mdless` and `export PAGER=mdless` both work.
 - When stdout is not a TTY, `--render-once` behaviour is implied so `mdless x.md | cat`
-  produces sensible output instead of escape soup.
+  produces sensible output instead of escape soup. `--render-once` emits ANSI truecolour
+  to a TTY and plain text otherwise, which is also what makes headless snapshotting
+  trivial. There is no `--color` flag.
 - Exit codes: 0 success, 1 unreadable input, 2 bad arguments.
 
 ## 12. Error handling
