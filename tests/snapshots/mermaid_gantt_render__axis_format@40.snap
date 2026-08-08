@@ -4,13 +4,16 @@ expression: canvas.plain_text()
 ---
               Release plan              
                                         
-              04 Jan  18 Jan  01 Feb    
-             ├──┬────────┬───────┬──────
-Design       │                          
-  Spec       │░░░░░                     
-  Review     │     ████                 
-             │                          
-Build        │                          
-  Core engine│         ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
-  Docs       │             ▒▒▒▒▒▒▒▒▒    
-  Ship       │                         ◆
+                 01 Jan       01 Feb    
+                ├──┬─────────────┬─────┤
+                │                       
+Design          │                       
+  Spec          │  ███                  
+  Review        │     ███               
+                │                       
+Build           │                       
+  Core engine   │        █████████████  
+  Docs          │            ██████     
+  Ship          │                     ◆ 
+                                        
+                 █ done   █ active

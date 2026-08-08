@@ -432,12 +432,7 @@ impl Canvas {
     ///
     /// Returns the index of the new row.
     pub fn push_text_ellipsized(&mut self, text: &str, align: Align, style: Style) -> usize {
-        let width = usize::from(self.width);
-        if display_width(text) <= width {
-            return self.push_text(text, align, style);
-        }
-        let head = crate::text::truncate_to_width(text, width.saturating_sub(1));
-        let shortened = format!("{head}…");
+        let shortened = crate::text::ellipsize(text, usize::from(self.width));
         self.push_text(&shortened, align, style)
     }
 }

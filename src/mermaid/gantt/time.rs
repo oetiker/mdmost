@@ -207,6 +207,11 @@ pub fn add_months(seconds: i64, months: i64) -> i64 {
     days_from_civil(year, month, 1) * DAY
 }
 
+/// The start of the UTC day containing `seconds`.
+pub fn day_start(seconds: i64) -> i64 {
+    seconds.div_euclid(DAY) * DAY
+}
+
 /// The start of the calendar month containing `seconds`.
 pub fn month_start(seconds: i64) -> i64 {
     let at = DateTime::from_epoch(seconds);

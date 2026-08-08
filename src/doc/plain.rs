@@ -22,6 +22,13 @@ use super::{Node, NodeKind, SourceSpan};
 pub(super) fn looks_like_markdown(source: &str) -> bool {
     source.lines().any(|line| {
         let trimmed = line.trim_start();
+        // Markup only counts at the left margin. A `git log` body is indented by four
+        // spaces and routinely contains `- ` bullets and `**` emphasis that the writer
+        // never meant as Markdown; Markdown's own block markup lives much further left
+        // (four spaces of indent is an indented code block, not a list).
+        if line.len() - trimmed.len() >= 4 {
+            return false;
+        }
         let heading =
             trimmed.starts_with('#') && trimmed.trim_start_matches('#').starts_with([' ', '\t']);
         heading

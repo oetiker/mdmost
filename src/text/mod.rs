@@ -172,13 +172,43 @@ pub fn min_unbreakable_width(text: &str) -> usize {
 pub fn truncate_to_width(text: &str, max_width: usize) -> &str {
     let mut width = 0usize;
     for (offset, cluster) in text.grapheme_indices(true) {
-        let w = usize::from(grapheme_width(cluster));
+        // The cluster's *true* width, not a cell's capacity: costing a three-column
+        // cluster as two would let the result exceed `max_width`, which is the one
+        // promise this function makes.
+        let w = display_width(cluster);
         if width + w > max_width {
             return &text[..offset];
         }
         width += w;
     }
     text
+}
+
+/// The glyph marking text that had to be shortened.
+///
+/// One idiom for the whole program: the visual review found three different truncation
+/// markers in use, which reads as three different features rather than one.
+pub const ELLIPSIS: &str = "…";
+
+/// Shortens `text` to at most `width` display columns, marking the cut with `…`.
+///
+/// Text that already fits is returned unchanged. Cuts land on grapheme cluster
+/// boundaries, so combining marks and emoji sequences survive; the result may come out
+/// a column narrower than `width` when a double-width cluster would have straddled the
+/// limit, but it is never wider.
+///
+/// This is the single implementation of "shorten and mark it". [`Canvas::push_text_ellipsized`]
+/// and the Mermaid chart chrome both call it rather than keeping their own copy.
+///
+/// [`Canvas::push_text_ellipsized`]: crate::canvas::Canvas::push_text_ellipsized
+pub fn ellipsize(text: &str, width: usize) -> String {
+    if display_width(text) <= width {
+        return text.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    format!("{}{ELLIPSIS}", truncate_to_width(text, width - 1))
 }
 
 /// Splits `text` at `at_width` display columns, returning the part before and after.

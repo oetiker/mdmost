@@ -40,6 +40,14 @@ const TASK_INDENT: usize = 2;
 const TICK_PADDING: usize = 2;
 /// The marker drawn for a milestone.
 const MILESTONE: &str = "◆";
+/// The fraction of a span added as breathing room at each end.
+const SPAN_MARGIN: i64 = 12;
+/// Blank columns kept between the longest task name and the axis.
+const GUTTER_PAD: usize = 2;
+/// The gutter is rounded up to a multiple of this, so sibling charts tend to agree.
+const GUTTER_STEP: usize = 4;
+/// The fill of every task bar; state is carried by colour, not by ink density.
+const BAR: &str = "█";
 /// The text shown for a chart that declares no tasks.
 const EMPTY_TEXT: &str = "(no tasks)";
 /// Upper bound on generated ticks, so a pathological span cannot loop for long.
@@ -63,6 +71,9 @@ pub fn draw(chart: &GanttChart, width: u16, theme: &Theme) -> Result<Canvas, Mer
     } else {
         time::clamp_instant(start.saturating_add(DAY))
     };
+    // Pad the span so the outermost tasks do not run edge to edge: a single task
+    // filling the whole plot conveys nothing about how long it is.
+    let (start, end) = pad_span(start, end);
     let body = plot(chart, start, end, width, theme)?;
     chrome::compose(chart.title.as_deref(), &body, width, theme)
 }
@@ -109,8 +120,14 @@ fn negotiate(chart: &GanttChart, width: u16) -> Result<Columns, MermaidError> {
         .max()
         .unwrap_or(MIN_GUTTER);
 
+    // Leave air between the longest label and the axis, then round up to a step so
+    // two charts in one document are likely to start their axes at the same column.
+    // Layout is a pure function of one chart (design spec §3), so charts cannot agree
+    // by negotiation; quantising is what lets them agree by construction.
+    let padded = natural + GUTTER_PAD;
+    let quantised = padded.div_ceil(GUTTER_STEP) * GUTTER_STEP;
     let cap = (budget * 2 / 5).max(MIN_GUTTER);
-    let gutter = natural.clamp(MIN_GUTTER, cap);
+    let gutter = quantised.clamp(MIN_GUTTER, cap);
     for gutter in [gutter, MIN_GUTTER] {
         if let Some(plot) = budget.checked_sub(gutter + 1)
             && plot >= MIN_PLOT
@@ -144,23 +161,32 @@ fn plot(
         "─",
         theme.diagram.axis,
     );
+    // The rule is capped at both ends; an open right-hand end read as a line that had
+    // simply run out of room.
+    body.write_str(
+        1,
+        columns.plot_start() + columns.plot.saturating_sub(1),
+        "┤",
+        theme.diagram.axis,
+    );
     for tick in &axis.ticks {
         let at = columns.plot_start() + tick.column;
         let text = chrome::fit(&tick.label, columns.plot);
         let span = display_width(&text);
         let left = columns.plot_start() + tick_left(tick.column, span, columns.plot);
         body.write_str(0, left, &text, theme.diagram.axis);
-        // Column zero is already marked by the axis' own left terminator.
-        if tick.column > 0 {
+        // The two ends already carry their own terminators.
+        if tick.column > 0 && tick.column + 1 < columns.plot {
             body.write_str(1, at, "┬", theme.diagram.axis);
         }
     }
 
-    for (index, section) in chart.sections.iter().enumerate() {
-        if index > 0 {
-            let row = body.push_blank_row(base);
-            body.write_str(row, columns.separator(), "│", theme.diagram.axis);
-        }
+    for section in &chart.sections {
+        // Every section opens with the same blank row, the first one included: a gap
+        // before `Build` but not before `Design` broke the rhythm, and the first gap
+        // also gives the axis room to breathe.
+        let row = body.push_blank_row(base);
+        body.write_str(row, columns.separator(), "│", theme.diagram.axis);
         if let Some(title) = &section.title {
             let row = body.push_blank_row(base);
             body.write_str(
@@ -186,6 +212,8 @@ fn plot(
             draw_task(&mut body, row, &columns, task, start, end, theme);
         }
     }
+
+    legend(&mut body, &columns, chart, theme);
 
     Ok(body)
 }
@@ -222,6 +250,82 @@ fn draw_task(
     );
 }
 
+/// Appends the legend naming every task state the chart actually uses.
+///
+/// Now that colour alone carries state (M10), a reader needs somewhere to learn what
+/// the colours mean — the pie chart has shipped a legend since it landed, and the
+/// gantt had none.
+fn legend(body: &mut Canvas, columns: &Columns, chart: &GanttChart, theme: &Theme) {
+    let tasks = || chart.sections.iter().flat_map(|section| &section.tasks);
+    let styles = theme.diagram;
+    let mut entries: Vec<(&str, &str, Style)> = Vec::new();
+    let mut note = |present: bool, glyph: &'static str, text: &'static str, style: Style| {
+        if present {
+            entries.push((glyph, text, style));
+        }
+    };
+    note(
+        tasks().any(|task| task.progress == TaskProgress::Done && !task.critical),
+        BAR,
+        "done",
+        styles.task_done,
+    );
+    note(
+        tasks().any(|task| task.progress == TaskProgress::Active && !task.critical),
+        BAR,
+        "active",
+        styles.task_active,
+    );
+    note(
+        tasks().any(|task| task.critical),
+        BAR,
+        "critical",
+        styles.task_crit,
+    );
+    note(
+        tasks().any(|task| {
+            task.progress == TaskProgress::Planned && !task.critical && !task.milestone
+        }),
+        BAR,
+        "planned",
+        styles.line,
+    );
+    note(
+        tasks().any(|task| task.milestone),
+        MILESTONE,
+        "milestone",
+        styles.milestone,
+    );
+    if entries.len() < 2 {
+        return;
+    }
+    body.push_blank_row(theme.base());
+    let row = body.push_blank_row(theme.base());
+    let mut at = columns.plot_start();
+    for (glyph, text, style) in entries {
+        let entry = format!("{glyph} {text}");
+        if at + display_width(&entry) > columns.total() {
+            break;
+        }
+        at += body.write_str(row, at, glyph, style);
+        at += body.write_str(row, at, &format!(" {text}"), styles.legend);
+        at += 3;
+    }
+}
+
+/// Widens a span by a margin at each end.
+///
+/// Without this a chart with one task starts where the task starts and ends where it
+/// ends, so the bar fills every column and the axis says only "this task took all of
+/// the time there was".
+fn pad_span(start: i64, end: i64) -> (i64, i64) {
+    let margin = ((end - start) / SPAN_MARGIN).max(1);
+    (
+        time::clamp_instant(start.saturating_sub(margin)),
+        time::clamp_instant(end.saturating_add(margin)),
+    )
+}
+
 /// Maps an instant onto a plot column.
 fn column_of(at: i64, start: i64, end: i64, plot: usize) -> usize {
     let span = (end - start).max(1) as f64;
@@ -232,15 +336,13 @@ fn column_of(at: i64, start: i64, end: i64, plot: usize) -> usize {
 }
 
 /// The fill texture of a task bar.
-fn task_glyph(task: &GanttTask) -> &'static str {
-    if task.critical {
-        return "▓";
-    }
-    match task.progress {
-        TaskProgress::Done => "░",
-        TaskProgress::Active => "█",
-        TaskProgress::Planned => "▒",
-    }
+fn task_glyph(_task: &GanttTask) -> &'static str {
+    // Every bar is solid and state is carried by colour alone. Varying the fill
+    // density double-encoded the state and fought the colour: a *completed* task read
+    // as washed out, and the default state — a quarter-filled mid grey on a near-black
+    // page — was the lowest-contrast thing on the screen. The legend below the chart
+    // names the states so nothing is lost (design spec §6.6).
+    BAR
 }
 
 /// The style of a task bar.
@@ -313,9 +415,19 @@ impl Step {
     }
 
     /// The format string to use when the chart gave no `axisFormat`.
-    fn default_format(self) -> &'static str {
+    ///
+    /// `crosses_days` keeps the date on a sub-day step: an hourly axis labelled only
+    /// `00:00 12:00 00:00 …` repeats itself and tells the reader nothing about which
+    /// day a tick belongs to.
+    fn default_format(self, crosses_days: bool) -> &'static str {
         match self {
-            Self::Seconds(seconds) if seconds < DAY => "%H:%M",
+            Self::Seconds(seconds) if seconds < DAY => {
+                if crosses_days {
+                    "%m-%d %H:%M"
+                } else {
+                    "%H:%M"
+                }
+            }
             Self::Seconds(_) => "%Y-%m-%d",
             Self::Months(months) if months < 12 => "%b %Y",
             Self::Months(_) => "%Y",
@@ -380,13 +492,14 @@ fn tick_left(column: usize, span: usize, columns: usize) -> usize {
 impl Axis {
     /// Chooses the finest tick spacing whose labels still fit side by side.
     fn choose(start: i64, end: i64, plot: usize, format: Option<&str>) -> Self {
+        let crosses_days = time::day_start(start) != time::day_start(end);
         let mut fallback = None;
         for step in STEPS {
             let instants = step.ticks(start, end);
             if instants.is_empty() {
                 continue;
             }
-            let pattern = format.unwrap_or_else(|| step.default_format());
+            let pattern = format.unwrap_or_else(|| step.default_format(crosses_days));
             let labels: Vec<String> = instants
                 .iter()
                 .map(|at| DateTime::from_epoch(*at).format(pattern))

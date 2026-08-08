@@ -383,3 +383,59 @@ fn distribute_evenly_totals_correctly_for_every_shape() {
         }
     }
 }
+
+#[test]
+fn ellipsize_leaves_text_that_fits_alone() {
+    assert_eq!(ellipsize("hello", 10), "hello");
+    assert_eq!(ellipsize("hello", 5), "hello");
+    assert_eq!(ellipsize("", 0), "");
+}
+
+#[test]
+fn ellipsize_marks_the_cut() {
+    assert_eq!(ellipsize("hello", 4), "hel…");
+    assert_eq!(ellipsize("hello", 1), "…");
+    assert_eq!(ellipsize("hello", 0), "");
+}
+
+#[test]
+fn ellipsize_never_splits_a_cluster() {
+    // A double-width cluster that would straddle the limit is dropped, not halved,
+    // so the result can be a column narrower than the budget but never wider.
+    assert_eq!(ellipsize("日本語", 4), "日…");
+    assert_eq!(ellipsize(&format!("{ZWJ}{ZWJ}"), 3), format!("{ZWJ}…"));
+    assert_eq!(ellipsize(&format!("caf{COMBINING}x"), 4), "caf…");
+}
+
+#[test]
+fn ellipsize_never_exceeds_its_budget() {
+    let samples = [
+        "plain text that is quite long",
+        "日本語のテキスト",
+        WIDE_PLUS_SPACING_MARK,
+        ZWJ,
+        FLAG,
+        COMBINING,
+        "mixed 日本 \u{17000}\u{1A57} tail",
+    ];
+    for text in samples {
+        for width in 0..14usize {
+            let cut = ellipsize(text, width);
+            assert!(
+                display_width(&cut) <= width,
+                "{text:?} at {width}: {cut:?} draws {}",
+                display_width(&cut)
+            );
+        }
+    }
+}
+
+#[test]
+fn truncate_to_width_costs_a_wide_cluster_honestly() {
+    // Three columns of content, two columns of budget: the cluster cannot fit at all.
+    assert_eq!(truncate_to_width(WIDE_PLUS_SPACING_MARK, 2), "");
+    assert_eq!(
+        truncate_to_width(WIDE_PLUS_SPACING_MARK, 3),
+        WIDE_PLUS_SPACING_MARK
+    );
+}

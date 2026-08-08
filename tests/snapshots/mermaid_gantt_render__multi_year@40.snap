@@ -4,8 +4,9 @@ expression: canvas.plain_text()
 ---
              The long haul              
                                         
-              2020      2022     2024   
-          ├─────┬─────────┬────────┬────
-Phases    │                             
-  Research│▒▒▒▒▒▒▒▒▒▒▒▒                 
-  Delivery│            ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
+                 2020    2022   2024    
+            ├──────┬───────┬──────┬────┤
+            │                           
+Phases      │                           
+  Research  │  █████████                
+  Delivery  │           ██████████████

@@ -84,7 +84,7 @@ Document
     TableRow(header=false)
       TableCell
         Text("a list:")
-        SkippedHtml(block=false)
+        LineBreak
         Text("not html")
       TableCell
         Strong

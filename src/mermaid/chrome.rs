@@ -9,7 +9,7 @@
 use crate::canvas::Canvas;
 use crate::error::MermaidError;
 use crate::mermaid::ast::Label;
-use crate::text::{Align, display_width, truncate_to_width, wrap_plain};
+use crate::text::{Align, display_width, wrap_plain};
 use crate::theme::Theme;
 
 /// Left-growing block elements, indexed by how many eighths of a cell are filled.
@@ -18,9 +18,6 @@ use crate::theme::Theme;
 /// bars their sub-cell precision (design spec §6.5). Gantt bars deliberately stay on
 /// whole cells so their texture can carry the task state.
 pub const EIGHTH_BLOCKS: [&str; 9] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
-
-/// The ellipsis appended to a label that had to be shortened.
-pub const ELLIPSIS: &str = "…";
 
 /// Composes a finished plot into a canvas exactly `width` columns wide.
 ///
@@ -89,16 +86,11 @@ pub fn eighths_of(fraction: f64, cells: usize) -> usize {
 
 /// Shortens `text` to at most `width` display columns, marking the cut with an ellipsis.
 ///
-/// Text that already fits is returned unchanged. Cuts land on grapheme cluster
-/// boundaries, so combining marks and emoji sequences survive intact.
+/// Kept as a name the chart renderers already read well with; the behaviour lives in
+/// [`text::ellipsize`](crate::text::ellipsize), which the canvas uses too, so the
+/// program has one truncation idiom rather than three.
 pub fn fit(text: &str, width: usize) -> String {
-    if display_width(text) <= width {
-        return text.to_string();
-    }
-    if width == 0 {
-        return String::new();
-    }
-    format!("{}{ELLIPSIS}", truncate_to_width(text, width - 1))
+    crate::text::ellipsize(text, width)
 }
 
 /// Wraps a [`Label`] into plain lines of at most `width` display columns.
@@ -152,7 +144,7 @@ pub fn placeholder(text: &str, width: u16, theme: &Theme) -> Canvas {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::text::grapheme_width;
+    use crate::text::{ELLIPSIS, grapheme_width};
 
     #[test]
     fn every_shared_glyph_is_one_column_wide() {
