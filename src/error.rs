@@ -98,11 +98,31 @@ pub enum MermaidError {
     UnsupportedFamily(String),
 
     /// A construct inside a supported family is outside the implemented subset.
+    ///
+    /// This variant blames the *source*, so it must only be used when there really is a
+    /// line of the author's Mermaid to point at. `line` is 1-based and must never be
+    /// `0`: a message reading "on line 0" sends the reader hunting for a typo on a line
+    /// that does not exist. A failure that is not the author's fault belongs in
+    /// [`MermaidError::Internal`] instead.
     #[error("unsupported syntax on line {line}: {message}")]
     Unsupported {
         /// The 1-based line number within the Mermaid source.
         line: usize,
         /// A human-readable description of the unsupported construct.
+        message: String,
+    },
+
+    /// `mdless` built an inconsistent drawing request for its own layout engine.
+    ///
+    /// Nothing the author wrote can cause this — it means a renderer handed the graph
+    /// engine a specification that violates the engine's contract, for instance a node
+    /// claimed by two containers. It is kept recoverable rather than made a panic,
+    /// because a wrecked diagram must never take down a document the reader is trying
+    /// to read (design spec §12). There is deliberately no line number: attaching one
+    /// would be inventing a location in source that is not at fault.
+    #[error("mdless could not draw this diagram: {message}")]
+    Internal {
+        /// What was inconsistent, for a bug report rather than for the author.
         message: String,
     },
 

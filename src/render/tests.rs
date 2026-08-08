@@ -520,18 +520,27 @@ fn a_table_narrower_than_its_minimums_is_clipped_with_a_marker() {
 }
 
 #[test]
-fn the_full_table_canvas_keeps_the_columns_the_viewport_scrolls_through() {
+fn re_rendering_a_clipped_table_wider_reveals_the_columns_it_lost() {
+    // This is the contract `tui::wide::render_scrollable` relies on for horizontal
+    // scrolling: it re-renders an over-wide *block* at a larger budget, and the table
+    // renderer must reveal the columns it had clipped when given one. Widening is the
+    // viewport's job precisely because it applies to every block, not just tables —
+    // the table renderer offers no unclipped entry point of its own, deliberately.
     let markdown = "| aaaaaaaaaa | bbbbbbbbbb |\n|---|---|\n| cccccccccc | dddddddddd |\n";
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     let table = &doc.root().children[0];
-    let full = render_table_full(table, 12, &theme, &PLAIN);
-    assert!(
-        full.width() > 12,
-        "the unclipped canvas is wider than the budget"
-    );
-    assert!(full.plain_text().contains("bbbbbbbbbb"));
-    full.check_invariants().expect("contract holds");
+
+    let narrow = render_block(table, 12, &theme, &PLAIN);
+    assert_eq!(narrow.width(), 12);
+    assert!(narrow.plain_text().contains(code::OVERFLOW_MARKER));
+    assert!(!narrow.plain_text().contains("bbbbbbbbbb"));
+
+    let wide = render_block(table, 40, &theme, &PLAIN);
+    assert_eq!(wide.width(), 40);
+    assert!(wide.plain_text().contains("bbbbbbbbbb"));
+    assert!(!wide.plain_text().contains(code::OVERFLOW_MARKER));
+    wide.check_invariants().expect("contract holds");
 }
 
 #[test]

@@ -30,7 +30,7 @@ use crate::canvas::{BorderSet, Canvas};
 use crate::error::MermaidError;
 use crate::mermaid::ast::{BlockKind, MessageHead, MessageLine, ParticipantKind, SequenceDiagram};
 use crate::mermaid::chrome;
-use crate::text::{Align, display_width};
+use crate::text::{Align, display_width, ellipsize};
 use crate::theme::Theme;
 
 use columns::{Columns, HOOK, Header};
@@ -228,7 +228,7 @@ fn draw_arrow(canvas: &mut Canvas, columns: &Columns, arrow: &Arrow, top: usize,
             canvas.write_str(
                 row + 1,
                 at,
-                &chrome::fit(&arrow.label, room),
+                &ellipsize(&arrow.label, room),
                 theme.diagram.edge_label,
             );
         }
@@ -244,7 +244,7 @@ fn draw_arrow(canvas: &mut Canvas, columns: &Columns, arrow: &Arrow, top: usize,
 
     if !arrow.label.is_empty() {
         let room = high - low - 1;
-        let text = chrome::fit(&arrow.label, room);
+        let text = ellipsize(&arrow.label, room);
         let left = low + 1 + crate::canvas::align_offset(room, display_width(&text), Align::Center);
         canvas.write_str(row - 1, left, &text, theme.diagram.edge_label);
     }
@@ -301,7 +301,7 @@ fn draw_frame(canvas: &mut Canvas, columns: &Columns, frame: &Frame, top: usize,
         canvas.write_str(
             row,
             left + 2,
-            &chrome::fit(&caption, inner.saturating_sub(2)),
+            &ellipsize(&caption, inner.saturating_sub(2)),
             theme.diagram.group_title,
         );
     }

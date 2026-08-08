@@ -156,7 +156,35 @@ fn a_node_in_two_groups_is_rejected() {
         nodes: vec![NodeIdx(0)],
         ..GroupSpec::default()
     });
-    assert!(draw(&spec, &art, 40, &theme).is_err());
+    // An inconsistent specification is *our* bug, not the diagram author's, so it must
+    // never come back as a complaint about their syntax on a line that does not exist.
+    match draw(&spec, &art, 40, &theme) {
+        Err(crate::error::MermaidError::Internal { message }) => {
+            assert!(message.contains("subgraph"), "{message}");
+        }
+        other => panic!("expected an internal error, got {other:?}"),
+    }
+}
+
+#[test]
+fn an_inconsistent_specification_never_blames_the_source() {
+    let theme = Theme::default_dark();
+    // Every way of building a spec the engine rejects, and none of them may produce a
+    // `Syntax` or `Unsupported` error: those name a line of the author's Mermaid.
+    let mut orphan = spec(Direction::TopToBottom, 2, &[]);
+    orphan.root.nodes.pop();
+
+    let mut stray_edge = spec(Direction::TopToBottom, 1, &[]);
+    stray_edge
+        .edges
+        .push(EdgeSpec::arrow(NodeIdx(0), NodeIdx(9)));
+
+    for bad in [orphan, stray_edge] {
+        match draw(&bad, &art, 40, &theme) {
+            Err(crate::error::MermaidError::Internal { .. }) => {}
+            other => panic!("expected an internal error, got {other:?}"),
+        }
+    }
 }
 
 #[test]

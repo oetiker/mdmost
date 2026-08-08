@@ -5,9 +5,8 @@
 //! `<<fork>>`/`<<join>>`. Notes reuse the rounded box in the note ink.
 
 use crate::canvas::{BorderSet, Canvas};
-use crate::mermaid::chrome;
 use crate::mermaid::layout::graph::PortPolicy;
-use crate::text::{Align, display_width, wrap_plain};
+use crate::text::{Align, display_width, ellipsize, wrap_plain};
 use crate::theme::{Style, Theme};
 
 /// Blank columns between a state's label and its border.
@@ -42,7 +41,7 @@ fn box_of(label: &[String], budget: u16, theme: &Theme, ink: Style) -> Canvas {
     let mut lines: Vec<String> = label
         .iter()
         .flat_map(|line| wrap_plain(line, text_budget))
-        .map(|line| chrome::fit(&line, text_budget))
+        .map(|line| ellipsize(&line, text_budget))
         .collect();
     if lines.is_empty() {
         lines.push(String::new());

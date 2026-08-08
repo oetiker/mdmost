@@ -27,6 +27,7 @@ use crate::error::MermaidError;
 use crate::mermaid::ast::{GanttChart, GanttTask, TaskProgress};
 use crate::mermaid::chrome;
 use crate::text::display_width;
+use crate::text::ellipsize;
 use crate::theme::{Style, Theme};
 use time::{DAY, DateTime, HOUR, WEEK};
 
@@ -171,7 +172,7 @@ fn plot(
     );
     for tick in &axis.ticks {
         let at = columns.plot_start() + tick.column;
-        let text = chrome::fit(&tick.label, columns.plot);
+        let text = ellipsize(&tick.label, columns.plot);
         let span = display_width(&text);
         let left = columns.plot_start() + tick_left(tick.column, span, columns.plot);
         body.write_str(0, left, &text, theme.diagram.axis);
@@ -192,7 +193,7 @@ fn plot(
             body.write_str(
                 row,
                 0,
-                &chrome::fit(title, columns.gutter),
+                &ellipsize(title, columns.gutter),
                 theme.diagram.group_title,
             );
             body.write_str(row, columns.separator(), "│", theme.diagram.axis);
@@ -205,7 +206,7 @@ fn plot(
                 indent,
                 // `MIN_GUTTER` exceeds `TASK_INDENT`, so this cannot currently reach
                 // zero; saturating keeps that a local fact rather than a global one.
-                &chrome::fit(&task.name, columns.gutter.saturating_sub(indent)),
+                &ellipsize(&task.name, columns.gutter.saturating_sub(indent)),
                 theme.diagram.node_text,
             );
             body.write_str(row, columns.separator(), "│", theme.diagram.axis);

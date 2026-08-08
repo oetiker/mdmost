@@ -9,7 +9,7 @@
 use crate::canvas::Canvas;
 use crate::error::MermaidError;
 use crate::mermaid::ast::Label;
-use crate::text::{Align, display_width, wrap_plain};
+use crate::text::{Align, display_width, ellipsize, wrap_plain};
 use crate::theme::Theme;
 
 /// Left-growing block elements, indexed by how many eighths of a cell are filled.
@@ -84,15 +84,6 @@ pub fn eighths_of(fraction: f64, cells: usize) -> usize {
     eighths.max(0.0) as usize
 }
 
-/// Shortens `text` to at most `width` display columns, marking the cut with an ellipsis.
-///
-/// Kept as a name the chart renderers already read well with; the behaviour lives in
-/// [`text::ellipsize`](crate::text::ellipsize), which the canvas uses too, so the
-/// program has one truncation idiom rather than three.
-pub fn fit(text: &str, width: usize) -> String {
-    crate::text::ellipsize(text, width)
-}
-
 /// Wraps a [`Label`] into plain lines of at most `width` display columns.
 ///
 /// The label's own `<br>`-separated lines are honoured first, then each is wrapped.
@@ -134,7 +125,7 @@ pub fn label_natural_width(label: &Label) -> usize {
 /// Pie, gantt and sequence all reported "no slices" / "no tasks" / "no participants"
 /// with character-identical code; §14 makes that a defect, so it lives here.
 pub fn placeholder(text: &str, width: u16, theme: &Theme) -> Canvas {
-    let text = fit(text, usize::from(width));
+    let text = ellipsize(text, usize::from(width));
     let cols = u16::try_from(crate::text::display_width(&text)).unwrap_or(0);
     let mut body = Canvas::new(cols, 0, theme.base());
     body.push_text(&text, crate::text::Align::Left, theme.text.dim);
@@ -173,15 +164,5 @@ mod tests {
         assert_eq!(eighths_of(-1.0, 10), 0);
         assert_eq!(eighths_of(2.0, 10), 80);
         assert_eq!(eighths_of(0.5, 10), 40);
-    }
-
-    #[test]
-    fn fit_marks_the_cut() {
-        assert_eq!(fit("hello", 10), "hello");
-        assert_eq!(fit("hello", 5), "hello");
-        assert_eq!(fit("hello", 4), "hel…");
-        assert_eq!(fit("hello", 0), "");
-        // A double-width cluster that would straddle the limit is dropped, not split.
-        assert_eq!(fit("日本語", 4), "日…");
     }
 }

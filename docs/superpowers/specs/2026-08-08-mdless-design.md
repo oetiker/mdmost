@@ -228,10 +228,23 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
 | `t` | cycle theme |
 | `[` `]` | previous / next heading |
 | `←` `→` | scroll horizontally (wide tables, long code lines) |
+| `%` | jump to a percentage of the document |
+| `=` `Ctrl-G` | report where you are |
+| `-` | toggle code line numbers |
+| `Ctrl-R` | switch literal / regex search |
+| `Ctrl-D` `Ctrl-U` `Ctrl-F` `Ctrl-B` | movement variants of `d` `u` `Space` `b` |
 | `h` `F1` | help overlay |
 | `q` | quit, unconditionally |
-| `Esc` | cancel: closes an overlay or TOC focus first, quits from a bare document |
+| `Esc` | cancel, never quit: unwinds count → search → TOC filter → TOC focus → TOC pane, then says so |
 | mouse wheel | scroll; click in TOC jumps |
+
+`Esc` never exits. It is the key people press when unsure, and losing your place in a
+long document with no undo is a hostile answer to uncertainty; when there is nothing left
+to cancel it says `nothing to cancel — press q to quit`. Quitting is `q` alone.
+
+Counts prefix motions (`10j`), and the whole table is remappable from config. The help
+overlay and the README key map are both generated from this same binding table, so the
+three cannot drift.
 
 When the content is scrolled horizontally the status bar shows a horizontal offset
 indicator, so a reader who bumps `→` can see why the text moved.
@@ -247,7 +260,8 @@ mdless [FILE]              # file, or stdin when FILE is absent or "-"
   --width N                # force render width in BOTH modes; in the TUI the surplus
                            # is reachable by horizontal scrolling
   --theme NAME
-  --no-icons
+  --icons / --no-icons     # Nerd Font glyphs on or off; on by default per §2
+  --mouse / --no-mouse     # mouse capture; off leaves native drag-select working
   --toc                    # start with TOC pane open
   --config PATH
 ```

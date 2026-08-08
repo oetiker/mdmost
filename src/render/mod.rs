@@ -51,7 +51,7 @@ use glyphs::Glyphs;
 
 pub use block::{render_block, render_blocks};
 pub use inline::wrap;
-pub use table::{render_table, render_table_full};
+pub use table::render_table;
 
 /// Render-time capabilities that come from CLI flags and configuration rather than
 /// from the theme.

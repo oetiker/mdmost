@@ -1059,7 +1059,10 @@ fn a_wide_character_binding_does_not_ragged_edge_the_help_column() {
     // columns, and it is columns the alignment is about.
     let column_of = |needle: &str| -> usize {
         rows.iter()
-            .find_map(|row| row.find(needle).map(|at| crate::text::display_width(&row[..at])))
+            .find_map(|row| {
+                row.find(needle)
+                    .map(|at| crate::text::display_width(&row[..at]))
+            })
             .unwrap_or_else(|| panic!("{needle:?} is in the overlay: {rows:?}"))
     };
     assert_eq!(

@@ -105,8 +105,7 @@ fn validate(spec: &GraphSpec) -> Result<(), MermaidError> {
             match seen.get_mut(node.0) {
                 Some(flag) if !*flag => *flag = true,
                 _ => {
-                    return Err(MermaidError::Unsupported {
-                        line: 0,
+                    return Err(MermaidError::Internal {
                         message: "node placed in more than one subgraph".to_string(),
                     });
                 }
@@ -115,8 +114,7 @@ fn validate(spec: &GraphSpec) -> Result<(), MermaidError> {
         stack.extend(&group.children);
     }
     if seen.iter().any(|placed| !placed) {
-        return Err(MermaidError::Unsupported {
-            line: 0,
+        return Err(MermaidError::Internal {
             message: "node missing from the container tree".to_string(),
         });
     }
@@ -125,8 +123,7 @@ fn validate(spec: &GraphSpec) -> Result<(), MermaidError> {
         .iter()
         .any(|edge| edge.from.0 >= spec.node_count || edge.to.0 >= spec.node_count)
     {
-        return Err(MermaidError::Unsupported {
-            line: 0,
+        return Err(MermaidError::Internal {
             message: "edge refers to an unknown node".to_string(),
         });
     }

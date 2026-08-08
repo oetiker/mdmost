@@ -103,13 +103,25 @@ fn a_document_whose_only_markup_is_a_footnote_is_still_markdown() {
 
 #[test]
 fn markup_nobody_would_type_by_accident_still_counts() {
+    // One minor feature is all it takes. Every entry here is a whole document whose
+    // *only* markup is the construct named — the class of input that broke footnotes,
+    // and that a hand-written signal list gets wrong one construct at a time.
     for source in [
         "a[^n]\n\n[^n]: note\n",
         "an *emphasis* alone\n",
+        "**strong** alone\n",
+        "~~struck out~~ alone\n",
         "an `inline code span` alone\n",
         "an ![image](p.png) alone\n",
         "a [real link](http://example.com) alone\n",
         "- [ ] a task\n",
+        "- just a list\n- of two items\n",
+        "1. just an ordered list\n2. of two items\n",
+        "> just a quote\n",
+        "# just a heading\n",
+        "###### just a deep heading\n",
+        "```\njust a fenced block\n```\n",
+        "| a | b |\n|---|---|\n| 1 | 2 |\n",
     ] {
         assert_eq!(
             Doc::parse_auto(source),

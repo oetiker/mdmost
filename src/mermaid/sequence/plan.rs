@@ -13,6 +13,7 @@ use crate::mermaid::ast::{
     BlockKind, MessageHead, MessageLine, NotePlacement, SequenceDiagram, SequenceItem,
 };
 use crate::mermaid::chrome;
+use crate::text::ellipsize;
 
 use super::columns::Columns;
 
@@ -152,7 +153,7 @@ impl Builder<'_> {
                 SequenceItem::Message(message) => {
                     let from = self.participant(message.from.0);
                     let to = self.participant(message.to.0);
-                    let label = chrome::fit(
+                    let label = ellipsize(
                         &message.label.text().replace('\n', " "),
                         self.columns.label_cap,
                     );
@@ -225,7 +226,7 @@ impl Builder<'_> {
             marks.push(Branch {
                 row,
                 label: branch.label.as_ref().map(|label| {
-                    chrome::fit(&label.text().replace('\n', " "), self.columns.label_cap)
+                    ellipsize(&label.text().replace('\n', " "), self.columns.label_cap)
                 }),
             });
             self.walk(&branch.items, depth + 1);

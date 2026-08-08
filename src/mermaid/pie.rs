@@ -18,7 +18,7 @@ use crate::canvas::Canvas;
 use crate::error::MermaidError;
 use crate::mermaid::ast::{PieChart, PieSlice};
 use crate::mermaid::chrome;
-use crate::text::{Align, display_width};
+use crate::text::{Align, display_width, ellipsize};
 use crate::theme::{Style, Theme};
 
 /// The legend swatch drawn in front of every slice label.
@@ -171,7 +171,7 @@ fn plot(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidEr
             index,
             SWATCH_COLS,
             columns.label,
-            &chrome::fit(&slice.label, columns.label),
+            &ellipsize(&slice.label, columns.label),
             Align::Left,
             theme.diagram.legend,
         );
@@ -220,7 +220,7 @@ fn plot(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidEr
             row,
             SWATCH_COLS,
             columns.label,
-            &chrome::fit("Total", columns.label),
+            &ellipsize("Total", columns.label),
             Align::Left,
             theme.diagram.legend,
         );

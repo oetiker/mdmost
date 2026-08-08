@@ -306,12 +306,18 @@ fn footnote(node: &Node, label: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     hanging(&marker, &content, ctx.base)
 }
 
+/// The narrowest budget an image still draws its frame in; below it, bare text.
+pub(crate) const IMAGE_MIN_WIDTH: usize = 8;
+
+/// Columns an image placeholder spends on chrome: two borders plus one pad each side.
+pub(crate) const IMAGE_CHROME: usize = 4;
+
 /// A framed placeholder standing in for an image (design spec §2).
 fn image(node: &Node, url: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     let theme = ctx.theme;
     let text = node.plain_text();
     let alt = text.trim();
-    if width < 8 {
+    if usize::from(width) < IMAGE_MIN_WIDTH {
         let fallback = if alt.is_empty() { url } else { alt };
         return Canvas::from_text(width, fallback, theme.text.image_alt);
     }

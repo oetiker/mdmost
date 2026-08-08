@@ -16,8 +16,7 @@
 //!   glyph ever touches the border (finding P1: nothing in the program has margins).
 
 use crate::canvas::{BorderSet, Canvas};
-use crate::mermaid::chrome;
-use crate::text::{Align, display_width};
+use crate::text::{Align, display_width, ellipsize};
 use crate::theme::{Style, Theme};
 
 /// Blank columns between the text and the box border.
@@ -79,7 +78,7 @@ pub(super) fn draw(compartments: &[Vec<Row>], budget: u16, theme: &Theme) -> Can
         .map(|rows| {
             rows.iter()
                 .map(|row| Row {
-                    text: chrome::fit(&row.text, text_budget),
+                    text: ellipsize(&row.text, text_budget),
                     ..row.clone()
                 })
                 .collect()

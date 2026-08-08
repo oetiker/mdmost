@@ -35,30 +35,6 @@ pub fn render_table(node: &Node, width: u16, theme: &Theme, options: &RenderOpti
     }
 }
 
-/// Renders a table at its natural size, without clipping it to `width`.
-///
-/// The returned canvas may be wider than `width`; `width` is still the budget the
-/// columns are negotiated for, so the surplus only appears when the minimums genuinely
-/// do not fit.
-///
-/// **Nothing in the viewport calls this.** Horizontal scrolling (design spec §7.3) is
-/// done by [`tui::wide::render_scrollable`](crate::tui::wide::render_scrollable), which
-/// re-renders every over-wide *block* — tables and code alike — at a larger budget. The
-/// doc comment here used to claim the viewport used this function, which was untrue for
-/// the whole of the project's life; it is kept for now because it is a reasonable
-/// public entry point and one test exercises it, but it has no production caller.
-pub fn render_table_full(
-    node: &Node,
-    width: u16,
-    theme: &Theme,
-    options: &RenderOptions,
-) -> Canvas {
-    match &node.kind {
-        NodeKind::Table(info) => lay_out(node, info, width, Ctx::new(theme, options)),
-        _ => Canvas::empty(width),
-    }
-}
-
 /// Renders a table with an explicit context, clipping it to `width`.
 pub(crate) fn render_table_node(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
     let mut canvas = lay_out(node, info, width, ctx);
@@ -389,8 +365,13 @@ fn measure_block(node: &Node, ctx: Ctx<'_>) -> (usize, usize) {
         }
         NodeKind::ThematicBreak => (1, 1),
         NodeKind::Image { url, .. } => {
+            // Below the framed placeholder's own threshold an image degrades to bare
+            // text, so its minimum is the narrowest frame that still draws.
             let alt = display_width(&node.plain_text());
-            (6, alt.max(display_width(url)) + 4)
+            (
+                block::IMAGE_MIN_WIDTH,
+                alt.max(display_width(url)) + block::IMAGE_CHROME,
+            )
         }
         NodeKind::FootnoteDefinition { name, number } => {
             let label = block::footnote_label(name, *number);

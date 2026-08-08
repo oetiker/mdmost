@@ -149,7 +149,7 @@ impl Default for Glyphs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::text::grapheme_width;
+    use crate::text::display_width;
 
     /// Every glyph either set can draw.
     fn all(set: Glyphs) -> Vec<&'static str> {
@@ -187,8 +187,11 @@ mod tests {
     fn every_glyph_is_exactly_one_display_column() {
         for set in [Glyphs::PLAIN, Glyphs::NERD] {
             for glyph in all(set) {
+                // `display_width`, not `grapheme_width`: the latter clamps to the
+                // two columns a cell can hold, so a glyph that genuinely draws three
+                // would pass a clamped assertion and then shift every column after it.
                 assert_eq!(
-                    grapheme_width(glyph),
+                    display_width(glyph),
                     1,
                     "glyph {glyph:?} ({:04x}) must be one column, or turning icons \
                      off would shift the layout",
