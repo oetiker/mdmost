@@ -200,8 +200,11 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     let mut left: Vec<Segment> = Vec::new();
     let mut right: Vec<Segment> = Vec::new();
 
+    // The file name is the one segment that can lose characters and still mean
+    // something, so it is elided before anything is dropped and dropped only when
+    // eliding it to nothing is still not enough.
     left.push(Segment::new(
-        Drop::Never,
+        Drop::Title,
         vec![
             TermSpan::styled(
                 format!(" {} ", icons.file),
@@ -343,7 +346,9 @@ enum Drop {
     Meter,
     /// The horizontal-offset chip.
     Hscroll,
-    /// The file name, the position, and the way out.
+    /// The file name, which is elided before it is given up altogether.
+    Title,
+    /// The position and the way out.
     Never,
 }
 

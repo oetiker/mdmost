@@ -3,6 +3,9 @@
 //! Every test here drives the real state machine with no terminal in sight, which is
 //! the separation design spec §13 requires.
 
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+
 use super::app::{App, AppOptions, Focus, Overlay, PromptKind};
 use super::help;
 use super::icons::meter;
@@ -943,4 +946,68 @@ fn escape_clears_a_half_typed_count() {
     app.on_key(Key::plain(KeyCode::Esc));
     assert_eq!(app.pending_count(), "");
     assert!(!app.should_quit());
+}
+
+/// Renders one chrome element into a fresh buffer and returns it as text rows.
+fn painted(width: u16, height: u16, paint: impl FnOnce(&mut Buffer, Rect)) -> Vec<String> {
+    let area = Rect::new(0, 0, width, height);
+    let mut buffer = Buffer::empty(area);
+    paint(&mut buffer, area);
+    (0..height)
+        .map(|y| {
+            (0..width)
+                .filter_map(|x| buffer.cell((x, y)).map(|cell| cell.symbol().to_string()))
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn the_status_bar_keeps_the_quit_hint_at_every_width() {
+    // The narrower the terminal, the less likely the reader knows how to get out, so
+    // the help hint is the one segment that is never dropped (usability review P2).
+    let mut app = pager(SAMPLE);
+    app.run_search("Needle");
+    for width in [16u16, 20, 24, 30, 40, 60, 80, 100] {
+        app.resize(width, 12);
+        let rows = painted(width, 1, |buffer, area| {
+            super::chrome::draw_status(buffer, area, &app)
+        });
+        let bar = &rows[0];
+        assert_eq!(
+            crate::text::display_width(bar),
+            usize::from(width),
+            "the bar is exactly the terminal's width at {width}"
+        );
+        assert!(
+            bar.contains("h help"),
+            "the quit hint survives at width {width}: {bar:?}"
+        );
+    }
+}
+
+#[test]
+fn the_help_overlay_shows_the_way_out_at_every_height() {
+    // An overlay that cannot tell a trapped reader how to quit is the blocker
+    // usability review B4 reported; it must hold at any terminal this runs in.
+    let mut app = pager(SAMPLE);
+    app.act(Action::Help);
+    for (width, height) in [(40u16, 6u16), (40, 10), (60, 16), (80, 20), (100, 29)] {
+        app.resize(width, height + 1);
+        let rows = painted(width, height, |buffer, area| {
+            super::chrome::draw_help(buffer, area, &mut app)
+        });
+        let text = rows.join("\n");
+        assert!(
+            text.contains(" q ") || text.contains("q quit") || text.contains("q  Quit"),
+            "the quit key is visible at {width}x{height}:\n{text}"
+        );
+        for row in &rows {
+            assert_eq!(
+                crate::text::display_width(row),
+                usize::from(width),
+                "no row overflows at {width}x{height}"
+            );
+        }
+    }
 }

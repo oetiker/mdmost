@@ -343,9 +343,11 @@ fn draw_note(canvas: &mut Canvas, note: &NoteBox, top: usize, theme: &Theme) {
             theme.diagram.note,
         );
     }
-    // Square corners set a note apart from the rounded participant boxes.
+    // Rounded, like every other box in the program (design spec §7.5). A note is
+    // already set apart by its colour and its position beside a lifeline; giving it a
+    // third box vocabulary made one diagram speak two dialects.
     let boxed = text.framed(
-        BorderSet::PLAIN,
+        BorderSet::ROUNDED,
         theme.diagram.note,
         None,
         theme.diagram.note,

@@ -203,12 +203,15 @@ fn plot(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidEr
         }
     }
 
-    if slices.len() > 1 {
+    if !slices.is_empty() {
         let rule = body.push_blank_row(base);
+        // Inset at both ends. It used to start at the label column and run to the
+        // very edge, which read as a rule that had overshot rather than one that
+        // belonged to the columns above it.
         body.hline(
             rule,
             SWATCH_COLS,
-            usize::from(content) - SWATCH_COLS,
+            usize::from(content).saturating_sub(SWATCH_COLS * 2),
             "─",
             theme.diagram.axis,
         );
