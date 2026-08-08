@@ -227,3 +227,28 @@ fn parallel_edges_merge_into_one_port_on_a_narrow_box() {
         canvas.plain_text()
     );
 }
+
+#[test]
+fn end_notes_are_drawn_beside_their_terminators() {
+    let theme = Theme::default_dark();
+    let mut spec = spec(Direction::TopToBottom, 2, &[(0, 1)]);
+    spec.edges[0].tail_label = Some("1".to_string());
+    spec.edges[0].head_label = Some("0..*".to_string());
+    spec.edges[0].head = Terminator::HollowDiamond;
+    let text = draw(&spec, &art, 40, &theme).expect("fits").plain_text();
+    assert!(text.contains('1'), "tail note\n{text}");
+    assert!(text.contains("0..*"), "head note\n{text}");
+    assert!(text.contains('◇'), "hollow diamond\n{text}");
+}
+
+#[test]
+fn end_notes_survive_a_left_to_right_graph() {
+    let theme = Theme::default_dark();
+    let mut spec = spec(Direction::LeftToRight, 2, &[(0, 1)]);
+    spec.edges[0].tail_label = Some("1".to_string());
+    spec.edges[0].head_label = Some("0..*".to_string());
+    let canvas = draw(&spec, &art, 60, &theme).expect("fits");
+    canvas.check_invariants().expect("canvas contract holds");
+    let text = canvas.plain_text();
+    assert!(text.contains("0..*"), "{text}");
+}

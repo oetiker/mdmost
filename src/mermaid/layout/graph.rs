@@ -44,7 +44,7 @@ mod spec;
 mod tests;
 
 pub use glyph::{Dir, Stroke};
-pub use spec::{EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Size, Terminator};
+pub use spec::{EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Terminator};
 
 use crate::canvas::{BorderSet, Canvas};
 use crate::error::MermaidError;
@@ -286,7 +286,8 @@ impl Ctx<'_> {
             .zip(&place_size)
             .map(|(at, size)| at + size)
             .max()
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .max(routing.cross_extent);
         let frame = Frame::new(direction, routing.total_flow, total_cross);
         let styles = self.theme.diagram;
         let mut pen = Pen::new(frame, self.theme.base(), styles.edge_label);
@@ -347,6 +348,8 @@ impl Ctx<'_> {
                 tail: edge.tail,
                 head: edge.head,
                 label: edge.label.clone(),
+                tail_label: edge.tail_label.clone(),
+                head_label: edge.head_label.clone(),
                 from_hint: hint(from, edge.from),
                 to_hint: hint(to, edge.to),
             };

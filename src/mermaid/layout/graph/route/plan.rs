@@ -109,6 +109,14 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
         }
         if is_item(input, seg.b) {
             gap.head_len = gap.head_len.max(edge.head.len(Dir::Down));
+            gap.head_note = gap
+                .head_note
+                .max(note_extent(input, edge.head_label.as_deref()));
+        }
+        if is_item(input, seg.a) {
+            gap.tail_note = gap
+                .tail_note
+                .max(note_extent(input, edge.tail_label.as_deref()));
         }
     }
     let jogs: Vec<usize> = members
@@ -128,7 +136,7 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
         routes[index].channel = Some(channel);
     }
     gap.channels = channels;
-    gap.label_base = gap.tail_len + channels;
+    gap.label_base = gap.tail_len + gap.tail_note + channels;
     let labelled: Vec<usize> = members
         .iter()
         .copied()
@@ -168,13 +176,24 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
     for (slot, &index) in labelled.iter().enumerate() {
         routes[index].label = Some((gap.label_base + offsets[bands[slot]], routes[index].dst + 1));
     }
-    let needed = gap.tail_len + gap.channels + gap.label_size + gap.head_len;
+    let needed =
+        gap.tail_len + gap.tail_note + gap.channels + gap.label_size + gap.head_note + gap.head_len;
     // A dashed or heavy edge needs at least one plain cell of line, or its stroke would
     // be hidden entirely behind the terminator.
     let styled = members
         .iter()
         .any(|&index| input.edges[input.layered.segs[index].edge].stroke != Stroke::Solid);
     gap.size = needed.max(input.min_gap) + usize::from(styled);
+}
+
+/// How many flow cells an end note occupies: one row when the flow runs down the
+/// page, its full width when it runs across.
+fn note_extent(input: &Input<'_>, note: Option<&str>) -> usize {
+    match note {
+        None => 0,
+        Some(text) if input.vertical => usize::from(!text.is_empty()),
+        Some(text) => crate::text::display_width(text),
+    }
 }
 
 /// Greedy interval colouring: intervals sharing a colour never overlap.

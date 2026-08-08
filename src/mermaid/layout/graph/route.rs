@@ -31,6 +31,10 @@ pub(super) struct LevelEdge {
     pub head: Terminator,
     /// The mid label, already split into lines.
     pub label: Vec<String>,
+    /// A short note drawn beside the source end.
+    pub tail_label: Option<String>,
+    /// A short note drawn beside the target end.
+    pub head_label: Option<String>,
     /// Preferred cross offset of the source port, relative to the source item.
     pub from_hint: usize,
     /// Preferred cross offset of the target port, relative to the target item.
@@ -68,6 +72,9 @@ pub(super) struct Routing {
     pub flow: Vec<usize>,
     /// Total extent along the flow axis.
     pub total_flow: usize,
+    /// How far across the flow axis the edge labels and end notes reach, so the caller
+    /// can widen the canvas enough that no label is ever clipped.
+    pub cross_extent: usize,
     /// First flow cell after each rank's band, i.e. where its gap starts.
     band_end: Vec<usize>,
     gaps: Vec<Gap>,
@@ -80,6 +87,9 @@ pub(super) struct Gap {
     pub size: usize,
     pub tail_len: usize,
     pub head_len: usize,
+    /// Flow cells reserved for end notes at the source and target ends.
+    pub tail_note: usize,
+    pub head_note: usize,
     pub channels: usize,
     pub label_base: usize,
     pub label_size: usize,
@@ -120,9 +130,11 @@ impl Routing {
             plan_gap(input, &members, &mut routes, gap);
         }
         let (flow, band_end, total_flow) = stack_ranks(input, &gaps);
+        let cross_extent = label_extent(input, &routes);
         Self {
             flow,
             total_flow,
+            cross_extent,
             band_end,
             gaps,
             routes,
@@ -195,7 +207,7 @@ impl Routing {
         match route.channel {
             None => pen.run_flow(body, route.src, head_at.saturating_sub(body), edge.stroke),
             Some(channel) => {
-                let at = self.band_end[rank] + gap.tail_len + channel;
+                let at = self.band_end[rank] + gap.tail_len + gap.tail_note + channel;
                 pen.run_flow(body, route.src, at.saturating_sub(body), edge.stroke);
                 let (lo, hi) = (route.src.min(route.dst), route.src.max(route.dst));
                 pen.run_cross(at, lo, hi - lo, edge.stroke);
@@ -207,6 +219,20 @@ impl Routing {
         }
         if let Some((flow, cross)) = route.label {
             pen.label(self.band_end[rank] + flow, cross, &edge.label);
+        }
+        // End notes — class-diagram cardinalities and the like — sit just outside the
+        // terminator they belong to.
+        if let Some(note) = edge.tail_label.as_ref().filter(|_| is_source) {
+            let at = self.band_end[rank] + gap.tail_len;
+            pen.label(at, route.src + 1, std::slice::from_ref(note));
+        }
+        if let Some(note) = edge
+            .head_label
+            .as_ref()
+            .filter(|_| head_len > 0 || is_item(input, b))
+        {
+            let at = head_at.saturating_sub(gap.head_note);
+            pen.label(at, route.dst + 1, std::slice::from_ref(note));
         }
     }
 
@@ -231,6 +257,43 @@ impl Routing {
             pen.terminator(arrow, centre, spec.head.glyphs(back), spec.stroke, false);
         }
     }
+}
+
+/// How far across the flow axis the labels and end notes reach.
+fn label_extent(input: &Input<'_>, routes: &[Route]) -> usize {
+    let across = |text: &str| {
+        if input.vertical {
+            crate::text::display_width(text)
+        } else {
+            1
+        }
+    };
+    let mut extent = 0usize;
+    for (index, seg) in input.layered.segs.iter().enumerate() {
+        let edge = &input.edges[seg.edge];
+        let route = &routes[index];
+        // Across the flow axis a label is as wide as its widest line when the graph
+        // runs down the page, and as tall as its line count when it runs across.
+        let widest = if input.vertical {
+            edge.label
+                .iter()
+                .map(|line| crate::text::display_width(line))
+                .max()
+                .unwrap_or(0)
+        } else {
+            edge.label.len()
+        };
+        if widest > 0 {
+            extent = extent.max(route.dst + 1 + widest);
+        }
+        if let Some(note) = &edge.tail_label {
+            extent = extent.max(route.src + 1 + across(note));
+        }
+        if let Some(note) = &edge.head_label {
+            extent = extent.max(route.dst + 1 + across(note));
+        }
+    }
+    extent
 }
 
 /// True when `vnode` is a real item rather than a routing dummy.

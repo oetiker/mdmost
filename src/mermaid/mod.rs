@@ -45,15 +45,9 @@ pub fn render_diagram(
         ast::Diagram::Sequence(d) => sequence::draw(d, width, theme),
         ast::Diagram::Pie(d) => pie::draw(d, width, theme),
         ast::Diagram::Gantt(d) => gantt::draw(d, width, theme),
-        // TODO(dispatch): the graph-engine families are wired up as they land.
-        ast::Diagram::Flowchart(_) => Err(unsupported("flowchart")),
-        ast::Diagram::Class(_) => Err(unsupported("classDiagram")),
-        ast::Diagram::Er(_) => Err(unsupported("erDiagram")),
-        ast::Diagram::State(_) => Err(unsupported("stateDiagram")),
+        ast::Diagram::Flowchart(d) => layout::flowchart::draw(d, width, theme),
+        ast::Diagram::Class(d) => layout::class::draw(d, width, theme),
+        ast::Diagram::Er(d) => layout::er::draw(d, width, theme),
+        ast::Diagram::State(d) => layout::state::draw(d, width, theme),
     }
-}
-
-/// The error reported for a family whose renderer has not landed yet.
-fn unsupported(family: &str) -> MermaidError {
-    MermaidError::UnsupportedFamily(family.to_string())
 }

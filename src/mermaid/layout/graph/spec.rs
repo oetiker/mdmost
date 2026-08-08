@@ -15,15 +15,6 @@ pub use super::glyph::Stroke;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeIdx(pub usize);
 
-/// A size in character cells.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Size {
-    /// Width in display columns.
-    pub cols: usize,
-    /// Height in rows.
-    pub rows: usize,
-}
-
 /// The graph to lay out.
 ///
 /// Nodes are addressed by index only; their appearance comes from the [`NodeArt`]
@@ -92,10 +83,10 @@ pub struct EdgeSpec {
     pub head: Terminator,
     /// The label carried in the middle of the edge, already split into lines.
     pub label: Vec<String>,
-    /// A short label placed next to the [`from`](EdgeSpec::from) end, such as a class
-    /// diagram cardinality.
+    /// A short label placed beside the [`from`](EdgeSpec::from) end, such as a class
+    /// diagram cardinality (`"1"` in `"1" -- "0..*"`).
     pub tail_label: Option<String>,
-    /// A short label placed next to the [`to`](EdgeSpec::to) end.
+    /// A short label placed beside the [`to`](EdgeSpec::to) end.
     pub head_label: Option<String>,
 }
 
