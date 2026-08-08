@@ -114,8 +114,9 @@ pub struct AppOptions {
     pub toc_open: bool,
     /// A forced render width (`--width`), independent of the terminal size.
     ///
-    /// Content wider than the viewport is reached with the horizontal scroll keys, so
-    /// forcing a width never hides anything.
+    /// It sets the width blocks are *laid out* at; a block that still does not fit is
+    /// widened further by [`super::wide`]. Content beyond the viewport is reached with
+    /// the horizontal scroll keys either way, so forcing a width never hides anything.
     pub width: Option<u16>,
 }
 
@@ -336,7 +337,8 @@ impl App {
     /// How many columns of content sit beyond the right edge of the viewport.
     ///
     /// Zero when everything fits, which is how the status bar knows to say nothing
-    /// about horizontal position.
+    /// about horizontal position. Non-zero when `--width` forced a wider render, or
+    /// when [`super::wide`] widened a block that would otherwise have been clipped.
     pub fn hscroll_max(&self) -> u16 {
         self.cache
             .canvas()
@@ -354,8 +356,11 @@ impl App {
 
     /// The number of columns of document actually on screen.
     ///
-    /// Equal to [`App::content_width`] unless `--width` forced a wider render, in which
-    /// case the surplus is reached by scrolling horizontally.
+    /// This is what the reader can see; the canvas may be wider. It exceeds
+    /// [`App::content_width`] never, and falls short of the *canvas* width whenever
+    /// `--width` forced a wider render or [`super::wide`] widened an over-wide block.
+    /// Either way the surplus is reached by scrolling horizontally, and
+    /// [`App::hscroll_max`] measures it.
     pub fn viewport_width(&self) -> u16 {
         // One column is the scrollbar's gutter.
         self.size

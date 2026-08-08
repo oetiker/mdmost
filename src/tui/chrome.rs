@@ -1,8 +1,11 @@
 //! The chrome: table-of-contents pane, status bar and help overlay.
 //!
-//! All three are pure functions of [`App`]; the help overlay in particular is built
-//! from [`super::help::sections`], which reads the live key table, so it cannot drift
-//! from the bindings actually in force (design spec §10).
+//! The table-of-contents pane and the status bar are pure functions of [`App`]. The
+//! help overlay takes `&mut App` for one reason: how far it can scroll depends on how
+//! many rows and columns it just laid out at this terminal size, which only the
+//! drawing code knows, so it clamps [`App::help_scroll`] on the way past. Its content
+//! is still built from [`super::help::sections`], which reads the live key table, so
+//! it cannot drift from the bindings actually in force (design spec §10).
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

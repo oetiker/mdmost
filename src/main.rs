@@ -8,7 +8,8 @@
 //! `cat x.md | mdless` and `PAGER=mdless` both work; when standard output is not a
 //! terminal, `--render-once` is implied so `mdless x.md | cat` produces text rather
 //! than escape soup. Exit codes are 0 for success, 1 for unreadable input and 2 for
-//! bad arguments.
+//! bad arguments; the reader of a pipe closing it early (`mdless x.md | head`) is not
+//! a failure and also exits 0, silently.
 
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
