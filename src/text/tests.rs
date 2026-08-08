@@ -19,6 +19,12 @@ const COMBINING: &str = "e\u{0301}";
 /// cluster that genuinely draws three columns, which is more than a cell can hold.
 const WIDE_PLUS_SPACING_MARK: &str = "\u{17000}\u{1A57}";
 
+/// A ZWJ sequence followed by a spacing combining mark (`Mc`): one grapheme cluster
+/// that draws three columns, so it must be split — but the ZWJ sequence inside it
+/// draws two columns *only while it stays joined*, so the split may not fall between
+/// the joined halves.
+const ZWJ_PLUS_SPACING_MARK: &str = "\u{1f600}\u{200d}\u{1f600}\u{1A57}";
+
 #[test]
 fn display_width_counts_columns_not_bytes() {
     assert_eq!(display_width("abc"), 3);
@@ -53,6 +59,54 @@ fn cell_clusters_split_a_cluster_too_wide_for_one_cell() {
     let pieces: Vec<&str> = cell_clusters(WIDE_PLUS_SPACING_MARK).collect();
     assert_eq!(pieces, vec!["\u{17000}", "\u{1A57}"]);
     assert_eq!(pieces.iter().map(|p| display_width(p)).sum::<usize>(), 3);
+}
+
+#[test]
+fn cell_clusters_never_split_inside_a_joined_sequence() {
+    // Splitting between the two halves of the ZWJ sequence yields pieces measuring
+    // 2 + 2 + 1 = 5 for a cluster that draws 3: each piece is honest on its own, but
+    // writing them into adjacent cells re-joins them and the row comes up two columns
+    // short. The split has to fall after the joined run, not inside it.
+    assert_eq!(display_width(ZWJ_PLUS_SPACING_MARK), 3);
+    let pieces: Vec<&str> = cell_clusters(ZWJ_PLUS_SPACING_MARK).collect();
+    assert_eq!(pieces, vec!["\u{1f600}\u{200d}\u{1f600}", "\u{1A57}"]);
+    assert_eq!(
+        pieces.iter().map(|p| display_width(p)).sum::<usize>(),
+        display_width(ZWJ_PLUS_SPACING_MARK),
+        "the pieces must account for exactly the columns the cluster draws"
+    );
+}
+
+#[test]
+fn cell_clusters_split_width_preservingly_across_the_corpus() {
+    // The property the splitter exists to hold: pieces round-trip, each fits a cell,
+    // and their widths sum to what the whole draws. A split that breaks the last one
+    // is invisible per-piece and only shows up as a short row on screen.
+    for text in [
+        WIDE_PLUS_SPACING_MARK,
+        ZWJ_PLUS_SPACING_MARK,
+        ZWJ,
+        FLAG,
+        COMBINING,
+        "\u{1f469}\u{200d}\u{1f4bb}\u{1A57}",
+        "\u{1f600}\u{200d}\u{1f600}\u{200d}\u{1f600}\u{1A57}",
+        "a\u{1f600}\u{200d}\u{1f600}\u{1A57}日",
+    ] {
+        let pieces: Vec<&str> = cell_clusters(text).collect();
+        assert_eq!(pieces.concat(), text, "round trip failed for {text:?}");
+        for piece in &pieces {
+            assert!(
+                display_width(piece) <= 2,
+                "{piece:?} of {text:?} draws {} columns",
+                display_width(piece)
+            );
+        }
+        assert_eq!(
+            pieces.iter().map(|p| display_width(p)).sum::<usize>(),
+            display_width(text),
+            "pieces of {text:?} do not account for its columns: {pieces:?}"
+        );
+    }
 }
 
 #[test]

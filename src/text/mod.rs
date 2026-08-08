@@ -76,14 +76,21 @@ pub fn grapheme_width(cluster: &str) -> u8 {
 /// Splits `text` into pieces that each occupy exactly one terminal cell.
 ///
 /// This is [`graphemes`] with one extra rule: a cluster too wide for a single cell is
-/// broken into a piece per advancing character, each carrying the zero-width marks that
-/// follow it. Only clusters of three columns or more are ever broken — in practice a
-/// wide base plus a spacing mark — so combining marks, ZWJ emoji sequences and flags
-/// are untouched, because `unicode-width` already measures those at two columns or
-/// fewer.
+/// broken at the widest point that preserves its total width (see `leading_cell`). Only
+/// clusters of three columns or more are ever broken — in practice a spacing mark
+/// (category `Mc`) attached to something already two columns wide.
 ///
-/// The pieces concatenate back to `text` exactly, so nothing the author wrote is lost;
-/// only the column accounting changes, from a lie to the truth.
+/// A ZWJ emoji sequence or a flag is never broken *on its own*, because `unicode-width`
+/// measures those at two columns and they never enter the splitting path. But do not
+/// read that as "sequences are untouched": a ZWJ sequence carrying a spacing mark
+/// measures three and does enter it, and the cut must then fall after the joined run
+/// rather than inside it. Splitting inside a join is the failure this function is
+/// written to avoid, so the rule is stated as a measurement, not as a list of
+/// characters that may not be separated.
+///
+/// Two guarantees hold for the pieces: they concatenate back to `text` exactly, so
+/// nothing the author wrote is lost, and their widths sum to `display_width(text)`, so
+/// a row filled from them is as wide as the cells claim.
 pub fn cell_clusters(text: &str) -> CellClusters<'_> {
     CellClusters { rest: text }
 }
@@ -113,9 +120,40 @@ impl<'a> Iterator for CellClusters<'a> {
 
 /// The leading one-cell piece of an over-wide cluster.
 ///
-/// That is its first character together with any zero-width characters trailing it;
-/// the next advancing character starts the following piece.
+/// The split point is chosen by *measurement*, not by character category: the longest
+/// prefix that still fits a cell (at most two columns) and whose width, plus the width
+/// of the remainder, is exactly the width of the whole cluster.
+///
+/// That last condition is the one that matters, and it is not implied by the first.
+/// A prefix can measure two columns on its own and still be a ruinous split, because
+/// characters that were *joined* inside the cluster draw as one unit only while they
+/// stay together: cutting a ZWJ emoji sequence in half yields two pieces of two columns
+/// each, but writing them into adjacent cells re-joins them on screen, where they draw
+/// two columns in total rather than four. The cells are then each honest about their own
+/// text and the row is still short — which is exactly how this survived a per-cell
+/// invariant check. Measuring the remainder catches every such join without having to
+/// enumerate which characters join.
+///
+/// If no width-preserving split exists, the fallback is the first character together
+/// with any zero-width characters trailing it, which always makes progress. That piece
+/// may then misreport its width; the row check in `Canvas::check_invariants` is what
+/// catches that case.
 fn leading_cell(cluster: &str) -> &str {
+    let whole = display_width(cluster);
+    let mut split = None;
+    for (at, _) in cluster.char_indices().skip(1) {
+        let head = display_width(&cluster[..at]);
+        if head <= 2 && head + display_width(&cluster[at..]) == whole {
+            split = Some(at);
+        }
+    }
+    let end = split.unwrap_or_else(|| fallback_cell_end(cluster));
+    &cluster[..end]
+}
+
+/// Where to cut an over-wide cluster that has no width-preserving split: after its first
+/// character and any zero-width characters trailing it.
+fn fallback_cell_end(cluster: &str) -> usize {
     let mut end = cluster.len();
     for (at, ch) in cluster.char_indices() {
         if at == 0 {
@@ -129,7 +167,7 @@ fn leading_cell(cluster: &str) -> &str {
             break;
         }
     }
-    &cluster[..end]
+    end
 }
 
 /// Hands `extra` columns out across `slots`, as evenly as whole columns allow.
