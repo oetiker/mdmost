@@ -109,7 +109,9 @@ fn malformed_input_errors_without_panicking() {
     ];
 
     for src in cases {
-        // The contract is only that this returns rather than unwinds.
-        let _ = parse(src);
+        assert!(
+            parse(src).is_err(),
+            "malformed input {src:?} must be reported as an error, not accepted"
+        );
     }
 }

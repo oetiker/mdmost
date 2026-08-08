@@ -4,7 +4,7 @@
 //!
 //! The central rule of the design (spec §3) is:
 //!
-//! > Rendering is a pure function of `(AST, width, theme)`.
+//! > Rendering is a pure function of `(AST, width, theme, options)`.
 //!
 //! The document is parsed once into [`doc::Doc`]. Nothing about layout is decided at
 //! parse time. Every renderer receives a *width budget* and returns a
@@ -27,11 +27,15 @@
 //! | [`config`] | TOML configuration, themes, key bindings |
 //! | [`tui`] | The ratatui application |
 //!
-//! # Foundation vs. work in progress
+//! # The shared layer
 //!
-//! [`doc`], [`text`], [`canvas`], [`theme`] and [`error`] are complete. The remaining
-//! modules are placeholders owned by other workstreams; they exist so the module map
-//! is visible and so their interfaces can be filled in without moving files.
+//! [`text`] and [`canvas`] are the single home for grapheme-safe width arithmetic and
+//! for composition. No other module may re-implement wrapping, truncation, padding or
+//! box drawing: if a renderer needs such an operation and it is missing, the operation
+//! belongs in the shared layer rather than in the caller. Duplication between the table
+//! renderer, the code renderer and the diagram renderers is treated as a defect (spec
+//! §14), and in practice every instance of it has turned out to be a missing shared
+//! operation rather than a careless caller.
 
 #![warn(missing_docs)]
 #![warn(clippy::doc_markdown)]
