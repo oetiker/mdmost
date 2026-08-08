@@ -385,6 +385,20 @@ impl Canvas {
                     self.width
                 ));
             }
+            // Finally the row is measured *assembled*. Every check above is per cell,
+            // and per-cell honesty does not add up to an honest row: two adjacent cells
+            // can each measure exactly what they claim and still re-join into a single
+            // grapheme cluster when concatenated, drawing narrower together than apart.
+            // A ZWJ emoji sequence split across two cells did precisely that, and passed
+            // every assertion above while rendering the row two columns short.
+            let drawn = display_width(&self.row_text(index));
+            if drawn != usize::from(self.width) {
+                return Err(format!(
+                    "row {index}: cells claim {} columns but the assembled row draws \
+                     {drawn} — adjacent cells are re-joining",
+                    self.width
+                ));
+            }
         }
         Ok(())
     }

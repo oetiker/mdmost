@@ -15,6 +15,47 @@ fn base() -> Style {
     Theme::default_dark().base()
 }
 
+#[test]
+fn check_invariants_catches_cells_that_re_join_when_assembled() {
+    // The exact row the cluster splitter used to produce for "😀\u{200d}😀ᩗ" at width 8:
+    // the ZWJ sequence cut in half. Every cell is honest on its own — 2 + 2 + 1 plus
+    // three blanks is 8 columns — but concatenating them re-forms one cluster that
+    // draws 3 instead of 5, so the row renders two columns short. Only the assembled
+    // check sees it, which is why this went unnoticed while every per-cell assertion
+    // passed.
+    let style = base();
+    let mut canvas = Canvas::empty(8);
+    canvas.rows.push(vec![
+        Cell::blank(style),
+        Cell::new("\u{1f600}\u{200d}", style),
+        Cell::continuation(style),
+        Cell::new("\u{1f600}", style),
+        Cell::continuation(style),
+        Cell::new("\u{1A57}", style),
+        Cell::blank(style),
+        Cell::blank(style),
+    ]);
+
+    let columns: usize = canvas.rows[0]
+        .iter()
+        .map(|c| usize::from(c.width()))
+        .sum::<usize>();
+    assert_eq!(columns, 8, "the cells must claim a full row");
+    assert_eq!(
+        display_width(&canvas.row_text(0)),
+        6,
+        "but the assembled row must really draw short"
+    );
+
+    let problem = canvas
+        .check_invariants()
+        .expect_err("a row that draws short must be rejected");
+    assert!(
+        problem.contains("re-joining"),
+        "unexpected complaint: {problem}"
+    );
+}
+
 fn ok(canvas: &Canvas) {
     if let Err(problem) = canvas.check_invariants() {
         panic!(
