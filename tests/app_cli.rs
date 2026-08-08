@@ -193,6 +193,64 @@ fn a_broken_config_is_reported_and_defaults_are_used() {
 }
 
 #[test]
+fn no_icons_reaches_the_renderer_not_just_the_chrome() {
+    // `--render-once` draws no chrome at all, so any difference here is proof the
+    // flag reached the document renderer.
+    let with = run_with_stdin(&["--render-once", "--width", "60"], SAMPLE);
+    let without = run_with_stdin(&["--render-once", "--width", "60", "--no-icons"], SAMPLE);
+    assert!(with.status.success() && without.status.success());
+    assert_ne!(
+        with.stdout, without.stdout,
+        "--no-icons must change the rendered document, not only the status bar"
+    );
+
+    // The fallback glyphs are the same display width, so the layout is untouched.
+    let with = String::from_utf8(with.stdout).expect("output should be UTF-8");
+    let without = String::from_utf8(without.stdout).expect("output should be UTF-8");
+    assert_eq!(
+        with.lines().count(),
+        without.lines().count(),
+        "the icon fallback must not reflow the document"
+    );
+}
+
+#[test]
+fn line_numbers_from_config_reach_the_renderer() {
+    let source = "# Code\n\n```rust\nfn main() {}\nlet x = 1;\n```\n";
+    let config = std::env::temp_dir().join(format!("mdless-ln-{}.toml", std::process::id()));
+
+    std::fs::write(&config, "line_numbers = false\n").expect("writable");
+    let off = run_with_stdin(
+        &[
+            "--render-once",
+            "--width",
+            "60",
+            "--config",
+            &config.display().to_string(),
+        ],
+        source,
+    );
+    std::fs::write(&config, "line_numbers = true\n").expect("writable");
+    let on = run_with_stdin(
+        &[
+            "--render-once",
+            "--width",
+            "60",
+            "--config",
+            &config.display().to_string(),
+        ],
+        source,
+    );
+
+    assert!(off.status.success() && on.status.success());
+    assert_ne!(
+        off.stdout, on.stdout,
+        "`line_numbers` must reach the code renderer"
+    );
+    let _ = std::fs::remove_file(config);
+}
+
+#[test]
 fn an_empty_document_renders_nothing_and_succeeds() {
     let output = run_with_stdin(&["--render-once", "--width", "40"], "");
     assert!(output.status.success());

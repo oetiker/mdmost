@@ -10,7 +10,7 @@ use super::*;
 fn every_alias_resolves_to_a_real_syntax() {
     for (alias, token) in ALIASES {
         assert!(
-            SYNTAX_SET.find_syntax_by_token(token).is_some(),
+            resolve_syntax(Some(token)).is_some(),
             "alias {alias} points at unknown syntect token {token}"
         );
     }
@@ -33,8 +33,10 @@ fn alias_table_is_sorted_and_free_of_duplicates() {
 #[test]
 fn aliases_only_cover_tags_syntect_misses_or_misresolves() {
     for (alias, token) in ALIASES {
-        let direct = SYNTAX_SET.find_syntax_by_token(alias).map(|s| &s.name);
-        let aliased = SYNTAX_SET.find_syntax_by_token(token).map(|s| &s.name);
+        // Deliberately bypasses the alias table on the left-hand side: the question is
+        // what the raw tag would resolve to *without* the alias.
+        let direct = find_in_sets(alias).map(|(_, syntax)| syntax.name.as_str());
+        let aliased = find_in_sets(token).map(|(_, syntax)| syntax.name.as_str());
         assert_ne!(
             direct, aliased,
             "alias {alias} is redundant; remove it from the table"
@@ -122,4 +124,45 @@ fn makefile_recipe_lines_still_parse_with_a_leading_tab() {
         "recipe line lost its highlighting: {:?}",
         lines[1]
     );
+}
+
+/// A definition that fails to parse is skipped at runtime; that must never actually
+/// happen, so assert every one of them made it into the set.
+#[test]
+fn every_extra_syntax_loads() {
+    assert_eq!(
+        EXTRA_SYNTAX_SET.syntaxes().len(),
+        EXTRA_SYNTAXES.len(),
+        "an extra syntax definition failed to parse"
+    );
+    for (name, _) in EXTRA_SYNTAXES {
+        assert!(
+            EXTRA_SYNTAX_SET.syntaxes().iter().any(|s| &s.name == name),
+            "extra syntax {name} is missing or its `name` key does not match the table"
+        );
+    }
+}
+
+/// The extra definitions must be reachable by their own file extensions, which is what
+/// makes them need no [`ALIASES`] entry.
+#[test]
+fn extra_syntaxes_resolve_without_an_alias() {
+    assert_eq!(syntax_name(Some("toml")), Some("TOML"));
+    assert_eq!(syntax_name(Some("dockerfile")), Some("Dockerfile"));
+    assert_eq!(syntax_name(Some("containerfile")), Some("Dockerfile"));
+    assert!(!ALIASES.iter().any(|(alias, _)| *alias == "toml"));
+}
+
+/// The two sets must stay separate: merging them would re-link every bundled syntax.
+/// A `ParseState` is also only valid against the set its syntax came from, so this
+/// asserts each tag resolves against the set that actually owns it.
+#[test]
+fn each_syntax_is_paired_with_its_own_set() {
+    let (set, syntax) = resolve_syntax(Some("toml")).expect("toml resolves");
+    assert!(std::ptr::eq(set, &*EXTRA_SYNTAX_SET));
+    assert!(set.find_syntax_by_name(&syntax.name).is_some());
+
+    let (set, syntax) = resolve_syntax(Some("rust")).expect("rust resolves");
+    assert!(std::ptr::eq(set, &*DEFAULT_SYNTAXES));
+    assert!(set.find_syntax_by_name(&syntax.name).is_some());
 }

@@ -424,4 +424,89 @@ mod tests {
             );
         }
     }
+
+    /// The token slots the syntax highlighter maps scopes onto.
+    ///
+    /// Every one of them must be visibly different from every other, in every theme:
+    /// a slot that collapses onto its neighbour is a distinction the highlighter makes
+    /// and the reader cannot see.
+    fn token_slots(theme: &Theme) -> [(&'static str, Style); 16] {
+        let c = &theme.code;
+        [
+            ("text", c.text),
+            ("keyword", c.keyword),
+            ("string", c.string),
+            ("number", c.number),
+            ("comment", c.comment),
+            ("function", c.function),
+            ("type_name", c.type_name),
+            ("variable", c.variable),
+            ("constant", c.constant),
+            ("operator", c.operator),
+            ("attribute", c.attribute),
+            ("invalid", c.invalid),
+            ("macro_name", c.macro_name),
+            ("punctuation", c.punctuation),
+            ("namespace", c.namespace),
+            ("escape", c.escape),
+        ]
+    }
+
+    #[test]
+    fn code_token_slots_are_all_distinct_in_every_theme() {
+        for name in Theme::builtin_names() {
+            let theme = Theme::builtin(name).expect("built-in theme resolves");
+            let slots = token_slots(&theme);
+            for (i, (left_name, left)) in slots.iter().enumerate() {
+                for (right_name, right) in &slots[i + 1..] {
+                    assert_ne!(
+                        left, right,
+                        "{name}: code slots {left_name} and {right_name} are identical"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Distinctness is necessary but not sufficient: two slots one RGB step apart pass
+    /// the equality test and are invisible on a terminal. Require a real gap.
+    #[test]
+    fn code_token_slots_differ_perceptibly_in_every_theme() {
+        for name in Theme::builtin_names() {
+            let theme = Theme::builtin(name).expect("built-in theme resolves");
+            let slots = token_slots(&theme);
+            for (i, (left_name, left)) in slots.iter().enumerate() {
+                for (right_name, right) in &slots[i + 1..] {
+                    // Slots that differ in attributes (comment is italic, invalid is
+                    // underlined) are already distinguishable without a colour gap.
+                    if left.attrs != right.attrs {
+                        continue;
+                    }
+                    let (Some(a), Some(b)) = (left.fg, right.fg) else {
+                        continue;
+                    };
+                    let distance = u32::from(a.r.abs_diff(b.r))
+                        + u32::from(a.g.abs_diff(b.g))
+                        + u32::from(a.b.abs_diff(b.b));
+                    assert!(
+                        distance >= 24,
+                        "{name}: {left_name} and {right_name} are only {distance} apart"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A user theme built from a bare palette must get the same derived slots as a
+    /// built-in one, since both go through [`Theme::from_palette`].
+    #[test]
+    fn derived_slots_survive_a_user_defined_palette() {
+        let base = Theme::default_dark();
+        let custom = Theme::from_palette("custom", true, base.palette.clone());
+        assert_eq!(custom.code, base.code);
+        assert_ne!(custom.code.number, custom.code.constant);
+        assert_ne!(custom.code.variable, custom.code.text);
+        assert_ne!(custom.code.escape, custom.code.string);
+        assert_ne!(custom.code.punctuation, custom.code.operator);
+    }
 }

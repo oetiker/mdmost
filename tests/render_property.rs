@@ -4,36 +4,53 @@
 //!
 //! 1. rendering never panics;
 //! 2. every rendered line is exactly `width` display columns;
-//! 3. rendering is deterministic — the same `(document, width, theme)` always
-//!    produces the same canvas, which is what makes the render cache safe to drop.
+//! 3. rendering is deterministic — the same `(document, width, theme, options)`
+//!    always produces the same canvas, which is what makes the render cache safe to
+//!    drop.
+//!
+//! Every case runs under both [`RenderOptions`] settings, because the glyph set and
+//! the code gutter both change what is drawn and neither may break the width rule.
 
 use mdless::doc::Doc;
-use mdless::render::render_document;
+use mdless::render::{RenderOptions, render_document};
 use mdless::text::display_width;
 use mdless::theme::Theme;
 
 use proptest::prelude::*;
 
-/// Renders `markdown` at `width` and asserts the universal properties.
+/// Every combination of the render options.
+const OPTION_SETS: [RenderOptions; 4] = [
+    RenderOptions::new(true, false),
+    RenderOptions::new(false, false),
+    RenderOptions::new(true, true),
+    RenderOptions::new(false, true),
+];
+
+/// Renders `markdown` at `width` under every option set, asserting the properties.
 fn check(markdown: &str, width: u16) {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
-    let canvas = render_document(&doc, width, &theme);
+    for options in OPTION_SETS {
+        let canvas = render_document(&doc, width, &theme, &options);
 
-    assert_eq!(canvas.width(), width);
-    canvas
-        .check_invariants()
-        .unwrap_or_else(|problem| panic!("canvas contract violated at width {width}: {problem}"));
-    for row in 0..canvas.height() {
+        assert_eq!(canvas.width(), width);
+        canvas.check_invariants().unwrap_or_else(|problem| {
+            panic!("canvas contract violated at width {width} with {options:?}: {problem}")
+        });
+        for row in 0..canvas.height() {
+            assert_eq!(
+                display_width(&canvas.row_text(row)),
+                usize::from(width),
+                "row {row} at width {width} with {options:?} is not exactly {width} columns"
+            );
+        }
+
+        let again = render_document(&doc, width, &theme, &options);
         assert_eq!(
-            display_width(&canvas.row_text(row)),
-            usize::from(width),
-            "row {row} at width {width} is not exactly {width} display columns"
+            canvas, again,
+            "rendering is not deterministic at {width} with {options:?}"
         );
     }
-
-    let again = render_document(&doc, width, &theme);
-    assert_eq!(canvas, again, "rendering is not deterministic at {width}");
 }
 
 /// The building blocks a generated document is assembled from.
@@ -95,12 +112,47 @@ fn both_built_in_themes_produce_identically_shaped_output() {
     let markdown = include_str!("corpus/adversarial.md");
     let doc = Doc::parse(markdown);
     for width in [40u16, 80, 120] {
-        let dark = render_document(&doc, width, &Theme::default_dark());
-        let light = render_document(&doc, width, &Theme::default_light());
+        let options = RenderOptions::default();
+        let dark = render_document(&doc, width, &Theme::default_dark(), &options);
+        let light = render_document(&doc, width, &Theme::default_light(), &options);
         assert_eq!(
             dark.plain_text(),
             light.plain_text(),
             "layout must not depend on the palette"
         );
+    }
+}
+
+#[test]
+fn turning_icons_off_never_changes_the_layout() {
+    let markdown = include_str!("corpus/adversarial.md");
+    let doc = Doc::parse(markdown);
+    let theme = Theme::default_dark();
+    for width in 4..=120u16 {
+        for line_numbers in [false, true] {
+            let fancy =
+                render_document(&doc, width, &theme, &RenderOptions::new(true, line_numbers));
+            let plain = render_document(
+                &doc,
+                width,
+                &theme,
+                &RenderOptions::new(false, line_numbers),
+            );
+            assert_eq!(
+                fancy.height(),
+                plain.height(),
+                "row count differs at width {width} (line_numbers={line_numbers})"
+            );
+            assert_eq!(
+                fancy.anchors(),
+                plain.anchors(),
+                "anchors differ at {width}"
+            );
+            assert_eq!(
+                fancy.spans(),
+                plain.spans(),
+                "search spans differ at {width}"
+            );
+        }
     }
 }

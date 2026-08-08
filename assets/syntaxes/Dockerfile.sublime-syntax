@@ -1,0 +1,94 @@
+%YAML 1.2
+---
+# Dockerfile syntax definition for mdless.
+#
+# Licence: MIT — the same licence as the rest of mdless. Written for this project
+# rather than vendored from any other source, so no third-party licence applies.
+#
+# syntect's default set has no Dockerfile definition. Aliasing `dockerfile` to the
+# shell syntax colours the command bodies well but reads `FROM` and `RUN` as ordinary
+# commands; this definition makes the directive a keyword and hands the rest of the
+# line to the shell syntax, so both halves are right.
+name: Dockerfile
+file_extensions:
+  - dockerfile
+  - Dockerfile
+  - containerfile
+  - Containerfile
+scope: source.dockerfile
+
+variables:
+  # Every directive of the Dockerfile reference, longest-first where one is a prefix
+  # of another so that alternation cannot match the shorter one.
+  directive: '(?i:ADD|ARG|CMD|COPY|ENTRYPOINT|ENV|EXPOSE|FROM|HEALTHCHECK|LABEL|MAINTAINER|ONBUILD|RUN|SHELL|STOPSIGNAL|USER|VOLUME|WORKDIR)'
+
+contexts:
+  main:
+    - include: comments
+    - match: '^\s*{{directive}}\b'
+      scope: keyword.control.dockerfile
+      push: directive-body
+    - include: shell-body
+
+  comments:
+    # A `# syntax=` or `# escape=` line at the top of the file is a parser directive,
+    # not a comment, but colouring it as one is the lesser of two confusions.
+    - match: '#'
+      scope: punctuation.definition.comment.dockerfile
+      push:
+        - meta_scope: comment.line.number-sign.dockerfile
+        - match: '$\n?'
+          pop: true
+
+  # The remainder of a directive line, including any lines it continues onto with a
+  # trailing backslash.
+  directive-body:
+    - meta_scope: meta.directive.dockerfile
+    - match: '\\\s*$\n?'
+      scope: punctuation.separator.continuation.dockerfile
+    - match: '$\n?'
+      pop: true
+    - match: '\b(?i:AS)\b'
+      scope: keyword.operator.dockerfile
+    - include: shell-body
+
+  shell-body:
+    - include: comments
+    - include: strings
+    - match: '\$[A-Za-z_][A-Za-z0-9_]*'
+      scope: variable.other.dockerfile
+    - match: '\$\{'
+      scope: punctuation.definition.variable.dockerfile
+      push:
+        - meta_scope: variable.other.dockerfile
+        - match: '\}'
+          scope: punctuation.definition.variable.dockerfile
+          pop: true
+    - match: '--[A-Za-z][A-Za-z0-9-]*'
+      scope: variable.parameter.option.dockerfile
+    - match: '[|&;]'
+      scope: keyword.operator.dockerfile
+    - match: '\b\d+\b'
+      scope: constant.numeric.dockerfile
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.dockerfile
+      push:
+        - meta_scope: string.quoted.double.dockerfile
+        - match: '"'
+          scope: punctuation.definition.string.end.dockerfile
+          pop: true
+        - match: '$\n?'
+          pop: true
+        - match: '\\.'
+          scope: constant.character.escape.dockerfile
+    - match: "'"
+      scope: punctuation.definition.string.begin.dockerfile
+      push:
+        - meta_scope: string.quoted.single.dockerfile
+        - match: "'"
+          scope: punctuation.definition.string.end.dockerfile
+          pop: true
+        - match: '$\n?'
+          pop: true

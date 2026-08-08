@@ -16,25 +16,10 @@ use crate::text::{Align, Line, Span, display_width, pad_to_width};
 use crate::theme::{Style, Theme};
 
 use super::inline::{HTML_MARKER, render_inline};
-use super::{Ctx, MAX_TABLE_DEPTH, code, inline, table};
-
-/// The glyph drawn in front of a heading, indexed by level `1..=6`.
-///
-/// Plain Unicode rather than Nerd Font glyphs: icon selection is configuration's job
-/// (`--no-icons`, design spec §9) and the renderer has no access to the config.
-const HEADING_PREFIX: [&str; 6] = ["◆", "◈", "▸", "▹", "•", "·"];
-
-/// The glyph a bullet list item is marked with, by nesting depth.
-const BULLETS: [&str; 4] = ["•", "◦", "‣", "·"];
+use super::{Ctx, MAX_TABLE_DEPTH, RenderOptions, code, inline, table};
 
 /// The vertical bar drawn to the left of a block quote.
 const QUOTE_BAR: &str = "▌";
-
-/// The box of a ticked task list item.
-const TASK_CHECKED: &str = "☑";
-
-/// The box of an unticked task list item.
-const TASK_UNCHECKED: &str = "☐";
 
 /// The rule drawn beneath a heading, by level.
 const HEADING_RULE: [&str; 2] = ["━", "─"];
@@ -43,13 +28,13 @@ const HEADING_RULE: [&str; 2] = ["━", "─"];
 ///
 /// The result is exactly `width` columns wide, and empty for a node that renders to
 /// nothing.
-pub fn render_block(node: &Node, width: u16, theme: &Theme) -> Canvas {
-    render_block_ctx(node, width, Ctx::new(theme))
+pub fn render_block(node: &Node, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
+    render_block_ctx(node, width, Ctx::new(theme, options))
 }
 
 /// Renders a sequence of blocks at `width` columns, separated by blank rows.
-pub fn render_blocks(nodes: &[Node], width: u16, theme: &Theme) -> Canvas {
-    render_sequence(nodes, width, Ctx::new(theme), true)
+pub fn render_blocks(nodes: &[Node], width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
+    render_sequence(nodes, width, Ctx::new(theme, options), true)
 }
 
 /// Renders a sequence of sibling blocks.
@@ -150,7 +135,7 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
 fn heading(node: &Node, level: u8, id: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     let theme = ctx.theme;
     let style = theme.heading(level);
-    let prefix = HEADING_PREFIX[usize::from(level.clamp(1, 6)) - 1];
+    let prefix = ctx.glyphs.heading(level);
     let marker = Line::new(vec![Span::new(
         format!("{prefix} "),
         theme.block.heading_prefix,
@@ -202,13 +187,12 @@ fn quote(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
 
 /// A bullet, ordered or task list.
 fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
-    let theme = ctx.theme;
     let inner = ctx.in_list();
     let field = marker_field(&node.children, info);
     let indent = u16::try_from(field).unwrap_or(u16::MAX).min(width);
     let mut out = Canvas::empty(width);
     for (index, item) in node.children.iter().enumerate() {
-        let marker = marker_line(item, info, index, field, ctx.list_depth, theme);
+        let marker = marker_line(item, info, index, field, ctx);
         let content = render_sequence(&item.children, width - indent, inner, !info.tight);
         let part = hanging(&marker, &content, ctx.base);
         if !info.tight && !out.is_empty() {
@@ -229,19 +213,14 @@ fn marker_field(items: &[Node], info: ListInfo) -> usize {
 }
 
 /// The marker of one list item, padded to the marker field width.
-fn marker_line(
-    item: &Node,
-    info: ListInfo,
-    index: usize,
-    field: usize,
-    depth: usize,
-    theme: &Theme,
-) -> Line {
+fn marker_line(item: &Node, info: ListInfo, index: usize, field: usize, ctx: Ctx<'_>) -> Line {
+    let theme = ctx.theme;
     if let NodeKind::TaskItem { checked } = item.kind {
-        let (glyph, style) = if checked {
-            (TASK_CHECKED, theme.block.task_checked)
+        let glyph = ctx.glyphs.task(checked);
+        let style = if checked {
+            theme.block.task_checked
         } else {
-            (TASK_UNCHECKED, theme.block.task_unchecked)
+            theme.block.task_unchecked
         };
         return Line::new(vec![Span::new(
             pad_to_width(glyph, field, Align::Left),
@@ -259,7 +238,7 @@ fn marker_line(
     } else {
         // The bullet glyph rotates with nesting depth, so a nested list reads as
         // nested even where the indentation alone would be ambiguous.
-        pad_to_width(BULLETS[depth % BULLETS.len()], field, Align::Left)
+        pad_to_width(ctx.glyphs.bullet(ctx.list_depth), field, Align::Left)
     };
     Line::new(vec![Span::new(text, theme.block.list_marker)])
 }

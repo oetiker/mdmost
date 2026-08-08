@@ -18,6 +18,7 @@ use clap::Parser;
 
 use mdless::config::Config;
 use mdless::doc::Doc;
+use mdless::render::RenderOptions;
 use mdless::theme::Theme;
 use mdless::tui::{self, App, AppOptions, dump};
 
@@ -112,7 +113,15 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     let stdout_is_terminal = io::stdout().is_terminal();
 
     if cli.render_once || !stdout_is_terminal {
-        return render_once(&doc, &config, &theme_name, cli.width, stdout_is_terminal);
+        let options = RenderOptions::new(icons, config.line_numbers);
+        return render_once(
+            &doc,
+            &config,
+            &theme_name,
+            cli.width,
+            stdout_is_terminal,
+            &options,
+        );
     }
 
     let mut app = App::new(
@@ -141,6 +150,7 @@ fn render_once(
     theme_name: &str,
     width: Option<u16>,
     stdout_is_terminal: bool,
+    options: &RenderOptions,
 ) -> anyhow::Result<ExitCode> {
     let theme = match config.resolve_theme(theme_name) {
         Ok(theme) => theme,
@@ -156,7 +166,7 @@ fn render_once(
             FALLBACK_WIDTH
         }
     });
-    let canvas = mdless::render::render_document(doc, width.max(1), &theme);
+    let canvas = mdless::render::render_document(doc, width.max(1), &theme, options);
 
     let stdout = io::stdout();
     let mut out = stdout.lock();

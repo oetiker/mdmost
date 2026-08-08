@@ -31,7 +31,10 @@ mod scopes;
 use std::sync::LazyLock;
 
 use syntect::easy::ScopeRegionIterator;
-use syntect::parsing::{ParseState, ScopeStack, ScopeStackOp, SyntaxReference, SyntaxSet};
+use syntect::parsing::{
+    ParseState, ScopeStack, ScopeStackOp, SyntaxDefinition, SyntaxReference, SyntaxSet,
+    SyntaxSetBuilder,
+};
 use syntect::util::LinesWithEndings;
 
 use crate::text::{Line, Span, display_width, graphemes};
@@ -49,11 +52,50 @@ pub const MAX_HIGHLIGHT_BYTES: usize = 256 * 1024;
 /// Blocks with more lines than this are rendered as plain themed text.
 pub const MAX_HIGHLIGHT_LINES: usize = 10_000;
 
-/// The default `syntect` syntax set, loaded once.
+/// Syntax definitions `syntect`'s default set does not ship, compiled into the binary.
 ///
-/// Loading takes long enough to be visible at startup for a pager, so it happens
-/// lazily on the first highlighted block and never again.
-static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+/// Each is written for `mdless` under the project's own licence rather than vendored,
+/// and each declares its `file_extensions`, so the ordinary token lookup finds it with
+/// no alias entry. Keep the tuple's first element in step with the definition's `name`
+/// key: it is only used for the error message when a definition fails to parse.
+const EXTRA_SYNTAXES: &[(&str, &str)] = &[
+    (
+        "TOML",
+        include_str!("../assets/syntaxes/TOML.sublime-syntax"),
+    ),
+    (
+        "Dockerfile",
+        include_str!("../assets/syntaxes/Dockerfile.sublime-syntax"),
+    ),
+];
+
+/// `syntect`'s own syntax set, deserialised from its compiled dump.
+///
+/// This is cheap (about a millisecond) because the dump is pre-linked, and it happens
+/// lazily on the first highlighted block.
+static DEFAULT_SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+
+/// A second set holding only [`EXTRA_SYNTAXES`].
+///
+/// Deliberately *not* merged into [`DEFAULT_SYNTAXES`]: adding a definition to the
+/// default set means calling `into_builder().build()`, which re-links the context
+/// references of all seventy-five bundled syntaxes and costs about 180 ms — a cost
+/// every document with any code block would pay. Built on its own, the same two
+/// definitions link in about 9 ms, and only a document that actually contains a TOML
+/// or Dockerfile fence pays even that.
+///
+/// A definition that fails to parse is skipped rather than panicking;
+/// `every_extra_syntax_loads` asserts that none currently does, so a broken definition
+/// is a test failure and not a silent loss of highlighting.
+static EXTRA_SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
+    let mut builder = SyntaxSetBuilder::new();
+    for (_, source) in EXTRA_SYNTAXES {
+        if let Ok(definition) = SyntaxDefinition::load_from_str(source, true, None) {
+            builder.add(definition);
+        }
+    }
+    builder.build()
+});
 
 /// Language tags that `syntect`'s own name and extension lookup does not resolve, or
 /// resolves to something other than what a Markdown author means by the tag.
@@ -61,15 +103,13 @@ static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_
 /// The right-hand side is a `syntect` token — a syntax name or a file extension — that
 /// [`SyntaxSet::find_syntax_by_token`] does resolve.
 ///
-/// The default set has no syntax of its own for TOML, Dockerfiles or TypeScript, so
-/// those tags borrow the closest relative rather than falling back to plain text: a
-/// Dockerfile is mostly shell, a TOML file is `key = value` with `#` comments like a
-/// properties file, and TypeScript is a superset of JavaScript.
+/// TOML and Dockerfiles have their own definitions in [`EXTRA_SYNTAXES`] and therefore
+/// need no alias. TypeScript has none, and borrows `JavaScript` — a superset sharing
+/// most of its surface — rather than falling back to plain text.
 const ALIASES: &[(&str, &str)] = &[
     ("cjs", "JavaScript"),
     ("console", "sh"),
-    ("docker", "sh"),
-    ("dockerfile", "sh"),
+    ("docker", "dockerfile"),
     ("golang", "go"),
     ("jinja", "html"),
     ("jsonc", "json"),
@@ -82,7 +122,6 @@ const ALIASES: &[(&str, &str)] = &[
     ("shell", "sh"),
     ("shell-session", "sh"),
     ("text", "txt"),
-    ("toml", "properties"),
     ("ts", "JavaScript"),
     ("tsx", "JavaScript"),
     ("typescript", "JavaScript"),
@@ -102,13 +141,13 @@ pub fn highlight(lang: Option<&str>, src: &str, theme: &Theme) -> Vec<Line> {
     if src.len() > MAX_HIGHLIGHT_BYTES {
         return plain(src, theme);
     }
-    let Some(syntax) = resolve_syntax(lang) else {
+    let Some((set, syntax)) = resolve_syntax(lang) else {
         return plain(src, theme);
     };
     if LinesWithEndings::from(src).count() > MAX_HIGHLIGHT_LINES {
         return plain(src, theme);
     }
-    highlight_with(syntax, src, theme).unwrap_or_else(|| plain(src, theme))
+    highlight_with(set, syntax, src, theme).unwrap_or_else(|| plain(src, theme))
 }
 
 /// The name of the `syntect` syntax a language tag resolves to, if any.
@@ -116,7 +155,7 @@ pub fn highlight(lang: Option<&str>, src: &str, theme: &Theme) -> Vec<Line> {
 /// Useful to a renderer that wants to show the real language name in a code frame, and
 /// to callers that want to know whether a tag would be highlighted at all.
 pub fn syntax_name(lang: Option<&str>) -> Option<&'static str> {
-    resolve_syntax(lang).map(|syntax| syntax.name.as_str())
+    resolve_syntax(lang).map(|(_, syntax)| syntax.name.as_str())
 }
 
 /// Resolves a fence info string to a syntax.
@@ -124,8 +163,13 @@ pub fn syntax_name(lang: Option<&str>) -> Option<&'static str> {
 /// Resolution order: the info string's first token, lower-cased, is looked up in
 /// [`ALIASES`]; the result (or the token itself) is then handed to
 /// [`SyntaxSet::find_syntax_by_token`], which matches syntax names and file extensions
-/// case-insensitively. `None` means "render as plain text".
-fn resolve_syntax(lang: Option<&str>) -> Option<&'static SyntaxReference> {
+/// case-insensitively. [`EXTRA_SYNTAX_SET`] is consulted first, so a definition written
+/// for `mdless` always wins over a same-named one appearing in a future `syntect`.
+/// `None` means "render as plain text".
+///
+/// The set is returned alongside the syntax because a [`ParseState`] must be driven by
+/// the very set its [`SyntaxReference`] came from.
+fn resolve_syntax(lang: Option<&str>) -> Option<(&'static SyntaxSet, &'static SyntaxReference)> {
     let tag = lang?
         .trim()
         .split([',', ' ', '\t', '{'])
@@ -139,7 +183,20 @@ fn resolve_syntax(lang: Option<&str>) -> Option<&'static SyntaxReference> {
         .iter()
         .find(|(alias, _)| *alias == tag)
         .map_or(tag.as_str(), |(_, token)| token);
-    SYNTAX_SET.find_syntax_by_token(token)
+    find_in_sets(token)
+}
+
+/// Looks a `syntect` token up in both sets, [`EXTRA_SYNTAX_SET`] first.
+///
+/// Split out from [`resolve_syntax`] so that it can be asked what a tag resolves to
+/// *without* the alias table in the way.
+fn find_in_sets(token: &str) -> Option<(&'static SyntaxSet, &'static SyntaxReference)> {
+    if let Some(syntax) = EXTRA_SYNTAX_SET.find_syntax_by_token(token) {
+        return Some((&EXTRA_SYNTAX_SET, syntax));
+    }
+    DEFAULT_SYNTAXES
+        .find_syntax_by_token(token)
+        .map(|syntax| (&*DEFAULT_SYNTAXES, syntax))
 }
 
 /// Highlights `src` with `syntax`, or returns `None` if the parser gave up.
@@ -147,13 +204,18 @@ fn resolve_syntax(lang: Option<&str>) -> Option<&'static SyntaxReference> {
 /// Any parser error degrades the whole block rather than half of it, so the reader
 /// never sees a block that is colourful at the top and plain at the bottom for no
 /// visible reason.
-fn highlight_with(syntax: &SyntaxReference, src: &str, theme: &Theme) -> Option<Vec<Line>> {
+fn highlight_with(
+    set: &SyntaxSet,
+    syntax: &SyntaxReference,
+    src: &str,
+    theme: &Theme,
+) -> Option<Vec<Line>> {
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
     let mut out = Vec::new();
 
     for raw in LinesWithEndings::from(src) {
-        let ops = state.parse_line(raw, &SYNTAX_SET).ok()?;
+        let ops = state.parse_line(raw, set).ok()?;
         let mut line = Line::empty();
         let mut column = 0usize;
         let mut style = theme.code.text;

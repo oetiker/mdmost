@@ -1,0 +1,216 @@
+%YAML 1.2
+---
+# TOML syntax definition for mdless.
+#
+# Licence: MIT — the same licence as the rest of mdless. This file was written for
+# this project rather than vendored from Sublime Text's package repository or any
+# other source, so no third-party licence or attribution applies to it.
+#
+# syntect's default syntax set has no TOML definition, and TOML is both mdless's own
+# configuration format and one of the most common fence languages in the kind of
+# document this pager exists to read. Scopes follow the conventional TextMate naming
+# so that the scope table in `src/highlight/scopes.rs` maps them without special cases.
+#
+# Covers TOML v1.0.0: tables and array-of-tables headers, bare / dotted / quoted keys,
+# basic and literal strings including their multi-line forms, escape sequences,
+# integers in all four radices, floats, `inf` / `nan`, booleans, offset and local
+# date-times, arrays (which may span lines) and inline tables.
+name: TOML
+file_extensions:
+  - toml
+scope: source.toml
+
+variables:
+  bare_key: '[A-Za-z0-9_-]+'
+  # A date, a date-time or a time-of-day, per RFC 3339. Matched before numbers, since
+  # `1979-05-27` starts with something that also looks like an integer.
+  date_time: '\d{4}-\d{2}-\d{2}([Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?)?|\d{2}:\d{2}:\d{2}(\.\d+)?'
+
+contexts:
+  main:
+    - include: comments
+    - include: table-headers
+    - match: '(?=\S)'
+      push: key
+
+  comments:
+    - match: '#'
+      scope: punctuation.definition.comment.toml
+      push:
+        - meta_scope: comment.line.number-sign.toml
+        - match: '$\n?'
+          pop: true
+
+  # `[table]`, `[a.b.c]` and `[[array-of-tables]]`.
+  table-headers:
+    - match: '\[\['
+      scope: punctuation.section.brackets.begin.toml
+      push:
+        - meta_scope: meta.table-array.toml
+        - match: '\]\]'
+          scope: punctuation.section.brackets.end.toml
+          pop: true
+        - match: '$\n?'
+          pop: true
+        - include: table-name
+    - match: '\['
+      scope: punctuation.section.brackets.begin.toml
+      push:
+        - meta_scope: meta.table.toml
+        - match: '\]'
+          scope: punctuation.section.brackets.end.toml
+          pop: true
+        - match: '$\n?'
+          pop: true
+        - include: table-name
+
+  table-name:
+    - match: '{{bare_key}}'
+      scope: entity.name.section.toml
+    - match: '\.'
+      scope: punctuation.accessor.toml
+    - include: quoted-keys
+
+  # Everything left of the `=` on a key/value line.
+  key:
+    - match: '='
+      scope: keyword.operator.assignment.toml
+      set: value
+    - match: '$\n?'
+      pop: true
+    - include: comments
+    - match: '{{bare_key}}'
+      scope: entity.name.tag.toml
+    - match: '\.'
+      scope: punctuation.accessor.toml
+    - include: quoted-keys
+
+  quoted-keys:
+    - match: '"'
+      scope: punctuation.definition.string.begin.toml
+      push:
+        - meta_scope: string.quoted.double.toml entity.name.tag.toml
+        - match: '"'
+          scope: punctuation.definition.string.end.toml
+          pop: true
+        - match: '$\n?'
+          pop: true
+        - include: escapes
+    - match: "'"
+      scope: punctuation.definition.string.begin.toml
+      push:
+        - meta_scope: string.quoted.single.toml entity.name.tag.toml
+        - match: "'"
+          scope: punctuation.definition.string.end.toml
+          pop: true
+        - match: '$\n?'
+          pop: true
+
+  # Everything right of the `=`. Scalars end at the line break; arrays and inline
+  # tables push their own context and therefore survive it.
+  value:
+    - match: '$\n?'
+      pop: true
+    - include: comments
+    - include: value-atoms
+
+  value-atoms:
+    - include: multi-line-strings
+    - include: strings
+    - include: arrays
+    - include: inline-tables
+    - match: '\b(true|false)\b'
+      scope: constant.language.toml
+    - match: '{{date_time}}'
+      scope: constant.other.datetime.toml
+    - match: '[+-]?(inf|nan)\b'
+      scope: constant.numeric.float.toml
+    - match: '0x[0-9A-Fa-f](_?[0-9A-Fa-f])*'
+      scope: constant.numeric.integer.hexadecimal.toml
+    - match: '0o[0-7](_?[0-7])*'
+      scope: constant.numeric.integer.octal.toml
+    - match: '0b[01](_?[01])*'
+      scope: constant.numeric.integer.binary.toml
+    - match: '[+-]?[0-9](_?[0-9])*(\.[0-9](_?[0-9])*)?([eE][+-]?[0-9](_?[0-9])*)?'
+      scope: constant.numeric.toml
+
+  # `"""` and `'''` must be tried before their single-character forms.
+  multi-line-strings:
+    - match: '"""'
+      scope: punctuation.definition.string.begin.toml
+      push:
+        - meta_scope: string.quoted.double.block.toml
+        - match: '"""'
+          scope: punctuation.definition.string.end.toml
+          pop: true
+        - include: escapes
+    - match: "'''"
+      scope: punctuation.definition.string.begin.toml
+      push:
+        - meta_scope: string.quoted.single.block.toml
+        - match: "'''"
+          scope: punctuation.definition.string.end.toml
+          pop: true
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.toml
+      push:
+        - meta_scope: string.quoted.double.toml
+        - match: '"'
+          scope: punctuation.definition.string.end.toml
+          pop: true
+        - match: '$\n?'
+          pop: true
+        - include: escapes
+    - match: "'"
+      scope: punctuation.definition.string.begin.toml
+      push:
+        - meta_scope: string.quoted.single.toml
+        - match: "'"
+          scope: punctuation.definition.string.end.toml
+          pop: true
+        - match: '$\n?'
+          pop: true
+
+  # Escapes are legal only in basic strings; literal strings never include this.
+  escapes:
+    - match: '\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|[btnfr"\\/]|\s*$)'
+      scope: constant.character.escape.toml
+    - match: '\\.'
+      scope: invalid.illegal.unknown-escape.toml
+
+  arrays:
+    - match: '\['
+      scope: punctuation.section.brackets.begin.toml
+      push:
+        - meta_scope: meta.array.toml
+        - match: '\]'
+          scope: punctuation.section.brackets.end.toml
+          pop: true
+        - match: ','
+          scope: punctuation.separator.toml
+        - include: comments
+        - include: value-atoms
+
+  inline-tables:
+    - match: '\{'
+      scope: punctuation.section.braces.begin.toml
+      push:
+        - meta_scope: meta.mapping.toml
+        - match: '\}'
+          scope: punctuation.section.braces.end.toml
+          pop: true
+        - match: ','
+          scope: punctuation.separator.toml
+        - match: '='
+          scope: keyword.operator.assignment.toml
+          push:
+            - match: '(?=[,}])'
+              pop: true
+            - include: value-atoms
+        - match: '{{bare_key}}'
+          scope: entity.name.tag.toml
+        - match: '\.'
+          scope: punctuation.accessor.toml
+        - include: quoted-keys

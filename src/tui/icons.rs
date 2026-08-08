@@ -25,6 +25,8 @@ pub struct Icons {
     pub separator: &'static str,
     /// Marks a warning or error notice.
     pub warning: &'static str,
+    /// Marks the horizontal offset when content is scrolled sideways.
+    pub horizontal: &'static str,
 }
 
 impl Icons {
@@ -41,6 +43,9 @@ impl Icons {
         unselected: " ",
         separator: "\u{e0b1}",
         warning: "\u{f071}",
+        // Plain in both sets: an arrow that renders double-width in some terminals
+        // would shift the whole status bar.
+        horizontal: "\u{2194}",
     };
 
     /// The plain-Unicode fallback, for terminals without a Nerd Font.
@@ -54,6 +59,7 @@ impl Icons {
         unselected: " ",
         separator: "\u{2502}",
         warning: "!",
+        horizontal: "\u{2194}",
     };
 
     /// Picks a glyph set.

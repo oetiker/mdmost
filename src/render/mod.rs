@@ -21,11 +21,12 @@
 //!
 //! ```
 //! use mdless::doc::Doc;
-//! use mdless::render::render_document;
+//! use mdless::render::{RenderOptions, render_document};
 //! use mdless::theme::Theme;
 //!
 //! let doc = Doc::parse("# Title\n\nHello.\n");
-//! let canvas = render_document(&doc, 20, &Theme::default_dark());
+//! let options = RenderOptions::default();
+//! let canvas = render_document(&doc, 20, &Theme::default_dark(), &options);
 //! assert_eq!(canvas.width(), 20);
 //! assert_eq!(canvas.anchors()[0].id, "title");
 //! ```
@@ -33,6 +34,7 @@
 pub mod block;
 mod bridge;
 mod code;
+mod glyphs;
 pub mod inline;
 pub mod table;
 
@@ -43,9 +45,56 @@ use crate::canvas::Canvas;
 use crate::doc::Doc;
 use crate::theme::{Style, Theme};
 
+use glyphs::Glyphs;
+
 pub use block::{render_block, render_blocks};
 pub use inline::wrap;
 pub use table::{render_table, render_table_full};
+
+/// Render-time capabilities that come from CLI flags and configuration rather than
+/// from the theme.
+///
+/// The theme decides what things *look* like; these decide what the renderer is
+/// *allowed to draw*. They are a separate input on purpose: two documents rendered
+/// with the same theme but different options are different renders.
+///
+/// # Cache key
+///
+/// Rendering is a pure function of `(AST, width, theme, options)` — a render cache
+/// must therefore include these in its key, alongside the document version, the width
+/// and the theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderOptions {
+    /// Whether Nerd Font glyphs may be used.
+    ///
+    /// `false` (from `--no-icons` or `icons = false`) substitutes plain Unicode of
+    /// the same display width, so the layout is identical either way.
+    pub icons: bool,
+    /// Whether fenced code blocks get a line-number gutter.
+    pub line_numbers: bool,
+}
+
+impl RenderOptions {
+    /// Creates options from the two flags.
+    pub const fn new(icons: bool, line_numbers: bool) -> Self {
+        Self {
+            icons,
+            line_numbers,
+        }
+    }
+
+    /// The glyph set these options select.
+    pub(crate) const fn glyphs(&self) -> Glyphs {
+        Glyphs::new(self.icons)
+    }
+}
+
+impl Default for RenderOptions {
+    /// Nerd Font glyphs on, line numbers off — the defaults of design spec §9 and §8.
+    fn default() -> Self {
+        Self::new(true, false)
+    }
+}
 
 /// The immutable context threaded through the recursive renderers.
 ///
@@ -57,6 +106,10 @@ pub use table::{render_table, render_table_full};
 pub(crate) struct Ctx<'a> {
     /// The active theme.
     pub theme: &'a Theme,
+    /// The active render options.
+    pub options: RenderOptions,
+    /// The glyph set the options select, resolved once.
+    pub glyphs: Glyphs,
     /// The style canvases are filled with and inline text inherits.
     ///
     /// Body text at the top level, quote text inside a block quote; a span that sets
@@ -78,9 +131,11 @@ pub(crate) const MAX_TABLE_DEPTH: usize = 4;
 
 impl<'a> Ctx<'a> {
     /// The context a top-level document render starts from.
-    pub(crate) fn new(theme: &'a Theme) -> Self {
+    pub(crate) fn new(theme: &'a Theme, options: &RenderOptions) -> Self {
         Self {
             theme,
+            options: *options,
+            glyphs: options.glyphs(),
             base: theme.base(),
             list_depth: 0,
             quote_depth: 0,
@@ -127,8 +182,13 @@ impl<'a> Ctx<'a> {
 ///   on, so the table of contents can jump to it;
 /// * [`SearchSpan`](crate::canvas::SearchSpan)s mapping source byte ranges to canvas
 ///   positions, so search hits can be highlighted.
-pub fn render_document(doc: &Doc, width: u16, theme: &Theme) -> Canvas {
-    let mut canvas = block::render_sequence(&doc.root().children, width, Ctx::new(theme), true);
+///
+/// `options` carries the settings that are not the theme's business — Nerd Font
+/// glyphs and code line numbers — and belongs in any cache key alongside the document
+/// version, the width and the theme.
+pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
+    let ctx = Ctx::new(theme, options);
+    let mut canvas = block::render_sequence(&doc.root().children, width, ctx, true);
     canvas.resize_width(width, theme.base());
     canvas
 }

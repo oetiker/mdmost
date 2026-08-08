@@ -46,8 +46,16 @@ enum Slot {
     Variable,
     /// Named constants, language literals and escape sequences.
     Constant,
-    /// Operators and punctuation.
+    /// Operators.
     Operator,
+    /// Brackets, separators and terminators.
+    Punctuation,
+    /// Macro and preprocessor-macro names.
+    MacroName,
+    /// Namespace, module and package names.
+    Namespace,
+    /// Escape sequences inside string literals.
+    Escape,
     /// Attributes, annotations, decorators, preprocessor directives, mapping keys.
     Attribute,
     /// Text the syntax flagged as illegal.
@@ -67,6 +75,10 @@ impl Slot {
             Self::Variable => code.variable,
             Self::Constant => code.constant,
             Self::Operator => code.operator,
+            Self::Punctuation => code.punctuation,
+            Self::MacroName => code.macro_name,
+            Self::Namespace => code.namespace,
+            Self::Escape => code.escape,
             Self::Attribute => code.attribute,
             Self::Invalid => code.invalid,
         }
@@ -81,7 +93,7 @@ impl Slot {
 ///   recedes rather than competing with it. The comment *punctuation* (`//`, `/*`)
 ///   joins it so a comment reads as one object.
 /// * **Strings** keep their quotes (`punctuation.definition.string`), but an escape
-///   sequence inside a string is promoted to `Constant`, which is the one place the
+///   sequence inside a string gets its own `Escape` slot, which is the one place the
 ///   mapping deliberately breaks a run of colour — `\n` is code, not text.
 /// * **Numbers** are separated from other constants so that literal-heavy code
 ///   (tables of data, colour values) gets visual rhythm.
@@ -100,8 +112,12 @@ impl Slot {
 ///   in it: `#[derive]`, `@Override`, `#include`, HTML/JSX attribute names, and — the
 ///   one liberty taken — mapping keys in JSON/YAML/TOML, which are structurally the
 ///   same idea and would otherwise be indistinguishable from their string values.
-/// * **Operators and punctuation** share the muted slot so that the eye follows
-///   identifiers, not brackets and semicolons.
+/// * **Operators and punctuation** are separate but both quiet, punctuation quieter
+///   still: an operator says what the code *does*, a bracket only says where it
+///   starts, and neither should pull the eye away from identifiers.
+/// * **Macros and namespaces** are split off from functions and types, because an
+///   invocation of `println!` is a different event from a call to `write`, and a
+///   module path names a container rather than a value's type.
 /// * **Markup** scopes appear when a fence contains Markdown, LaTeX or a diff; they
 ///   are folded onto the nearest code slot rather than left unstyled.
 const RULES: &[(&str, Slot)] = &[
@@ -111,8 +127,8 @@ const RULES: &[(&str, Slot)] = &[
     // Strings.
     ("string", Slot::Str),
     ("punctuation.definition.string", Slot::Str),
-    ("constant.character.escape", Slot::Constant),
-    ("constant.other.placeholder", Slot::Constant),
+    ("constant.character.escape", Slot::Escape),
+    ("constant.other.placeholder", Slot::Escape),
     // Numbers and constants.
     ("constant", Slot::Constant),
     ("constant.numeric", Slot::Number),
@@ -124,9 +140,9 @@ const RULES: &[(&str, Slot)] = &[
     ("storage", Slot::Keyword),
     // Functions and macros.
     ("entity.name.function", Slot::Function),
-    ("entity.name.macro", Slot::Function),
+    ("entity.name.macro", Slot::MacroName),
     ("support.function", Slot::Function),
-    ("support.macro", Slot::Function),
+    ("support.macro", Slot::MacroName),
     ("variable.function", Slot::Function),
     // Types, classes and namespaces.
     ("entity.name.type", Slot::TypeName),
@@ -137,8 +153,9 @@ const RULES: &[(&str, Slot)] = &[
     ("entity.name.interface", Slot::TypeName),
     ("entity.name.impl", Slot::TypeName),
     ("entity.name.union", Slot::TypeName),
-    ("entity.name.namespace", Slot::TypeName),
-    ("entity.name.module", Slot::TypeName),
+    ("entity.name.namespace", Slot::Namespace),
+    ("entity.name.section", Slot::Namespace),
+    ("entity.name.module", Slot::Namespace),
     ("entity.other.inherited-class", Slot::TypeName),
     ("support.type", Slot::TypeName),
     ("support.class", Slot::TypeName),
@@ -160,18 +177,18 @@ const RULES: &[(&str, Slot)] = &[
     ("meta.structure.dictionary.key string", Slot::Attribute),
     // Operators and punctuation.
     ("keyword.operator", Slot::Operator),
-    ("punctuation", Slot::Operator),
-    ("punctuation.separator", Slot::Operator),
-    ("punctuation.terminator", Slot::Operator),
-    ("punctuation.section", Slot::Operator),
-    ("punctuation.accessor", Slot::Operator),
+    ("punctuation", Slot::Punctuation),
+    ("punctuation.separator", Slot::Punctuation),
+    ("punctuation.terminator", Slot::Punctuation),
+    ("punctuation.section", Slot::Punctuation),
+    ("punctuation.accessor", Slot::Punctuation),
     // Markup, for fences holding Markdown, LaTeX or a diff.
     ("markup.heading", Slot::Keyword),
     ("markup.bold", Slot::Keyword),
     ("markup.italic", Slot::TypeName),
     ("markup.underline.link", Slot::Function),
     ("markup.raw", Slot::Str),
-    ("markup.list", Slot::Operator),
+    ("markup.list", Slot::Punctuation),
     ("markup.inserted", Slot::Str),
     ("markup.deleted", Slot::Invalid),
     ("markup.changed", Slot::Attribute),
@@ -267,6 +284,35 @@ mod tests {
     }
 
     #[test]
+    fn macros_and_namespaces_have_their_own_slots() {
+        let theme = Theme::default_dark();
+        assert_eq!(
+            style_of("source.rust support.macro.rust"),
+            theme.code.macro_name
+        );
+        assert_ne!(theme.code.macro_name, theme.code.function);
+        assert_eq!(
+            style_of("source.cs entity.name.namespace.cs"),
+            theme.code.namespace
+        );
+        assert_ne!(theme.code.namespace, theme.code.type_name);
+    }
+
+    #[test]
+    fn punctuation_is_quieter_than_operators() {
+        let theme = Theme::default_dark();
+        assert_eq!(
+            style_of("source.rust punctuation.section.block.begin.rust"),
+            theme.code.punctuation
+        );
+        assert_eq!(
+            style_of("source.rust keyword.operator.rust"),
+            theme.code.operator
+        );
+        assert_ne!(theme.code.punctuation, theme.code.operator);
+    }
+
+    #[test]
     fn escapes_stand_out_inside_strings() {
         let theme = Theme::default_dark();
         assert_eq!(
@@ -275,7 +321,7 @@ mod tests {
         );
         assert_eq!(
             style_of("source.rust string.quoted.double.rust constant.character.escape.rust"),
-            theme.code.constant
+            theme.code.escape
         );
     }
 

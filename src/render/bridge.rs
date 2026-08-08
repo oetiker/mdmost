@@ -1,18 +1,16 @@
-//! Shims for the two renderer collaborators that are being built in parallel.
+//! Calls out to the two renderer collaborators owned by other workstreams.
 //!
-//! The block renderer depends on two functions owned by other workstreams:
+//! The block renderer depends on two functions it does not own:
 //!
-//! * `crate::highlight::highlight(lang, src, &Theme) -> Vec<Line>` — landed, and
-//!   called directly below;
+//! * `crate::highlight::highlight(lang, src, &Theme) -> Vec<Line>`
 //! * `crate::mermaid::render_mermaid(src, width, &Theme) -> Result<Canvas, MermaidError>`
-//!   — not yet available, so a stand-in with exactly that signature stands in for it.
 //!
-//! Every call site in `render` goes through here, so integration is a one-line change
-//! per function, with no other file touched.
+//! Routing both through this module keeps the dependency in one place, so a change on
+//! either side is a change to one function here rather than to every call site.
 //!
-//! The Mermaid stub deliberately returns an error rather than a placeholder canvas:
-//! the graceful-degradation path (design spec §6) is owned by this workstream, so it
-//! must be live code exercised by the tests rather than a branch nobody runs.
+//! A Mermaid failure is never fatal: [`render_code_block`](super::code::render_code_block)
+//! turns the error into a syntax-highlighted code block with a dim caption naming the
+//! reason (design spec §6).
 
 use crate::canvas::Canvas;
 use crate::error::MermaidError;
@@ -26,19 +24,9 @@ pub(crate) fn highlight(language: Option<&str>, src: &str, theme: &Theme) -> Vec
 
 /// Draws a Mermaid diagram as Unicode box art.
 ///
-/// TODO(integration): replace the body with
-/// `crate::mermaid::render_mermaid(src, width, theme)` once that module lands.
-pub(crate) fn render_mermaid(
-    src: &str,
-    _width: u16,
-    _theme: &Theme,
-) -> Result<Canvas, MermaidError> {
-    let family = src
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with("%%"))
-        .and_then(|line| line.split_whitespace().next())
-        .unwrap_or("")
-        .to_string();
-    Err(MermaidError::UnsupportedFamily(family))
+/// # Errors
+///
+/// Propagates the [`MermaidError`] so the caller can degrade gracefully.
+pub(crate) fn render_mermaid(src: &str, width: u16, theme: &Theme) -> Result<Canvas, MermaidError> {
+    crate::mermaid::render_mermaid(src, width, theme)
 }

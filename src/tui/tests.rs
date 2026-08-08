@@ -8,6 +8,7 @@ use super::help;
 use super::icons::meter;
 use crate::config::{Action, Config, Key, KeyBindings, KeyCode};
 use crate::doc::Doc;
+use crate::search::SearchMode;
 
 /// A document with enough headings and body to scroll through.
 const SAMPLE: &str = "\
@@ -107,6 +108,93 @@ fn dropping_the_render_cache_changes_nothing_visible() {
     fresh.scroll_to(scroll);
     assert_eq!(fresh.canvas().plain_text(), before);
     assert_eq!(fresh.current_heading(), heading);
+}
+
+#[test]
+fn toggling_icons_invalidates_the_render_cache() {
+    // The render cache key must include RenderOptions. If it does not, the canvas
+    // rendered with Nerd Font glyphs is served again after icons are switched off —
+    // a stale frame that looks almost right, which is the worst kind.
+    let mut app = pager(SAMPLE);
+    app.set_icons(true);
+    let with_icons = app.canvas().plain_text();
+
+    app.set_icons(false);
+    let without_icons = app.canvas().plain_text();
+    assert_ne!(
+        with_icons, without_icons,
+        "switching icons off must re-render the document, not reuse the cache"
+    );
+
+    // And switching back reproduces the original exactly.
+    app.set_icons(true);
+    assert_eq!(app.canvas().plain_text(), with_icons);
+}
+
+#[test]
+fn render_options_follow_the_flags_that_feed_them() {
+    let mut app = pager(SAMPLE);
+    app.set_icons(false);
+    assert!(!app.render_options().icons);
+    app.set_icons(true);
+    assert!(app.render_options().icons);
+
+    let config = Config {
+        line_numbers: true,
+        ..Config::default()
+    };
+    let app = App::new(
+        Doc::parse(SAMPLE),
+        config,
+        AppOptions {
+            title: "x".to_string(),
+            icons: false,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    let options = app.render_options();
+    assert!(
+        options.line_numbers,
+        "config.line_numbers must reach render"
+    );
+    assert!(!options.icons, "--no-icons must reach render");
+}
+
+#[test]
+fn the_status_bar_reports_a_horizontal_offset_only_when_scrolled() {
+    let mut app = pager(SAMPLE);
+    assert_eq!(app.hscroll(), 0);
+
+    // Prose reflows to the viewport, so there is nothing to scroll sideways to.
+    app.act(Action::ScrollRight);
+    assert_eq!(
+        app.hscroll(),
+        0,
+        "content that fits must not scroll sideways"
+    );
+    assert_eq!(app.hscroll_max(), 0);
+
+    // Force a render wider than the viewport and the offset becomes real.
+    let mut wide = App::new(
+        Doc::parse(SAMPLE),
+        Config::default(),
+        AppOptions {
+            title: "x".to_string(),
+            icons: false,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: Some(200),
+        },
+    );
+    wide.resize(80, 12);
+    let _ = wide.canvas();
+    assert!(wide.hscroll_max() > 0);
+    wide.act(Action::ScrollRight);
+    assert!(wide.hscroll() > 0, "wide content must scroll sideways");
+    wide.act(Action::ScrollLeft);
+    assert_eq!(wide.hscroll(), 0, "and back again");
 }
 
 #[test]
@@ -232,10 +320,80 @@ fn searching_scrolls_the_match_into_view() {
 }
 
 #[test]
-fn an_invalid_regex_falls_back_to_a_literal_search() {
+fn searching_is_literal_until_the_user_asks_for_a_regex() {
     let mut app = pager("a (b) c\n");
+    assert_eq!(app.search_mode(), SearchMode::Literal);
+
+    // Literal mode takes the query as typed: no pattern compilation, no error.
     app.run_search("(b");
     assert_eq!(app.search().len(), 1, "`(b` must be found literally");
+    assert!(app.notice().is_none_or(|notice| !notice.is_error));
+
+    // Switching is explicit and re-runs the query, which now fails to compile.
+    app.act(Action::ToggleSearchMode);
+    assert_eq!(app.search_mode(), SearchMode::Regex);
+    assert!(
+        app.notice().is_some(),
+        "the mode switch must announce itself"
+    );
+
+    app.run_search("(b");
+    assert!(
+        app.notice().is_some_and(|notice| notice.is_error),
+        "a broken pattern must report, not silently fall back"
+    );
+}
+
+#[test]
+fn regex_mode_actually_matches_patterns() {
+    let mut app = pager("cat1 dog22 cow333\n");
+    app.act(Action::ToggleSearchMode);
+    app.run_search(r"[a-z]+\d{2,}");
+    assert_eq!(app.search().len(), 2);
+    assert_eq!(app.search().mode(), SearchMode::Regex);
+
+    // And the same query in literal mode finds nothing, proving the mode is real.
+    app.act(Action::ToggleSearchMode);
+    assert_eq!(app.search().len(), 0);
+}
+
+#[test]
+fn the_search_mode_is_visible_at_the_prompt() {
+    let mut app = pager(SAMPLE);
+    assert_eq!(
+        PromptKind::SearchForward.sigil(app.search_mode()),
+        "/",
+        "literal search keeps the familiar sigil"
+    );
+    app.act(Action::ToggleSearchMode);
+    assert_eq!(
+        PromptKind::SearchForward.sigil(app.search_mode()),
+        "re/",
+        "a regex search must name itself"
+    );
+    assert_eq!(PromptKind::SearchBackward.sigil(app.search_mode()), "re?");
+    assert_eq!(
+        PromptKind::TocFilter.sigil(app.search_mode()),
+        "toc /",
+        "the toc filter is unaffected by the search mode"
+    );
+}
+
+#[test]
+fn the_mode_can_be_switched_while_typing_a_query() {
+    let mut app = pager(SAMPLE);
+    app.on_key(Key::char('/'));
+    for ch in "Need".chars() {
+        app.on_key(Key::char(ch));
+    }
+    app.on_key(Key::ctrl('r'));
+    assert_eq!(app.search_mode(), SearchMode::Regex);
+
+    // Ctrl-R switches the mode; it must not be typed into the query.
+    let Overlay::Prompt { input, .. } = app.overlay() else {
+        panic!("the prompt should still be up");
+    };
+    assert_eq!(input, "Need", "the chord must not reach the input");
 }
 
 #[test]
@@ -404,6 +562,29 @@ fn clicking_the_toc_jumps() {
     app.on_toc_click(0, 1);
     let expected = app.toc().row_of(1).expect("the heading was rendered");
     assert_eq!(app.scroll(), expected.min(app.max_scroll()));
+}
+
+#[test]
+fn toc_hit_testing_covers_every_visible_row_and_no_border() {
+    let mut app = pager(SAMPLE);
+    app.act(Action::ToggleToc);
+    // A pane 8 rows tall borders rows 0 and 7 and lists rows 1..=6.
+    assert_eq!(super::chrome::toc_row_at(&app, 8, 0), None, "top border");
+    assert_eq!(super::chrome::toc_row_at(&app, 8, 1), Some(0));
+    assert_eq!(
+        super::chrome::toc_row_at(&app, 8, 6),
+        Some(5),
+        "the bottom-most entry must be clickable"
+    );
+    assert_eq!(super::chrome::toc_row_at(&app, 8, 7), None, "bottom border");
+    assert_eq!(super::chrome::toc_row_at(&app, 8, 99), None);
+
+    app.act(Action::ToggleToc);
+    assert_eq!(
+        super::chrome::toc_row_at(&app, 8, 1),
+        None,
+        "a closed pane swallows no clicks"
+    );
 }
 
 #[test]

@@ -8,7 +8,7 @@
 use crate::canvas::Canvas;
 use crate::config::{Action, Config, Key, KeyCode};
 use crate::doc::Doc;
-use crate::render::render_document;
+use crate::render::{RenderOptions, render_document};
 use crate::search::{Search, SearchMode};
 use crate::theme::Theme;
 use crate::toc::{FilterHit, Toc};
@@ -37,11 +37,17 @@ pub enum PromptKind {
 
 impl PromptKind {
     /// The sigil shown in front of the input.
-    pub fn sigil(self) -> &'static str {
-        match self {
-            PromptKind::SearchForward => "/",
-            PromptKind::SearchBackward => "?",
-            PromptKind::TocFilter => "toc /",
+    ///
+    /// A regular-expression search is spelled `re/` rather than `/`, so the mode in
+    /// force is legible at the prompt itself and never has to be guessed. `mode` is
+    /// ignored by the table-of-contents filter, which is always fuzzy.
+    pub fn sigil(self, mode: SearchMode) -> &'static str {
+        match (self, mode) {
+            (PromptKind::SearchForward, SearchMode::Literal) => "/",
+            (PromptKind::SearchForward, SearchMode::Regex) => "re/",
+            (PromptKind::SearchBackward, SearchMode::Literal) => "?",
+            (PromptKind::SearchBackward, SearchMode::Regex) => "re?",
+            (PromptKind::TocFilter, _) => "toc /",
         }
     }
 }
@@ -77,6 +83,10 @@ pub struct AppOptions {
     /// The name shown in the status bar.
     pub title: String,
     /// Whether Nerd Font glyphs may be drawn.
+    ///
+    /// Applies to the chrome *and* to the document: it is passed to the renderer as
+    /// part of [`RenderOptions`], so `--no-icons` strips heading bullets, list markers
+    /// and code-fence icons too, not merely the status bar.
     pub icons: bool,
     /// The theme to start in.
     pub theme: String,
@@ -111,6 +121,7 @@ pub struct App {
     notice: Option<Notice>,
     search_index: Option<usize>,
     search_backward: bool,
+    search_mode: SearchMode,
     quit: bool,
 }
 
@@ -157,6 +168,7 @@ impl App {
             notice,
             search_index: None,
             search_backward: false,
+            search_mode: SearchMode::Literal,
             quit: false,
         };
         app.refilter_toc();
@@ -188,6 +200,20 @@ impl App {
         self.options.icons
     }
 
+    /// The capability flags the document is rendered under.
+    ///
+    /// Distinct from the theme on purpose: the theme decides what things look like,
+    /// these decide what the renderer may draw at all. They are part of the render
+    /// cache key, so changing one re-renders.
+    pub fn render_options(&self) -> RenderOptions {
+        RenderOptions::new(self.options.icons, self.config.line_numbers)
+    }
+
+    /// Turns Nerd Font glyphs on or off, in the chrome and the document alike.
+    pub fn set_icons(&mut self, icons: bool) {
+        self.options.icons = icons;
+    }
+
     /// Whether the user has asked to leave.
     pub fn should_quit(&self) -> bool {
         self.quit
@@ -206,6 +232,14 @@ impl App {
     /// The index of the match the viewport is sitting on, if any.
     pub fn search_index(&self) -> Option<usize> {
         self.search_index
+    }
+
+    /// How the search query is currently interpreted.
+    ///
+    /// This is an explicit, user-visible mode, not a guess: the prompt and the status
+    /// bar both spell it out, and `toggle_search_mode` switches it.
+    pub fn search_mode(&self) -> SearchMode {
+        self.search_mode
     }
 
     /// The overlay currently up.
@@ -266,6 +300,17 @@ impl App {
     /// The horizontal offset, for content wider than the viewport.
     pub fn hscroll(&self) -> u16 {
         self.hscroll
+    }
+
+    /// How many columns of content sit beyond the right edge of the viewport.
+    ///
+    /// Zero when everything fits, which is how the status bar knows to say nothing
+    /// about horizontal position.
+    pub fn hscroll_max(&self) -> u16 {
+        self.cache
+            .canvas()
+            .width()
+            .saturating_sub(self.viewport_width())
     }
 
     /// The width the document is rendered at.
@@ -358,11 +403,12 @@ impl App {
     /// recomputed here, never carried over.
     fn ensure_rendered(&mut self) {
         let width = self.content_width();
-        let stale = self
-            .cache
-            .refresh(self.doc.version(), width, &self.theme.name, || {
-                render_document(&self.doc, width, &self.theme)
-            });
+        let options = self.render_options();
+        let stale =
+            self.cache
+                .refresh(self.doc.version(), width, &self.theme.name, options, || {
+                    render_document(&self.doc, width, &self.theme, &options)
+                });
         if stale {
             self.toc.attach_anchors(self.cache.canvas().anchors());
             self.search
@@ -503,6 +549,7 @@ impl App {
             Action::SearchBackward => self.open_prompt(PromptKind::SearchBackward),
             Action::NextMatch => self.step_match(!self.search_backward),
             Action::PrevMatch => self.step_match(self.search_backward),
+            Action::ToggleSearchMode => self.toggle_search_mode(),
             Action::Confirm if self.focus == Focus::Toc => self.jump_to_selected_heading(),
             Action::Confirm => {}
             Action::ScrollLeft => self.hscroll = self.hscroll.saturating_sub(4),
@@ -648,6 +695,16 @@ impl App {
                     return;
                 }
             }
+            // The mode can be switched mid-query, which is when one usually realises
+            // the pattern wants to be a regular expression.
+            KeyCode::Char('r') if key.mods.contains(crate::config::KeyMods::CTRL) => {
+                if kind != PromptKind::TocFilter {
+                    self.search_mode = match self.search_mode {
+                        SearchMode::Literal => SearchMode::Regex,
+                        SearchMode::Regex => SearchMode::Literal,
+                    };
+                }
+            }
             KeyCode::Char(ch) if !key.mods.contains(crate::config::KeyMods::CTRL) => {
                 input.push(ch);
             }
@@ -678,15 +735,37 @@ impl App {
         }
     }
 
+    /// Switches between literal and regular-expression searching.
+    ///
+    /// The mode is explicit and sticky: it survives the prompt closing, is spelled out
+    /// at the prompt and in the status bar, and re-runs the current query immediately
+    /// so the effect of the switch is visible rather than deferred.
+    fn toggle_search_mode(&mut self) {
+        self.search_mode = match self.search_mode {
+            SearchMode::Literal => SearchMode::Regex,
+            SearchMode::Regex => SearchMode::Literal,
+        };
+        let label = match self.search_mode {
+            SearchMode::Literal => "search: literal text",
+            SearchMode::Regex => "search: regular expression",
+        };
+        let query = self.search.query().to_string();
+        if query.is_empty() {
+            self.notify(label, false);
+        } else {
+            self.run_search(&query);
+            self.notify(label, false);
+        }
+    }
+
     /// Runs a search and jumps to the first match in the search's direction.
     ///
-    /// A query that is not a valid regular expression is retried literally, so typing
-    /// `(` at the prompt finds a parenthesis instead of producing an error.
+    /// The query is interpreted strictly according to [`App::search_mode`]. There is
+    /// deliberately no silent fall back from a broken pattern to a literal search: a
+    /// mode the user cannot predict is worse than an error message they can act on.
     pub fn run_search(&mut self, query: &str) {
         self.ensure_rendered();
-        let search = Search::new(self.doc.source(), query, SearchMode::Regex)
-            .or_else(|_| Search::new(self.doc.source(), query, SearchMode::Literal));
-        match search {
+        match Search::new(self.doc.source(), query, self.search_mode) {
             Ok(mut search) => {
                 search.locate(self.doc.source(), self.cache.canvas().spans());
                 self.search = search;

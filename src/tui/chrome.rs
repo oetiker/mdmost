@@ -10,6 +10,7 @@ use ratatui::style::Style as TermStyle;
 use ratatui::text::{Line as TermLine, Span as TermSpan};
 use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
+use crate::search::SearchMode;
 use crate::text::{display_width, truncate_to_width};
 use crate::theme::Theme;
 
@@ -147,7 +148,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     if let Overlay::Prompt { kind, input } = app.overlay() {
         let line = TermLine::from(vec![
             TermSpan::styled(
-                format!(" {} ", kind.sigil()),
+                format!(" {} ", kind.sigil(app.search_mode())),
                 term_style(theme.ui.prompt.reverse()),
             ),
             TermSpan::styled(format!(" {input}"), term_style(theme.ui.prompt)),
@@ -184,6 +185,21 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         ),
     ];
 
+    // Design spec §7: a horizontally scrolled table or code block must say so, or a
+    // reader who bumps the arrow key cannot tell why the text moved.
+    if app.hscroll() > 0 {
+        left.push(sep.clone());
+        left.push(TermSpan::styled(
+            format!(
+                "{} {}/{}",
+                icons.horizontal,
+                app.hscroll(),
+                app.hscroll_max()
+            ),
+            term_style(theme.ui.status_accent),
+        ));
+    }
+
     if let Some(notice) = app.notice() {
         let style = if notice.is_error {
             theme.ui.error
@@ -218,6 +234,15 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
             .search_index()
             .map(|index| format!("{}/{}", index + 1, app.search().len()))
             .unwrap_or_else(|| format!("{}", app.search().len()));
+        // The mode is named, never inferred: `re` marks a regular expression, and its
+        // absence marks a literal search.
+        if app.search().mode() == SearchMode::Regex {
+            right.push(TermSpan::styled(
+                " re ",
+                term_style(theme.ui.status_key.reverse()),
+            ));
+            right.push(TermSpan::styled(" ", bar));
+        }
         right.push(TermSpan::styled(
             format!("{} {} {position}", icons.search, app.search().query()),
             term_style(theme.ui.status_bar),
@@ -370,11 +395,15 @@ pub fn in_toc(app: &App, column: u16) -> bool {
 }
 
 /// The table-of-contents list row a mouse click at `row` landed on, if any.
+///
+/// The pane's row 0 and row `area_height - 1` are its border, so the list occupies
+/// rows `1..=area_height - 2`, which is `area_height - 2` rows. Getting this bound
+/// wrong makes the bottom-most entry silently unclickable.
 pub fn toc_row_at(app: &App, area_height: u16, row: u16) -> Option<usize> {
     if !app.toc_is_open() || row == 0 || area_height < 3 {
         return None;
     }
-    let list_height = area_height.saturating_sub(3);
+    let list_height = area_height.saturating_sub(2);
     let index = row.checked_sub(1)?;
     (index < list_height).then_some(usize::from(index))
 }

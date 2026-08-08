@@ -56,6 +56,7 @@ fn main() {
         assert_eq!(style_of(&lines, "42"), c.number);
         assert_eq!(style_of(&lines, "\"hi\""), c.string);
         assert_eq!(style_of(&lines, "="), c.operator);
+        assert_eq!(style_of(&lines, ";"), c.punctuation);
     });
 }
 
@@ -63,8 +64,8 @@ fn main() {
 fn rust_string_escapes_break_out_of_the_string_colour() {
     for_each_builtin_theme(|theme| {
         let lines = highlight(Some("rust"), "let s = \"a\\nb\";\n", theme);
-        assert_eq!(style_of(&lines, "\\n"), theme.code.constant);
-        assert_ne!(theme.code.constant, theme.code.string);
+        assert_eq!(style_of(&lines, "\\n"), theme.code.escape);
+        assert_ne!(theme.code.escape, theme.code.string);
     });
 }
 
@@ -119,6 +120,15 @@ fn shell_commands_read_as_functions() {
 }
 
 #[test]
+fn rust_macros_are_not_confused_with_functions() {
+    for_each_builtin_theme(|theme| {
+        let lines = highlight(Some("rust"), "fn go() { println!(\"x\"); }\n", theme);
+        assert_eq!(style_of(&lines, "println!"), theme.code.macro_name);
+        assert_eq!(style_of(&lines, "go"), theme.code.function);
+    });
+}
+
+#[test]
 fn yaml_and_json_keys_are_distinct_from_their_values() {
     for_each_builtin_theme(|theme| {
         let yaml = highlight(Some("yml"), "key: value\n", theme);
@@ -129,6 +139,89 @@ fn yaml_and_json_keys_are_distinct_from_their_values() {
         assert_eq!(style_of(&json, "key"), theme.code.attribute);
         assert_eq!(style_of(&json, "\"value\""), theme.code.string);
         assert_eq!(style_of(&json, "12"), theme.code.number);
+    });
+}
+
+#[test]
+fn toml_covers_sections_keys_values_dates_and_arrays() {
+    for_each_builtin_theme(|theme| {
+        let src = "\
+# a note
+[server.http]
+name = \"api\"
+literal = 'raw\\nnot-an-escape'
+port = 8080
+ratio = 1.5e3
+mask = 0xdead_beef
+bits = 0b1010
+enabled = true
+started = 1979-05-27T07:32:00Z
+day = 1979-05-27
+ports = [80, 443]
+inline = { a = 1 }
+
+[[handlers]]
+\"quoted key\" = 1
+";
+        let lines = highlight(Some("toml"), src, theme);
+        let c = &theme.code;
+        assert_eq!(style_of(&lines, "# a note"), c.comment);
+        // A table header names a container, so it takes the namespace slot.
+        assert_eq!(style_of(&lines, "server"), c.namespace);
+        assert_eq!(style_of(&lines, "http"), c.namespace);
+        assert_eq!(style_of(&lines, "handlers"), c.namespace);
+        assert_eq!(style_of(&lines, "["), c.punctuation);
+        assert_eq!(style_of(&lines, "[["), c.punctuation);
+        assert_eq!(style_of(&lines, "name"), c.keyword);
+        assert_eq!(style_of(&lines, "quoted key"), c.keyword);
+        assert_eq!(style_of(&lines, "="), c.operator);
+        assert_eq!(style_of(&lines, "\"api\""), c.string);
+        assert_eq!(style_of(&lines, "'raw\\nnot-an-escape'"), c.string);
+        assert_eq!(style_of(&lines, "8080"), c.number);
+        assert_eq!(style_of(&lines, "1.5e3"), c.number);
+        assert_eq!(style_of(&lines, "0xdead_beef"), c.number);
+        assert_eq!(style_of(&lines, "0b1010"), c.number);
+        assert_eq!(style_of(&lines, "true"), c.constant);
+        assert_eq!(style_of(&lines, "1979-05-27T07:32:00Z"), c.constant);
+        assert_eq!(style_of(&lines, "1979-05-27"), c.constant);
+        assert_eq!(style_of(&lines, "80"), c.number);
+        assert_eq!(style_of(&lines, "443"), c.number);
+        assert_eq!(style_of(&lines, ","), c.punctuation);
+    });
+}
+
+#[test]
+fn toml_multi_line_strings_and_escapes() {
+    for_each_builtin_theme(|theme| {
+        let lines = highlight(
+            Some("toml"),
+            "a = \"\"\"first\nsecond\"\"\"\nb = \"x\\ty\\u00e9\"\nc = \"bad\\q\"\n",
+            theme,
+        );
+        assert_eq!(lines.len(), 4);
+        // The block string keeps its colour across the line break; its second line is
+        // one span because the closing delimiter shares the string style.
+        assert_eq!(style_of(&lines, "second\"\"\""), theme.code.string);
+        assert_eq!(style_of(&lines, "\\t"), theme.code.escape);
+        assert_eq!(style_of(&lines, "\\u00e9"), theme.code.escape);
+        assert_eq!(style_of(&lines, "\\q"), theme.code.invalid);
+    });
+}
+
+#[test]
+fn dockerfile_directives_are_keywords_not_commands() {
+    for_each_builtin_theme(|theme| {
+        let src = "# base\nFROM alpine:3 AS build\nRUN apk add --no-cache curl\nEXPOSE 8080\nENV P=\"$HOME\"\n";
+        let lines = highlight(Some("dockerfile"), src, theme);
+        let c = &theme.code;
+        assert_eq!(style_of(&lines, "# base"), c.comment);
+        assert_eq!(style_of(&lines, "FROM"), c.keyword);
+        assert_eq!(style_of(&lines, "RUN"), c.keyword);
+        assert_eq!(style_of(&lines, "EXPOSE"), c.keyword);
+        assert_eq!(style_of(&lines, "AS"), c.operator);
+        assert_eq!(style_of(&lines, "--no-cache"), c.variable);
+        assert_eq!(style_of(&lines, "8080"), c.number);
+        assert_eq!(style_of(&lines, "\"$HOME\""), c.string);
     });
 }
 
@@ -186,6 +279,10 @@ fn no_colour_ever_comes_from_outside_the_theme() {
             c.operator,
             c.attribute,
             c.invalid,
+            c.macro_name,
+            c.punctuation,
+            c.namespace,
+            c.escape,
         ];
         let src = "\
 #[derive(Debug)]

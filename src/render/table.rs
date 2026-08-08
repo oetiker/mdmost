@@ -20,7 +20,7 @@ use crate::text::{Align, display_width};
 use crate::theme::{Style, Theme};
 
 use super::code::OVERFLOW_MARKER;
-use super::{Ctx, block, inline};
+use super::{Ctx, RenderOptions, block, inline};
 
 /// Columns consumed by one column's chrome: its left border and the two pad spaces.
 const COLUMN_CHROME: usize = 3;
@@ -28,9 +28,9 @@ const COLUMN_CHROME: usize = 3;
 /// Renders a [`NodeKind::Table`] at `width` columns, clipping if it cannot fit.
 ///
 /// A node of any other kind renders as nothing.
-pub fn render_table(node: &Node, width: u16, theme: &Theme) -> Canvas {
+pub fn render_table(node: &Node, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
     match &node.kind {
-        NodeKind::Table(info) => render_table_node(node, info, width, Ctx::new(theme)),
+        NodeKind::Table(info) => render_table_node(node, info, width, Ctx::new(theme, options)),
         _ => Canvas::empty(width),
     }
 }
@@ -41,9 +41,14 @@ pub fn render_table(node: &Node, width: u16, theme: &Theme) -> Canvas {
 /// canvas may be wider than the terminal, and the viewport blits the column window the
 /// user has scrolled to. `width` is still the budget the columns are negotiated for,
 /// so scrolling only happens when the minimums genuinely do not fit.
-pub fn render_table_full(node: &Node, width: u16, theme: &Theme) -> Canvas {
+pub fn render_table_full(
+    node: &Node,
+    width: u16,
+    theme: &Theme,
+    options: &RenderOptions,
+) -> Canvas {
     match &node.kind {
-        NodeKind::Table(info) => draw(node, info, width, Ctx::new(theme)),
+        NodeKind::Table(info) => draw(node, info, width, Ctx::new(theme, options)),
         _ => Canvas::empty(width),
     }
 }
@@ -358,10 +363,9 @@ fn measure_block(node: &Node, ctx: Ctx<'_>) -> (usize, usize) {
             measure(&node.children, ctx)
         }
         NodeKind::CodeBlock { literal, .. } => {
-            let longest = literal.lines().map(display_width).max().unwrap_or(0);
             // Code is clipped rather than wrapped, so a narrow column is survivable:
             // its minimum is the frame itself.
-            (4, longest + 2)
+            (4, super::code::natural_width(literal, ctx))
         }
         NodeKind::Table(info) if ctx.table_depth < super::MAX_TABLE_DEPTH => {
             measure_table(node, info, ctx.in_table())

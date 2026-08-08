@@ -43,6 +43,8 @@ pub enum Action {
     NextMatch,
     /// Jump to the previous match.
     PrevMatch,
+    /// Switch between literal and regular-expression searching.
+    ToggleSearchMode,
     /// Show or hide the table-of-contents pane.
     ToggleToc,
     /// Confirm: jump to the selected heading, or accept the search prompt.
@@ -80,6 +82,7 @@ impl Action {
         Action::SearchBackward,
         Action::NextMatch,
         Action::PrevMatch,
+        Action::ToggleSearchMode,
         Action::ToggleToc,
         Action::Confirm,
         Action::CycleTheme,
@@ -105,6 +108,7 @@ impl Action {
             Action::SearchBackward => "search_backward",
             Action::NextMatch => "next_match",
             Action::PrevMatch => "prev_match",
+            Action::ToggleSearchMode => "toggle_search_mode",
             Action::ToggleToc => "toggle_toc",
             Action::Confirm => "confirm",
             Action::PrevHeading => "prev_heading",
@@ -133,6 +137,7 @@ impl Action {
             Action::SearchBackward => "Search backward",
             Action::NextMatch => "Go to the next match",
             Action::PrevMatch => "Go to the previous match",
+            Action::ToggleSearchMode => "Switch literal / regex search",
             Action::ToggleToc => "Show or hide the table of contents",
             Action::Confirm => "Jump to the selected heading",
             Action::PrevHeading => "Go to the previous heading",
@@ -163,7 +168,8 @@ impl Action {
             Action::SearchForward
             | Action::SearchBackward
             | Action::NextMatch
-            | Action::PrevMatch => ActionGroup::Search,
+            | Action::PrevMatch
+            | Action::ToggleSearchMode => ActionGroup::Search,
             Action::CycleTheme | Action::Help | Action::Quit | Action::Cancel => ActionGroup::View,
         }
     }
@@ -525,6 +531,7 @@ impl KeyBindings {
             (Key::char('?'), Action::SearchBackward),
             (Key::char('n'), Action::NextMatch),
             (Key::char('N'), Action::PrevMatch),
+            (Key::ctrl('r'), Action::ToggleSearchMode),
             (Key::plain(KeyCode::Tab), Action::ToggleToc),
             (Key::plain(KeyCode::Enter), Action::Confirm),
             (Key::char('t'), Action::CycleTheme),

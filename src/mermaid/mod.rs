@@ -6,8 +6,12 @@
 //! captioned code block.
 
 pub mod ast;
+pub(crate) mod chrome;
+pub mod gantt;
 pub mod layout;
 pub mod parse;
+pub mod pie;
+pub mod sequence;
 
 use crate::canvas::Canvas;
 use crate::error::MermaidError;

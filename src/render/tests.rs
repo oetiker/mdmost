@@ -10,11 +10,22 @@ use crate::doc::Doc;
 use crate::text::display_width;
 use crate::theme::{Attributes, Theme};
 
-/// Renders `markdown` at `width`, checking the universal invariants.
+/// Options the readable assertions below are written against.
+///
+/// Plain glyphs, because a Nerd Font code point in an `assert_eq!` is unreadable;
+/// [`icons_change_the_glyphs_but_never_the_layout`] covers the other setting.
+const PLAIN: RenderOptions = RenderOptions::new(false, false);
+
+/// Renders `markdown` at `width` with the plain glyph set, checking the invariants.
 fn render(markdown: &str, width: u16) -> Canvas {
+    render_with(markdown, width, &PLAIN)
+}
+
+/// Renders `markdown` at `width` with explicit options, checking the invariants.
+fn render_with(markdown: &str, width: u16, options: &RenderOptions) -> Canvas {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
-    let canvas = render_document(&doc, width, &theme);
+    let canvas = render_document(&doc, width, &theme, options);
     assert_eq!(canvas.width(), width, "canvas must be exactly {width} wide");
     canvas
         .check_invariants()
@@ -404,7 +415,7 @@ fn table_with_cell(content: &str) -> crate::doc::Node {
 #[test]
 fn a_list_inside_a_cell_keeps_its_markers() {
     let table = table_with_cell("- one\n- two\n");
-    let canvas = render_block(&table, 30, &Theme::default_dark());
+    let canvas = render_block(&table, 30, &Theme::default_dark(), &PLAIN);
     canvas.check_invariants().expect("contract holds");
     let text = canvas.plain_text();
     assert!(text.contains("• one"), "{text}");
@@ -414,7 +425,7 @@ fn a_list_inside_a_cell_keeps_its_markers() {
 #[test]
 fn a_nested_table_inside_a_cell_is_rendered_as_a_table() {
     let table = table_with_cell("| in |\n|----|\n| y |\n");
-    let canvas = render_block(&table, 40, &Theme::default_dark());
+    let canvas = render_block(&table, 40, &Theme::default_dark(), &PLAIN);
     canvas.check_invariants().expect("contract holds");
     assert_eq!(canvas.width(), 40);
     let text = canvas.plain_text();
@@ -432,7 +443,7 @@ fn a_nested_table_inside_a_cell_is_rendered_as_a_table() {
 fn a_cell_too_narrow_for_a_nested_table_still_renders() {
     let table = table_with_cell("| in |\n|----|\n| y |\n");
     for width in 1..=12u16 {
-        let canvas = render_block(&table, width, &Theme::default_dark());
+        let canvas = render_block(&table, width, &Theme::default_dark(), &PLAIN);
         assert_eq!(canvas.width(), width);
         canvas.check_invariants().expect("contract holds");
     }
@@ -456,7 +467,7 @@ fn the_full_table_canvas_keeps_the_columns_the_viewport_scrolls_through() {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     let table = &doc.root().children[0];
-    let full = render_table_full(table, 12, &theme);
+    let full = render_table_full(table, 12, &theme, &PLAIN);
     assert!(
         full.width() > 12,
         "the unclipped canvas is wider than the budget"
@@ -526,13 +537,181 @@ fn every_width_from_one_upwards_renders_without_panicking() {
     }
 }
 
+// ------------------------------------------------------------- render options
+
+#[test]
+fn icons_change_the_glyphs_but_never_the_layout() {
+    let markdown = include_str!("../../tests/corpus/adversarial.md");
+    let nerd = RenderOptions::new(true, false);
+    for width in [17u16, 40, 80] {
+        let plain = render_with(markdown, width, &PLAIN);
+        let fancy = render_with(markdown, width, &nerd);
+        assert_eq!(
+            plain.height(),
+            fancy.height(),
+            "turning icons on must not change how many rows are used at {width}"
+        );
+        for row in 0..plain.height() {
+            assert_eq!(
+                display_width(&fancy.row_text(row)),
+                usize::from(width),
+                "row {row} at width {width}"
+            );
+        }
+        assert_eq!(
+            plain.anchors(),
+            fancy.anchors(),
+            "anchors must land on the same rows at {width}"
+        );
+        assert_eq!(plain.spans(), fancy.spans(), "spans must agree at {width}");
+    }
+    // The glyphs themselves really do differ.
+    assert_ne!(
+        render_with("# Title\n", 20, &PLAIN).row_text(0),
+        render_with("# Title\n", 20, &nerd).row_text(0)
+    );
+}
+
+#[test]
+fn every_icon_the_renderer_draws_has_a_plain_substitute() {
+    let markdown = "# h1\n## h2\n### h3\n#### h4\n##### h5\n###### h6\n\n                    - a\n  - b\n    - c\n      - d\n\n- [x] y\n- [ ] n\n\n                    ```rust\ncode\n```\n";
+    let plain = render_with(markdown, 40, &PLAIN);
+    let fancy = render_with(markdown, 40, &RenderOptions::new(true, false));
+    assert_eq!(plain.height(), fancy.height());
+    // No private-use code point may survive with icons off.
+    assert!(
+        !plain
+            .plain_text()
+            .chars()
+            .any(|ch| ('\u{e000}'..='\u{f8ff}').contains(&ch)),
+        "the plain set must contain no Nerd Font code points"
+    );
+    assert!(
+        fancy
+            .plain_text()
+            .chars()
+            .any(|ch| ('\u{e000}'..='\u{f8ff}').contains(&ch)),
+        "the Nerd set must actually use them"
+    );
+}
+
+#[test]
+fn a_code_fence_shows_a_language_icon_only_when_icons_are_on() {
+    let markdown = "```rust\ncode\n```\n";
+    let plain = lines(markdown, 24);
+    assert!(plain[0].starts_with("╭ rust"), "{:?}", plain[0]);
+    let fancy = render_with(markdown, 24, &RenderOptions::new(true, false));
+    let title = fancy.row_text(0);
+    assert!(title.contains("rust"), "{title:?}");
+    assert!(title.contains('\u{e7a8}'), "{title:?}");
+}
+
+#[test]
+fn line_numbers_draw_a_themed_gutter() {
+    let markdown = "```\none\ntwo\n```\n";
+    let numbered = RenderOptions::new(false, true);
+    let canvas = render_with(markdown, 20, &numbered);
+    let out: Vec<String> = (0..canvas.height())
+        .map(|row| canvas.row_text(row).trim_end().to_string())
+        .collect();
+    assert_eq!(
+        out,
+        [
+            "╭──────────────────╮",
+            "│1 │ one           │",
+            "│2 │ two           │",
+            "╰──────────────────╯"
+        ]
+    );
+    let theme = Theme::default_dark();
+    // Column 0 is the frame; the gutter occupies 1..=3 inside it.
+    assert_eq!(style_at(&canvas, 1, 1), theme.code.line_number);
+    assert_eq!(style_at(&canvas, 1, 3), theme.code.frame);
+}
+
+#[test]
+fn the_gutter_is_as_wide_as_the_largest_line_number() {
+    let body: String = (1..=12).map(|n| format!("line{n}\n")).collect();
+    let markdown = format!("```\n{body}```\n");
+    let canvas = render_with(&markdown, 20, &RenderOptions::new(false, true));
+    assert!(
+        canvas.row_text(1).starts_with("│ 1 │"),
+        "{:?}",
+        canvas.row_text(1)
+    );
+    assert!(
+        canvas.row_text(12).starts_with("│12 │"),
+        "{:?}",
+        canvas.row_text(12)
+    );
+}
+
+#[test]
+fn the_gutter_is_outside_the_clipped_region() {
+    let markdown = "```\nabcdefghijklmnopqrstuvwxyz\n```\n";
+    let numbered = render_with(markdown, 12, &RenderOptions::new(false, true));
+    let bare = render_with(markdown, 12, &PLAIN);
+    let row = numbered.row_text(1);
+    assert!(
+        row.starts_with("│1 │"),
+        "the gutter survives clipping: {row:?}"
+    );
+    assert!(row.contains('›'), "the code is still clipped: {row:?}");
+    // The gutter costs code columns; it never widens the block or hides the marker.
+    assert_eq!(numbered.width(), bare.width());
+    assert!(bare.row_text(1).contains('›'));
+    let code_columns = |text: &str| text.chars().filter(char::is_ascii_alphabetic).count();
+    assert!(
+        code_columns(&row) < code_columns(&bare.row_text(1)),
+        "less code fits once the gutter takes its columns: {row:?}"
+    );
+}
+
+#[test]
+fn a_block_too_narrow_for_a_gutter_drops_it_rather_than_the_code() {
+    let markdown = "```\nabcdef\n```\n";
+    for width in 1..=8u16 {
+        let canvas = render_with(markdown, width, &RenderOptions::new(false, true));
+        assert_eq!(canvas.width(), width);
+        canvas.check_invariants().expect("contract holds");
+    }
+    // At six columns the frame leaves four, which cannot carry a gutter and code
+    // both, so the gutter goes and the code keeps every column it can.
+    let narrow = render_with(markdown, 6, &RenderOptions::new(false, true));
+    assert_eq!(narrow.row_text(1), "│abc›│");
+}
+
+#[test]
+fn options_reach_into_table_cells() {
+    let table = table_with_cell("- one\n");
+    let theme = Theme::default_dark();
+    let plain = render_block(&table, 30, &theme, &PLAIN);
+    let fancy = render_block(&table, 30, &theme, &RenderOptions::new(true, false));
+    assert!(plain.plain_text().contains('•'));
+    assert!(
+        !fancy.plain_text().contains('•'),
+        "the cell must use the Nerd bullet too:\n{}",
+        fancy.plain_text()
+    );
+    assert_eq!(plain.height(), fancy.height());
+    assert_eq!(plain.width(), fancy.width());
+}
+
+#[test]
+fn the_default_options_are_icons_on_and_line_numbers_off() {
+    let defaults = RenderOptions::default();
+    assert!(defaults.icons);
+    assert!(!defaults.line_numbers);
+    assert_eq!(defaults, RenderOptions::new(true, false));
+}
+
 // ------------------------------------------------------------------- metadata
 
 #[test]
 fn search_spans_map_source_offsets_onto_the_canvas() {
     let source = "hello brave world\n";
     let doc = Doc::parse(source);
-    let canvas = render_document(&doc, 40, &Theme::default_dark());
+    let canvas = render_document(&doc, 40, &Theme::default_dark(), &PLAIN);
     // Unwrapped, the whole run is one contiguous mapping.
     assert_eq!(canvas.spans().len(), 1);
     let span = canvas.spans()[0];
@@ -547,7 +726,7 @@ fn search_spans_map_source_offsets_onto_the_canvas() {
 fn a_wrap_splits_the_mapping_at_the_line_break() {
     let source = "hello brave world\n";
     let doc = Doc::parse(source);
-    let canvas = render_document(&doc, 11, &Theme::default_dark());
+    let canvas = render_document(&doc, 11, &Theme::default_dark(), &PLAIN);
     let texts: Vec<(&str, usize, u16)> = canvas
         .spans()
         .iter()
@@ -575,7 +754,7 @@ fn search_spans_follow_content_into_lists_quotes_and_cells() {
         "**needle**\n",
     ] {
         let doc = Doc::parse(markdown);
-        let canvas = render_document(&doc, 30, &Theme::default_dark());
+        let canvas = render_document(&doc, 30, &Theme::default_dark(), &PLAIN);
         let span = canvas
             .spans()
             .iter()
@@ -592,8 +771,8 @@ fn rendering_is_deterministic() {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     for width in [13u16, 40, 80] {
-        let first = render_document(&doc, width, &theme);
-        let second = render_document(&doc, width, &theme);
+        let first = render_document(&doc, width, &theme, &PLAIN);
+        let second = render_document(&doc, width, &theme, &PLAIN);
         assert_eq!(first, second, "width {width} is not deterministic");
     }
 }
@@ -616,17 +795,17 @@ fn render_block_and_render_blocks_agree_with_the_document_renderer() {
     let markdown = "# Title\n\nbody text\n";
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
-    let whole = render_document(&doc, 30, &theme);
-    let parts = render_blocks(&doc.root().children, 30, &theme);
+    let whole = render_document(&doc, 30, &theme, &PLAIN);
+    let parts = render_blocks(&doc.root().children, 30, &theme, &PLAIN);
     assert_eq!(whole.plain_text(), parts.plain_text());
-    let heading = render_block(&doc.root().children[0], 30, &theme);
+    let heading = render_block(&doc.root().children[0], 30, &theme, &PLAIN);
     assert!(heading.row_text(0).contains("Title"));
 }
 
 #[test]
 fn render_table_ignores_a_node_that_is_not_a_table() {
     let doc = Doc::parse("text\n");
-    let canvas = render_table(&doc.root().children[0], 20, &Theme::default_dark());
+    let canvas = render_table(&doc.root().children[0], 20, &Theme::default_dark(), &PLAIN);
     assert!(canvas.is_empty());
     assert_eq!(canvas.width(), 20);
 }
