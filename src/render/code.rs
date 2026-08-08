@@ -35,7 +35,7 @@ pub(crate) fn render_code_block(
     ctx: Ctx<'_>,
 ) -> Canvas {
     if language == Some(MERMAID) {
-        return match bridge::render_mermaid(literal, width, ctx.theme) {
+        return match bridge::mermaid(literal, width, ctx.theme) {
             Ok(mut canvas) => {
                 canvas.resize_width(width, ctx.base);
                 canvas

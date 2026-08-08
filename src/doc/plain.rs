@@ -46,11 +46,7 @@ pub(super) fn has_markup(root: &Node) -> bool {
         | NodeKind::Strikethrough
         | NodeKind::Image { .. } => return true,
         NodeKind::CodeBlock { fenced, .. } => return *fenced,
-        NodeKind::Link { url, .. } => {
-            if !is_autolink(root, url) {
-                return true;
-            }
-        }
+        NodeKind::Link { url, .. } if !is_autolink(root, url) => return true,
         _ => {}
     }
     root.children.iter().any(has_markup)

@@ -54,14 +54,14 @@ pub fn render_table_full(
     options: &RenderOptions,
 ) -> Canvas {
     match &node.kind {
-        NodeKind::Table(info) => draw(node, info, width, Ctx::new(theme, options)),
+        NodeKind::Table(info) => lay_out(node, info, width, Ctx::new(theme, options)),
         _ => Canvas::empty(width),
     }
 }
 
 /// Renders a table with an explicit context, clipping it to `width`.
 pub(crate) fn render_table_node(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
-    let mut canvas = draw(node, info, width, ctx);
+    let mut canvas = lay_out(node, info, width, ctx);
     canvas.clip_with_marker(width, OVERFLOW_MARKER, ctx.theme.table.overflow_marker);
     canvas.resize_width(width, ctx.base);
     canvas
@@ -88,7 +88,7 @@ fn rows(node: &Node) -> Vec<Row<'_>> {
 }
 
 /// Lays a table out at the width its columns negotiated, which may exceed `width`.
-fn draw(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
+fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
     let rows = rows(node);
     let columns = rows
         .iter()

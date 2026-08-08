@@ -58,27 +58,30 @@ impl RenderCache {
         options: RenderOptions,
         render: impl FnOnce() -> Canvas,
     ) -> bool {
-        let wanted = CacheKey {
+        // Compared field by field rather than by building a `CacheKey`: `refresh` is
+        // called several times per frame and the theme name would otherwise be cloned
+        // on every hit, which is every call but the rare one that actually renders.
+        let hit = self.key.as_ref().is_some_and(|key| {
+            key.version == version
+                && key.width == width
+                && key.options == options
+                && key.theme == theme
+        });
+        if hit {
+            return false;
+        }
+        self.canvas = render();
+        self.key = Some(CacheKey {
             version,
             width,
             theme: theme.to_string(),
             options,
-        };
-        if self.key.as_ref() == Some(&wanted) {
-            return false;
-        }
-        self.canvas = render();
-        self.key = Some(wanted);
+        });
         true
     }
 
     /// The cached canvas. Empty until the first [`RenderCache::refresh`].
     pub fn canvas(&self) -> &Canvas {
         &self.canvas
-    }
-
-    /// Forgets the cached render.
-    pub fn invalidate(&mut self) {
-        self.key = None;
     }
 }

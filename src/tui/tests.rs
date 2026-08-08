@@ -936,9 +936,22 @@ fn painted(width: u16, height: u16, paint: impl FnOnce(&mut Buffer, Rect)) -> Ve
     paint(&mut buffer, area);
     (0..height)
         .map(|y| {
-            (0..width)
-                .filter_map(|x| buffer.cell((x, y)).map(|cell| cell.symbol().to_string()))
-                .collect()
+            let mut row = String::new();
+            let mut skip = 0usize;
+            for x in 0..width {
+                if skip > 0 {
+                    // A double-width symbol owns the cell after it, whatever that cell
+                    // happens to hold; counting it again would over-measure the row.
+                    skip -= 1;
+                    continue;
+                }
+                let Some(symbol) = buffer.cell((x, y)).map(|cell| cell.symbol()) else {
+                    continue;
+                };
+                skip = crate::text::display_width(symbol).saturating_sub(1);
+                row.push_str(symbol);
+            }
+            row
         })
         .collect()
 }
@@ -988,6 +1001,96 @@ fn the_help_overlay_shows_the_way_out_at_every_height() {
                 crate::text::display_width(row),
                 usize::from(width),
                 "no row overflows at {width}x{height}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_deep_toc_entry_still_says_something_in_a_narrow_pane() {
+    // The indent is what gives way when the pane is narrow. If the prefix is allowed
+    // to eat the whole width the entry renders as a blank row, which reads as a bug
+    // rather than as a deep heading.
+    let mut app = pager("# A\n\n## B\n\n### C\n\n#### D\n\n##### Epsilon heading\n\ntext\n");
+    app.act(Action::ToggleToc);
+    for width in [14u16, 16, 20, 30] {
+        let rows = painted(width, 8, |buffer, area| {
+            super::chrome::draw_toc(buffer, area, &app)
+        });
+        let last = rows
+            .iter()
+            .find(|row| row.contains('E'))
+            .unwrap_or_else(|| panic!("the deepest entry is drawn at width {width}: {rows:?}"));
+        assert!(
+            last.trim().len() > 1,
+            "the deepest entry is not a blank row at width {width}: {last:?}"
+        );
+    }
+}
+
+#[test]
+fn a_wide_character_binding_does_not_ragged_edge_the_help_column() {
+    // The key column is measured in display columns, so it must be padded in display
+    // columns too; `{:>width$}` counts `char`s and would shift every other row.
+    let mut keys = KeyBindings::defaults();
+    keys.bind(Key::char('\u{ff21}'), Action::Quit);
+    let config = Config {
+        keys,
+        ..Config::default()
+    };
+    let mut app = App::new(
+        Doc::parse(SAMPLE),
+        config,
+        AppOptions {
+            title: "x".to_string(),
+            icons: false,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(100, 30);
+    app.act(Action::Help);
+    let rows = painted(100, 29, |buffer, area| {
+        super::chrome::draw_help(buffer, area, &mut app)
+    });
+    // The description column must land in the same place whatever the key looks like.
+    // Display column, not byte offset: a wide key glyph is three bytes and two
+    // columns, and it is columns the alignment is about.
+    let column_of = |needle: &str| -> usize {
+        rows.iter()
+            .find_map(|row| row.find(needle).map(|at| crate::text::display_width(&row[..at])))
+            .unwrap_or_else(|| panic!("{needle:?} is in the overlay: {rows:?}"))
+    };
+    assert_eq!(
+        column_of("Quit"),
+        column_of("Show or hide this help"),
+        "a wide-character binding must not shift its own row's description"
+    );
+}
+
+#[test]
+fn every_chrome_glyph_is_one_column_wide() {
+    // `draw_status` lays the bar out with `display_width`, so a glyph that a font
+    // renders double-width would shift every segment to its right. Both sets must
+    // measure the same, which is also what makes `--no-icons` layout-neutral.
+    for icons in [super::icons::Icons::NERD, super::icons::Icons::PLAIN] {
+        for glyph in [
+            icons.file,
+            icons.toc,
+            icons.search,
+            icons.heading,
+            icons.help,
+            icons.selected,
+            icons.unselected,
+            icons.separator,
+            icons.warning,
+            icons.horizontal,
+        ] {
+            assert_eq!(
+                crate::text::display_width(glyph),
+                1,
+                "chrome glyph {glyph:?} must occupy exactly one column"
             );
         }
     }

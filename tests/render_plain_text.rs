@@ -88,6 +88,58 @@ fn anything_carrying_markdown_still_takes_the_markdown_path() {
 }
 
 #[test]
+fn a_document_whose_only_markup_is_a_footnote_is_still_markdown() {
+    // Regression: the first detector scanned for a hand-written list of signals, so a
+    // document whose only markup was `[^a]` was paged as flat text and its footnotes
+    // came out as raw source. Detection now asks the parser, so every construct it
+    // recognises counts — including the ones nobody thought to list.
+    let source = "Ref one[^a] and ref two[^long].\n\n[^a]: First.\n\n[^long]: Second.\n";
+    assert_eq!(Doc::parse_auto(source), Doc::parse(source));
+    let out = lines(source, 44);
+    assert_eq!(out[0], "Ref one[1] and ref two[2].");
+    assert!(out.iter().any(|row| row == "[1] First."), "{out:?}");
+    assert!(out.iter().any(|row| row == "[2] Second."), "{out:?}");
+}
+
+#[test]
+fn markup_nobody_would_type_by_accident_still_counts() {
+    for source in [
+        "a[^n]\n\n[^n]: note\n",
+        "an *emphasis* alone\n",
+        "an `inline code span` alone\n",
+        "an ![image](p.png) alone\n",
+        "a [real link](http://example.com) alone\n",
+        "- [ ] a task\n",
+    ] {
+        assert_eq!(
+            Doc::parse_auto(source),
+            Doc::parse(source),
+            "{source:?} must be parsed as Markdown"
+        );
+    }
+}
+
+#[test]
+fn markup_plain_text_produces_by_accident_does_not_count() {
+    for source in [
+        // An indented commit body, not a code block.
+        "Header line\n\n    an indented body paragraph\n",
+        // An e-mail address in a header, not a link.
+        "Author: Tobias Oetiker <tobi@oetiker.ch>\n",
+        // A separator in --help output, not a thematic break.
+        "Usage\n\n---\n\nOptions\n",
+        // Two trailing spaces are lint, not a hard break.
+        "one line  \ntwo lines\n",
+    ] {
+        assert_eq!(
+            Doc::parse_auto(source),
+            Doc::parse_plain(source),
+            "{source:?} must be paged as plain text"
+        );
+    }
+}
+
+#[test]
 fn a_stream_with_no_markup_takes_the_plain_path() {
     let doc = Doc::parse_auto(GIT_LOG);
     assert_eq!(doc, Doc::parse_plain(GIT_LOG));

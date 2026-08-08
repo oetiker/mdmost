@@ -303,7 +303,9 @@ fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>
     // bare e-mail address is the same case wearing a scheme: comrak gives `a@b.c` the
     // target `mailto:a@b.c`, and `a@b.c (mailto:a@b.c)` tells the reader nothing.
     let target = url.trim();
-    if target.is_empty() || text.trim() == target || text.trim() == target.trim_start_matches("mailto:")
+    if target.is_empty()
+        || text.trim() == target
+        || text.trim() == target.trim_start_matches("mailto:")
     {
         return;
     }

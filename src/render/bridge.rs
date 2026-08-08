@@ -24,9 +24,12 @@ pub(crate) fn highlight(language: Option<&str>, src: &str, theme: &Theme) -> Vec
 
 /// Draws a Mermaid diagram as Unicode box art.
 ///
+/// Named for what it returns rather than mirroring `mermaid::render_mermaid`, so the
+/// two sides of the seam cannot be confused at a call site.
+///
 /// # Errors
 ///
 /// Propagates the [`MermaidError`] so the caller can degrade gracefully.
-pub(crate) fn render_mermaid(src: &str, width: u16, theme: &Theme) -> Result<Canvas, MermaidError> {
+pub(crate) fn mermaid(src: &str, width: u16, theme: &Theme) -> Result<Canvas, MermaidError> {
     crate::mermaid::render_mermaid(src, width, theme)
 }

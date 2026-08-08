@@ -5,8 +5,8 @@
 //!
 //! * a [`Restore`] guard, for the ordinary return and for `?`;
 //! * a panic hook, installed before `ratatui`'s so it runs after it;
-//! * a `SIGTERM` flag polled by the loop, plus `Ctrl-C`, which raw mode delivers as an
-//!   ordinary key event.
+//! * a `SIGTERM`/`SIGHUP`/`SIGINT` flag polled by the loop, plus `Ctrl-C`, which raw
+//!   mode delivers as an ordinary key event rather than as a signal.
 //!
 //! "Restored" means all of: raw mode off, alternate screen left, mouse capture off,
 //! cursor shown. Forgetting the mouse is the one that leaves a terminal spewing escape
@@ -45,11 +45,15 @@ pub fn run(app: &mut App) -> io::Result<()> {
     // panic hook still cover every other exit path.
     let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&terminate));
     let _ = signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&terminate));
+    // `Ctrl-C` arrives as a key event under raw mode, but `kill -INT` from another
+    // terminal does not; without this it would leave the alternate screen up.
+    let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&terminate));
 
     let mut terminal = ratatui::try_init()?;
-    let mouse = app.config().mouse;
-    if mouse {
-        let _ = execute!(io::stdout(), EnableMouseCapture);
+    // Asked for and refused is worth saying: silently having no mouse looks like the
+    // configuration was ignored.
+    if app.config().mouse && execute!(io::stdout(), EnableMouseCapture).is_err() {
+        app.notify("this terminal refused mouse capture", true);
     }
     let _guard = Restore;
 

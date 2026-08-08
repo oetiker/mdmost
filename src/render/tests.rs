@@ -348,7 +348,7 @@ fn a_mermaid_fence_degrades_to_a_captioned_code_block() {
     // top edge, rather than as a stray log line under the box.
     let last = out.last().unwrap_or_else(|| panic!("no rows in {out:?}"));
     assert!(
-        last.starts_with("╰ not a mermaid diagram ─") && last.ends_with('╯'),
+        last.starts_with("╰ not a diagram type — mdless draws ") && last.ends_with('╯'),
         "{last:?}"
     );
     // The old caption said "unsupported" twice and quoted the reader's own typo back
@@ -1162,4 +1162,84 @@ fn nested_quotes_do_not_stack_a_gutter_per_level() {
     assert_eq!(out, ["▌▌▌▌ level four"]);
     // A level that carries text of its own still gets its separating space.
     assert_eq!(lines("> one\n", 40), ["▌ one"]);
+}
+
+// ------------------------------------------------------------ mermaid captions
+
+#[test]
+fn the_advertised_families_are_the_ones_that_actually_parse() {
+    // The caption promises these render; a promise the parser does not keep is worse
+    // than saying nothing, so the list is pinned to reality rather than maintained.
+    for family in code::FAMILIES {
+        let out = lines(&format!("```mermaid\n{family}\n```\n"), 80);
+        let last = out.last().cloned().unwrap_or_default();
+        assert!(
+            !last.contains("not a diagram type"),
+            "{family} is advertised but the parser rejects the family: {out:?}"
+        );
+    }
+    // Wide enough that the caption is not elided, so every promise is visible.
+    let out = lines("```mermaid\nnonsensekeyword\n```\n", 200);
+    let last = out.last().cloned().unwrap_or_default();
+    assert!(last.contains("not a diagram type"), "{out:?}");
+    for family in code::FAMILIES {
+        assert!(
+            last.contains(family),
+            "the caption must name {family}: {last:?}"
+        );
+    }
+}
+
+#[test]
+fn a_caption_never_reports_line_zero() {
+    // Lines are 1-based to a reader; "line 0" sends them hunting somewhere that cannot
+    // exist. An internal error with no line simply omits the location.
+    for markdown in [
+        "```mermaid\nnonsense\n```\n",
+        "```mermaid\nsequenceDiagram\n  Alice ->> ??? oops\n```\n",
+        "```mermaid\n\n```\n",
+        "```mermaid\nflowchart TD\n  A --> \n```\n",
+    ] {
+        let out = lines(markdown, 100);
+        assert!(!out.concat().contains("line 0"), "{markdown:?} -> {out:?}");
+    }
+}
+
+#[test]
+fn a_syntax_error_names_its_line_and_quotes_the_offending_text() {
+    let out = lines(
+        "```mermaid\nsequenceDiagram\n  Alice ->> ??? oops\n```\n",
+        100,
+    );
+    let last = out.last().cloned().unwrap_or_default();
+    assert!(last.contains("line 2"), "{last:?}");
+    assert!(last.contains("Alice ->> ??? oops"), "{last:?}");
+}
+
+// -------------------------------------------------- wide clusters and autolinks
+
+#[test]
+fn a_cluster_wider_than_a_cell_is_charged_the_columns_it_draws() {
+    // U+17000 plus a *spacing* Tai Tham mark is one grapheme drawing three columns.
+    // Pricing it at the two a cell can hold walks the search-span cursor left of its
+    // own text and drags every following span with it.
+    let source = "\u{17000}\u{1a57} tail\n";
+    let doc = Doc::parse(source);
+    let canvas = render_document(&doc, 30, &Theme::default_dark(), &PLAIN);
+    canvas.check_invariants().expect("contract holds");
+    for span in canvas.spans() {
+        let text = &source[span.source_start..span.source_end];
+        let row = canvas.row_text(span.row);
+        let at = crate::text::split_at_width(&row, usize::from(span.col)).1;
+        assert!(
+            at.starts_with(text),
+            "span for {text:?} points at {at:?} in {row:?}"
+        );
+    }
+}
+
+#[test]
+fn a_bare_email_address_does_not_grow_a_mailto_tail() {
+    let out = lines("Author: tobi@oetiker.ch\n", 60);
+    assert_eq!(out, ["Author: tobi@oetiker.ch"]);
 }

@@ -24,8 +24,11 @@ const RIGHT_MARKER: &str = "\u{203a}";
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let area = frame.area();
     app.resize(area.width, area.height);
-    let theme = app.theme().clone();
-    let base = theme.base();
+    // Styles are `Copy`, so the handful the document needs are taken here rather than
+    // cloning the whole theme — eighty-odd styles and a `String` — on every frame.
+    let base = app.theme().base();
+    let marker_style = term_style(app.theme().code.overflow_marker);
+    let dim_style = term_style(app.theme().text.dim);
 
     let buffer = frame.buffer_mut();
     buffer.set_style(area, term_style(base));
@@ -60,12 +63,12 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         app.rendered(),
         scroll,
         hscroll,
-        app.theme(),
+        marker_style,
     );
     highlight_matches(buffer, doc_area, app, scroll, hscroll);
     scrollbar(buffer, bar_area, app);
     if app.rendered().is_empty() {
-        empty_notice(buffer, doc_area, app.theme());
+        empty_notice(buffer, doc_area, dim_style);
     }
 
     if toc_width > 0 {
@@ -156,12 +159,11 @@ fn edge_markers(
     canvas: &Canvas,
     top: usize,
     left: u16,
-    theme: &crate::theme::Theme,
+    style: TermStyle,
 ) {
     if area.width == 0 {
         return;
     }
-    let style = term_style(theme.code.overflow_marker);
     for y in 0..area.height {
         let Some(cells) = canvas.row(top + usize::from(y)) else {
             break;
@@ -189,16 +191,11 @@ fn edge_markers(
 }
 
 /// Says so, rather than showing a screenful of nothing (usability P14).
-fn empty_notice(buffer: &mut Buffer, area: Rect, theme: &crate::theme::Theme) {
+fn empty_notice(buffer: &mut Buffer, area: Rect, style: TermStyle) {
     if area.width < 4 || area.height == 0 {
         return;
     }
-    buffer.set_string(
-        area.x,
-        area.y,
-        "(empty document)",
-        term_style(theme.text.dim),
-    );
+    buffer.set_string(area.x, area.y, "(empty document)", style);
 }
 
 /// Repaints search matches on top of the document.

@@ -236,6 +236,11 @@ impl App {
     }
 
     /// Turns Nerd Font glyphs on or off, in the chrome and the document alike.
+    ///
+    /// Deliberately not bound to a key: whether the terminal's font has the glyphs is
+    /// a property of the terminal, not a reading preference, so it is settled once by
+    /// `--icons` / `--no-icons` / `icons` in the configuration file rather than being
+    /// something to discover by accident mid-document.
     pub fn set_icons(&mut self, icons: bool) {
         self.options.icons = icons;
     }
@@ -340,15 +345,11 @@ impl App {
     }
 
     /// The width the document is rendered at.
+    ///
+    /// The terminal's, unless `--width` forced another; the surplus of a forced width
+    /// is reached by scrolling horizontally (design spec §11).
     pub fn content_width(&self) -> u16 {
-        // Leave one column for the scrollbar gutter.
-        self.options.width.unwrap_or_else(|| {
-            self.size
-                .0
-                .saturating_sub(self.toc_width())
-                .saturating_sub(1)
-                .max(1)
-        })
+        self.options.width.unwrap_or_else(|| self.viewport_width())
     }
 
     /// The number of columns of document actually on screen.
@@ -356,6 +357,7 @@ impl App {
     /// Equal to [`App::content_width`] unless `--width` forced a wider render, in which
     /// case the surplus is reached by scrolling horizontally.
     pub fn viewport_width(&self) -> u16 {
+        // One column is the scrollbar's gutter.
         self.size
             .0
             .saturating_sub(self.toc_width())

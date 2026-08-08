@@ -2,18 +2,128 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
-╭ outline ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│# mdless torture test                                                                                                 │
-│## Mixed scripts                                                                                                      │
-│## Lists                                                                                                              │
-│## Table with Markdown inside cells                                                                                   │
-│### Nested table                                                                                                      │
-│### Degenerate tables                                                                                                 │
-│## Code                                                                                                               │
-│## Mermaid                                                                                                            │
-│## HTML is not supported                                                                                              │
-│## Quotes and rules                                                                                                   │
-│## Images and footnotes                                                                                               │
-│## Duplicate heading                                                                                                  │
-│## Duplicate heading                                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ◆ mdless torture test                                                                                                  
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
+                                                                                                                        
+ A paragraph with emphasis, strong, strikethrough, inline code, a link (https://example.com) and an autolink            
+ https://example.org/very/long/path/that/will/not/fit/in/forty/columns.                                                 
+                                                                                                                        
+ ◈ Mixed scripts                                                                                                        
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+ 日本語のテキストと English が混ざった段落です。مرحبا بالعالم — नमस्ते दुनिया. Emoji: 👩‍💻 🇨🇭 👍🏽 and a combining sequence:   
+ café (decomposed) and café (precomposed). A cluster wider than a terminal cell: 𗀀ᩗ (a Tangut base plus a spacing Tai  
+ Tham mark: one grapheme, three columns) and a zero-width space: a​b.                                                    
+                                                                                                                        
+ An unbreakable-token stress case: supercalifragilisticexpialidociousantidisestablishmentarianism                       
+                                                                                                                        
+ ◈ Lists                                                                                                                
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+ • level one                                                                                                            
+   ◦ level two with a longer line that has to wrap somewhere sensible                                                   
+     ⁃ level three                                                                                                      
+       1. ordered inside unordered                                                                                      
+       2. second                                                                                                        
+ ☑ a finished task                                                                                                      
+ ☐ an unfinished task                                                                                                   
+                                                                                                                        
+ ◈ Table with Markdown inside cells                                                                                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+ ╭──────────────┬─────────────────┬────────────╮                                                                        
+ │ Left         │     Centre      │      Right │                                                                        
+ ├──────────────┼─────────────────┼────────────┤                                                                        
+ │ em           │      code       │          1 │                                                                        
+ │ a list:      │ bold and a link │ 1234567890 │                                                                        
+ │ not html     │                 │            │                                                                        
+ │ 日本語のセル │       👩‍💻        │         -1 │                                                                        
+ ╰──────────────┴─────────────────┴────────────╯                                                                        
+                                                                                                                        
+ ◇ Nested table                                                                                                         
+                                                                                                                        
+ ╭─────────────────────────────────────────────────────────────────────────────────╮                                    
+ │ outer                                                                           │                                    
+ ├─────────────────────────────────────────────────────────────────────────────────┤                                    
+ │ a cell containing another table is legal in this renderer because cells recurse │                                    
+ ╰─────────────────────────────────────────────────────────────────────────────────╯                                    
+                                                                                                                        
+ ◇ Degenerate tables                                                                                                    
+                                                                                                                        
+ ╭───╮                                                                                                                  
+ │   │                                                                                                                  
+ ├───┤                                                                                                                  
+ │   │                                                                                                                  
+ ╰───╯                                                                                                                  
+                                                                                                                        
+ ◈ Code                                                                                                                 
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+ ╭ rust ──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
+ │ fn main() {                                                                                                        │ 
+ │     // A deliberately long line that must scroll horizontally rather than wrap, per design spec section 8.         │ 
+ │     println!("{}", "x".repeat(200));                                                                               │ 
+ │ }                                                                                                                  │ 
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ 
+                                                                                                                        
+ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
+ │ no language tag at all                                                                                             │ 
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ 
+                                                                                                                        
+ ◈ Mermaid                                                                                                              
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+                                                        ┌───────┐                                                       
+                                                        │ Start │                                                       
+                                                        └─┬───┬─┘                                                       
+                                                          │   ▲                                                         
+                                                          ╰─╮ │                                                         
+                                                            ├─╯                                                         
+                                                            │no                                                         
+                                                            ▼                                                           
+                                                       ╱────┴───╲                                                       
+                                                      │ Decision │                                                      
+                                                       ╲────┬───╱                                                       
+                                                            │yes                                                        
+                                                            ▼                                                           
+                                                        ╭──────╮                                                        
+                                                        ( Done )                                                        
+                                                        ╰──────╯                                                        
+                                                                                                                        
+ ╭ mermaid ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
+ │ this is not valid mermaid at all                                                                                   │ 
+ ╰ not a diagram type — mdless draws flowchart, sequenceDiagram, classDiagram, erDiagram, stateDiagram-v2, pie, gantt ╯ 
+                                                                                                                        
+ ◈ HTML is not supported                                                                                                
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+ ⟨html⟩                                                                                                                 
+                                                                                                                        
+ Inline ⟨html⟩ html is dropped too.                                                                                     
+                                                                                                                        
+ ◈ Quotes and rules                                                                                                     
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+ ▌ A block quote spanning two lines.                                                                                    
+ ▌                                                                                                                      
+ ▌ ▌ and a nested one.                                                                                                  
+                                                                                                                        
+                    ───────────────────────────────────────◈────────────────────────────────────────                    
+                                                                                                                        
+ ◈ Images and footnotes                                                                                                 
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+ ╭ image ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
+ │ alt text for a picture                                                                                             │ 
+ │ picture.png                                                                                                        │ 
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ 
+                                                                                                                        
+ A statement needing a source[1].                                                                                       
+                                                                                                                        
+ ◈ Duplicate heading                                                                                                    
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+ ◈ Duplicate heading                                                                                                    
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                                                                                                        
+ [1] The footnote body.

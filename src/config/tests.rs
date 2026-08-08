@@ -217,3 +217,14 @@ fn every_action_has_a_default_binding_and_a_description() {
         assert_eq!(Action::parse(action.name()), Some(*action));
     }
 }
+
+#[test]
+fn a_config_theme_shadowing_a_builtin_does_not_stall_the_cycle() {
+    // `resolve_theme` prefers the configured theme, so listing the name twice would
+    // leave `t` cycling from `dark` to `dark` for ever.
+    let loaded = Config::parse_str("[themes.dark]\nbase = \"light\"\n", path());
+    let config = loaded.config;
+    assert_eq!(config.theme_names(), vec!["dark", "light"]);
+    assert_eq!(config.next_theme_name("dark"), "light");
+    assert_eq!(config.next_theme_name("light"), "dark");
+}

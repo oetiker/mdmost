@@ -32,6 +32,10 @@ Document
     Text("日本語のテキストと English が混ざった段…")
     SoftBreak
     Text("Emoji: 👩\u{200d}💻 🇨🇭 👍🏽 and a combining sequence…")
+    SoftBreak
+    Text("A cluster wider than a terminal cell: …")
+    SoftBreak
+    Text("Tai Tham mark: one grapheme, three colum…")
   Paragraph
     Text("An unbreakable-token stress case:")
     SoftBreak
