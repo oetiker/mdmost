@@ -1,0 +1,8 @@
+---
+source: tests/mermaid_gantt_render.rs
+expression: canvas.plain_text()
+---
+                              2024-03-07
+        ├───────────────────────────┬───
+Kick off│▒▒▒▒▒▒▒▒▒▒▒▒▒                  
+Wrap up │             ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒

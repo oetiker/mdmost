@@ -158,7 +158,10 @@ fn plot(
             .saturating_sub(span / 2)
             .clamp(columns.plot_start(), columns.total().saturating_sub(span));
         body.write_str(0, left, &text, theme.diagram.axis);
-        body.write_str(1, at, "┬", theme.diagram.axis);
+        // Column zero is already marked by the axis' own left terminator.
+        if tick.column > 0 {
+            body.write_str(1, at, "┬", theme.diagram.axis);
+        }
     }
 
     for (index, section) in chart.sections.iter().enumerate() {
@@ -392,28 +395,38 @@ impl Axis {
                     label,
                 })
                 .collect();
-            let axis = Self { ticks };
+            let mut axis = Self { ticks };
             let spacing = step.seconds() as f64 / (end - start).max(1) as f64 * plot as f64;
             if spacing >= (widest + TICK_PADDING) as f64 {
+                axis.thin(plot);
                 return axis;
             }
             fallback = Some(axis);
         }
-        // Nothing fits comfortably: keep the coarsest spacing that produced any tick,
-        // and drop ticks that would collide with the one before them.
+        // Nothing fits comfortably: keep the coarsest spacing that produced any tick.
         let mut axis = fallback.unwrap_or(Self { ticks: Vec::new() });
         axis.thin(plot);
         axis
     }
 
     /// Drops ticks whose labels would overlap the previous one.
+    ///
+    /// Labels are nudged back inside the plot area when they are drawn, so the two
+    /// outermost ones can still collide with their neighbours even when the nominal
+    /// spacing was comfortable. Thinning models that same nudge.
     fn thin(&mut self, plot: usize) {
         let mut kept: Vec<Tick> = Vec::new();
         let mut next_free = 0usize;
         for tick in self.ticks.drain(..) {
+            if tick.column >= plot {
+                continue;
+            }
             let span = display_width(&tick.label);
-            let left = tick.column.saturating_sub(span / 2);
-            if left >= next_free && tick.column < plot {
+            let left = tick
+                .column
+                .saturating_sub(span / 2)
+                .min(plot.saturating_sub(span));
+            if left >= next_free {
                 next_free = left + span + TICK_PADDING;
                 kept.push(tick);
             }

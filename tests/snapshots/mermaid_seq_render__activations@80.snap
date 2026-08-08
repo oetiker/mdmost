@@ -1,0 +1,19 @@
+---
+source: tests/mermaid_seq_render.rs
+expression: canvas.plain_text()
+---
+                          ╭─────────╮  ╭─────────╮                              
+                          │ Client  │  │ Server  │                              
+                          ╰─────────╯  ╰─────────╯                              
+                               ┆            ┆                                   
+                               ┆  request   ┆                                   
+                               ┆────────────▶                                   
+                               ┆            ┃──╮                                
+                               ┆            ┃  │ work                           
+                               ┆            ┃◀─╯                                
+                               ┆  response  ┃                                   
+                               ◀╌╌╌╌╌╌╌╌╌╌╌╌┃                                   
+                               ┆            ┆                                   
+                          ╭─────────╮  ╭─────────╮                              
+                          │ Client  │  │ Server  │                              
+                          ╰─────────╯  ╰─────────╯

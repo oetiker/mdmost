@@ -7,11 +7,14 @@
 use mdless::mermaid::ast::Diagram;
 use mdless::mermaid::parse::parse;
 
+/// A Mermaid sample paired with a predicate identifying the variant it must parse into.
+type FamilyCase = (&'static str, fn(&Diagram) -> bool);
+
 /// One realistic sample per supported family, taken from Mermaid's own documentation
 /// style, must parse into the matching [`Diagram`] variant.
 #[test]
 fn every_family_parses() {
-    let cases: &[(&str, fn(&Diagram) -> bool)] = &[
+    let cases: &[FamilyCase] = &[
         (
             "flowchart TD\n  A[Start] --> B{Choice}\n  B -->|yes| C(Done)\n  B -.->|no| A\n",
             |d| matches!(d, Diagram::Flowchart(_)),

@@ -313,7 +313,9 @@ mod tests {
     fn values_are_formatted_without_noise() {
         assert_eq!(format_value(245.0), "245");
         assert_eq!(format_value(2.5), "2.5");
-        assert_eq!(format_value(2.125), "2.13");
+        // `2.125` is exactly representable, so formatting rounds half to even.
+        assert_eq!(format_value(2.125), "2.12");
+        assert_eq!(format_value(2.126), "2.13");
         assert_eq!(format_value(f64::INFINITY), "—");
     }
 

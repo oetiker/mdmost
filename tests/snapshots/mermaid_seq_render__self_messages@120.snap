@@ -1,0 +1,22 @@
+---
+source: tests/mermaid_seq_render.rs
+expression: canvas.plain_text()
+---
+                                             ╭───╮       ╭───╮                                                          
+                                             │ A │       │ B │                                                          
+                                             ╰───╯       ╰───╯                                                          
+                                               ┆           ┆                                                            
+                                               ┆──╮        ┆                                                            
+                                               ┆  │ think  ┆                                                            
+                                               ┆◀─╯        ┆                                                            
+                                               ┆    ask    ┆                                                            
+                                               ┆───────────▶                                                            
+                                               ┆           ┆──╮                                                         
+                                               ┆           ┆  │ look it up                                              
+                                               ┆           ┆◀─╯                                                         
+                                               ┆  answer   ┆                                                            
+                                               ◀───────────┆                                                            
+                                               ┆           ┆                                                            
+                                             ╭───╮       ╭───╮                                                          
+                                             │ A │       │ B │                                                          
+                                             ╰───╯       ╰───╯

@@ -1,0 +1,16 @@
+---
+source: tests/mermaid_seq_render.rs
+expression: canvas.plain_text()
+---
+         ◯      ╭───────╮     ◯         
+        ╱│╲     │ Till  │    ╱│╲        
+     Customer   ╰───────╯  Manager      
+         ┆          ┆         ┆         
+         ┆   pay    ┆         ┆         
+         ┆──────────▶         ┆         
+         ┆          ┆escalate ┆         
+         ┆          ┆─────────▶         
+         ┆          ┆         ┆         
+         ◯      ╭───────╮     ◯         
+        ╱│╲     │ Till  │    ╱│╲        
+     Customer   ╰───────╯  Manager

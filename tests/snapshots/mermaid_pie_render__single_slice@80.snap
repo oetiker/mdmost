@@ -1,0 +1,7 @@
+---
+source: tests/mermaid_pie_render.rs
+expression: canvas.plain_text()
+---
+                                    Only one                                    
+                                                                                
+● All    ███████████████████████████████████████████████████████████  100.0%   7

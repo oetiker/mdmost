@@ -1,0 +1,16 @@
+---
+source: tests/mermaid_gantt_render.rs
+expression: canvas.plain_text()
+---
+                                  Release plan                                  
+                                                                                
+              2024-01-04            2024-01-18            2024-02-01            
+             ├─────┬─────────────────────┬─────────────────────┬────────────────
+Design       │                                                                  
+  Spec       │░░░░░░░░░░░░░                                                     
+  Review     │             █████████                                            
+             │                                                                  
+Build        │                                                                  
+  Core engine│                      ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+  Docs       │                                 ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒           
+  Ship       │                                                                 ◆

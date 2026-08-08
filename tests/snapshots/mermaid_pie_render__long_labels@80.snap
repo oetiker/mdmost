@@ -1,0 +1,10 @@
+---
+source: tests/mermaid_pie_render.rs
+expression: canvas.plain_text()
+---
+         A title that is itself far too long to fit into forty columns          
+                                                                                
+● An extremely long slice label t…  ████████████████████████████████   62.5%   5
+● short                             ███████████████████▎               37.5%   3
+  ──────────────────────────────────────────────────────────────────────────────
+  Total                                                               100.0%   8

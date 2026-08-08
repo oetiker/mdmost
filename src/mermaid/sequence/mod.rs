@@ -7,8 +7,9 @@
 //!    note widths and frame nesting into one column position per lifeline.
 //! 2. [`plan`] walks the diagram body and assigns every arrow, note, activation bar
 //!    and block frame the *rows* it occupies.
-//! 3. [`paint`](fn@paint) draws the plan, bottom layer first: lifelines, then frames,
-//!    then activation bars, then arrows, and finally notes, which sit on top of
+//! 3. [`paint`](fn@paint) draws the plan, bottom layer first: lifelines, then
+//!    activation bars, then arrows, then the block frames — whose edges must stay
+//!    unbroken where anything crosses them — and finally notes, which sit on top of
 //!    everything they cover.
 //!
 //! ```text
@@ -39,6 +40,11 @@ use plan::{Arrow, Frame, NoteBox, Plan};
 const LIFELINE: &str = "┆";
 /// The activation-bar glyph, deliberately heavier than the lifeline.
 const ACTIVATION: &str = "┃";
+/// The glyph for an activation nested inside another one.
+///
+/// Nested bars stay on the lifeline column rather than stepping to the right, so they
+/// can never collide with a self-message hook or an arrowhead.
+const ACTIVATION_NESTED: &str = "║";
 /// A solid message shaft.
 const SOLID: &str = "─";
 /// A dotted message shaft.
@@ -100,21 +106,27 @@ fn paint(columns: &Columns, plan: &Plan, theme: &Theme) -> Canvas {
         );
     }
 
-    for frame in &plan.frames {
-        draw_frame(&mut canvas, columns, frame, body_top, theme);
-    }
     for bar in &plan.bars {
-        let column = columns.centers[bar.participant] + bar.depth;
+        let glyph = if bar.depth == 0 {
+            ACTIVATION
+        } else {
+            ACTIVATION_NESTED
+        };
         canvas.vline(
             body_top + bar.top,
-            column,
+            columns.centers[bar.participant],
             bar.bottom - bar.top + 1,
-            ACTIVATION,
+            glyph,
             theme.diagram.activation,
         );
     }
     for arrow in &plan.arrows {
         draw_arrow(&mut canvas, columns, arrow, body_top, theme);
+    }
+    // Frames are painted after their contents so their edges and captions stay
+    // unbroken where a lifeline, an activation bar or an arrow crosses them.
+    for frame in &plan.frames {
+        draw_frame(&mut canvas, columns, frame, body_top, theme);
     }
     for note in &plan.notes {
         draw_note(&mut canvas, note, body_top, theme);
@@ -209,7 +221,13 @@ fn draw_arrow(canvas: &mut Canvas, columns: &Columns, arrow: &Arrow, top: usize,
         );
         if !arrow.label.is_empty() {
             let at = corner + 2;
-            let room = columns.width.saturating_sub(at);
+            // The label may reach as far as the next lifeline, or — for the last
+            // participant — as far as the margin the solver reserved on the right.
+            let boundary = match columns.centers.get(arrow.from + 1) {
+                Some(next) => next.saturating_sub(1),
+                None => from + columns.right_reach,
+            };
+            let room = (boundary + 1).saturating_sub(at);
             canvas.write_str(
                 row + 1,
                 at,
@@ -301,7 +319,7 @@ fn draw_frame(canvas: &mut Canvas, columns: &Columns, frame: &Frame, top: usize,
 }
 
 /// The caption written into a frame's top edge or a branch divider.
-fn caption(kind: BlockKind, index: usize, label: Option<&str>) -> String {
+pub(super) fn caption(kind: BlockKind, index: usize, label: Option<&str>) -> String {
     let keyword = match (kind, index) {
         (BlockKind::Loop, _) => "loop",
         (BlockKind::Opt, _) => "opt",
@@ -336,8 +354,9 @@ fn draw_note(canvas: &mut Canvas, note: &NoteBox, top: usize, theme: &Theme) {
             theme.diagram.note,
         );
     }
+    // Square corners set a note apart from the rounded participant boxes.
     let boxed = text.framed(
-        BorderSet::ROUNDED,
+        BorderSet::PLAIN,
         theme.diagram.note,
         None,
         theme.diagram.note,

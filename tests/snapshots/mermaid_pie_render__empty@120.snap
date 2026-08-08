@@ -1,0 +1,7 @@
+---
+source: tests/mermaid_pie_render.rs
+expression: canvas.plain_text()
+---
+                                                    Nothing to show                                                     
+                                                                                                                        
+                                                       (no data)

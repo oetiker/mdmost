@@ -31,18 +31,22 @@ const PROFILES: [Profile; 4] = [
     Profile {
         gap: 3,
         label_cap: 32,
+        self_label: 32,
     },
     Profile {
         gap: 3,
         label_cap: 20,
+        self_label: 20,
     },
     Profile {
         gap: 2,
         label_cap: 14,
+        self_label: 6,
     },
     Profile {
         gap: 1,
         label_cap: 8,
+        self_label: 0,
     },
 ];
 
@@ -53,6 +57,9 @@ struct Profile {
     gap: usize,
     /// The widest a message or note label may be before it is truncated.
     label_cap: usize,
+    /// How much room a self-message label is *guaranteed*. Beyond this it is
+    /// truncated to whatever the finished layout happens to leave.
+    self_label: usize,
 }
 
 /// The head of one lifeline: the participant box or actor figure.
@@ -96,25 +103,34 @@ pub(super) struct Columns {
     pub header_height: usize,
     /// How deeply block frames nest, `0` when the diagram has no frames.
     pub frame_levels: usize,
+    /// Columns of content reaching left of the leftmost lifeline.
+    pub left_reach: usize,
+    /// Columns of content reaching right of the rightmost lifeline.
+    pub right_reach: usize,
     /// The widest a label may be under the profile that succeeded.
     pub label_cap: usize,
 }
 
 impl Columns {
     /// The left edge of the block frame drawn at nesting `depth`.
+    ///
+    /// Frames clear everything that reaches outside the lifelines — self-message
+    /// hooks and notes attached to the outer participants — so a frame edge never
+    /// cuts through diagram content.
     pub fn frame_left(&self, depth: usize) -> usize {
         let inset = FRAME_INSET * (self.frame_levels.saturating_sub(depth));
         self.centers
             .first()
             .copied()
             .unwrap_or(0)
-            .saturating_sub(inset)
+            .saturating_sub(self.left_reach + inset)
     }
 
     /// The right edge of the block frame drawn at nesting `depth`.
     pub fn frame_right(&self, depth: usize) -> usize {
         let inset = FRAME_INSET * (self.frame_levels.saturating_sub(depth));
-        (self.centers.last().copied().unwrap_or(0) + inset).min(self.width.saturating_sub(1))
+        (self.centers.last().copied().unwrap_or(0) + self.right_reach + inset)
+            .min(self.width.saturating_sub(1))
     }
 }
 
@@ -147,22 +163,29 @@ fn attempt(diagram: &SequenceDiagram, profile: Profile) -> Columns {
                 .max(MIN_DISTANCE)
         })
         .collect();
-    let mut left_pad = headers.first().map_or(0, Header::left_half);
-    let mut right_pad = headers.last().map_or(0, Header::right_half);
-    let frame_margin = FRAME_INSET * frame_levels;
-    left_pad = left_pad.max(frame_margin);
-    right_pad = right_pad.max(frame_margin);
-
+    // Room needed *outside* the outermost lifelines for notes and self-message
+    // hooks. Block frames claim their own margin there too, so the two add up.
+    let mut left_reach = 0usize;
+    let mut right_reach = 0usize;
     let mut spans = Vec::new();
     collect(
         &diagram.items,
         &headers,
         profile,
         &mut distance,
-        &mut left_pad,
-        &mut right_pad,
+        &mut left_reach,
+        &mut right_reach,
         &mut spans,
     );
+    let frame_margin = FRAME_INSET * frame_levels;
+    let left_pad = headers
+        .first()
+        .map_or(0, Header::left_half)
+        .max(frame_margin + left_reach);
+    let right_pad = headers
+        .last()
+        .map_or(0, Header::right_half)
+        .max(frame_margin + right_reach);
     satisfy(&mut distance, &spans);
 
     let mut centers = Vec::with_capacity(count);
@@ -181,6 +204,8 @@ fn attempt(diagram: &SequenceDiagram, profile: Profile) -> Columns {
         width,
         header_height,
         frame_levels,
+        left_reach,
+        right_reach,
         label_cap: profile.label_cap,
     }
 }
@@ -234,8 +259,8 @@ fn collect(
     headers: &[Header],
     profile: Profile,
     distance: &mut [usize],
-    left_pad: &mut usize,
-    right_pad: &mut usize,
+    left_reach: &mut usize,
+    right_reach: &mut usize,
     spans: &mut Vec<Span>,
 ) {
     let count = headers.len();
@@ -247,11 +272,11 @@ fn collect(
                 let label = chrome::label_natural_width(&message.label).min(profile.label_cap);
                 if from == to {
                     // A self-message hooks out to the right and hangs its label there.
-                    let need = HOOK + 2 + label;
+                    let need = HOOK + 2 + label.min(profile.self_label);
                     if from + 1 < count {
                         widen(distance, from, need + headers[from + 1].left_half());
                     } else {
-                        *right_pad = (*right_pad).max(need);
+                        *right_reach = (*right_reach).max(need);
                     }
                 } else {
                     spans.push(Span {
@@ -284,16 +309,16 @@ fn collect(
                 match note.placement {
                     NotePlacement::LeftOf => {
                         if first == 0 {
-                            *left_pad = (*left_pad).max(box_width + 1);
+                            *left_reach = (*left_reach).max(box_width + 1);
                         } else {
-                            widen(distance, first - 1, box_width + 2);
+                            widen(distance, first - 1, box_width + 3);
                         }
                     }
                     NotePlacement::RightOf => {
                         if last + 1 >= count {
-                            *right_pad = (*right_pad).max(box_width + 1);
+                            *right_reach = (*right_reach).max(box_width + 1);
                         } else {
-                            widen(distance, last, box_width + 2);
+                            widen(distance, last, box_width + 3);
                         }
                     }
                     NotePlacement::Over if first < last => spans.push(Span {
@@ -305,12 +330,12 @@ fn collect(
                         // A note over a single lifeline spreads evenly to both sides.
                         let reach = box_width / 2 + 1;
                         if first == 0 {
-                            *left_pad = (*left_pad).max(reach);
+                            *left_reach = (*left_reach).max(reach);
                         } else {
                             widen(distance, first - 1, reach + 1);
                         }
                         if last + 1 >= count {
-                            *right_pad = (*right_pad).max(reach);
+                            *right_reach = (*right_reach).max(reach);
                         } else {
                             widen(distance, last, reach + 1);
                         }
@@ -318,14 +343,33 @@ fn collect(
                 }
             }
             SequenceItem::Block(block) => {
+                // A frame is only as wide as the lifelines it spans, so its caption
+                // has to be part of the horizontal constraints or it would be cut.
+                for (index, branch) in block.branches.iter().enumerate() {
+                    let label = branch.label.as_ref().map(|label| label.text());
+                    let caption = display_width(&super::caption(
+                        block.kind,
+                        index,
+                        label.as_deref().map(str::trim),
+                    ));
+                    if count > 1 {
+                        spans.push(Span {
+                            from: 0,
+                            to: count - 1,
+                            least: caption,
+                        });
+                    } else {
+                        *right_reach = (*right_reach).max(caption + 2);
+                    }
+                }
                 for branch in &block.branches {
                     collect(
                         &branch.items,
                         headers,
                         profile,
                         distance,
-                        left_pad,
-                        right_pad,
+                        left_reach,
+                        right_reach,
                         spans,
                     );
                 }

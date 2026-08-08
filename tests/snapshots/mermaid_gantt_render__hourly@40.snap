@@ -1,0 +1,11 @@
+---
+source: tests/mermaid_gantt_render.rs
+expression: canvas.plain_text()
+---
+                Cutover                 
+                                        
+       00:00          06:00   09:00     
+      ├─────────────────┬───────┬───────
+Drain │▒▒▒▒▒▒▒▒▒▒▒                      
+Switch│           ▒▒▒                   
+Verify│              ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒

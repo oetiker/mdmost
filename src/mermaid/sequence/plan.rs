@@ -263,12 +263,14 @@ impl Builder<'_> {
         let total = self.columns.width;
         let (width, left) = match note.placement {
             NotePlacement::Over => {
+                // The box reaches one column past the outermost lifeline it covers,
+                // and grows evenly to both sides when the text needs more than that.
                 let from = self.columns.centers[first];
                 let to = self.columns.centers[last];
-                let width = natural.max(to - from + 3).min(total);
-                let middle = from.midpoint(to);
-                let left = middle
-                    .saturating_sub(width / 2)
+                let covered = to - from + 3;
+                let width = natural.max(covered).min(total);
+                let left = from
+                    .saturating_sub(1 + width.saturating_sub(covered) / 2)
                     .min(total.saturating_sub(width));
                 (width, left)
             }

@@ -15,7 +15,8 @@ use crate::theme::Theme;
 /// Left-growing block elements, indexed by how many eighths of a cell are filled.
 ///
 /// Index `0` is the empty string, index `8` is a full block. This is what gives pie
-/// bars and gantt bars sub-cell precision (design spec §6.5).
+/// bars their sub-cell precision (design spec §6.5). Gantt bars deliberately stay on
+/// whole cells so their texture can carry the task state.
 pub const EIGHTH_BLOCKS: [&str; 9] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
 
 /// The ellipsis appended to a label that had to be shortened.

@@ -698,6 +698,71 @@ fn options_reach_into_table_cells() {
 }
 
 #[test]
+fn a_code_block_inside_a_table_cell_honours_both_flags() {
+    // The deepest recursion the options have to survive: document -> table -> row ->
+    // cell -> block sequence -> code block, where both flags change what is drawn.
+    let table = table_with_cell("```rust\nfn a() {}\nlet b = 2;\n```\n");
+    let theme = Theme::default_dark();
+
+    let plain = render_block(&table, 60, &theme, &RenderOptions::new(false, false));
+    plain.check_invariants().expect("contract holds");
+    let plain_text = plain.plain_text();
+    assert!(plain_text.contains("╭ rust"), "plain title:\n{plain_text}");
+    assert!(
+        !plain_text
+            .chars()
+            .any(|ch| ('\u{e000}'..='\u{f8ff}').contains(&ch)),
+        "no Nerd glyph may reach a cell with icons off:\n{plain_text}"
+    );
+    assert!(
+        !plain_text.contains("1 │fn"),
+        "no gutter with line numbers off:\n{plain_text}"
+    );
+
+    let fancy = render_block(&table, 60, &theme, &RenderOptions::new(true, true));
+    fancy.check_invariants().expect("contract holds");
+    let fancy_text = fancy.plain_text();
+    assert!(
+        fancy_text.contains('\u{e7a8}'),
+        "the language icon must reach the cell:\n{fancy_text}"
+    );
+    assert!(
+        fancy_text.contains("1 │ fn a() {}") && fancy_text.contains("2 │ let b = 2;"),
+        "the gutter must reach the cell:\n{fancy_text}"
+    );
+
+    assert_eq!(plain.width(), fancy.width());
+    for canvas in [&plain, &fancy] {
+        for row in 0..canvas.height() {
+            assert_eq!(display_width(&canvas.row_text(row)), 60);
+        }
+    }
+}
+
+#[test]
+fn a_narrow_cell_still_clips_its_code_and_keeps_the_gutter() {
+    let table = table_with_cell("```\nabcdefghijklmnopqrstuvwxyz\n```\n");
+    let theme = Theme::default_dark();
+    for width in 1..=30u16 {
+        for options in [
+            RenderOptions::new(false, false),
+            RenderOptions::new(true, true),
+        ] {
+            let canvas = render_block(&table, width, &theme, &options);
+            assert_eq!(canvas.width(), width);
+            canvas.check_invariants().expect("contract holds");
+        }
+    }
+    let numbered = render_block(&table, 24, &theme, &RenderOptions::new(false, true));
+    let text = numbered.plain_text();
+    assert!(
+        text.contains("1 │"),
+        "gutter survives inside a cell:\n{text}"
+    );
+    assert!(text.contains('›'), "the code is still clipped:\n{text}");
+}
+
+#[test]
 fn the_default_options_are_icons_on_and_line_numbers_off() {
     let defaults = RenderOptions::default();
     assert!(defaults.icons);
