@@ -154,12 +154,31 @@ pub struct CodeStyles {
     pub variable: Style,
     /// Constants and enum members.
     pub constant: Style,
-    /// Operators and punctuation.
+    /// Operators.
     pub operator: Style,
     /// Attributes, annotations and preprocessor directives.
     pub attribute: Style,
     /// Text the highlighter flagged as invalid.
     pub invalid: Style,
+    /// Macro and preprocessor-macro names.
+    ///
+    /// Separate from [`CodeStyles::function`] because a macro invocation is a
+    /// different kind of event from a call, and Rust-heavy documents show many of both.
+    pub macro_name: Style,
+    /// Brackets, separators and terminators.
+    ///
+    /// Quieter than [`CodeStyles::operator`]: an operator says what the code *does*,
+    /// a bracket only says where it starts.
+    pub punctuation: Style,
+    /// Namespace, module and package names.
+    ///
+    /// A paler relative of [`CodeStyles::type_name`], since a namespace names a
+    /// container rather than a value's type.
+    pub namespace: Style,
+    /// Escape sequences inside string literals.
+    ///
+    /// Deliberately breaks out of [`CodeStyles::string`]: `\n` is code, not text.
+    pub escape: Style,
 }
 
 /// Styles for tables.
@@ -302,6 +321,15 @@ impl Theme {
             "light" => Ok(Self::default_light()),
             other => Err(ThemeError::UnknownTheme(other.to_string())),
         }
+    }
+
+    /// Derives a complete theme from a palette.
+    ///
+    /// This is the single implementation of palette-to-semantic-style derivation, and
+    /// is what user-defined themes in `config.toml` are built from. `is_dark` selects
+    /// the contrast direction used when shading derived styles.
+    pub fn from_palette(name: &str, is_dark: bool, palette: Palette) -> Self {
+        builtin::from_palette(name, is_dark, palette)
     }
 
     /// The signature dark theme.

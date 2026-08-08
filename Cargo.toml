@@ -23,7 +23,9 @@ comrak = { version = "0.54.0", default-features = false }
 crossterm = "0.29.0"
 directories = "6.0.0"
 ratatui = "0.30.2"
+regex = "1.13.1"
 serde = { version = "1.0.229", features = ["derive"] }
+signal-hook = "0.4.4"
 # `default-fancy` swaps oniguruma for the pure-Rust `fancy-regex` engine, so the build
 # needs no C toolchain. Same syntaxes, same themes, same API.
 syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }

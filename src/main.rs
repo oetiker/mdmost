@@ -3,17 +3,196 @@
 //! This is the CLI edge of the program: argument parsing, stdin handling and the
 //! `--render-once` dump mode live here, and this is the only place `anyhow` is used.
 //!
-//! The command line is not implemented yet; the entry point currently reports the
-//! foundation's state so the crate has a runnable binary target.
+//! Design spec §11 in one paragraph: the document comes from a file or from standard
+//! input; keyboard input is read from `/dev/tty` when standard input is a pipe, so
+//! `cat x.md | mdless` and `PAGER=mdless` both work; when standard output is not a
+//! terminal, `--render-once` is implied so `mdless x.md | cat` produces text rather
+//! than escape soup. Exit codes are 0 for success, 1 for unreadable input and 2 for
+//! bad arguments.
 
-use anyhow::Result;
+use std::io::{self, IsTerminal, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 
-fn main() -> Result<()> {
-    let theme = mdless::Theme::default_dark();
-    eprintln!(
-        "mdless {} — foundation only; the pager is not wired up yet (theme: {})",
-        env!("CARGO_PKG_VERSION"),
-        theme.name
+use clap::Parser;
+
+use mdless::config::Config;
+use mdless::doc::Doc;
+use mdless::theme::Theme;
+use mdless::tui::{self, App, AppOptions, dump};
+
+/// Exit code for an input that could not be read.
+const EXIT_INPUT: u8 = 1;
+/// Exit code for arguments that made no sense.
+const EXIT_USAGE: u8 = 2;
+/// The width used for a one-shot render when nothing else says otherwise.
+const FALLBACK_WIDTH: u16 = 80;
+
+/// A full-screen terminal pager for a single Markdown document.
+#[derive(Debug, Parser)]
+#[command(name = "mdless", version, about, long_about = None)]
+struct Cli {
+    /// The document to show. Omit it, or pass `-`, to read standard input.
+    file: Option<PathBuf>,
+
+    /// Render one frame to standard output and exit. Needs no terminal.
+    #[arg(long)]
+    render_once: bool,
+
+    /// Render at this width instead of the terminal's.
+    #[arg(long, value_name = "N")]
+    width: Option<u16>,
+
+    /// The theme to start in.
+    #[arg(long, value_name = "NAME")]
+    theme: Option<String>,
+
+    /// Use plain Unicode instead of Nerd Font glyphs.
+    #[arg(long)]
+    no_icons: bool,
+
+    /// Start with the table-of-contents pane open.
+    #[arg(long)]
+    toc: bool,
+
+    /// Read configuration from this file instead of the default location.
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
+}
+
+fn main() -> ExitCode {
+    // `clap` exits with 2 on a usage error of its own accord; see `Cli::command`
+    // below for the explicit setting.
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            let _ = error.print();
+            return ExitCode::from(if error.use_stderr() { EXIT_USAGE } else { 0 });
+        }
+    };
+    match run(cli) {
+        Ok(code) => code,
+        Err(error) => {
+            // The terminal may or may not have been taken over; restoring twice is
+            // harmless and restoring not at all is not.
+            tui::restore_terminal();
+            let _ = writeln!(io::stderr(), "mdless: {error:#}");
+            ExitCode::from(EXIT_INPUT)
+        }
+    }
+}
+
+/// The real entry point.
+fn run(cli: Cli) -> anyhow::Result<ExitCode> {
+    if cli.width == Some(0) {
+        let _ = writeln!(io::stderr(), "mdless: --width must be at least 1");
+        return Ok(ExitCode::from(EXIT_USAGE));
+    }
+
+    let loaded = match &cli.config {
+        Some(path) => Config::load_from(path),
+        None => Config::load(),
+    };
+    for problem in &loaded.problems {
+        let _ = writeln!(io::stderr(), "mdless: {problem}");
+    }
+    let config = loaded.config;
+
+    let (source, title) = match read_input(cli.file.as_deref()) {
+        Ok(pair) => pair,
+        Err(error) => {
+            let _ = writeln!(io::stderr(), "mdless: {error}");
+            return Ok(ExitCode::from(EXIT_INPUT));
+        }
+    };
+    let doc = Doc::parse(&source);
+
+    let theme_name = cli.theme.clone().unwrap_or_else(|| config.theme.clone());
+    let icons = config.icons && !cli.no_icons;
+    let stdout_is_terminal = io::stdout().is_terminal();
+
+    if cli.render_once || !stdout_is_terminal {
+        return render_once(&doc, &config, &theme_name, cli.width, stdout_is_terminal);
+    }
+
+    let mut app = App::new(
+        doc,
+        config,
+        AppOptions {
+            title,
+            icons,
+            theme: theme_name,
+            toc_open: cli.toc,
+            width: cli.width,
+        },
     );
-    Ok(())
+    tui::run(&mut app)?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Renders one frame to standard output and returns.
+///
+/// Deterministic by construction: the width is either given or falls back to a fixed
+/// 80 columns when there is no terminal to ask, and the output carries colour only
+/// when a terminal is there to show it.
+fn render_once(
+    doc: &Doc,
+    config: &Config,
+    theme_name: &str,
+    width: Option<u16>,
+    stdout_is_terminal: bool,
+) -> anyhow::Result<ExitCode> {
+    let theme = match config.resolve_theme(theme_name) {
+        Ok(theme) => theme,
+        Err(error) => {
+            let _ = writeln!(io::stderr(), "mdless: {error}, using the dark theme");
+            Theme::default_dark()
+        }
+    };
+    let width = width.unwrap_or_else(|| {
+        if stdout_is_terminal {
+            tui::terminal_width().unwrap_or(FALLBACK_WIDTH)
+        } else {
+            FALLBACK_WIDTH
+        }
+    });
+    let canvas = mdless::render::render_document(doc, width.max(1), &theme);
+
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    if stdout_is_terminal {
+        dump::write_ansi(&mut out, &canvas, theme.base())?;
+    } else {
+        dump::write_plain(&mut out, &canvas)?;
+    }
+    out.flush()?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Reads the document and works out what to call it in the status bar.
+fn read_input(file: Option<&Path>) -> Result<(String, String), mdless::Error> {
+    let from_stdin = match file {
+        None => true,
+        Some(path) => path.as_os_str() == "-",
+    };
+    if from_stdin {
+        let mut source = String::new();
+        io::stdin()
+            .read_to_string(&mut source)
+            .map_err(|source_error| mdless::Error::Input {
+                path: PathBuf::from("-"),
+                source: source_error,
+            })?;
+        return Ok((source, "(standard input)".to_string()));
+    }
+    let path = file.unwrap_or(Path::new("-"));
+    let source = std::fs::read_to_string(path).map_err(|source| mdless::Error::Input {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let title = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    Ok((source, title))
 }

@@ -60,7 +60,7 @@ pub(super) fn light() -> Theme {
 }
 
 /// Builds a complete theme from a palette.
-fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
+pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
     // A style carrying the page background, used as the base for everything that is
     // not explicitly raised onto a surface.
     let base = Style::new().fg(p.fg).bg(p.bg);
@@ -118,11 +118,24 @@ fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             comment: code_muted.italic(),
             function: on_surface.fg(p.blue),
             type_name: on_surface.fg(p.cyan),
-            variable: on_surface,
-            constant: on_surface.fg(p.orange),
+            // Identifiers carry a faint cool tint so they separate from prose-like
+            // plain text without becoming a colour of their own.
+            variable: on_surface.fg(p.fg.blend(p.cyan, 0.22)),
+            // Named constants sit beside numbers in the warm family but lean towards
+            // the keyword hue, because `true` and `None` belong to the language rather
+            // than to arithmetic.
+            constant: on_surface.fg(p.orange.blend(p.purple, 0.35)),
             operator: on_surface.fg(p.muted),
             attribute: on_surface.fg(p.yellow),
             invalid: on_surface.fg(p.red).underline(),
+            macro_name: on_surface.fg(p.magenta.blend(p.blue, 0.3)),
+            // Quieter than `operator`: blended towards the border colour, which is the
+            // palette's "structure, not content" hue.
+            punctuation: on_surface.fg(p.muted.blend(p.border, 0.45)),
+            namespace: on_surface.fg(p.cyan.blend(p.fg, 0.4)),
+            // An escape must break the string run without shouting; amber sits between
+            // the number and attribute hues and appears only inside green strings.
+            escape: on_surface.fg(p.yellow.blend(p.orange, 0.5)),
         },
         table: TableStyles {
             border: base.fg(p.border),
