@@ -19,6 +19,29 @@ pub const DAY: i64 = 24 * HOUR;
 /// Seconds in one week.
 pub const WEEK: i64 = 7 * DAY;
 
+/// The earliest instant a chart may refer to: `0000-01-01T00:00:00Z`.
+pub const MIN_INSTANT: i64 = -62_167_219_200;
+/// The latest instant a chart may refer to: `9999-12-31T23:59:59Z`.
+pub const MAX_INSTANT: i64 = 253_402_300_799;
+/// The longest span any chart can cover, and therefore the longest usable duration.
+pub const MAX_SPAN: i64 = MAX_INSTANT - MIN_INSTANT;
+
+/// Brings an instant inside the range charts are drawn in.
+///
+/// `dateFormat X` hands the parser an arbitrary `i64`, and a duration literal can be
+/// astronomically large, so every instant entering the timeline passes through here.
+/// Downstream arithmetic — spans, tick steps, column mapping — is then guaranteed to
+/// stay far inside `i64`, which is what stops a diagram from panicking the pager
+/// (design spec §12).
+pub fn clamp_instant(seconds: i64) -> i64 {
+    seconds.clamp(MIN_INSTANT, MAX_INSTANT)
+}
+
+/// Brings a duration inside the range charts are drawn in.
+pub fn clamp_span(seconds: i64) -> i64 {
+    seconds.clamp(0, MAX_SPAN)
+}
+
 /// A civil date and time of day in UTC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DateTime {

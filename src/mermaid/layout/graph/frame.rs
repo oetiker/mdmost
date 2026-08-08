@@ -164,6 +164,22 @@ impl Pen {
         }
     }
 
+    /// True when a line may pass through this flow-space cell.
+    ///
+    /// Blank cells and existing box art qualify — box art merges into a junction. Any
+    /// other content (a label, a node's text) does not, so a route can never run
+    /// through something a caller has drawn.
+    pub(super) fn passable(&self, flow: usize, cross: usize) -> bool {
+        let (row, col) = self.frame.cell(flow, cross);
+        match self.canvas.row(row).and_then(|cells| cells.get(col)) {
+            None => false,
+            Some(cell) => {
+                let ch = cell.text().chars().next().unwrap_or(' ');
+                ch == ' ' || super::glyph::mask_of(ch).is_some()
+            }
+        }
+    }
+
     /// Writes an edge label whose block starts at `(flow, cross)` in flow space.
     pub(super) fn label(&mut self, flow: usize, cross: usize, lines: &[String]) {
         let width = lines

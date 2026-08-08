@@ -12,4 +12,5 @@ pub mod class;
 pub mod er;
 pub mod flowchart;
 pub mod graph;
+mod record;
 pub mod state;

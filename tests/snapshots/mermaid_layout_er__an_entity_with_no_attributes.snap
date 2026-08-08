@@ -1,0 +1,7 @@
+---
+source: tests/mermaid_layout_er.rs
+expression: "render(&diagram(vec![entity(\"PLAIN\", Vec::new())], Vec::new()), 30)"
+---
+          ┌───────┐           
+          │ PLAIN │           
+          └───────┘

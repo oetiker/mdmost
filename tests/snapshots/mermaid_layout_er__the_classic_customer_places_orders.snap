@@ -1,0 +1,19 @@
+---
+source: tests/mermaid_layout_er.rs
+expression: "render(&chart, 70)"
+---
+                         ┌──────────────────┐                         
+                         │     CUSTOMER     │                         
+                         ├──────────────────┤                         
+                         │ string  name  PK │                         
+                         └─────────┬────────┘                         
+                                   ┼                                  
+                                   ┼                                  
+                                   │places                            
+                                   ○                                  
+                                   ∧                                  
+                          ┌────────────────┐                          
+                          │     ORDER      │                          
+                          ├────────────────┤                          
+                          │ int  total  PK │                          
+                          └────────────────┘

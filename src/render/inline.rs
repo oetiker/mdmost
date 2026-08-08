@@ -240,10 +240,16 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
                 ));
             }
             // One marker per inline run is enough to say "HTML was dropped here";
-            // `<b>x</b>` would otherwise bracket its own text with two of them.
+            // `<b>x</b>` would otherwise bracket its own text with two of them. The
+            // marker is spaced away from the words around it so it reads as a note in
+            // the margin of the sentence rather than as a word in it.
             NodeKind::SkippedHtml { .. } => {
-                if !out.iter().any(|piece| piece.text == HTML_MARKER) {
-                    out.push(Piece::synthetic(HTML_MARKER, style.patch(theme.text.dim)));
+                if !out.iter().any(|piece| piece.text.trim() == HTML_MARKER) {
+                    let lead = if ends_with_space(out) { "" } else { " " };
+                    out.push(Piece::synthetic(
+                        format!("{lead}{HTML_MARKER} "),
+                        style.patch(theme.text.dim),
+                    ));
                 }
             }
             // Any other node appearing in an inline position is a container we do not
@@ -251,6 +257,13 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
             _ => collect(&node.children, style, ctx, out),
         }
     }
+}
+
+/// Whether the run so far already ends in whitespace (or is empty).
+fn ends_with_space(pieces: &[Piece]) -> bool {
+    pieces
+        .last()
+        .is_none_or(|piece| piece.text.ends_with(char::is_whitespace))
 }
 
 /// A code span, anchored past the opening backtick fence when that is unambiguous.
@@ -267,7 +280,15 @@ fn code_piece(literal: &str, style: Style, source: SourceSpan) -> Piece {
     }
 }
 
+/// The longest a link target may be before it is shown elided.
+const URL_BUDGET: usize = 34;
+
 /// Renders a link as its text, followed by a dim target when the two differ.
+///
+/// Inside a table cell the target is dropped altogether: a column is negotiated
+/// against every other column in the table, and one long URL would otherwise claim a
+/// whole row for itself (design spec §7.2). Elsewhere an over-long target is elided in
+/// the middle, which keeps the informative ends — the host and the last path segment.
 fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
     let theme = ctx.theme;
     let before = out.len();
@@ -280,10 +301,28 @@ fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>
     if text.trim() == url.trim() || url.is_empty() {
         return;
     }
+    if ctx.table_depth > 0 && !text.trim().is_empty() {
+        return;
+    }
     out.push(Piece::synthetic(
-        format!(" ({url})"),
+        format!(" ({})", elide_middle(url, URL_BUDGET)),
         style.patch(theme.text.link_url),
     ));
+}
+
+/// Shortens `text` to `budget` display columns by replacing its middle with `…`.
+///
+/// Both ends are kept because a URL carries its meaning there: the host at the front
+/// and the document name at the back.
+pub(crate) fn elide_middle(text: &str, budget: usize) -> String {
+    if display_width(text) <= budget || budget < 3 {
+        return text.to_string();
+    }
+    let head = (budget - 1).div_ceil(2);
+    let tail = budget - 1 - head;
+    let front = crate::text::truncate_to_width(text, head);
+    let back = crate::text::split_at_width(text, display_width(text) - tail).1;
+    format!("{front}…{back}")
 }
 
 /// The display width of inline content when it is not wrapped at all.

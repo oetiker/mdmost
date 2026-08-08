@@ -70,10 +70,7 @@ const EMPTY_TEXT: &str = "(empty sequence diagram)";
 /// block frames cannot be squeezed into `width` even at the tightest layout profile.
 pub fn draw(diagram: &SequenceDiagram, width: u16, theme: &Theme) -> Result<Canvas, MermaidError> {
     if diagram.participants.is_empty() {
-        let text = chrome::fit(EMPTY_TEXT, usize::from(width));
-        let cols = u16::try_from(display_width(&text)).unwrap_or(0);
-        let mut body = Canvas::new(cols, 0, theme.base());
-        body.push_text(&text, Align::Left, theme.text.dim);
+        let body = chrome::placeholder(EMPTY_TEXT, width, theme);
         return chrome::compose(diagram.title.as_deref(), &body, width, theme);
     }
     let columns = columns::solve(diagram, width)?;
@@ -248,7 +245,7 @@ fn draw_arrow(canvas: &mut Canvas, columns: &Columns, arrow: &Arrow, top: usize,
     if !arrow.label.is_empty() {
         let room = high - low - 1;
         let text = chrome::fit(&arrow.label, room);
-        let left = low + 1 + (room - display_width(&text)) / 2;
+        let left = low + 1 + crate::canvas::align_offset(room, display_width(&text), Align::Center);
         canvas.write_str(row - 1, left, &text, theme.diagram.edge_label);
     }
 }

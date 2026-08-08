@@ -175,3 +175,42 @@ proptest! {
         let _ = parse(&mutated);
     }
 }
+
+/// A `dateFormat X` chart whose timestamps sit at the edges of `i64` must not overflow.
+///
+/// Regression for a panic found by code review: the task parser added a duration to a
+/// start instant unchecked, so `9223372036854775000` plus one day wrapped and aborted
+/// the pager (design spec §12: a panic is a release blocker).
+#[test]
+fn extreme_unix_timestamps_are_clamped_rather_than_overflowing() {
+    let src = concat!(
+        "gantt\n",
+        "dateFormat X\n",
+        "section s\n",
+        "  a : -9223372036854775000, 1d\n",
+        "  b : 9223372036854775000, 1d\n",
+    );
+    let diagram = mdless::mermaid::parse::parse(src).expect("the chart parses");
+    let theme = mdless::theme::Theme::default_dark();
+    for width in [1u16, 20, 80, 200] {
+        let canvas = mdless::mermaid::render_diagram(&diagram, width, &theme);
+        if let Ok(canvas) = canvas {
+            assert_eq!(canvas.width(), width);
+        }
+    }
+}
+
+/// A duration too large for any timeline is clamped, not saturated into an overflow.
+#[test]
+fn an_absurd_duration_is_clamped() {
+    let src = concat!(
+        "gantt\n",
+        "dateFormat X\n",
+        "section s\n",
+        "  a : 0, 99999999999999d\n",
+    );
+    let diagram = mdless::mermaid::parse::parse(src).expect("the chart parses");
+    let theme = mdless::theme::Theme::default_dark();
+    let canvas = mdless::mermaid::render_diagram(&diagram, 80, &theme).expect("it draws");
+    assert_eq!(canvas.width(), 80);
+}

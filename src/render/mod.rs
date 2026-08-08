@@ -29,6 +29,8 @@
 //! let canvas = render_document(&doc, 20, &Theme::default_dark(), &options);
 //! assert_eq!(canvas.width(), 20);
 //! assert_eq!(canvas.anchors()[0].id, "title");
+//! // Column 0 is the document gutter, so nothing is ever written there.
+//! assert!(canvas.row_text(0).starts_with(' '));
 //! ```
 
 pub mod block;
@@ -186,9 +188,34 @@ impl<'a> Ctx<'a> {
 /// `options` carries the settings that are not the theme's business — Nerd Font
 /// glyphs and code line numbers — and belongs in any cache key alongside the document
 /// version, the width and the theme.
+///
+/// # Margins
+///
+/// The document body is inset by [`DOCUMENT_MARGIN`] columns on each side, so no
+/// block — paragraph, table border or code frame — is ever welded to the viewport
+/// edge or to the scrollbar next to it. The inset is applied once, here, rather than
+/// by every block renderer: block renderers still receive a plain width budget and
+/// still return a canvas exactly that wide.
 pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
     let ctx = Ctx::new(theme, options);
-    let mut canvas = block::render_sequence(&doc.root().children, width, ctx, true);
+    let margin = margins(width);
+    let body = block::render_sequence(&doc.root().children, width - 2 * margin, ctx, true);
+    let mut canvas = body.indent(margin, margin, theme.base());
     canvas.resize_width(width, theme.base());
     canvas
+}
+
+/// The blank columns kept clear on each side of the document body (design spec §9).
+pub const DOCUMENT_MARGIN: u16 = 1;
+
+/// The margin actually affordable at `width`.
+///
+/// The gutter is dropped only when paying for it would leave the body no columns at
+/// all, which is the degenerate one- and two-column case.
+pub(crate) const fn margins(width: u16) -> u16 {
+    if width > 2 * DOCUMENT_MARGIN {
+        DOCUMENT_MARGIN
+    } else {
+        0
+    }
 }

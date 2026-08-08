@@ -12,7 +12,8 @@
 //! width, so scrolling a long line horizontally never scrolls the numbers away.
 
 use crate::canvas::{BorderSet, Canvas};
-use crate::text::{Align, Line, Span, display_width};
+use crate::error::MermaidError;
+use crate::text::{Line, Span, display_width};
 
 use super::{Ctx, bridge};
 
@@ -39,11 +40,7 @@ pub(crate) fn render_code_block(
                 canvas.resize_width(width, ctx.base);
                 canvas
             }
-            Err(error) => {
-                let mut out = framed_code(language, literal, fenced, width, ctx);
-                out.append(&caption(&error.reason(), width, ctx), ctx.base);
-                out
-            }
+            Err(error) => fallback(literal, &error, width, ctx),
         };
     }
     framed_code(language, literal, fenced, width, ctx)
@@ -64,17 +61,52 @@ fn framed_code(
     if width < 4 {
         return code_area(&lines, width, false, ctx);
     }
-    let inner = code_area(&lines, width - 2, ctx.options.line_numbers, ctx);
+    // The frame takes two columns and the interior padding one more on each side, so
+    // code sits inside its box the way a table cell sits inside its column.
+    let padding = if width > 2 + 2 * CODE_PADDING {
+        CODE_PADDING
+    } else {
+        0
+    };
+    let area_width = width - 2 - 2 * padding;
+    let area = code_area(&lines, area_width, ctx.options.line_numbers, ctx);
+    let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
+    let inner = area.indent(padding, padding, theme.code.background);
     let title = fenced
         .then_some(language)
         .flatten()
         .map(|name| title(name, ctx));
-    inner.framed(
+    let mut out = inner.framed(
         BorderSet::ROUNDED,
         theme.code.frame,
         title.as_ref(),
         theme.code.background,
-    )
+    );
+    join_gutter(&mut out, gutter, padding, ctx);
+    out
+}
+
+/// Blank columns between the code frame and the code inside it.
+const CODE_PADDING: u16 = 1;
+
+/// Joins the line-number gutter rule to the frame with `┬`/`┴` junctions.
+///
+/// Without this the gutter is a bar floating between two horizontal edges it does not
+/// meet; with it the block reads as one piece of chrome.
+fn join_gutter(out: &mut Canvas, gutter: usize, padding: u16, ctx: Ctx<'_>) {
+    if gutter == 0 {
+        return;
+    }
+    // Inside the frame and the padding, the rule sits two columns left of the code.
+    let col = 1 + usize::from(padding) + gutter - 2;
+    let set = BorderSet::ROUNDED;
+    let last = out.height().saturating_sub(1);
+    // A title occupying the junction column must win: it is content, the junction is
+    // decoration.
+    if out.row_text(0).chars().nth(col) == Some(set.horizontal) {
+        out.write_str(0, col, &set.tee_down.to_string(), ctx.theme.code.frame);
+    }
+    out.write_str(last, col, &set.tee_up.to_string(), ctx.theme.code.frame);
 }
 
 /// The label drawn into the frame's top edge: the language, with its icon if enabled.
@@ -95,37 +127,47 @@ fn title(language: &str, ctx: Ctx<'_>) -> Line {
 fn code_area(lines: &[Line], width: u16, numbered: bool, ctx: Ctx<'_>) -> Canvas {
     let theme = ctx.theme;
     let budget = usize::from(width);
-    let digits = if numbered {
-        digit_count(lines.len())
-    } else {
-        0
-    };
-    // The gutter is `NNN │ `. It is dropped entirely rather than squeezing the code
-    // into nothing when the block is too narrow to carry both.
-    let gutter = if digits == 0 || digits + 4 > budget {
-        0
-    } else {
-        digits + 3
-    };
-    let code_width = budget - gutter;
-
-    let mut out = Canvas::new(width, lines.len(), theme.code.background);
+    let digits = digit_count(lines.len());
+    let gutter = gutter_width(lines.len(), width, numbered);
+    // Lines are written at their full length onto an over-wide canvas and the whole
+    // block is then clipped in one operation, so the "line goes on" marker rule lives
+    // in `Canvas::clip_with_marker` rather than being re-derived here.
+    let natural = lines.iter().map(Line::width).max().unwrap_or(0) + gutter;
+    let mut out = Canvas::new(
+        u16::try_from(natural.max(budget)).unwrap_or(u16::MAX),
+        lines.len(),
+        theme.code.background,
+    );
     for (row, line) in lines.iter().enumerate() {
         if gutter > 0 {
             let number = format!("{:>digits$} ", row + 1, digits = digits);
             out.write_str(row, 0, &number, theme.code.line_number);
             out.write_str(row, digits + 1, GUTTER_RULE, theme.code.frame);
         }
-        if line.width() <= code_width {
-            out.write_line(row, gutter, line, theme.code.background);
-            continue;
-        }
-        // One column is reserved for the marker that says the line goes on.
-        let head = line.truncated(code_width.saturating_sub(1));
-        out.write_line(row, gutter, &head, theme.code.background);
-        out.write_str(row, budget - 1, OVERFLOW_MARKER, theme.code.overflow_marker);
+        out.write_line(row, gutter, line, theme.code.background);
     }
+    // The gutter sits left of the clip point, so scrolling a long line never scrolls
+    // the numbers away.
+    debug_assert!(gutter < budget || budget == 0);
+    out.clip_with_marker(width, OVERFLOW_MARKER, theme.code.overflow_marker);
+    out.resize_width(width, theme.code.background);
     out
+}
+
+/// How many columns the line-number gutter `NNN │ ` occupies, zero when there is none.
+///
+/// The gutter is dropped entirely rather than squeezing the code into nothing when the
+/// block is too narrow to carry both.
+fn gutter_width(lines: usize, width: u16, numbered: bool) -> usize {
+    if !numbered {
+        return 0;
+    }
+    let digits = digit_count(lines);
+    if digits + 4 > usize::from(width) {
+        0
+    } else {
+        digits + 3
+    }
 }
 
 /// How many columns the largest line number needs.
@@ -139,21 +181,87 @@ fn digit_count(lines: usize) -> usize {
     digits
 }
 
-/// The dim caption drawn under a block that could not be rendered as intended.
-fn caption(reason: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
+/// Mermaid diagram families that exist but that `mdless` does not draw yet.
+///
+/// The distinction matters for the caption: a reader who wrote `flowchart` deserves
+/// "not drawn yet", while a reader who wrote prose deserves "this is not a diagram" —
+/// not their own typo quoted back at them as if it were a diagram type.
+const KNOWN_FAMILIES: [&str; 12] = [
+    "flowchart",
+    "graph",
+    "sequencediagram",
+    "classdiagram",
+    "statediagram",
+    "statediagram-v2",
+    "erdiagram",
+    "journey",
+    "gantt",
+    "pie",
+    "gitgraph",
+    "mindmap",
+];
+
+/// The mermaid source shown as a framed code block, with the reason in its bottom edge.
+///
+/// The frame's top edge already names the language, so the caption says what happened,
+/// not what the block is.
+fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Canvas {
     let theme = ctx.theme;
-    let text = format!("unsupported mermaid syntax: {reason}");
-    let mut out = Canvas::empty(width);
-    for line in super::inline::wrap(&[Span::new(text, theme.block.caption)], usize::from(width)) {
-        out.push_line(&line, Align::Left, ctx.base);
+    let lines = bridge::highlight(Some(MERMAID), literal, theme);
+    if width < 4 {
+        return code_area(&lines, width, false, ctx);
     }
+    let padding = if width > 2 + 2 * CODE_PADDING {
+        CODE_PADDING
+    } else {
+        0
+    };
+    let area_width = width - 2 - 2 * padding;
+    let inner = code_area(&lines, area_width, ctx.options.line_numbers, ctx).indent(
+        padding,
+        padding,
+        theme.code.background,
+    );
+    let title = Line::styled(MERMAID, theme.code.language);
+    let caption = Line::styled(caption(error), theme.block.caption);
+    let mut out = inner.framed_captioned(
+        BorderSet::ROUNDED,
+        theme.code.frame,
+        Some(&title),
+        Some(&caption),
+        theme.code.background,
+    );
+    let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
+    join_gutter(&mut out, gutter, padding, ctx);
     out
 }
 
-/// The natural width of a code block at these options, frame and gutter included.
+/// What the bottom edge of an undrawable Mermaid block says.
+fn caption(error: &MermaidError) -> String {
+    match error {
+        MermaidError::UnsupportedFamily(family) if is_known_family(family) => {
+            format!("{family} diagrams are not drawn yet — source shown")
+        }
+        MermaidError::UnsupportedFamily(_) => "not a diagram mdless recognises".to_string(),
+        MermaidError::TooNarrow { .. } => "too narrow to draw — source shown".to_string(),
+        MermaidError::Unsupported { line, message } | MermaidError::Syntax { line, message } => {
+            format!("line {line}: {message}")
+        }
+    }
+}
+
+/// Whether `family` names a real Mermaid diagram family.
+fn is_known_family(family: &str) -> bool {
+    let lowered = family.to_lowercase();
+    KNOWN_FAMILIES.contains(&lowered.as_str())
+}
+
+/// The natural width of a code block at these options: frame, padding and gutter
+/// included.
 ///
 /// The table column negotiator needs this so a code block in a cell asks for the
-/// right amount of room.
+/// right amount of room; it must therefore track every column
+/// [`framed_code`] spends on chrome.
 pub(crate) fn natural_width(literal: &str, ctx: Ctx<'_>) -> usize {
     let longest = literal.lines().map(display_width).max().unwrap_or(0);
     let gutter = if ctx.options.line_numbers {
@@ -161,5 +269,10 @@ pub(crate) fn natural_width(literal: &str, ctx: Ctx<'_>) -> usize {
     } else {
         0
     };
-    longest + gutter + 2
+    longest + gutter + chrome_width()
+}
+
+/// The columns a framed code block spends on chrome: two border columns plus padding.
+pub(crate) const fn chrome_width() -> usize {
+    2 + 2 * CODE_PADDING as usize
 }

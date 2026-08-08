@@ -12,7 +12,7 @@
 
 use crate::canvas::{Anchor, BorderSet, Canvas};
 use crate::doc::{ListInfo, Node, NodeKind};
-use crate::text::{Align, Line, Span, display_width, pad_to_width};
+use crate::text::{Align, Line, Span, display_width, pad_to_width, repeat_to_width};
 use crate::theme::{Style, Theme};
 
 use super::inline::{HTML_MARKER, render_inline};
@@ -79,7 +79,7 @@ pub(crate) fn render_sequence(nodes: &[Node], width: u16, ctx: Ctx<'_>, spaced: 
 /// An image is deliberately *not* inline: it becomes a framed placeholder box
 /// (design spec §2). Inline HTML is, so that its collapsed marker stays in the
 /// sentence it was dropped from.
-fn is_inline(node: &Node) -> bool {
+pub(crate) fn is_inline(node: &Node) -> bool {
     matches!(
         node.kind,
         NodeKind::Text(_)
@@ -120,7 +120,9 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         }
         NodeKind::Table(_) => render_sequence(&node.children, width, ctx, false),
         NodeKind::TableRow { .. } => render_sequence(&node.children, width, ctx, false),
-        NodeKind::FootnoteDefinition { name } => footnote(node, name, width, ctx),
+        NodeKind::FootnoteDefinition { name, number } => {
+            footnote(node, &footnote_label(name, *number), width, ctx)
+        }
         NodeKind::Image { url, .. } => image(node, url, width, ctx),
         NodeKind::SkippedHtml { .. } => html_marker(width, ctx),
         // Anything else in a block position is inline content: a bare text run in a
@@ -170,20 +172,33 @@ fn paragraph(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
 /// A block quote, drawn with a coloured gutter bar that shifts hue with nesting depth.
 fn quote(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
     let theme = ctx.theme;
-    let gutter = 2u16.min(width);
     let inner = ctx.in_quote();
+    // Each level owns one bar column, tinted by its depth. The separating space is
+    // spent once, by the level that actually carries text, so a chain of four quotes
+    // costs five columns rather than the eight it used to — a fifth of a 40-column
+    // line went on gutters alone.
+    let carries_text = node
+        .children
+        .iter()
+        .any(|child| !matches!(child.kind, NodeKind::BlockQuote));
+    let gutter = if carries_text { QUOTE_GUTTER } else { 1 }.min(width);
     let content = render_sequence(&node.children, width - gutter, inner, true);
     let mut out = content.indent(gutter, 0, inner.base);
     if out.is_empty() {
         out.push_blank_row(inner.base);
     }
-    // The bar hue rotates with nesting depth so nested quotes are distinguishable.
+    if gutter == 0 {
+        return out;
+    }
     let bar = theme.block.quote_bar.patch(theme.accent(ctx.quote_depth));
     for row in 0..out.height() {
         out.write_str(row, 0, QUOTE_BAR, bar);
     }
     out
 }
+
+/// Columns the block-quote bar and its trailing space occupy.
+const QUOTE_GUTTER: u16 = 2;
 
 /// A bullet, ordered or task list.
 fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
@@ -244,16 +259,46 @@ fn marker_line(item: &Node, info: ListInfo, index: usize, field: usize, ctx: Ctx
 }
 
 /// A thematic break.
+///
+/// Deliberately *not* the full-bleed rule a heading draws: it is inset on both sides
+/// and carries a centred lozenge, so a section break and a heading rule can be told
+/// apart at a glance (they were the same glyph at the same width before).
 fn rule(width: u16, ctx: Ctx<'_>) -> Canvas {
     let mut out = Canvas::empty(width);
-    out.push_rule("─", ctx.theme.block.rule);
+    let style = ctx.theme.block.rule;
+    let inset = usize::from(width) / 6;
+    let span = usize::from(width).saturating_sub(2 * inset);
+    if span < 3 {
+        out.push_rule("─", style);
+        return out;
+    }
+    let arm = (span - 1) / 2;
+    let text = format!(
+        "{}{BREAK_MARK}{}",
+        repeat_to_width("─", arm),
+        repeat_to_width("─", span - 1 - arm)
+    );
+    let row = out.push_blank_row(style);
+    out.write_str(row, inset, &text, style);
     out
 }
 
+/// The lozenge centred on a thematic break.
+const BREAK_MARK: &str = "◈";
+
+/// The text between the brackets of a footnote definition's marker.
+///
+/// A referenced footnote is labelled with the same number its references carry, so the
+/// two can be matched by eye; one nothing refers to falls back to its name, which is
+/// the only handle a reader has on it.
+pub(crate) fn footnote_label(name: &str, number: Option<u32>) -> String {
+    number.map_or_else(|| name.to_string(), |number| number.to_string())
+}
+
 /// A footnote definition, laid out like a list item with a `[n]` marker.
-fn footnote(node: &Node, name: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
+fn footnote(node: &Node, label: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     let marker = Line::new(vec![Span::new(
-        format!("[{name}] "),
+        format!("[{label}] "),
         ctx.theme.block.footnote_label,
     )]);
     let indent = u16::try_from(marker.width()).unwrap_or(u16::MAX).min(width);
@@ -265,16 +310,15 @@ fn footnote(node: &Node, name: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
 fn image(node: &Node, url: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     let theme = ctx.theme;
     let text = node.plain_text();
-    let alt = if text.trim().is_empty() {
-        "image"
-    } else {
-        text.as_str()
-    };
+    let alt = text.trim();
     if width < 6 {
-        return Canvas::from_text(width, alt, theme.text.image_alt);
+        let fallback = if alt.is_empty() { url } else { alt };
+        return Canvas::from_text(width, fallback, theme.text.image_alt);
     }
     let inner_width = width - 2;
     let mut inner = Canvas::empty(inner_width);
+    // The frame's label already says "image"; repeating it as the body when there is
+    // no alt text says nothing twice. With no alt, the target alone is the caption.
     for line in inline::wrap(
         &[Span::new(alt, theme.text.image_alt)],
         usize::from(inner_width),

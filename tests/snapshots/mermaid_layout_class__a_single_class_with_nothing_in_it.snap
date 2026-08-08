@@ -1,0 +1,7 @@
+---
+source: tests/mermaid_layout_class.rs
+expression: "render(&diagram(vec![class(\"Empty\", Vec::new())], Vec::new()), 30)"
+---
+          ┌───────┐           
+          │ Empty │           
+          └───────┘

@@ -42,7 +42,11 @@ const TOC_WIDTH_RANGE: std::ops::RangeInclusive<u16> = 12..=80;
 pub struct Config {
     /// The name of the theme to start in.
     pub theme: String,
-    /// Whether Nerd Font glyphs may be used. `--no-icons` forces this off.
+    /// Whether Nerd Font glyphs may be used.
+    ///
+    /// Off by default, because the glyphs come out as replacement boxes on a terminal
+    /// without a patched font and there is no way to ask the terminal whether it has
+    /// one. Turn them on with `--icons` or `icons = true`.
     pub icons: bool,
     /// Whether fenced code blocks are drawn with a line-number gutter.
     pub line_numbers: bool,
@@ -51,6 +55,11 @@ pub struct Config {
     /// The width of the table-of-contents pane, in columns.
     pub toc_width: u16,
     /// Whether the mouse wheel scrolls and clicks select in the TOC.
+    ///
+    /// Off by default. Capturing the mouse takes the terminal's own drag-select away,
+    /// and selecting text is the main thing anyone does with a read-only viewer that
+    /// is not scrolling it; `less` does not capture either. Turn it on with `--mouse`
+    /// or `mouse = true`.
     pub mouse: bool,
     /// How many document lines one mouse-wheel notch scrolls.
     pub scroll_step: u16,
@@ -64,11 +73,11 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             theme: "dark".to_string(),
-            icons: true,
+            icons: false,
             line_numbers: false,
             toc_open: false,
             toc_width: DEFAULT_TOC_WIDTH,
-            mouse: true,
+            mouse: false,
             scroll_step: 3,
             keys: KeyBindings::defaults(),
             themes: BTreeMap::new(),
@@ -109,26 +118,24 @@ impl Config {
 
     /// Loads the configuration from [`Config::default_path`].
     ///
-    /// A missing file is not a problem: it yields the defaults silently.
+    /// A missing file is not a problem here: nobody asked for it, so it yields the
+    /// defaults silently. An explicitly named file is a different matter — see
+    /// [`Config::load_from`].
     pub fn load() -> Loaded {
         match Self::default_path() {
-            Some(path) => Self::load_from(&path),
-            None => Loaded::defaults(),
+            Some(path) if path.exists() => Self::load_from(&path),
+            _ => Loaded::defaults(),
         }
     }
 
     /// Loads the configuration from an explicit path.
     ///
-    /// A missing file yields defaults plus a [`ConfigError::Read`] problem, because an
-    /// explicitly requested file that is not there is worth mentioning.
+    /// A missing file yields defaults plus a [`ConfigError::Read`] problem, because a
+    /// file the user named and that is not there is a typo, not an optional extra
+    /// (usability review P10).
     pub fn load_from(path: &Path) -> Loaded {
         match std::fs::read_to_string(path) {
             Ok(text) => Self::parse_str(&text, path),
-            Err(source) if source.kind() == std::io::ErrorKind::NotFound => Loaded {
-                config: Config::default(),
-                problems: Vec::new(),
-                path: None,
-            },
             Err(source) => Loaded {
                 config: Config::default(),
                 problems: vec![ConfigError::Read {
@@ -329,12 +336,9 @@ impl IntoThemes for BTreeMap<String, RawTheme> {
     ) -> BTreeMap<String, Theme> {
         let mut themes = BTreeMap::new();
         for (name, raw) in self {
-            match raw.build(&name, text, path) {
-                Ok(theme) => {
-                    themes.insert(name, theme);
-                }
-                Err(problem) => problems.push(problem),
-            }
+            let (theme, mut trouble) = raw.build(&name, text, path);
+            problems.append(&mut trouble);
+            themes.insert(name, theme);
         }
         themes
     }
@@ -342,10 +346,23 @@ impl IntoThemes for BTreeMap<String, RawTheme> {
 
 impl RawTheme {
     /// Builds the theme, inheriting anything unspecified from its base.
-    fn build(self, name: &str, text: &str, path: &Path) -> Result<Theme, ConfigError> {
+    ///
+    /// Problems are reported *per slot* and the theme is kept regardless. Design spec
+    /// §9 sells a custom theme as a two-line tweak; throwing the whole thing away over
+    /// one mistyped colour, and then reporting the theme as unknown (usability review
+    /// P11), makes that promise false exactly when the user is learning the format.
+    fn build(self, name: &str, text: &str, path: &Path) -> (Theme, Vec<ConfigError>) {
+        let mut problems = Vec::new();
         let base_name = self.base.as_deref().unwrap_or("dark");
-        let base = Theme::builtin(base_name)
-            .map_err(|error| problem(text, path, "base", &format!("in theme `{name}`: {error}")))?;
+        let base = Theme::builtin(base_name).unwrap_or_else(|error| {
+            problems.push(problem(
+                text,
+                path,
+                "base",
+                &format!("in theme `{name}`: {error}, using the dark theme"),
+            ));
+            Theme::default_dark()
+        });
         let is_dark = self.dark.unwrap_or(base.is_dark);
 
         let mut palette = base.palette.clone();
@@ -368,11 +385,19 @@ impl RawTheme {
         ];
         for (slot, value, target) in slots {
             let Some(value) = value else { continue };
-            *target = Color::parse(&value).map_err(|error| {
-                problem(text, path, slot, &format!("in theme `{name}`: {error}"))
-            })?;
+            match Color::parse(&value) {
+                Ok(color) => *target = color,
+                // The slot keeps the base theme's colour, which is the smallest
+                // correction that still leaves a usable theme.
+                Err(error) => problems.push(problem(
+                    text,
+                    path,
+                    slot,
+                    &format!("in theme `{name}`: {error}, keeping the `{base_name}` colour"),
+                )),
+            }
         }
-        Ok(Theme::from_palette(name, is_dark, palette))
+        (Theme::from_palette(name, is_dark, palette), problems)
     }
 }
 

@@ -22,6 +22,8 @@
 #[cfg(test)]
 mod tests;
 
+use std::collections::BTreeMap;
+
 use crate::canvas::Anchor;
 use crate::doc::Doc;
 
@@ -87,12 +89,17 @@ impl Toc {
     /// Headings without a matching anchor keep `row == None` and are skipped by
     /// [`Toc::current`] and [`Toc::row_of`]; that is the honest outcome for a heading
     /// the renderer did not emit.
+    ///
+    /// Indexed by id first: the obvious nested scan is quadratic in the number of
+    /// headings, which is what made a heading-dense document take seconds to open
+    /// (usability review B5) rather than merely being large.
     pub fn attach_anchors(&mut self, anchors: &[Anchor]) {
+        let rows: BTreeMap<&str, usize> = anchors
+            .iter()
+            .map(|anchor| (anchor.id.as_str(), anchor.row))
+            .collect();
         for entry in &mut self.entries {
-            entry.row = anchors
-                .iter()
-                .find(|anchor| anchor.id == entry.id)
-                .map(|anchor| anchor.row);
+            entry.row = rows.get(entry.id.as_str()).copied();
         }
     }
 

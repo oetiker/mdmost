@@ -145,16 +145,24 @@ fn subroutine(body: &Canvas, theme: &Theme) -> Canvas {
     out
 }
 
-/// A cylinder: a rectangle with a lid rule under its top edge.
+/// A cylinder: a rounded box with an ellipse rule under its lid and above its base.
+///
+/// Both rules are drawn, so the shape reads as a drum seen slightly from above rather
+/// than as a rectangle with one stray line across it.
 fn cylinder(body: &Canvas, theme: &Theme) -> Canvas {
     let styles = theme.diagram;
     let framed = body.framed(BorderSet::ROUNDED, styles.node_border, None, theme.base());
     let width = usize::from(framed.width());
+    let mut rule = String::from("├");
+    rule.push_str(&"─".repeat(width.saturating_sub(2)));
+    rule.push('┤');
+    let last = framed.height().saturating_sub(1);
     let mut out = Canvas::new(framed.width(), 0, theme.base());
-    let mut lid = String::from("├");
-    lid.push_str(&"─".repeat(width.saturating_sub(2)));
-    lid.push('┤');
     for row in 0..framed.height() {
+        if row == last {
+            let index = out.push_blank_row(theme.base());
+            out.write_str(index, 0, &rule, styles.node_border);
+        }
         let index = out.push_blank_row(theme.base());
         if let Some(cells) = framed.row(row) {
             for (col, cell) in cells.iter().enumerate() {
@@ -163,7 +171,7 @@ fn cylinder(body: &Canvas, theme: &Theme) -> Canvas {
         }
         if row == 0 {
             let index = out.push_blank_row(theme.base());
-            out.write_str(index, 0, &lid, styles.node_border);
+            out.write_str(index, 0, &rule, styles.node_border);
         }
     }
     out

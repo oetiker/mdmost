@@ -48,9 +48,19 @@ struct Cli {
     #[arg(long, value_name = "NAME")]
     theme: Option<String>,
 
-    /// Use plain Unicode instead of Nerd Font glyphs.
+    /// Use plain Unicode instead of Nerd Font glyphs. This is the default.
     #[arg(long)]
     no_icons: bool,
+
+    /// Use Nerd Font glyphs. Needs a terminal font that has them.
+    #[arg(long, conflicts_with = "no_icons")]
+    icons: bool,
+
+    /// Capture the mouse: wheel scrolls, clicks select in the contents pane.
+    ///
+    /// Off by default because capturing takes the terminal's own drag-select away.
+    #[arg(long)]
+    mouse: bool,
 
     /// Start with the table-of-contents pane open.
     #[arg(long)]
@@ -73,6 +83,9 @@ fn main() -> ExitCode {
     };
     match run(cli) {
         Ok(code) => code,
+        // `mdless x.md | head` is the ordinary `$PAGER` idiom, and the reader closing
+        // the pipe is not a failure: pagers exit quietly (usability P12, visual P17).
+        Err(error) if is_broken_pipe(&error) => ExitCode::SUCCESS,
         Err(error) => {
             // The terminal may or may not have been taken over; restoring twice is
             // harmless and restoring not at all is not.
@@ -81,6 +94,15 @@ fn main() -> ExitCode {
             ExitCode::from(EXIT_INPUT)
         }
     }
+}
+
+/// Whether a failure is nothing worse than the reader of our output going away.
+fn is_broken_pipe(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|io_error| io_error.kind() == io::ErrorKind::BrokenPipe)
+    })
 }
 
 /// The real entry point.
@@ -97,7 +119,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     for problem in &loaded.problems {
         let _ = writeln!(io::stderr(), "mdless: {problem}");
     }
-    let config = loaded.config;
+    let mut config = loaded.config;
 
     let (source, title) = match read_input(cli.file.as_deref()) {
         Ok(pair) => pair,
@@ -106,10 +128,13 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             return Ok(ExitCode::from(EXIT_INPUT));
         }
     };
-    let doc = Doc::parse(&source);
+    let doc = Doc::parse_auto(&source);
 
     let theme_name = cli.theme.clone().unwrap_or_else(|| config.theme.clone());
-    let icons = config.icons && !cli.no_icons;
+    let icons = (config.icons || cli.icons) && !cli.no_icons;
+    if cli.mouse {
+        config.mouse = true;
+    }
     let stdout_is_terminal = io::stdout().is_terminal();
 
     if cli.render_once || !stdout_is_terminal {

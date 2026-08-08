@@ -26,7 +26,7 @@ use crate::canvas::Canvas;
 use crate::error::MermaidError;
 use crate::mermaid::ast::{GanttChart, GanttTask, TaskProgress};
 use crate::mermaid::chrome;
-use crate::text::{Align, display_width};
+use crate::text::display_width;
 use crate::theme::{Style, Theme};
 use time::{DAY, DateTime, HOUR, WEEK};
 
@@ -53,23 +53,18 @@ const MAX_TICKS: usize = 1024;
 /// legible plot area side by side.
 pub fn draw(chart: &GanttChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidError> {
     let Some((start, end)) = chart.span() else {
-        let body = empty_body(width, theme);
+        let body = chrome::placeholder(EMPTY_TEXT, width, theme);
         return chrome::compose(chart.title.as_deref(), &body, width, theme);
     };
     // A chart whose tasks are all milestones on the same instant has a zero-length
     // span; widen it to a day so the axis has something to divide.
-    let end = if end > start { end } else { start + DAY };
+    let end = if end > start {
+        end
+    } else {
+        time::clamp_instant(start.saturating_add(DAY))
+    };
     let body = plot(chart, start, end, width, theme)?;
     chrome::compose(chart.title.as_deref(), &body, width, theme)
-}
-
-/// The placeholder plot used when a chart declares no tasks at all.
-fn empty_body(width: u16, theme: &Theme) -> Canvas {
-    let text = chrome::fit(EMPTY_TEXT, usize::from(width));
-    let cols = u16::try_from(display_width(&text)).unwrap_or(0);
-    let mut body = Canvas::new(cols, 0, theme.base());
-    body.push_text(&text, Align::Left, theme.text.dim);
-    body
 }
 
 /// How wide the gutter and the plot area are.
@@ -153,10 +148,7 @@ fn plot(
         let at = columns.plot_start() + tick.column;
         let text = chrome::fit(&tick.label, columns.plot);
         let span = display_width(&text);
-        // Centre the label on its tick, then nudge it back inside the plot area.
-        let left = at
-            .saturating_sub(span / 2)
-            .clamp(columns.plot_start(), columns.total().saturating_sub(span));
+        let left = columns.plot_start() + tick_left(tick.column, span, columns.plot);
         body.write_str(0, left, &text, theme.diagram.axis);
         // Column zero is already marked by the axis' own left terminator.
         if tick.column > 0 {
@@ -185,7 +177,9 @@ fn plot(
             body.write_str(
                 row,
                 indent,
-                &chrome::fit(&task.name, columns.gutter - indent),
+                // `MIN_GUTTER` exceeds `TASK_INDENT`, so this cannot currently reach
+                // zero; saturating keeps that a local fact rather than a global one.
+                &chrome::fit(&task.name, columns.gutter.saturating_sub(indent)),
                 theme.diagram.node_text,
             );
             body.write_str(row, columns.separator(), "│", theme.diagram.axis);
@@ -340,16 +334,20 @@ impl Step {
                 }
             }
             Self::Months(step) => {
-                let mut index = aligned_month_index(start, step);
+                // Step back to the month boundary `start` sits in, then align that
+                // down to a whole multiple of the step so quarters and years land on
+                // January rather than on whatever month the chart happens to open in.
+                let step = step.max(1);
+                let month = time::month_start(start);
+                let mut at = time::add_months(month, -months_past_boundary(month, step));
                 while out.len() < MAX_TICKS {
-                    let at = epoch_of_month_index(index);
                     if at > end {
                         break;
                     }
                     if at >= start {
                         out.push(at);
                     }
-                    index += step;
+                    at = time::add_months(at, step);
                 }
             }
         }
@@ -357,19 +355,26 @@ impl Step {
     }
 }
 
-/// The first month index at or before `seconds` that is a multiple of `step`.
-fn aligned_month_index(seconds: i64, step: i64) -> i64 {
+/// How many whole months `seconds` sits past the previous multiple of `step`.
+///
+/// Months are counted from January of year 0, so a step of 3 puts ticks on calendar
+/// quarters and a step of 12 puts them on January.
+fn months_past_boundary(seconds: i64, step: i64) -> i64 {
     let at = DateTime::from_epoch(seconds);
     let index = at.year * 12 + i64::from(at.month) - 1;
-    index.div_euclid(step.max(1)) * step.max(1)
+    index - index.div_euclid(step.max(1)) * step.max(1)
 }
 
-/// The instant a month index (months since year 0, January) starts at.
-fn epoch_of_month_index(index: i64) -> i64 {
-    let year = index.div_euclid(12);
-    // `rem_euclid(12)` lies in `0..=11`, so this is always a valid month number.
-    let month = (index.rem_euclid(12) + 1) as u32;
-    time::days_from_civil(year, month, 1) * DAY
+/// The plot-local column a tick label starts at, given its width.
+///
+/// The label is centred on its tick and then nudged back inside the plot area. Tick
+/// placement and the thinning pass that decides which ticks survive must agree about
+/// this exactly, or labels are dropped for collisions that never happen — so both go
+/// through here.
+fn tick_left(column: usize, span: usize, columns: usize) -> usize {
+    column
+        .saturating_sub(span / 2)
+        .min(columns.saturating_sub(span))
 }
 
 impl Axis {
@@ -422,10 +427,7 @@ impl Axis {
                 continue;
             }
             let span = display_width(&tick.label);
-            let left = tick
-                .column
-                .saturating_sub(span / 2)
-                .min(plot.saturating_sub(span));
+            let left = tick_left(tick.column, span, plot);
             if left >= next_free {
                 next_free = left + span + TICK_PADDING;
                 kept.push(tick);
@@ -463,11 +465,25 @@ mod tests {
     }
 
     #[test]
-    fn month_indices_round_trip() {
+    fn month_ticks_land_on_calendar_boundaries() {
         let march = time::days_from_civil(2024, 3, 1) * DAY;
-        assert_eq!(epoch_of_month_index(aligned_month_index(march, 1)), march);
-        let quarter = epoch_of_month_index(aligned_month_index(march, 3));
+        assert_eq!(months_past_boundary(march, 1), 0);
+        // March is the third month of its quarter-aligned run, so a quarterly step
+        // walks back two months to January.
+        assert_eq!(months_past_boundary(march, 3), 2);
+        let quarter = time::add_months(march, -months_past_boundary(march, 3));
         assert_eq!(quarter, time::days_from_civil(2024, 1, 1) * DAY);
+    }
+
+    #[test]
+    fn a_tick_label_is_centred_then_nudged_inside_the_plot() {
+        // Centred in the middle of the plot.
+        assert_eq!(tick_left(10, 4, 20), 8);
+        // Never off the left edge, never past the right edge.
+        assert_eq!(tick_left(0, 4, 20), 0);
+        assert_eq!(tick_left(20, 4, 20), 16);
+        // A label wider than the plot starts at zero instead of panicking.
+        assert_eq!(tick_left(3, 40, 20), 0);
     }
 
     #[test]

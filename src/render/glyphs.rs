@@ -14,6 +14,20 @@
 //!
 //! Box-drawing characters — frames, quote bars, rules, the overflow marker — are not
 //! icons and are identical in both sets, so they are not listed here.
+//!
+//! # The disjointness rule
+//!
+//! The three marker families each own a distinct *shape* vocabulary, and no glyph is
+//! ever shared between them:
+//!
+//! | family          | shape        | plain           | nerd                    |
+//! |-----------------|--------------|-----------------|-------------------------|
+//! | heading prefix  | angular      | diamonds, triangles, chevron | diamond, play, carets, angles |
+//! | list bullet     | round        | dots and rings  | circles                 |
+//! | task box        | square       | ballot boxes    | squares                 |
+//!
+//! A reader must never see one marker mean two things, so a test in this module
+//! asserts the three families are pairwise disjoint in both sets.
 
 /// The glyphs used for one rendering pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,8 +47,10 @@ pub(crate) struct Glyphs {
 impl Glyphs {
     /// Plain Unicode, for terminals without a Nerd Font (`--no-icons`).
     pub const PLAIN: Self = Self {
-        heading: ["◆", "◈", "▸", "▹", "•", "·"],
-        bullets: ["•", "◦", "‣", "·"],
+        // Angular for headings (solid diamond → hollow diamond → solid triangle →
+        // hollow triangle → chevron), round for bullets, boxes for tasks.
+        heading: ["◆", "◈", "◇", "▸", "▹", "❯"],
+        bullets: ["•", "◦", "⁃", "·"],
         task_checked: "☑",
         task_unchecked: "☐",
         code_icons: false,
@@ -45,21 +61,23 @@ impl Glyphs {
     /// The code points are the classic Font Awesome 4 block that every Nerd Font
     /// patch carries, named in the comments so they can be checked against
     /// <https://www.nerdfonts.com/cheat-sheet>. Headings step down in visual weight
-    /// exactly as the plain set does.
+    /// exactly as the plain set does, and — as in the plain set — headings are
+    /// angular, bullets are round and task boxes are square, so the three families
+    /// never share a glyph.
     pub const NERD: Self = Self {
         heading: [
-            "\u{f0c8}", // nf-fa-square
-            "\u{f096}", // nf-fa-square_o
-            "\u{f111}", // nf-fa-circle
-            "\u{f10c}", // nf-fa-circle_o
+            "\u{f219}", // nf-fa-diamond
+            "\u{f04b}", // nf-fa-play
             "\u{f0da}", // nf-fa-caret_right
+            "\u{f054}", // nf-fa-chevron_right
+            "\u{f101}", // nf-fa-angle_double_right
             "\u{f105}", // nf-fa-angle_right
         ],
         bullets: [
+            "\u{f111}", // nf-fa-circle
             "\u{f192}", // nf-fa-dot_circle_o
+            "\u{f10c}", // nf-fa-circle_o
             "\u{f1db}", // nf-fa-circle_thin
-            "\u{f0da}", // nf-fa-caret_right
-            "\u{f105}", // nf-fa-angle_right
         ],
         task_checked: "\u{f046}",   // nf-fa-check_square_o
         task_unchecked: "\u{f096}", // nf-fa-square_o
@@ -202,6 +220,37 @@ mod tests {
             }
             for depth in 0..12usize {
                 assert_eq!(set.bullet(depth), set.bullet(depth + set.bullets.len()));
+            }
+        }
+    }
+
+    /// A marker must mean exactly one thing. Heading prefixes, list bullets and task
+    /// boxes are three separate vocabularies; sharing a glyph between them makes the
+    /// same mark say "H5" in one place and "list item" in another.
+    #[test]
+    fn the_three_marker_families_are_disjoint() {
+        for set in [Glyphs::PLAIN, Glyphs::NERD] {
+            let families: [(&str, Vec<&'static str>); 3] = [
+                ("heading", set.heading.to_vec()),
+                ("bullets", set.bullets.to_vec()),
+                ("tasks", vec![set.task_checked, set.task_unchecked]),
+            ];
+            for (i, (left_name, left)) in families.iter().enumerate() {
+                for glyph in left {
+                    assert_eq!(
+                        left.iter().filter(|g| *g == glyph).count(),
+                        1,
+                        "{left_name} repeats {glyph:?}"
+                    );
+                }
+                for (right_name, right) in &families[i + 1..] {
+                    for glyph in left {
+                        assert!(
+                            !right.contains(glyph),
+                            "{glyph:?} is used by both {left_name} and {right_name}"
+                        );
+                    }
+                }
             }
         }
     }

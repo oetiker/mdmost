@@ -264,6 +264,12 @@ impl Builder {
                 format!("`{}` is a subgraph and cannot be used as a node", node.key),
             ));
         }
+        if self.nodes.is_empty() {
+            // A header with no body is not a diagram. Reporting it means the block
+            // renderer shows the source with a caption, which tells the reader more
+            // than an empty box would (design spec §6).
+            return Err(lex::syntax(last_line, "flowchart has no nodes".to_string()));
+        }
         Ok(Flowchart {
             direction: self.direction,
             nodes: self.nodes,

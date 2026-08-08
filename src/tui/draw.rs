@@ -15,6 +15,11 @@ use crate::theme::{Attributes, Color, Style};
 use super::app::{App, Overlay};
 use super::chrome;
 
+/// Drawn in the first column when content is scrolled off to the left.
+const LEFT_MARKER: &str = "\u{2039}";
+/// Drawn in the last column when content continues past the right edge.
+const RIGHT_MARKER: &str = "\u{203a}";
+
 /// Draws one frame.
 pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let area = frame.area();
@@ -49,8 +54,19 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let hscroll = app.hscroll();
     let _ = app.canvas();
     blit(buffer, doc_area, app.rendered(), scroll, hscroll, base);
+    edge_markers(
+        buffer,
+        doc_area,
+        app.rendered(),
+        scroll,
+        hscroll,
+        app.theme(),
+    );
     highlight_matches(buffer, doc_area, app, scroll, hscroll);
     scrollbar(buffer, bar_area, app);
+    if app.rendered().is_empty() {
+        empty_notice(buffer, doc_area, app.theme());
+    }
 
     if toc_width > 0 {
         chrome::draw_toc(buffer, toc_area, app);
@@ -58,8 +74,42 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     chrome::draw_status(buffer, status_area, app);
 
     if *app.overlay() == Overlay::Help {
-        chrome::draw_help(buffer, area, app);
+        // The document area only: the status bar keeps its `h help` hint visible.
+        chrome::draw_help(
+            buffer,
+            Rect::new(area.x, area.y, area.width, body_height),
+            app,
+        );
     }
+}
+
+/// Draws the frame shown while the document is still being laid out.
+///
+/// Deliberately reads nothing that would trigger a render: its whole purpose is to
+/// reach the terminal *before* the expensive work, so that opening a large document
+/// looks like opening a large document rather than like a hang.
+pub fn draw_splash(frame: &mut Frame<'_>, app: &App) {
+    let area = frame.area();
+    let theme = app.theme();
+    let buffer = frame.buffer_mut();
+    buffer.set_style(area, term_style(theme.base()));
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let row = area.y + area.height.saturating_sub(1);
+    buffer.set_style(
+        Rect::new(area.x, row, area.width, 1),
+        term_style(theme.ui.status_bar),
+    );
+    buffer.set_string(
+        area.x,
+        row,
+        crate::text::truncate_to_width(
+            &format!(" {} — rendering…", app.title()),
+            usize::from(area.width),
+        ),
+        term_style(theme.ui.status_bar),
+    );
 }
 
 /// Copies a vertical slice of the document canvas into the frame buffer.
@@ -91,6 +141,64 @@ fn blit(buffer: &mut Buffer, area: Rect, canvas: &Canvas, top: usize, left: u16,
             }
         }
     }
+}
+
+/// Paints the left and right cut-off markers on rows that reach past the viewport.
+///
+/// The document canvas is now wider than the viewport wherever a block asked to be
+/// (see [`super::wide`]), so the truncation the reader can see is a property of the
+/// *window*, not of the render. Marking both edges is what tells them there is more
+/// to the right and — the half that was missing entirely — that something is already
+/// off to the left.
+fn edge_markers(
+    buffer: &mut Buffer,
+    area: Rect,
+    canvas: &Canvas,
+    top: usize,
+    left: u16,
+    theme: &crate::theme::Theme,
+) {
+    if area.width == 0 {
+        return;
+    }
+    let style = term_style(theme.code.overflow_marker);
+    for y in 0..area.height {
+        let Some(cells) = canvas.row(top + usize::from(y)) else {
+            break;
+        };
+        let occupied = |range: std::ops::Range<usize>| {
+            cells
+                .get(range)
+                .is_some_and(|slice| slice.iter().any(|cell| !cell.text().trim().is_empty()))
+        };
+        if left > 0
+            && occupied(0..usize::from(left))
+            && let Some(cell) = buffer.cell_mut((area.x, area.y + y))
+        {
+            cell.set_symbol(LEFT_MARKER);
+            cell.set_style(style);
+        }
+        let right = usize::from(left) + usize::from(area.width);
+        if occupied(right..cells.len())
+            && let Some(cell) = buffer.cell_mut((area.x + area.width - 1, area.y + y))
+        {
+            cell.set_symbol(RIGHT_MARKER);
+            cell.set_style(style);
+        }
+    }
+}
+
+/// Says so, rather than showing a screenful of nothing (usability P14).
+fn empty_notice(buffer: &mut Buffer, area: Rect, theme: &crate::theme::Theme) {
+    if area.width < 4 || area.height == 0 {
+        return;
+    }
+    buffer.set_string(
+        area.x,
+        area.y,
+        "(empty document)",
+        term_style(theme.text.dim),
+    );
 }
 
 /// Repaints search matches on top of the document.

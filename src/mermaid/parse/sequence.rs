@@ -12,8 +12,8 @@
 
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
-    BlockKind, Branch, Label, Message, MessageHead, MessageLine, Note, NotePlacement, Participant,
-    ParticipantId, ParticipantKind, SequenceBlock, SequenceDiagram, SequenceItem,
+    BlockKind, Branch, Label, Message, MessageHead, MessageLine, Note, Participant, ParticipantId,
+    ParticipantKind, SequenceBlock, SequenceDiagram, SequenceItem,
 };
 
 use super::intern;
@@ -126,7 +126,7 @@ impl Builder {
         } else {
             ParticipantKind::Participant
         };
-        let (key, alias) = match split_alias(rest) {
+        let (key, alias) = match lex::split_as(rest) {
             Some((key, alias)) => (key, Some(alias)),
             None => (rest.trim(), None),
         };
@@ -146,14 +146,7 @@ impl Builder {
 
     /// Handles a `Note left of|right of|over …` statement.
     fn note(&mut self, rest: &str, line: usize) -> Result<(), MermaidError> {
-        let lowered = rest.to_ascii_lowercase();
-        let (placement, after) = if let Some(after) = lowered.strip_prefix("left of") {
-            (NotePlacement::LeftOf, &rest[rest.len() - after.len()..])
-        } else if let Some(after) = lowered.strip_prefix("right of") {
-            (NotePlacement::RightOf, &rest[rest.len() - after.len()..])
-        } else if let Some(after) = lowered.strip_prefix("over") {
-            (NotePlacement::Over, &rest[rest.len() - after.len()..])
-        } else {
+        let Some((placement, after)) = lex::split_note_placement(rest) else {
             return Err(lex::syntax(
                 line,
                 "note without `left of`/`right of`/`over`",
@@ -296,13 +289,6 @@ impl Builder {
 fn label_of(rest: &str) -> Option<Label> {
     let rest = lex::unquote(rest.trim());
     (!rest.is_empty()).then(|| Label::parse(rest))
-}
-
-/// Splits `A as Alice` into `("A", "Alice")`.
-fn split_alias(text: &str) -> Option<(&str, &str)> {
-    let lowered = text.to_ascii_lowercase();
-    let at = lowered.find(" as ")?;
-    Some((text[..at].trim(), text[at + 4..].trim()))
 }
 
 /// A message arrow found in a statement.

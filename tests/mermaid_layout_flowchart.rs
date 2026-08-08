@@ -300,3 +300,63 @@ fn a_long_edge_skips_a_rank() {
     let edges = vec![edge(0, 1), edge(1, 2), edge(2, 3), edge(0, 3)];
     insta::assert_snapshot!(render(&chart(Direction::TopToBottom, nodes, edges), 60));
 }
+
+#[test]
+fn wide_and_emoji_labels_keep_the_grid() {
+    let nodes = vec![
+        node("A", "开始处理", NodeShape::Round),
+        node("B", "🚀 deploy", NodeShape::Rect),
+        node("C", "日本語のラベル", NodeShape::Stadium),
+    ];
+    let edges = vec![
+        FlowEdge {
+            label: Some(Label::line("はい")),
+            ..edge(0, 1)
+        },
+        edge(1, 2),
+    ];
+    insta::assert_snapshot!(render(&chart(Direction::TopToBottom, nodes, edges), 60));
+}
+
+#[test]
+fn two_edges_between_the_same_pair() {
+    let nodes = vec![
+        node("A", "Producer", NodeShape::Rect),
+        node("B", "Consumer", NodeShape::Rect),
+    ];
+    let edges = vec![
+        FlowEdge {
+            label: Some(Label::line("data")),
+            ..edge(0, 1)
+        },
+        FlowEdge {
+            stroke: EdgeStroke::Dotted,
+            label: Some(Label::line("ack")),
+            ..edge(1, 0)
+        },
+    ];
+    insta::assert_snapshot!(render(&chart(Direction::TopToBottom, nodes, edges), 50));
+}
+
+#[test]
+fn a_hundred_nodes_still_fit_the_budget() {
+    let nodes: Vec<FlowNode> = (0..100)
+        .map(|index| node(&format!("N{index}"), &format!("n{index}"), NodeShape::Rect))
+        .collect();
+    let edges: Vec<FlowEdge> = (1..100).map(|index| edge(index / 3, index)).collect();
+    let chart = chart(Direction::LeftToRight, nodes, edges);
+    let theme = Theme::default_dark();
+    let canvas = flowchart::draw(&chart, 200, &theme).expect("a hundred nodes fit in 200 columns");
+    assert_eq!(canvas.width(), 200);
+    canvas.check_invariants().expect("canvas contract holds");
+    // Every node is drawn exactly once, so nothing was overlapped or clipped.
+    let text = canvas.plain_text();
+    for index in 0..100 {
+        assert_eq!(
+            text.matches(&format!("n{index} ")).count()
+                + text.matches(&format!("n{index}\n")).count(),
+            1,
+            "node n{index} drawn exactly once"
+        );
+    }
+}

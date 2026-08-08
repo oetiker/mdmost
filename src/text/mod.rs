@@ -48,17 +48,107 @@ pub fn display_width(text: &str) -> usize {
     text.width()
 }
 
-/// The display width of a single grapheme cluster, clamped to `0..=2`.
+/// The display width of a **one-cell piece** of text, in `0..=2`.
 ///
-/// Terminal cells hold at most a double-width cluster; anything `unicode-width`
-/// reports as wider is clamped so that the canvas contract cannot be violated.
-/// A cluster of width `0` (a lone combining mark, a zero-width joiner) is legal here
-/// and is merged into the preceding cell by the canvas.
+/// A terminal cell holds at most a double-width cluster, so this returns at most `2`.
+/// That ceiling is a *backstop*, not a guarantee about the input: a grapheme cluster
+/// can genuinely be wider than two columns — a wide base character followed by a
+/// spacing combining mark (Unicode category `Mc`) advances the cursor by three — and
+/// clamping such a cluster to `2` makes the cell claim a width its own text does not
+/// have. That mismatch was a live canvas-contract violation (design spec §4) for the
+/// whole of the project's early life.
+///
+/// Callers that are filling cells must therefore split their text with
+/// [`cell_clusters`] first, which never yields a piece wider than two columns; the
+/// clamp here then never fires. A width of `0` (a lone combining mark, a zero-width
+/// joiner) is legal and is merged into the preceding cell by the canvas.
+///
+/// ZWJ emoji sequences and regional-indicator flags are *not* affected: `unicode-width`
+/// already measures those clusters as two columns, which is what terminals draw.
 pub fn grapheme_width(cluster: &str) -> u8 {
     match cluster.width() {
         0 => 0,
         1 => 1,
         _ => 2,
+    }
+}
+
+/// Splits `text` into pieces that each occupy exactly one terminal cell.
+///
+/// This is [`graphemes`] with one extra rule: a cluster too wide for a single cell is
+/// broken into a piece per advancing character, each carrying the zero-width marks that
+/// follow it. Only clusters of three columns or more are ever broken — in practice a
+/// wide base plus a spacing mark — so combining marks, ZWJ emoji sequences and flags
+/// are untouched, because `unicode-width` already measures those at two columns or
+/// fewer.
+///
+/// The pieces concatenate back to `text` exactly, so nothing the author wrote is lost;
+/// only the column accounting changes, from a lie to the truth.
+pub fn cell_clusters(text: &str) -> CellClusters<'_> {
+    CellClusters { rest: text }
+}
+
+/// The iterator returned by [`cell_clusters`].
+#[derive(Debug, Clone)]
+pub struct CellClusters<'a> {
+    rest: &'a str,
+}
+
+impl<'a> Iterator for CellClusters<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<&'a str> {
+        let cluster = graphemes(self.rest).next()?;
+        let piece = if display_width(cluster) <= 2 {
+            cluster
+        } else {
+            leading_cell(cluster)
+        };
+        // Every branch consumes at least one character, so this cannot spin.
+        debug_assert!(!piece.is_empty(), "cell piece must make progress");
+        self.rest = &self.rest[piece.len()..];
+        Some(piece)
+    }
+}
+
+/// The leading one-cell piece of an over-wide cluster.
+///
+/// That is its first character together with any zero-width characters trailing it;
+/// the next advancing character starts the following piece.
+fn leading_cell(cluster: &str) -> &str {
+    let mut end = cluster.len();
+    for (at, ch) in cluster.char_indices() {
+        if at == 0 {
+            end = ch.len_utf8();
+            continue;
+        }
+        if display_width(ch.encode_utf8(&mut [0u8; 4])) == 0 {
+            end = at + ch.len_utf8();
+        } else {
+            end = at;
+            break;
+        }
+    }
+    &cluster[..end]
+}
+
+/// Hands `extra` columns out across `slots`, as evenly as whole columns allow.
+///
+/// Every slot grows by `extra / slots.len()`, and the `extra % slots.len()` columns
+/// that cannot be split go to the leftmost slots — so the result is deterministic and
+/// the total handed out is exactly `extra`. Distributing slack is the last step of
+/// every column negotiation in the program (table column widths, sequence-diagram
+/// participant spacing), and it was written out by hand each time.
+///
+/// An empty `slots` swallows the slack rather than dividing by zero.
+pub fn distribute_evenly(slots: &mut [usize], extra: usize) {
+    if slots.is_empty() || extra == 0 {
+        return;
+    }
+    let share = extra / slots.len();
+    let leftover = extra % slots.len();
+    for (at, slot) in slots.iter_mut().enumerate() {
+        *slot += share + usize::from(at < leftover);
     }
 }
 

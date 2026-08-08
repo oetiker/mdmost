@@ -56,15 +56,7 @@ pub fn render_table_full(
 /// Renders a table with an explicit context, clipping it to `width`.
 pub(crate) fn render_table_node(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
     let mut canvas = draw(node, info, width, ctx);
-    if canvas.width() > width {
-        canvas.truncate_width(width, ctx.base);
-        if width > 0 {
-            let marker = ctx.theme.table.overflow_marker;
-            for row in 0..canvas.height() {
-                canvas.write_str(row, usize::from(width) - 1, OVERFLOW_MARKER, marker);
-            }
-        }
-    }
+    canvas.clip_with_marker(width, OVERFLOW_MARKER, ctx.theme.table.overflow_marker);
     canvas.resize_width(width, ctx.base);
     canvas
 }
@@ -130,8 +122,11 @@ fn draw(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
         if !row.header {
             body_index += 1;
         }
-        let next_is_body = rows.get(index + 1).is_some_and(|next| !next.header);
-        if row.header && next_is_body {
+        // The rule under the header is drawn even when no body row follows: a header
+        // resting straight on the bottom border reads as a broken box, not as an
+        // empty table.
+        let last_header = row.header && !rows.get(index + 1).is_some_and(|next| next.header);
+        if last_header {
             out.append(
                 &border_row(&widths, set.tee_right, set.cross, set.tee_left, set, border),
                 ctx.base,
@@ -296,9 +291,9 @@ fn distribute(mins: &[usize], naturals: &[usize], budget: usize) -> Vec<usize> {
     }
     let total_natural: usize = naturals.iter().sum();
     if total_natural <= budget {
-        let mut widths = naturals;
-        spread(&mut widths, budget - total_natural);
-        return widths;
+        // Everything fits unwrapped: stop at natural width. Padding the columns out to
+        // the terminal would draw an eighty-column box around the letter "a".
+        return naturals;
     }
     let demand: usize = naturals
         .iter()
@@ -306,29 +301,44 @@ fn distribute(mins: &[usize], naturals: &[usize], budget: usize) -> Vec<usize> {
         .map(|(natural, min)| natural - min)
         .sum();
     let extra = budget - total_min;
-    let mut widths: Vec<usize> = if demand == 0 {
-        mins
-    } else {
-        mins.iter()
-            .zip(&naturals)
-            .map(|(min, natural)| min + extra * (natural - min) / demand)
-            .collect()
-    };
-    let used: usize = widths.iter().sum();
-    spread(&mut widths, budget.saturating_sub(used));
-    widths
+    if demand == 0 {
+        return mins;
+    }
+    // Share the growth in proportion to how much each column still wants, settling the
+    // rounding with largest remainders so equal demands get equal widths rather than a
+    // left-to-right stagger.
+    apportion(&mins, &naturals, extra, demand)
 }
 
-/// Hands `slack` extra columns out evenly, leftmost columns first.
-fn spread(widths: &mut [usize], slack: usize) {
-    if widths.is_empty() || slack == 0 {
-        return;
+/// Grows every column from its minimum toward its natural width, sharing `extra`
+/// columns in proportion to `natural - min` (design spec §7.2).
+///
+/// Rounding is settled by the largest-remainder method: columns with the largest
+/// fractional claim get the leftover columns first, so three columns with identical
+/// content come out identically wide.
+fn apportion(mins: &[usize], naturals: &[usize], extra: usize, demand: usize) -> Vec<usize> {
+    let claims: Vec<usize> = naturals
+        .iter()
+        .zip(mins)
+        .map(|(natural, min)| (natural - min) * extra)
+        .collect();
+    let mut widths: Vec<usize> = mins
+        .iter()
+        .zip(&claims)
+        .map(|(min, claim)| min + claim / demand)
+        .collect();
+    let mut leftover = extra - claims.iter().map(|claim| claim / demand).sum::<usize>();
+    // Ties break leftmost-first, which `sort_by_key` gives for free by being stable.
+    let mut order: Vec<usize> = (0..widths.len()).collect();
+    order.sort_by_key(|&index| std::cmp::Reverse(claims[index] % demand));
+    for index in order {
+        if leftover == 0 {
+            break;
+        }
+        widths[index] += 1;
+        leftover -= 1;
     }
-    let each = slack / widths.len();
-    let rest = slack % widths.len();
-    for (index, width) in widths.iter_mut().enumerate() {
-        *width += each + usize::from(index < rest);
-    }
+    widths
 }
 
 /// The minimum and natural width of a sequence of blocks.
@@ -338,8 +348,21 @@ fn spread(widths: &mut [usize], slack: usize) {
 pub(crate) fn measure(nodes: &[Node], ctx: Ctx<'_>) -> (usize, usize) {
     let mut min = 0usize;
     let mut natural = 0usize;
-    for node in nodes {
-        let (node_min, node_natural) = measure_block(node, ctx);
+    let mut index = 0usize;
+    while index < nodes.len() {
+        // Consecutive inline siblings wrap together as one run, exactly as
+        // `block::render_sequence` lays them out; measuring them one at a time would
+        // report the width of the longest *word* instead of the width of the sentence.
+        let (node_min, node_natural) = if block::is_inline(&nodes[index]) {
+            let start = index;
+            while index < nodes.len() && block::is_inline(&nodes[index]) {
+                index += 1;
+            }
+            measure_inline(&nodes[start..index], ctx)
+        } else {
+            index += 1;
+            measure_block(&nodes[index - 1], ctx)
+        };
         min = min.max(node_min);
         natural = natural.max(node_natural);
     }
@@ -364,8 +387,11 @@ fn measure_block(node: &Node, ctx: Ctx<'_>) -> (usize, usize) {
         }
         NodeKind::CodeBlock { literal, .. } => {
             // Code is clipped rather than wrapped, so a narrow column is survivable:
-            // its minimum is the frame itself.
-            (4, super::code::natural_width(literal, ctx))
+            // its minimum is the chrome itself.
+            (
+                super::code::chrome_width(),
+                super::code::natural_width(literal, ctx),
+            )
         }
         NodeKind::Table(info) if ctx.table_depth < super::MAX_TABLE_DEPTH => {
             measure_table(node, info, ctx.in_table())
@@ -375,8 +401,9 @@ fn measure_block(node: &Node, ctx: Ctx<'_>) -> (usize, usize) {
             let alt = display_width(&node.plain_text());
             (6, alt.max(display_width(url)) + 4)
         }
-        NodeKind::FootnoteDefinition { name } => {
-            offset_by(measure(&node.children, ctx), display_width(name) + 3)
+        NodeKind::FootnoteDefinition { name, number } => {
+            let label = block::footnote_label(name, *number);
+            offset_by(measure(&node.children, ctx), display_width(&label) + 3)
         }
         NodeKind::SkippedHtml { .. } => {
             let marker = display_width(inline::HTML_MARKER);

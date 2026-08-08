@@ -19,6 +19,7 @@
 //! ```
 
 mod convert;
+mod plain;
 mod slug;
 
 #[cfg(test)]
@@ -140,6 +141,9 @@ pub enum NodeKind {
     FootnoteDefinition {
         /// The footnote's name, as written between the brackets.
         name: String,
+        /// The 1-based number the footnote is displayed as, matching the number its
+        /// references carry. `None` when nothing in the document refers to it.
+        number: Option<u32>,
     },
     /// A reference to a footnote.
     FootnoteReference {
@@ -284,6 +288,32 @@ impl Doc {
             source: source.to_string(),
             root: owned,
             headings,
+            version: hasher.finish(),
+        }
+    }
+
+    /// Parses `source` as Markdown, or as plain text when it contains no Markdown.
+    ///
+    /// This is the `$PAGER` entry point: `git log | mdless` must not have its line
+    /// breaks reflowed away, its e-mail addresses turned into links or its indented
+    /// bodies framed as code (usability review P17). A stream carrying any Markdown
+    /// markup at all still takes the full Markdown path.
+    pub fn parse_auto(source: &str) -> Self {
+        if plain::looks_like_markdown(source) {
+            Self::parse(source)
+        } else {
+            Self::parse_plain(source)
+        }
+    }
+
+    /// Parses `source` as plain text: paragraphs of hard-broken lines, nothing else.
+    pub fn parse_plain(source: &str) -> Self {
+        let mut hasher = DefaultHasher::new();
+        source.hash(&mut hasher);
+        Self {
+            root: plain::document(source),
+            source: source.to_string(),
+            headings: Vec::new(),
             version: hasher.finish(),
         }
     }

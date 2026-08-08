@@ -2,6 +2,8 @@
 //!
 //! Keeping this here means [`super`] holds only the owned data model.
 
+use std::collections::HashMap;
+
 use comrak::Options;
 use comrak::nodes::{AstNode, ListType, NodeValue, TableAlignment};
 
@@ -76,7 +78,51 @@ pub(super) fn document<'a>(
     headings: &mut Vec<Heading>,
 ) -> Node {
     let offsets = LineOffsets::new(source);
-    convert(root, &offsets, slugger, headings)
+    let mut doc = convert(root, &offsets, slugger, headings);
+    number_footnotes(&mut doc);
+    doc
+}
+
+/// Whether an inline HTML tag is a `<br>` in any of its accepted spellings.
+fn is_line_break(html: &str) -> bool {
+    let inner = html
+        .trim()
+        .strip_prefix('<')
+        .and_then(|rest| rest.strip_suffix('>'))
+        .unwrap_or("");
+    let name = inner.trim_end_matches('/').trim();
+    name.eq_ignore_ascii_case("br")
+}
+
+/// Gives every footnote definition the number its references are shown with.
+///
+/// comrak numbers references (`ix`) but not definitions, so the mapping is rebuilt
+/// here from the references actually present. A definition nothing refers to keeps
+/// `None` and is labelled by name.
+fn number_footnotes(doc: &mut Node) {
+    let mut numbers = HashMap::new();
+    collect_footnote_numbers(doc, &mut numbers);
+    apply_footnote_numbers(doc, &numbers);
+}
+
+/// Records the number of every footnote reference in the tree, by name.
+fn collect_footnote_numbers(node: &Node, out: &mut HashMap<String, u32>) {
+    if let NodeKind::FootnoteReference { name, number } = &node.kind {
+        out.entry(name.clone()).or_insert(*number);
+    }
+    for child in &node.children {
+        collect_footnote_numbers(child, out);
+    }
+}
+
+/// Copies the collected numbers onto the matching definitions.
+fn apply_footnote_numbers(node: &mut Node, numbers: &HashMap<String, u32>) {
+    if let NodeKind::FootnoteDefinition { name, number } = &mut node.kind {
+        *number = numbers.get(name).copied();
+    }
+    for child in &mut node.children {
+        apply_footnote_numbers(child, numbers);
+    }
 }
 
 fn convert<'a>(
@@ -133,10 +179,14 @@ fn convert<'a>(
         NodeValue::TableCell => NodeKind::TableCell,
         NodeValue::FootnoteDefinition(def) => NodeKind::FootnoteDefinition {
             name: def.name.clone(),
+            // Filled in by `number_footnotes` once every reference has been seen.
+            number: None,
         },
+        // `ix` is the footnote's position in the document; `ref_num` counts the
+        // references to *one* footnote and is not what a reader is shown.
         NodeValue::FootnoteReference(reference) => NodeKind::FootnoteReference {
             name: reference.name.clone(),
-            number: reference.ref_num,
+            number: reference.ix,
         },
         NodeValue::Text(text) => NodeKind::Text(text.to_string()),
         NodeValue::SoftBreak => NodeKind::SoftBreak,
@@ -163,6 +213,10 @@ fn convert<'a>(
             block: true,
             literal: html.literal.clone(),
         },
+        // `<br>` is the only way GFM offers to break a line inside a table cell, and
+        // it is what every writer reaches for. Honouring it as a line break is not
+        // "passing HTML through": nothing of the tag reaches the canvas.
+        NodeValue::HtmlInline(html) if is_line_break(html) => NodeKind::LineBreak,
         NodeValue::HtmlInline(html) => NodeKind::SkippedHtml {
             block: false,
             literal: html.clone(),

@@ -3,7 +3,7 @@
 //! [`wrap_spans`] is the single wrapping implementation in `mdless`.
 //! `render::inline::wrap` and the Mermaid label layouters delegate to it.
 
-use crate::text::{Line, Span, grapheme_width, graphemes};
+use crate::text::{Line, Span, display_width, graphemes};
 use crate::theme::Style;
 
 /// One grapheme cluster together with the style it is drawn in.
@@ -147,7 +147,12 @@ fn tokenize<'a>(spans: &'a [Span]) -> Vec<Token<'a>> {
             let cluster = Cluster {
                 text,
                 style: span.style,
-                width: usize::from(grapheme_width(text)),
+                // Priced at its true width, not at a cell's capacity: a cluster wider
+                // than two columns still stays whole on one line — that is what design
+                // spec §4's "never split a cluster" means — but a line holding one has
+                // to be charged for the columns it really draws, or the wrapped line
+                // comes out wider than the budget it was given.
+                width: display_width(text),
             };
             if text == "\n" {
                 flush(&mut tokens, &mut word, &mut space);

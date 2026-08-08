@@ -87,8 +87,12 @@ impl Builder {
                 return Ok(());
             }
             "section" => {
+                let title = lex::unquote(rest).trim().to_string();
+                if title.is_empty() {
+                    return Err(lex::syntax(line, "section has no name".to_string()));
+                }
                 self.sections.push(GanttSection {
-                    title: Some(lex::unquote(rest).to_string()),
+                    title: Some(title),
                     tasks: Vec::new(),
                 });
                 return Ok(());
@@ -116,7 +120,12 @@ impl Builder {
         };
         let end = match &spec.end {
             Some(End::At(at)) => *at,
-            Some(End::Duration(seconds)) => start + seconds,
+            // Both operands are clamped to the drawable range, but a saturating add
+            // makes the absence of overflow local and obvious rather than a property
+            // of two other modules (design spec §12).
+            Some(End::Duration(seconds)) => {
+                crate::mermaid::gantt::time::clamp_instant(start.saturating_add(*seconds))
+            }
             Some(End::Until(ids)) => self.reference(ids, line, |start, _| start, i64::min)?,
             None if spec.milestone => start,
             None => return Err(lex::syntax(line, "task has no end date or duration")),

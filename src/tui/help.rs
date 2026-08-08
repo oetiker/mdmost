@@ -58,6 +58,34 @@ pub fn sections(bindings: &KeyBindings) -> Vec<HelpSection> {
         .collect()
 }
 
+/// One drawn line of a help column.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelpLine<'a> {
+    /// Vertical space between two sections.
+    Blank,
+    /// A section heading.
+    Title(&'a str),
+    /// A binding.
+    Row(&'a HelpRow),
+}
+
+/// Flattens sections into the lines they draw as, spacing included.
+///
+/// Turning the overlay into a flat list of lines is what lets it scroll: a scrolled
+/// overlay has to be able to start half way down a section, which a nested title/rows
+/// walk cannot express.
+pub fn lines(sections: &[HelpSection]) -> Vec<HelpLine<'_>> {
+    let mut out = Vec::new();
+    for section in sections {
+        if !out.is_empty() {
+            out.push(HelpLine::Blank);
+        }
+        out.push(HelpLine::Title(section.title));
+        out.extend(section.rows.iter().map(HelpLine::Row));
+    }
+    out
+}
+
 /// The widest key column across every section, for aligning the overlay.
 pub fn key_column_width(sections: &[HelpSection]) -> usize {
     sections

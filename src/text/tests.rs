@@ -15,6 +15,10 @@ const FLAG: &str = "\u{1f1e8}\u{1f1ed}";
 /// `e` followed by a combining acute accent.
 const COMBINING: &str = "e\u{0301}";
 
+/// A wide base character followed by a spacing combining mark (`Mc`): one grapheme
+/// cluster that genuinely draws three columns, which is more than a cell can hold.
+const WIDE_PLUS_SPACING_MARK: &str = "\u{17000}\u{1A57}";
+
 #[test]
 fn display_width_counts_columns_not_bytes() {
     assert_eq!(display_width("abc"), 3);
@@ -24,14 +28,66 @@ fn display_width_counts_columns_not_bytes() {
 }
 
 #[test]
-fn grapheme_width_is_clamped_to_two() {
+fn grapheme_width_measures_a_one_cell_piece() {
     assert_eq!(grapheme_width("a"), 1);
     assert_eq!(grapheme_width("日"), 2);
+    // A ZWJ sequence and a flag are each one cluster that really is two columns, so
+    // the clamp never fires for them.
     assert_eq!(grapheme_width(ZWJ), 2);
     assert_eq!(grapheme_width(FLAG), 2);
     assert_eq!(grapheme_width(COMBINING), 1);
     assert_eq!(grapheme_width("\u{0301}"), 0);
     assert_eq!(grapheme_width("\u{200d}"), 0);
+}
+
+#[test]
+fn grapheme_width_clamps_only_as_a_backstop() {
+    // A wide base plus a spacing mark genuinely draws three columns; the clamp would
+    // report two. This is why cell fillers must split with `cell_clusters` first.
+    assert_eq!(display_width(WIDE_PLUS_SPACING_MARK), 3);
+    assert_eq!(grapheme_width(WIDE_PLUS_SPACING_MARK), 2);
+}
+
+#[test]
+fn cell_clusters_split_a_cluster_too_wide_for_one_cell() {
+    let pieces: Vec<&str> = cell_clusters(WIDE_PLUS_SPACING_MARK).collect();
+    assert_eq!(pieces, vec!["\u{17000}", "\u{1A57}"]);
+    assert_eq!(pieces.iter().map(|p| display_width(p)).sum::<usize>(), 3);
+}
+
+#[test]
+fn cell_clusters_leave_every_cluster_that_fits_alone() {
+    for text in [ZWJ, FLAG, COMBINING, "日", "a", "\u{0301}"] {
+        let pieces: Vec<&str> = cell_clusters(text).collect();
+        assert_eq!(pieces, vec![text], "{text:?} must not be split");
+    }
+}
+
+#[test]
+fn cell_clusters_never_lose_or_reorder_text() {
+    for text in [
+        "",
+        "plain",
+        WIDE_PLUS_SPACING_MARK,
+        ZWJ,
+        FLAG,
+        "mixed 日本 \u{17000}\u{1A57} tail",
+    ] {
+        let rejoined: String = cell_clusters(text).collect();
+        assert_eq!(rejoined, text, "round trip failed for {text:?}");
+    }
+}
+
+#[test]
+fn every_cell_piece_fits_in_a_cell() {
+    let text = "a日\u{17000}\u{1A57}\u{1F469}\u{200D}\u{1F4BB}e\u{0301}";
+    for piece in cell_clusters(text) {
+        assert!(
+            display_width(piece) <= 2,
+            "{piece:?} draws {} columns",
+            display_width(piece)
+        );
+    }
 }
 
 #[test]
@@ -283,4 +339,47 @@ fn line_truncated_clips_on_cluster_boundaries() {
     assert_eq!(line.truncated(4).text(), "ab日");
     assert_eq!(line.truncated(0).text(), "");
     assert!(line.truncated(5).width() <= 5);
+}
+
+#[test]
+fn distribute_evenly_hands_out_exactly_the_slack() {
+    let mut slots = [0usize; 3];
+    distribute_evenly(&mut slots, 4);
+    assert_eq!(slots, [2, 1, 1], "the leftovers go to the leftmost slots");
+    assert_eq!(slots.iter().sum::<usize>(), 4);
+}
+
+#[test]
+fn distribute_evenly_adds_to_what_is_already_there() {
+    let mut slots = [5usize, 1, 9];
+    distribute_evenly(&mut slots, 6);
+    assert_eq!(slots, [7, 3, 11]);
+}
+
+#[test]
+fn distribute_evenly_is_a_no_op_when_there_is_nothing_to_do() {
+    let mut slots = [3usize, 4];
+    distribute_evenly(&mut slots, 0);
+    assert_eq!(slots, [3, 4]);
+
+    // An empty slice swallows the slack rather than dividing by zero.
+    let mut none: [usize; 0] = [];
+    distribute_evenly(&mut none, 7);
+    assert!(none.is_empty());
+}
+
+#[test]
+fn distribute_evenly_totals_correctly_for_every_shape() {
+    for count in 1..8usize {
+        for extra in 0..20usize {
+            let mut slots = vec![0usize; count];
+            distribute_evenly(&mut slots, extra);
+            assert_eq!(slots.iter().sum::<usize>(), extra, "{count} slots, {extra}");
+            let (max, min) = (
+                slots.iter().max().copied().unwrap_or(0),
+                slots.iter().min().copied().unwrap_or(0),
+            );
+            assert!(max - min <= 1, "slack must be spread evenly: {slots:?}");
+        }
+    }
 }

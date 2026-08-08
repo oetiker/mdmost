@@ -557,3 +557,180 @@ fn every_row_is_exactly_width_columns_for_adversarial_text() {
         }
     }
 }
+
+/// A wide base character followed by a spacing combining mark (`Mc`): one grapheme
+/// cluster that genuinely draws three columns.
+///
+/// This exact string is the minimal input that `render_property`'s
+/// `arbitrary_text_renders_cleanly` shrank to when it caught the canvas claiming two
+/// columns for it and drawing three.
+const WIDE_PLUS_SPACING_MARK: &str = "\u{17000}\u{1A57}";
+
+#[test]
+fn a_cluster_too_wide_for_one_cell_is_spread_over_two() {
+    let mut canvas = Canvas::new(6, 1, base());
+    let written = canvas.write_str(0, 0, WIDE_PLUS_SPACING_MARK, base());
+
+    assert_eq!(written, 3, "the cluster advances three columns");
+    ok(&canvas);
+    assert_eq!(canvas.row_text(0).trim_end(), WIDE_PLUS_SPACING_MARK);
+    assert_eq!(display_width(&canvas.row_text(0)), 6);
+}
+
+#[test]
+fn no_cell_ever_claims_a_width_its_text_does_not_draw() {
+    // The invariant that makes this class of bug impossible to reintroduce.
+    let samples = [
+        WIDE_PLUS_SPACING_MARK,
+        ZWJ,
+        FLAG,
+        COMBINING,
+        "日本語",
+        "plain",
+        "\u{17000}\u{1A57}\u{17000}\u{1A57}",
+    ];
+    for text in samples {
+        for width in 1..12u16 {
+            let mut canvas = Canvas::new(width, 1, base());
+            canvas.write_str(0, 0, text, base());
+            assert!(
+                canvas.check_invariants().is_ok(),
+                "{text:?} at width {width}: {:?}",
+                canvas.check_invariants()
+            );
+            for cell in canvas.row(0).unwrap_or_default() {
+                assert_eq!(
+                    display_width(cell.text()),
+                    usize::from(cell.width()),
+                    "cell {:?} lies about its width",
+                    cell.text()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn an_over_wide_cluster_is_dropped_rather_than_half_drawn() {
+    // Only two columns left: the three-column cluster cannot be shown whole, and the
+    // canvas must not draw part of it and mis-count the row.
+    let mut canvas = Canvas::new(2, 1, base());
+    canvas.write_str(0, 0, WIDE_PLUS_SPACING_MARK, base());
+    ok(&canvas);
+    assert_eq!(display_width(&canvas.row_text(0)), 2);
+}
+
+#[test]
+fn clip_with_marker_stamps_only_rows_that_lost_something() {
+    let mut canvas = Canvas::new(10, 0, base());
+    canvas.push_text("aaaaaaaaaa", Align::Left, base());
+    canvas.push_text("bb", Align::Left, base());
+
+    canvas.clip_with_marker(5, "›", base());
+
+    assert_eq!(canvas.width(), 5);
+    assert_eq!(canvas.row_text(0), "aaaa›");
+    assert_eq!(canvas.row_text(1), "bb   ", "a short row keeps no marker");
+    ok(&canvas);
+}
+
+#[test]
+fn clip_with_marker_never_underflows_at_a_zero_width() {
+    // The bug this op exists to make structurally impossible: the code renderer's
+    // hand-rolled version computed `width - 1` without guarding `width == 0`.
+    let mut canvas = Canvas::new(6, 0, base());
+    canvas.push_text("content", Align::Left, base());
+    canvas.clip_with_marker(0, "›", base());
+    assert_eq!(canvas.width(), 0);
+    ok(&canvas);
+}
+
+#[test]
+fn clip_with_marker_leaves_a_canvas_that_already_fits() {
+    let mut canvas = Canvas::new(4, 0, base());
+    canvas.push_text("ab", Align::Left, base());
+    canvas.clip_with_marker(9, "›", base());
+    assert_eq!(canvas.width(), 4);
+    assert_eq!(canvas.row_text(0), "ab  ");
+}
+
+#[test]
+fn clip_with_marker_handles_a_wide_marker_and_wide_content() {
+    let mut canvas = Canvas::new(8, 0, base());
+    canvas.push_text("日本語話", Align::Left, base());
+    canvas.clip_with_marker(5, "…", base());
+    assert_eq!(canvas.width(), 5);
+    ok(&canvas);
+    assert_eq!(display_width(&canvas.row_text(0)), 5);
+
+    // A marker too wide for what is left clips without stamping rather than
+    // overflowing the row.
+    let mut narrow = Canvas::new(6, 0, base());
+    narrow.push_text("abcdef", Align::Left, base());
+    narrow.clip_with_marker(1, "日", base());
+    ok(&narrow);
+    assert_eq!(display_width(&narrow.row_text(0)), 1);
+}
+
+#[test]
+fn rect_stamps_a_hollow_box_in_place() {
+    let mut canvas = Canvas::new(8, 4, base());
+    canvas.rect(0, 1, 3, 6, BorderSet::PLAIN, base());
+    ok(&canvas);
+    assert_eq!(canvas.row_text(0), " ┌────┐ ");
+    assert_eq!(canvas.row_text(1), " │    │ ");
+    assert_eq!(canvas.row_text(2), " └────┘ ");
+    assert_eq!(canvas.row_text(3), "        ", "nothing outside the box");
+}
+
+#[test]
+fn rect_degrades_instead_of_panicking_on_degenerate_sizes() {
+    let mut canvas = Canvas::new(6, 3, base());
+    canvas.rect(0, 0, 0, 4, BorderSet::PLAIN, base());
+    assert_eq!(canvas.row_text(0), "      ", "zero height draws nothing");
+
+    canvas.rect(0, 0, 3, 0, BorderSet::PLAIN, base());
+    assert_eq!(canvas.row_text(0), "      ", "zero width draws nothing");
+
+    // One row is a horizontal rule; one column is a vertical one.
+    canvas.rect(0, 1, 1, 4, BorderSet::PLAIN, base());
+    assert_eq!(canvas.row_text(0), " ──── ");
+
+    let mut tall = Canvas::new(3, 3, base());
+    tall.rect(0, 1, 3, 1, BorderSet::PLAIN, base());
+    assert_eq!(tall.row_text(0), " │ ");
+    assert_eq!(tall.row_text(2), " │ ");
+    ok(&tall);
+}
+
+#[test]
+fn rect_clips_rather_than_growing_the_canvas() {
+    // Unlike `framed`, which returns a bigger canvas, `rect` draws onto what is there.
+    let mut canvas = Canvas::new(5, 2, base());
+    canvas.rect(0, 0, 4, 5, BorderSet::PLAIN, base());
+    assert_eq!(canvas.height(), 2, "the canvas does not grow");
+    assert_eq!(canvas.row_text(0), "┌───┐");
+    assert_eq!(canvas.row_text(1), "│   │", "the bottom edge fell outside");
+    ok(&canvas);
+}
+
+#[test]
+fn grid_border_row_puts_a_junction_over_every_column_break() {
+    // Each column is drawn with one cell of padding either side.
+    let row = Canvas::grid_border_row(&[2, 3], '├', '┼', '┤', BorderSet::ROUNDED);
+    assert_eq!(row, "├────┼─────┤");
+
+    let single = Canvas::grid_border_row(&[1], '╭', '┬', '╮', BorderSet::ROUNDED);
+    assert_eq!(single, "╭───╮");
+
+    let none = Canvas::grid_border_row(&[], '╰', '┴', '╯', BorderSet::ROUNDED);
+    assert_eq!(none, "╰╯");
+}
+
+#[test]
+fn grid_border_row_matches_the_widths_it_was_given() {
+    let widths = [4usize, 2, 7];
+    let row = Canvas::grid_border_row(&widths, '├', '┼', '┤', BorderSet::ROUNDED);
+    let expected: usize = widths.iter().map(|w| w + 2).sum::<usize>() + widths.len() + 1;
+    assert_eq!(display_width(&row), expected);
+}

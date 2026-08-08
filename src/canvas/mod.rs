@@ -26,6 +26,7 @@
 
 mod border;
 mod cell;
+pub mod meter;
 mod ops;
 
 #[cfg(test)]
@@ -34,7 +35,7 @@ mod tests;
 pub use border::BorderSet;
 pub use cell::Cell;
 
-use crate::text::{Align, Line, display_width, grapheme_width, graphemes, pad_to_width};
+use crate::text::{Align, Line, cell_clusters, display_width, grapheme_width, pad_to_width};
 use crate::theme::Style;
 
 /// A named position in a canvas, used by the table of contents to jump to a heading.
@@ -237,7 +238,10 @@ impl Canvas {
         }
         let mut cursor = col;
         let mut last_written: Option<usize> = None;
-        for cluster in graphemes(text) {
+        // `cell_clusters`, not `graphemes`: a cluster wider than two columns (a wide
+        // base plus a spacing mark) has to occupy more than one cell, or the cells
+        // would claim a width their own text does not have.
+        for cluster in cell_clusters(text) {
             let cluster_width = usize::from(grapheme_width(cluster));
             if cluster_width == 0 {
                 if let Some(index) = last_written {
@@ -357,6 +361,19 @@ impl Canvas {
                 if cell.width() == 0 && !cell.is_continuation() {
                     return Err(format!("row {index}: stray zero-width cell"));
                 }
+                // The cell must not lie about how much room its own text needs. This
+                // is the assertion that makes design spec §4 enforceable rather than
+                // aspirational: without it a clamped over-wide cluster reports two
+                // columns while drawing three, and every row containing one is a
+                // column too wide.
+                let drawn = display_width(cell.text());
+                if drawn != usize::from(cell.width()) {
+                    return Err(format!(
+                        "row {index}: cell {:?} draws {drawn} columns but claims {}",
+                        cell.text(),
+                        cell.width()
+                    ));
+                }
                 columns += usize::from(cell.width());
             }
             if expect_continuation {
@@ -378,8 +395,17 @@ fn blank_row(width: u16, style: Style) -> Vec<Cell> {
     (0..width).map(|_| Cell::blank(style)).collect()
 }
 
-/// The column at which `content_width` starts when aligned in `field_width`.
-fn align_offset(field_width: usize, content_width: usize, align: Align) -> usize {
+/// The column at which `content_width` starts when aligned within `field_width`.
+///
+/// This is the whole of "where do I put this thing" arithmetic, and it belongs in one
+/// place: the table renderer, the Mermaid chart chrome, the sequence-diagram label
+/// placer and the graph layout engine all need it, and each had grown its own copy
+/// because this function used to be private. Reach for it rather than writing
+/// `slack / 2` again.
+///
+/// Content wider than the field yields `0` rather than underflowing — several of the
+/// hand-rolled copies used a bare `field - content`, which panics at small widths.
+pub(crate) fn align_offset(field_width: usize, content_width: usize, align: Align) -> usize {
     let slack = field_width.saturating_sub(content_width);
     match align {
         Align::Left => 0,

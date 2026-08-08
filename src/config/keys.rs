@@ -31,6 +31,10 @@ pub enum Action {
     Top,
     /// Jump to the last line.
     Bottom,
+    /// Jump to a percentage of the document, given by the repeat count.
+    Percent,
+    /// Report the position in the document in the status bar.
+    ReportPosition,
     /// Scroll one column left (wide tables and code blocks).
     ScrollLeft,
     /// Scroll one column right (wide tables and code blocks).
@@ -59,7 +63,9 @@ pub enum Action {
     Help,
     /// Leave the pager.
     Quit,
-    /// Close the topmost overlay, or leave the pager when there is none.
+    /// Show or hide the line-number gutter in fenced code blocks.
+    ToggleLineNumbers,
+    /// Unwind: clear the search, close an overlay, close the table of contents.
     Cancel,
 }
 
@@ -74,10 +80,12 @@ impl Action {
         Action::PageUp,
         Action::Top,
         Action::Bottom,
+        Action::Percent,
         Action::ScrollLeft,
         Action::ScrollRight,
         Action::PrevHeading,
         Action::NextHeading,
+        Action::ReportPosition,
         Action::SearchForward,
         Action::SearchBackward,
         Action::NextMatch,
@@ -86,6 +94,7 @@ impl Action {
         Action::ToggleToc,
         Action::Confirm,
         Action::CycleTheme,
+        Action::ToggleLineNumbers,
         Action::Help,
         Action::Cancel,
         Action::Quit,
@@ -102,6 +111,9 @@ impl Action {
             Action::PageUp => "page_up",
             Action::Top => "top",
             Action::Bottom => "bottom",
+            Action::Percent => "percent",
+            Action::ReportPosition => "report_position",
+            Action::ToggleLineNumbers => "toggle_line_numbers",
             Action::ScrollLeft => "scroll_left",
             Action::ScrollRight => "scroll_right",
             Action::SearchForward => "search_forward",
@@ -131,6 +143,9 @@ impl Action {
             Action::PageUp => "Scroll up one screen",
             Action::Top => "Go to the top of the document",
             Action::Bottom => "Go to the bottom of the document",
+            Action::Percent => "Jump N percent into the document (50%)",
+            Action::ReportPosition => "Report where you are",
+            Action::ToggleLineNumbers => "Show or hide code line numbers",
             Action::ScrollLeft => "Scroll left (wide tables and code)",
             Action::ScrollRight => "Scroll right (wide tables and code)",
             Action::SearchForward => "Search forward",
@@ -145,7 +160,7 @@ impl Action {
             Action::CycleTheme => "Switch to the next theme",
             Action::Help => "Show or hide this help",
             Action::Quit => "Quit",
-            Action::Cancel => "Close the overlay, or quit",
+            Action::Cancel => "Clear the search, close the overlay or pane",
         }
     }
 
@@ -160,17 +175,21 @@ impl Action {
             | Action::PageUp
             | Action::Top
             | Action::Bottom
+            | Action::Percent
             | Action::ScrollLeft
             | Action::ScrollRight => ActionGroup::Movement,
-            Action::PrevHeading | Action::NextHeading | Action::ToggleToc | Action::Confirm => {
-                ActionGroup::Navigation
-            }
+            Action::PrevHeading
+            | Action::NextHeading
+            | Action::ToggleToc
+            | Action::Confirm
+            | Action::ReportPosition => ActionGroup::Navigation,
             Action::SearchForward
             | Action::SearchBackward
             | Action::NextMatch
             | Action::PrevMatch
             | Action::ToggleSearchMode => ActionGroup::Search,
-            Action::CycleTheme | Action::Help | Action::Quit | Action::Cancel => ActionGroup::View,
+            Action::CycleTheme | Action::ToggleLineNumbers => ActionGroup::View,
+            Action::Help | Action::Quit | Action::Cancel => ActionGroup::Exit,
         }
     }
 
@@ -195,13 +214,18 @@ pub enum ActionGroup {
     Navigation,
     /// Searching.
     Search,
-    /// Appearance and lifecycle.
+    /// Appearance.
     View,
+    /// Help and leaving.
+    Exit,
 }
 
 impl ActionGroup {
     /// Every group, in the order the help overlay presents them.
+    /// The exit group comes first so that, however little room the help overlay has,
+    /// the keys that get a stuck reader out are the ones they can see.
     pub const ALL: &'static [ActionGroup] = &[
+        ActionGroup::Exit,
         ActionGroup::Movement,
         ActionGroup::Navigation,
         ActionGroup::Search,
@@ -215,6 +239,7 @@ impl ActionGroup {
             ActionGroup::Navigation => "Navigation",
             ActionGroup::Search => "Search",
             ActionGroup::View => "View",
+            ActionGroup::Exit => "Help and exit",
         }
     }
 }
@@ -524,6 +549,10 @@ impl KeyBindings {
             (Key::char('g'), Action::Top),
             (Key::plain(KeyCode::Home), Action::Top),
             (Key::char('G'), Action::Bottom),
+            (Key::char('%'), Action::Percent),
+            (Key::ctrl('g'), Action::ReportPosition),
+            (Key::char('='), Action::ReportPosition),
+            (Key::char('-'), Action::ToggleLineNumbers),
             (Key::plain(KeyCode::End), Action::Bottom),
             (Key::plain(KeyCode::Left), Action::ScrollLeft),
             (Key::plain(KeyCode::Right), Action::ScrollRight),

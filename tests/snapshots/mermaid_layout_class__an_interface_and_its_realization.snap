@@ -1,0 +1,16 @@
+---
+source: tests/mermaid_layout_class.rs
+expression: "render(&chart, 70)"
+---
+                ┌────────────────┐                                    
+                │ <<interface>>  │   ┌──────────────┐                 
+                │     Shape      │   │ <<abstract>> │                 
+                ├────────────────┤   │     Base     │                 
+                │ +area(): float │   └───────┬──────┘                 
+                └────────┬───────┘           △                        
+                         △                   │                        
+                         ╰┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮ ╰─╮                      
+                                           ┊   │                      
+                                        ┌──┴───┴─┐                    
+                                        │ Circle │                    
+                                        └────────┘

@@ -1,0 +1,18 @@
+---
+source: tests/mermaid_layout_class.rs
+expression: "render(&chart, 60)"
+---
+                     ┌───────────────┐                      
+                     │   Customer    │                      
+                     ├───────────────┤                      
+                     │ +name: String │                      
+                     └───────┬───────┘                      
+                             │1                             
+                             │places                        
+                             │0..*                          
+                             ▼                              
+                     ┌───────────────┐                      
+                     │     Order     │                      
+                     ├───────────────┤                      
+                     │ +total: Money │                      
+                     └───────────────┘

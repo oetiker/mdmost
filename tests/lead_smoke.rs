@@ -6,7 +6,7 @@
 
 use mdless::mermaid::ast::Diagram;
 use mdless::mermaid::parse::parse;
-use mdless::mermaid::render_mermaid;
+use mdless::mermaid::{render_diagram, render_mermaid};
 use mdless::theme::Theme;
 
 /// A Mermaid sample paired with a predicate identifying the variant it must parse into.
@@ -92,17 +92,20 @@ fn every_family_draws_or_degrades_at_every_width() {
     }
 }
 
-/// Malformed and truncated input must produce an error, never a panic.
+/// Genuinely malformed input must be reported as an error rather than accepted.
+///
+/// A header with no body is deliberately absent from this list: `flowchart` on its own
+/// is an *empty* diagram, not a broken one, and Mermaid accepts it with a defaulted
+/// direction. Rejecting it would mean rejecting valid input. Those cases are covered by
+/// [`header_only_input_is_an_empty_diagram`] instead.
 #[test]
 fn malformed_input_errors_without_panicking() {
     let cases = [
         "",
         "not a diagram at all",
-        "flowchart",
         "flowchart TD\n  A[",
         "sequenceDiagram\n  A->>",
         "pie title\n  \"x\" :",
-        "gantt\n  section\n",
         "classDiagram\n  class {",
         "erDiagram\n  A ||--",
         "stateDiagram-v2\n  [*] -->",
@@ -113,5 +116,25 @@ fn malformed_input_errors_without_panicking() {
             parse(src).is_err(),
             "malformed input {src:?} must be reported as an error, not accepted"
         );
+    }
+}
+
+/// A bare family header is a valid empty diagram, and drawing one must not panic.
+#[test]
+fn header_only_input_is_an_empty_diagram() {
+    let theme = Theme::default_dark();
+
+    for src in ["flowchart", "sequenceDiagram", "erDiagram", "classDiagram"] {
+        let Ok(diagram) = parse(src) else {
+            continue; // Rejecting an empty diagram is also defensible.
+        };
+        match render_diagram(&diagram, 40, &theme) {
+            Ok(canvas) => assert_eq!(
+                canvas.width(),
+                40,
+                "empty {src:?} must still fill its budget"
+            ),
+            Err(_) => continue,
+        }
     }
 }

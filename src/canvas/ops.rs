@@ -50,6 +50,133 @@ impl Canvas {
         self.width = width;
     }
 
+    /// Clips to `width` and stamps `marker` on every row that lost content.
+    ///
+    /// This is the "the line goes on past here" gesture, and it is deliberately one
+    /// operation rather than a truncate followed by a loop: the code renderer and the
+    /// table renderer each grew their own version, they disagreed about whether to
+    /// guard the zero-width case, and the unguarded one computed `width - 1` on a
+    /// `width` of `0`. Guarding it here is structural — a caller cannot forget.
+    ///
+    /// Rows that fitted are left alone, so a short row in a clipped canvas does not
+    /// sprout a misleading marker. A `width` of `0`, or a marker too wide for the last
+    /// column, clips without stamping. Widening is a no-op, since nothing was lost.
+    pub fn clip_with_marker(&mut self, width: u16, marker: &str, style: Style) {
+        if width >= self.width {
+            return;
+        }
+        let keep = usize::from(width);
+        // Which rows actually lose something has to be answered before the cells go.
+        let clipped: Vec<bool> = self
+            .rows
+            .iter()
+            .map(|cells| cells.iter().skip(keep).any(|cell| !cell.is_blank()))
+            .collect();
+
+        self.truncate_width(width, style);
+
+        let marker_width = display_width(marker);
+        if keep == 0 || marker_width == 0 || marker_width > keep {
+            return;
+        }
+        let at = keep - marker_width;
+        for (row, _) in clipped.iter().enumerate().filter(|(_, cut)| **cut) {
+            self.write_str(row, at, marker, style);
+        }
+    }
+
+    /// Stamps a hollow rectangle onto the canvas, in place.
+    ///
+    /// The complement of [`framed`](Canvas::framed): `framed` *wraps* a canvas and
+    /// hands back a bigger one, which is right for a box built around finished
+    /// content, and useless when the box has to be drawn over a canvas that already
+    /// exists — a sequence-diagram `loop`/`alt` frame, a graph-layout container. Both
+    /// of those were stamping corners one `write_str` at a time.
+    ///
+    /// Degenerate sizes degrade instead of panicking: a `height` or `width` of `1`
+    /// draws the single line that fits, and `0` draws nothing.
+    ///
+    /// **The canvas does not grow.** A rectangle reaching past the right or bottom edge
+    /// is clipped, so the part that fits is drawn and the rest is dropped. Callers
+    /// coming from [`framed`](Canvas::framed), which returns a *larger* canvas, should
+    /// size their canvas first.
+    pub fn rect(
+        &mut self,
+        top: usize,
+        left: usize,
+        height: usize,
+        width: usize,
+        border: BorderSet,
+        style: Style,
+    ) {
+        if height == 0 || width == 0 {
+            return;
+        }
+        let bottom = top + height - 1;
+        let right = left + width - 1;
+        let horizontal = border.horizontal.to_string();
+        let vertical = border.vertical.to_string();
+
+        if height == 1 {
+            self.hline(top, left, width, &horizontal, style);
+            return;
+        }
+        if width == 1 {
+            self.vline(top, left, height, &vertical, style);
+            return;
+        }
+
+        let inner = width - 2;
+        self.write_str(top, left, &border.top_left.to_string(), style);
+        self.hline(top, left + 1, inner, &horizontal, style);
+        self.write_str(top, right, &border.top_right.to_string(), style);
+
+        self.write_str(bottom, left, &border.bottom_left.to_string(), style);
+        self.hline(bottom, left + 1, inner, &horizontal, style);
+        self.write_str(bottom, right, &border.bottom_right.to_string(), style);
+
+        for row in top + 1..bottom {
+            self.write_str(row, left, &vertical, style);
+            self.write_str(row, right, &vertical, style);
+        }
+    }
+
+    /// Builds one horizontal rule of a grid, with a junction over every column break.
+    ///
+    /// `widths` are the *content* widths of the columns; each is drawn with one cell of
+    /// padding on either side, which is the table renderer's convention. `left`,
+    /// `junction` and `right` choose the row: `╭ ┬ ╮` for a top edge, `├ ┼ ┤` for a
+    /// separator, `╰ ┴ ╯` for a bottom edge.
+    ///
+    /// Returns the text rather than a canvas so the caller can place it wherever it
+    /// belongs; the run is built with
+    /// [`repeat_to_width`](crate::text::repeat_to_width) rather than a push loop, so a
+    /// multi-column border glyph cannot overshoot.
+    pub fn grid_border_row(
+        widths: &[usize],
+        left: char,
+        junction: char,
+        right: char,
+        border: BorderSet,
+    ) -> String {
+        /// Cells of padding either side of a column's content.
+        const PADDING: usize = 2;
+
+        let mut text = String::new();
+        text.push(left);
+        for (index, width) in widths.iter().enumerate() {
+            if index > 0 {
+                text.push(junction);
+            }
+            text.push_str(&crate::text::repeat_to_width(
+                &border.horizontal.to_string(),
+                width + PADDING,
+            ));
+        }
+        text.push(right);
+        text
+    }
+
     /// Sets the canvas width, padding or clipping as needed.
     pub fn resize_width(&mut self, width: u16, style: Style) {
         if width >= self.width {
@@ -156,8 +283,12 @@ impl Canvas {
             return Canvas::empty(0);
         }
         let height = parts.iter().map(Canvas::height).max().unwrap_or(0);
-        let total: u16 = parts.iter().map(Canvas::width).sum::<u16>()
-            + gap * u16::try_from(parts.len().saturating_sub(1)).unwrap_or(0);
+        // Widened to `usize` before summing and saturated on the way back: a row of
+        // wide parts can overflow `u16` in release, where it wraps silently and yields
+        // a canvas narrower than its own content.
+        let content: usize = parts.iter().map(|part| usize::from(part.width())).sum();
+        let gaps = usize::from(gap) * parts.len().saturating_sub(1);
+        let total = u16::try_from(content + gaps).unwrap_or(u16::MAX);
         let mut out = Canvas::new(total, height, fill);
         let mut col = 0usize;
         for part in parts {
@@ -221,6 +352,23 @@ impl Canvas {
         title: Option<&Line>,
         fill: Style,
     ) -> Canvas {
+        self.framed_captioned(border, border_style, title, None, fill)
+    }
+
+    /// Draws a frame around `self` with a label on each horizontal edge.
+    ///
+    /// `title` sits in the top edge and `caption` in the bottom one, both written one
+    /// column in from the corner and surrounded by a space, so a block can say what it
+    /// *is* at the top and what happened to it at the bottom without either label
+    /// becoming a stray line of text outside the box.
+    pub fn framed_captioned(
+        &self,
+        border: BorderSet,
+        border_style: Style,
+        title: Option<&Line>,
+        caption: Option<&Line>,
+        fill: Style,
+    ) -> Canvas {
         let width = self.width + 2;
         let height = self.height() + 2;
         let mut out = Canvas::new(width, height, fill);
@@ -250,18 +398,20 @@ impl Canvas {
             out.write_str(row, inner + 1, &border.vertical.to_string(), border_style);
         }
 
-        if let Some(title) = title
-            && inner >= 4
-        {
-            let mut label = Line::empty();
-            label.push(crate::text::Span::new(" ", border_style));
-            for span in &title.spans {
-                label.push(span.clone());
+        for (row, label) in [(0, title), (height - 1, caption)] {
+            if let Some(label) = label
+                && inner >= 4
+            {
+                let mut spaced = Line::empty();
+                spaced.push(crate::text::Span::new(" ", border_style));
+                for span in &label.spans {
+                    spaced.push(span.clone());
+                }
+                spaced.push(crate::text::Span::new(" ", border_style));
+                // Clip to the inner width so an over-long label can never overwrite
+                // the corner glyph.
+                out.write_line(row, 1, &spaced.truncated(inner), border_style);
             }
-            label.push(crate::text::Span::new(" ", border_style));
-            // Clip to the inner width so an over-long title can never overwrite the
-            // top-right corner glyph.
-            out.write_line(0, 1, &label.truncated(inner), border_style);
         }
 
         out.blit(1, 1, self, fill);

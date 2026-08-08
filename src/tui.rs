@@ -15,6 +15,7 @@
 //! | [`help`] | Help content generated from the live key table |
 //! | [`icons`] | Nerd Font glyphs and their plain-Unicode fallbacks |
 //! | [`dump`] | `--render-once` output, ANSI or plain |
+//! | [`wide`] | Rendering over-wide blocks so they stay horizontally reachable |
 //! | `term` | Terminal lifecycle, signal safety and the event loop |
 //!
 //! The split exists because design spec §13 requires application state to be testable
@@ -28,6 +29,7 @@ pub mod dump;
 pub mod help;
 pub mod icons;
 mod term;
+pub mod wide;
 
 #[cfg(test)]
 mod tests;

@@ -143,17 +143,33 @@ accent = "#ff0000"
 }
 
 #[test]
-fn a_bad_colour_rejects_only_that_theme() {
-    let loaded = Config::parse_str("[themes.broken]\naccent = \"not a colour\"\n", path());
-    assert_eq!(loaded.problems.len(), 1);
-    assert!(loaded.config.themes.is_empty());
-    assert_eq!(loaded.config, Config::default());
+fn a_bad_colour_costs_that_slot_and_not_the_theme() {
+    let loaded = Config::parse_str(
+        "[themes.broken]\naccent = \"not a colour\"\ngreen = \"#00ff00\"\n",
+        path(),
+    );
+    assert_eq!(loaded.problems.len(), 1, "one slot, one problem");
+    let theme = loaded
+        .config
+        .resolve_theme("broken")
+        .expect("the theme survives its one bad slot");
+    assert_eq!(
+        theme.palette.accent,
+        Theme::default_dark().palette.accent,
+        "the bad slot falls back to the base theme"
+    );
+    assert_eq!(
+        theme.palette.green,
+        Color::rgb(0, 0xff, 0),
+        "the good slot is kept"
+    );
 }
 
 #[test]
-fn missing_config_files_are_silent() {
+fn a_named_config_file_that_is_missing_is_reported() {
+    // The default config being absent is silent; a file the user named is a typo.
     let loaded = Config::load_from(Path::new("/nonexistent/mdless/config.toml"));
-    assert!(loaded.problems.is_empty());
+    assert_eq!(loaded.problems.len(), 1);
     assert_eq!(loaded.config, Config::default());
 }
 

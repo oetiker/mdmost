@@ -289,7 +289,21 @@ pub struct Theme {
     /// Raw colours.
     pub palette: Palette,
     /// Style of headings, indexed by level 1..=6.
+    ///
+    /// One hue family that dims with depth, so a deeper heading recedes instead of
+    /// competing with the one above it. Read it through [`Theme::heading`].
     pub headings: [Style; 6],
+    /// Style of the glyph in front of a heading, indexed by level 1..=6.
+    ///
+    /// Derived from the heading's own colour, so the marker encodes the level it
+    /// belongs to. Read it through [`Theme::heading_prefix`].
+    pub heading_prefixes: [Style; 6],
+    /// Style of the rule drawn beneath a heading, indexed by level 1..=6.
+    ///
+    /// Also derived from the heading's colour, and deliberately no fainter than body
+    /// text: a rule under the signature heading must not be the least visible thing on
+    /// the line. Read it through [`Theme::heading_rule`].
+    pub heading_rules: [Style; 6],
     /// Inline text styles.
     pub text: TextStyles,
     /// Block-level styles.
@@ -346,13 +360,34 @@ impl Theme {
     ///
     /// Levels outside `1..=6` are clamped, so callers never need to validate.
     pub fn heading(&self, level: u8) -> Style {
-        let index = usize::from(level.clamp(1, 6)) - 1;
-        self.headings[index]
+        self.headings[Self::level_index(level)]
+    }
+
+    /// The style for the prefix glyph of a heading of the given level.
+    ///
+    /// A tint of that level's own heading colour, one shade quieter than the text, so
+    /// the marker announces the level instead of being one fixed accent everywhere.
+    /// Levels outside `1..=6` are clamped.
+    pub fn heading_prefix(&self, level: u8) -> Style {
+        self.heading_prefixes[Self::level_index(level)]
+    }
+
+    /// The style for the rule drawn beneath a heading of the given level.
+    ///
+    /// Levels outside `1..=6` are clamped; see [`Theme::heading_has_rule`] for whether
+    /// a rule is drawn at all.
+    pub fn heading_rule(&self, level: u8) -> Style {
+        self.heading_rules[Self::level_index(level)]
     }
 
     /// Whether a rule should be drawn beneath a heading of this level.
     pub fn heading_has_rule(&self, level: u8) -> bool {
         level <= 2
+    }
+
+    /// The zero-based index of a heading level, clamped into `1..=6`.
+    fn level_index(level: u8) -> usize {
+        usize::from(level.clamp(1, 6)) - 1
     }
 
     /// A rotating accent style, for diagram series, chart bars and nesting depth.
@@ -364,8 +399,22 @@ impl Theme {
     }
 
     /// The style to use as the canvas background fill.
+    ///
+    /// Carries both [`Palette::fg`] and [`Palette::bg`], so anything drawn with it
+    /// paints the theme's own background rather than inheriting the terminal's. Every
+    /// surface the theme owns — the viewport, the TOC pane, overlays — must be filled
+    /// with this (or with [`Theme::background`]) on every frame, or the page reads as
+    /// islands of theme floating in whatever colour the terminal happens to be.
     pub fn base(&self) -> Style {
         self.text.body
+    }
+
+    /// A pure background fill: [`Palette::bg`] with no foreground and no attributes.
+    ///
+    /// Use this to wash an area whose text colour is set elsewhere; use
+    /// [`Theme::base`] when the area also needs the default text colour.
+    pub fn background(&self) -> Style {
+        Style::new().bg(self.palette.bg)
     }
 }
 

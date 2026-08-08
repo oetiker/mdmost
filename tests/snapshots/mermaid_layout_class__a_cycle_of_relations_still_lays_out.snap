@@ -1,0 +1,19 @@
+---
+source: tests/mermaid_layout_class.rs
+assertion_line: 301
+expression: "render(&chart, 60)"
+---
+                              ┌───┐                         
+                              │ A │                         
+                              └┬─┬┘                         
+                               │ ▲                          
+                          ╭────╯╭╯                          
+                          ▼     │                           
+                        ┌───┐   │                           
+                        │ B │   │                           
+                        └─┬─┘   │                           
+                          ╰────╮╰╮                          
+                               ▼ │                          
+                              ┌──┴┐                         
+                              │ C │                         
+                              └───┘

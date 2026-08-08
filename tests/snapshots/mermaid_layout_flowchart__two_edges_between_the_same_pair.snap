@@ -1,0 +1,14 @@
+---
+source: tests/mermaid_layout_flowchart.rs
+expression: "render(&chart(Direction::TopToBottom, nodes, edges), 50)"
+---
+                   ┌──────────┐                   
+                   │ Producer │                   
+                   └──┬────┬──┘                   
+                      │    ▲                      
+                      │data┊ack                   
+                      │    ┊                      
+                      ▼    ┊                      
+                   ┌───────┴──┐                   
+                   │ Consumer │                   
+                   └──────────┘

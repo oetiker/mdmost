@@ -61,15 +61,18 @@ struct Builder {
 impl Builder {
     /// Handles one source line, which may hold several `;`-separated statements.
     fn line(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
-        if let Some(note) = self.note.as_mut() {
+        if self.note.is_some() {
             if text.eq_ignore_ascii_case("end note") {
-                let note = self.note.take().unwrap_or_else(|| unreachable!());
-                self.scope().notes.push(StateNote {
-                    placement: note.placement,
-                    target: note.target,
-                    text: Label { lines: note.lines },
-                });
-            } else {
+                // Taking the note here — rather than borrowing it first and taking it
+                // afterwards — keeps the function total, with no `unreachable!`.
+                if let Some(note) = self.note.take() {
+                    self.scope().notes.push(StateNote {
+                        placement: note.placement,
+                        target: note.target,
+                        text: Label { lines: note.lines },
+                    });
+                }
+            } else if let Some(note) = self.note.as_mut() {
                 note.lines.push(text.to_string());
             }
             return Ok(());
@@ -147,17 +150,8 @@ impl Builder {
             Some((head, body)) => (head.trim(), Some(body)),
             None => (rest.trim(), None),
         };
-        let (head, stereotype) = match head.find("<<") {
-            Some(at) => {
-                let after = &head[at + 2..];
-                let close = after
-                    .find(">>")
-                    .ok_or_else(|| lex::syntax(line, "unterminated `<<…>>` stereotype"))?;
-                (head[..at].trim(), Some(after[..close].trim()))
-            }
-            None => (head, None),
-        };
-        let (key, description) = match split_as(head) {
+        let (head, stereotype) = lex::split_stereotype(head, line)?;
+        let (key, description) = match lex::split_as(head) {
             // `state "Long description" as s2`
             Some((description, key)) => (key, Some(description)),
             None => (head, None),
@@ -213,12 +207,9 @@ impl Builder {
 
     /// Handles a `note left of X` / `note right of X` statement.
     fn note(&mut self, rest: &str, line: usize) -> Result<(), MermaidError> {
-        let lowered = rest.to_ascii_lowercase();
-        let (placement, after) = if let Some(after) = lowered.strip_prefix("left of") {
-            (NotePlacement::LeftOf, &rest[rest.len() - after.len()..])
-        } else if let Some(after) = lowered.strip_prefix("right of") {
-            (NotePlacement::RightOf, &rest[rest.len() - after.len()..])
-        } else {
+        let placed = lex::split_note_placement(rest)
+            .filter(|(placement, _)| *placement != NotePlacement::Over);
+        let Some((placement, after)) = placed else {
             return Err(lex::unsupported(
                 line,
                 "notes other than `left of` and `right of`",
@@ -299,11 +290,10 @@ impl Builder {
         if self.stack.is_empty() {
             self.stack.push((None, StateScope::default()));
         }
-        match self.stack.last_mut() {
-            Some((_, scope)) => scope,
-            // Unreachable: the stack was just refilled.
-            None => unreachable!("scope stack is never empty"),
-        }
+        // The stack holds at least one scope by the line above, so the subtraction
+        // cannot underflow and the index is in bounds.
+        let innermost = self.stack.len() - 1;
+        &mut self.stack[innermost].1
     }
 
     /// Interns a state key, registering new states in the current scope.
@@ -346,11 +336,4 @@ impl Builder {
             root,
         })
     }
-}
-
-/// Splits `"Long description" as s2` into its two halves.
-fn split_as(text: &str) -> Option<(&str, &str)> {
-    let lowered = text.to_ascii_lowercase();
-    let at = lowered.find(" as ")?;
-    Some((text[..at].trim(), text[at + 4..].trim()))
 }

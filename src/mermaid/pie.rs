@@ -51,20 +51,11 @@ const EMPTY_TEXT: &str = "(no data)";
 /// chart, which happens below roughly twenty columns.
 pub fn draw(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidError> {
     let body = if chart.slices.is_empty() {
-        empty_body(width, theme)
+        chrome::placeholder(EMPTY_TEXT, width, theme)
     } else {
         plot(chart, width, theme)?
     };
     chrome::compose(chart.title.as_deref(), &body, width, theme)
-}
-
-/// The placeholder plot used when a chart declares no slices at all.
-fn empty_body(width: u16, theme: &Theme) -> Canvas {
-    let text = chrome::fit(EMPTY_TEXT, usize::from(width));
-    let cols = u16::try_from(display_width(&text)).unwrap_or(0);
-    let mut body = Canvas::new(cols, 0, theme.base());
-    body.push_text(&text, Align::Left, theme.text.dim);
-    body
 }
 
 /// The column budget of every part of one chart row.
@@ -115,12 +106,7 @@ fn negotiate(chart: &PieChart, width: u16, values: &[String]) -> Result<Columns,
         .unwrap_or(0)
         .max(display_width("Total"));
     let natural_value = if chart.show_data {
-        values
-            .iter()
-            .map(String::as_str)
-            .map(display_width)
-            .max()
-            .unwrap_or(0)
+        chrome::lines_width(values)
     } else {
         0
     };
@@ -317,6 +303,12 @@ fn format_percent(tenths: u32) -> String {
 /// truncated fractions, so **the printed percentages always sum to exactly `100.0%`**.
 /// Ties are broken by position, so the result stays deterministic.
 ///
+/// How finely a remainder is measured before slices are considered tied.
+///
+/// Nine digits is far beyond any real chart's precision and far short of the point
+/// where a `f64` division's last bits start to matter.
+const TIE_SCALE: f64 = 1e9;
+
 /// A chart whose values sum to zero (or to something non-finite) gets all-zero shares
 /// rather than a division by zero; its total row then honestly reads `0.0%`.
 fn apportion(slices: &[&PieSlice]) -> Vec<u32> {
@@ -339,12 +331,19 @@ fn apportion(slices: &[&PieSlice]) -> Vec<u32> {
     let assigned: u32 = shares.iter().sum();
     let mut leftover = 1000u32.saturating_sub(assigned);
 
+    // Largest remainder wins the leftover tenths. Remainders are quantised before
+    // they are compared, because two shares that are mathematically the same fraction
+    // — three slices of a third each, say — come out of the division differing in
+    // their last bits. Without the quantisation the declaration-order tie-break below
+    // could never fire, and the leftovers would land on whichever slice happened to
+    // round up. Quantising keeps the comparison a total order, which a tolerance
+    // would not.
+    let quantised = |index: usize| -> i64 {
+        let fraction = exact[index] - exact[index].floor();
+        (fraction * TIE_SCALE).round() as i64
+    };
     let mut order: Vec<usize> = (0..slices.len()).collect();
-    order.sort_by(|a, b| {
-        let fraction_a = exact[*a] - exact[*a].floor();
-        let fraction_b = exact[*b] - exact[*b].floor();
-        fraction_b.total_cmp(&fraction_a).then(a.cmp(b))
-    });
+    order.sort_by_key(|&index| (std::cmp::Reverse(quantised(index)), index));
     for index in order {
         if leftover == 0 {
             break;
@@ -471,6 +470,24 @@ mod tests {
         // Equal values must always hand the leftover tenth to the earliest slice.
         for _ in 0..8 {
             assert_eq!(shares(&[1.0; 3]), vec![334, 333, 333]);
+        }
+    }
+
+    #[test]
+    fn slices_with_the_same_fraction_tie_by_declaration_order() {
+        // These are not equal values, but they are equal *fractions*: each is a
+        // third of the total. The division leaves them differing in their last bits,
+        // so before the remainders were quantised the declaration-order tie-break
+        // could never fire and the leftover landed on an arbitrary slice.
+        assert_eq!(shares(&[2.0, 2.0, 2.0]), vec![334, 333, 333]);
+        assert_eq!(shares(&[1.0, 2.0, 3.0]), vec![167, 333, 500]);
+        // The shares always account for exactly one thousand tenths of a percent.
+        for values in [
+            vec![1.25, 0.5, 0.13],
+            vec![7.0, 11.0, 13.0],
+            vec![0.1, 0.2, 0.3, 0.4],
+        ] {
+            assert_eq!(shares(&values).iter().sum::<u32>(), 1000, "{values:?}");
         }
     }
 }

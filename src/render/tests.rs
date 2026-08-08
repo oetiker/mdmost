@@ -40,11 +40,37 @@ fn render_with(markdown: &str, width: u16, options: &RenderOptions) -> Canvas {
     canvas
 }
 
-/// The rendered rows with trailing padding removed, which is what tests read.
+/// The document body rendered at a budget of exactly `width` columns.
+///
+/// [`render_document`] insets the body by [`DOCUMENT_MARGIN`] on each side, so a body
+/// budget of `width` means a canvas of `width + 2 * DOCUMENT_MARGIN`. Stripping the
+/// margins here keeps every layout assertion in this file about the *body*, and keeps
+/// the margin itself asserted in exactly one place
+/// ([`every_row_keeps_a_margin_on_both_sides`]).
 fn rows(markdown: &str, width: u16) -> Vec<String> {
-    let canvas = render(markdown, width);
+    let canvas = render(markdown, width + 2 * DOCUMENT_MARGIN);
+    body_rows(&canvas)
+}
+
+/// Renders `markdown` at a body budget of exactly `width`, margins included on top.
+fn render_body(markdown: &str, width: u16, options: &RenderOptions) -> Canvas {
+    render_with(markdown, width + 2 * DOCUMENT_MARGIN, options)
+}
+
+/// The column the body starts at in a canvas wide enough to carry margins.
+const BODY_COL: usize = DOCUMENT_MARGIN as usize;
+
+/// The body rows of an already-rendered canvas, margins and trailing padding removed.
+fn body_rows(canvas: &Canvas) -> Vec<String> {
+    let margin = usize::from(margins(canvas.width()));
     (0..canvas.height())
-        .map(|row| canvas.row_text(row).trim_end().to_string())
+        .map(|row| {
+            let text = canvas.row_text(row);
+            crate::text::split_at_width(&text, margin)
+                .1
+                .trim_end()
+                .to_string()
+        })
         .collect()
 }
 
@@ -99,7 +125,7 @@ fn inline_markup_carries_the_theme_styles() {
     let theme = Theme::default_dark();
     let canvas = render("*em* **st** ~~del~~ `code`", 40);
     let row = canvas.row_text(0);
-    assert_eq!(row.trim_end(), "em st del code");
+    assert_eq!(row.trim(), "em st del code");
     let column = |needle: &str| row.find(needle).expect("substring present");
     assert_eq!(style_at(&canvas, 0, column("em")), theme.text.emphasis);
     assert_eq!(style_at(&canvas, 0, column("st")), theme.text.strong);
@@ -113,7 +139,7 @@ fn inline_markup_carries_the_theme_styles() {
 #[test]
 fn nested_emphasis_combines_attributes() {
     let canvas = render("***both***", 20);
-    let attrs = style_at(&canvas, 0, 0).attrs;
+    let attrs = style_at(&canvas, 0, BODY_COL).attrs;
     assert!(attrs.contains(Attributes::BOLD) && attrs.contains(Attributes::ITALIC));
 }
 
@@ -126,7 +152,7 @@ fn a_link_shows_its_target_but_an_autolink_does_not() {
 #[test]
 fn footnotes_render_a_marker_and_a_definition() {
     let out = lines("a[^n]\n\n[^n]: body\n", 40);
-    assert_eq!(out, ["a[1]", "[n] body"]);
+    assert_eq!(out, ["a[1]", "[1] body"]);
 }
 
 #[test]
@@ -134,7 +160,7 @@ fn html_never_reaches_the_canvas() {
     let block = lines("<div>secret</div>\n", 40);
     assert_eq!(block, ["⟨html⟩"]);
     let inline = lines("before <b>middle</b> after\n", 40);
-    assert_eq!(inline, ["before ⟨html⟩middle after"]);
+    assert_eq!(inline, ["before ⟨html⟩ middle after"]);
     assert!(!inline.concat().contains('<'));
 }
 
@@ -163,8 +189,7 @@ fn heading_levels_use_distinct_prefixes() {
     let prefixes: Vec<char> = (1..=6)
         .map(|level| {
             let markdown = format!("{} T\n", "#".repeat(level));
-            render(&markdown, 10)
-                .row_text(0)
+            rows(&markdown, 10)[0]
                 .chars()
                 .next()
                 .expect("a prefix glyph")
@@ -208,7 +233,7 @@ fn anchors_are_recorded_for_every_heading_in_order() {
 fn nested_lists_indent_and_change_their_bullet() {
     assert_eq!(
         lines("- one\n  - two\n    - three\n", 30),
-        ["• one", "  ◦ two", "    ‣ three"]
+        ["• one", "  ◦ two", "    ⁃ three"]
     );
 }
 
@@ -267,8 +292,15 @@ fn quote_bars_change_hue_with_depth() {
 }
 
 #[test]
-fn a_thematic_break_fills_the_width() {
-    assert_eq!(lines("---\n", 8), ["────────"]);
+fn a_thematic_break_is_inset_and_marked_so_it_is_not_a_heading_rule() {
+    // Inset on both sides with a centred lozenge: a heading rule is full-bleed and
+    // plain, so the two can no longer be confused.
+    assert_eq!(lines("---\n", 20), ["   ──────◈───────"]);
+    let rule = &lines("## Two\n", 20)[1];
+    assert_eq!(rule, "────────────────────");
+    // Too narrow to inset: still marked, never a bare full-bleed run.
+    assert_eq!(lines("---\n", 3), ["─◈─"]);
+    assert_eq!(lines("---\n", 2), ["──"]);
 }
 
 // ------------------------------------------------------------------ code blocks
@@ -280,7 +312,7 @@ fn a_fenced_block_is_framed_and_titled_with_its_language() {
         out,
         [
             "╭ rust ────────────╮",
-            "│fn a() {}         │",
+            "│ fn a() {}        │",
             "╰──────────────────╯"
         ]
     );
@@ -289,7 +321,7 @@ fn a_fenced_block_is_framed_and_titled_with_its_language() {
 #[test]
 fn an_untagged_block_is_still_framed() {
     let out = lines("```\nplain\n```\n", 12);
-    assert_eq!(out, ["╭──────────╮", "│plain     │", "╰──────────╯"]);
+    assert_eq!(out, ["╭──────────╮", "│ plain    │", "╰──────────╯"]);
 }
 
 #[test]
@@ -302,7 +334,7 @@ fn an_indented_block_is_framed_without_a_title() {
 #[test]
 fn long_code_lines_are_clipped_not_wrapped() {
     let out = lines("```\nabcdefghijklmnop\n```\n", 10);
-    assert_eq!(out, ["╭────────╮", "│abcdefg›│", "╰────────╯"]);
+    assert_eq!(out, ["╭────────╮", "│ abcde› │", "╰────────╯"]);
 }
 
 #[test]
@@ -312,11 +344,32 @@ fn a_mermaid_fence_degrades_to_a_captioned_code_block() {
     let out = lines("```mermaid\nnot a diagram at all\n```\n", 60);
     assert!(out[0].starts_with("╭ mermaid"));
     assert!(out.iter().any(|row| row.contains("not a diagram at all")));
-    let start = out
-        .iter()
-        .position(|row| row.starts_with("unsupported mermaid syntax:"))
-        .unwrap_or_else(|| panic!("no caption in {out:?}"));
-    assert!(!out[start..].join(" ").is_empty());
+    // The reason lives in the frame's bottom edge, mirroring the language label on the
+    // top edge, rather than as a stray log line under the box.
+    let last = out.last().unwrap_or_else(|| panic!("no rows in {out:?}"));
+    assert!(
+        last.starts_with("╰ not a diagram mdless recognises ─") && last.ends_with('╯'),
+        "{last:?}"
+    );
+    // The old caption said "unsupported" twice and quoted the reader's own typo back
+    // at them as if it were a diagram type.
+    assert!(!out.concat().contains("unsupported"), "{out:?}");
+    // …and it must not quote the reader's first word back at them as a diagram type.
+    assert!(!last.contains("`not`"), "{last:?}");
+}
+
+#[test]
+fn an_unimplemented_mermaid_family_says_so_by_name() {
+    let out = lines("```mermaid\nflowchart TD\n  A --> B\n```\n", 60);
+    let last = out.last().unwrap_or_else(|| panic!("no rows in {out:?}"));
+    // Either the family draws (in which case there is no fallback frame at all) or the
+    // caption names it and promises nothing it cannot deliver.
+    if last.starts_with('╰') && last.len() > 3 {
+        assert!(
+            last.contains("flowchart") && last.contains("not drawn yet"),
+            "{last:?}"
+        );
+    }
 }
 
 // ----------------------------------------------------------------------- images
@@ -356,20 +409,22 @@ fn a_table_fills_the_width_and_draws_rounded_borders() {
     assert_eq!(
         out,
         [
-            "╭─────────┬─────────╮",
-            "│ a       │ b       │",
-            "├─────────┼─────────┤",
-            "│ 1       │ 2       │",
-            "╰─────────┴─────────╯"
+            "╭───┬───╮",
+            "│ a │ b │",
+            "├───┼───┤",
+            "│ 1 │ 2 │",
+            "╰───┴───╯"
         ],
-        "slack is spread evenly once every column has its natural width"
+        "a table stops at its natural width instead of filling the terminal"
     );
 }
 
 #[test]
 fn per_column_alignment_is_honoured() {
-    let markdown = "| l | c | r |\n|:--|:-:|--:|\n| x | x | x |\n";
-    let out = lines(markdown, 25);
+    // The headers are wider than the body cells, so each column has slack for the
+    // alignment to show in.
+    let markdown = "| left | centre | right |\n|:--|:-:|--:|\n| x | x | x |\n";
+    let out = lines(markdown, 40);
     let body = &out[3];
     let cells: Vec<&str> = body.trim_matches('│').split('│').collect();
     assert!(cells[0].starts_with(" x"), "left: {:?}", cells[0]);
@@ -452,12 +507,15 @@ fn a_cell_too_narrow_for_a_nested_table_still_renders() {
 #[test]
 fn a_table_narrower_than_its_minimums_is_clipped_with_a_marker() {
     let markdown = "| aaaaaaaaaa | bbbbbbbbbb |\n|---|---|\n| cccccccccc | dddddddddd |\n";
-    let canvas = render(markdown, 12);
-    let row = find_row(&canvas, "aaa");
+    let canvas = render_body(markdown, 12, &PLAIN);
+    let out = body_rows(&canvas);
+    let row = out
+        .iter()
+        .find(|row| row.contains("aaa"))
+        .unwrap_or_else(|| panic!("no row of {out:?} carries the header"));
     assert!(
-        canvas.row_text(row).ends_with('›'),
-        "clipped rows carry the overflow marker: {:?}",
-        canvas.row_text(row)
+        row.ends_with('›'),
+        "clipped rows carry the overflow marker: {row:?}"
     );
 }
 
@@ -610,59 +668,65 @@ fn a_code_fence_shows_a_language_icon_only_when_icons_are_on() {
 fn line_numbers_draw_a_themed_gutter() {
     let markdown = "```\none\ntwo\n```\n";
     let numbered = RenderOptions::new(false, true);
-    let canvas = render_with(markdown, 20, &numbered);
-    let out: Vec<String> = (0..canvas.height())
-        .map(|row| canvas.row_text(row).trim_end().to_string())
-        .collect();
+    let canvas = render_body(markdown, 20, &numbered);
+    let out = body_rows(&canvas);
     assert_eq!(
         out,
         [
-            "╭──────────────────╮",
-            "│1 │ one           │",
-            "│2 │ two           │",
-            "╰──────────────────╯"
+            "╭───┬──────────────╮",
+            "│ 1 │ one          │",
+            "│ 2 │ two          │",
+            "╰───┴──────────────╯"
         ]
     );
     let theme = Theme::default_dark();
-    // Column 0 is the frame; the gutter occupies 1..=3 inside it.
-    assert_eq!(style_at(&canvas, 1, 1), theme.code.line_number);
-    assert_eq!(style_at(&canvas, 1, 3), theme.code.frame);
+    // The body starts at BODY_COL with the frame, then one column of padding, then
+    // the numbers and the rule that separates them from the code.
+    assert_eq!(style_at(&canvas, 1, BODY_COL + 2), theme.code.line_number);
+    assert_eq!(style_at(&canvas, 1, BODY_COL + 4), theme.code.frame);
 }
 
 #[test]
 fn the_gutter_is_as_wide_as_the_largest_line_number() {
     let body: String = (1..=12).map(|n| format!("line{n}\n")).collect();
     let markdown = format!("```\n{body}```\n");
-    let canvas = render_with(&markdown, 20, &RenderOptions::new(false, true));
+    let out = body_rows(&render_body(
+        &markdown,
+        20,
+        &RenderOptions::new(false, true),
+    ));
+    assert!(out[1].starts_with("│  1 │"), "{:?}", out[1]);
+    assert!(out[12].starts_with("│ 12 │"), "{:?}", out[12]);
     assert!(
-        canvas.row_text(1).starts_with("│ 1 │"),
-        "{:?}",
-        canvas.row_text(1)
+        out[0].contains('┬'),
+        "the gutter joins the frame: {:?}",
+        out[0]
     );
     assert!(
-        canvas.row_text(12).starts_with("│12 │"),
-        "{:?}",
-        canvas.row_text(12)
+        out[13].contains('┴'),
+        "the gutter joins the frame: {:?}",
+        out[13]
     );
 }
 
 #[test]
 fn the_gutter_is_outside_the_clipped_region() {
     let markdown = "```\nabcdefghijklmnopqrstuvwxyz\n```\n";
-    let numbered = render_with(markdown, 12, &RenderOptions::new(false, true));
-    let bare = render_with(markdown, 12, &PLAIN);
-    let row = numbered.row_text(1);
+    let numbered = render_body(markdown, 12, &RenderOptions::new(false, true));
+    let bare = render_body(markdown, 12, &PLAIN);
+    let row = body_rows(&numbered)[1].clone();
     assert!(
-        row.starts_with("│1 │"),
+        row.starts_with("│ 1 │"),
         "the gutter survives clipping: {row:?}"
     );
     assert!(row.contains('›'), "the code is still clipped: {row:?}");
     // The gutter costs code columns; it never widens the block or hides the marker.
     assert_eq!(numbered.width(), bare.width());
-    assert!(bare.row_text(1).contains('›'));
+    let bare_row = body_rows(&bare)[1].clone();
+    assert!(bare_row.contains('›'));
     let code_columns = |text: &str| text.chars().filter(char::is_ascii_alphabetic).count();
     assert!(
-        code_columns(&row) < code_columns(&bare.row_text(1)),
+        code_columns(&row) < code_columns(&bare_row),
         "less code fits once the gutter takes its columns: {row:?}"
     );
 }
@@ -677,8 +741,8 @@ fn a_block_too_narrow_for_a_gutter_drops_it_rather_than_the_code() {
     }
     // At six columns the frame leaves four, which cannot carry a gutter and code
     // both, so the gutter goes and the code keeps every column it can.
-    let narrow = render_with(markdown, 6, &RenderOptions::new(false, true));
-    assert_eq!(narrow.row_text(1), "│abc›│");
+    let narrow = render_body(markdown, 6, &RenderOptions::new(false, true));
+    assert_eq!(body_rows(&narrow)[1], "│ a› │");
 }
 
 #[test]
@@ -784,14 +848,22 @@ fn search_spans_map_source_offsets_onto_the_canvas() {
         &source[span.source_start..span.source_end],
         "hello brave world"
     );
-    assert_eq!((span.row, span.col, span.cols), (0, 0, 17));
+    assert_eq!(
+        (span.row, span.col, span.cols),
+        (0, DOCUMENT_MARGIN, 17)
+    );
 }
 
 #[test]
 fn a_wrap_splits_the_mapping_at_the_line_break() {
     let source = "hello brave world\n";
     let doc = Doc::parse(source);
-    let canvas = render_document(&doc, 11, &Theme::default_dark(), &PLAIN);
+    let canvas = render_document(
+        &doc,
+        11 + 2 * DOCUMENT_MARGIN,
+        &Theme::default_dark(),
+        &PLAIN,
+    );
     let texts: Vec<(&str, usize, u16)> = canvas
         .spans()
         .iter()
@@ -803,9 +875,10 @@ fn a_wrap_splits_the_mapping_at_the_line_break() {
             )
         })
         .collect();
-    assert_eq!(texts, [("hello brave", 0, 0), ("world", 1, 0)]);
+    let margin = DOCUMENT_MARGIN;
+    assert_eq!(texts, [("hello brave", 0, margin), ("world", 1, margin)]);
     for span in canvas.spans() {
-        let row = canvas.row_text(span.row);
+        let row = body_rows(&canvas)[span.row].clone();
         assert!(row.starts_with(&source[span.source_start..span.source_end]));
     }
 }
@@ -860,9 +933,12 @@ fn render_block_and_render_blocks_agree_with_the_document_renderer() {
     let markdown = "# Title\n\nbody text\n";
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
-    let whole = render_document(&doc, 30, &theme, &PLAIN);
+    let whole = render_document(&doc, 30 + 2 * DOCUMENT_MARGIN, &theme, &PLAIN);
     let parts = render_blocks(&doc.root().children, 30, &theme, &PLAIN);
-    assert_eq!(whole.plain_text(), parts.plain_text());
+    assert_eq!(
+        body_rows(&whole),
+        body_rows(&parts.indent(DOCUMENT_MARGIN, DOCUMENT_MARGIN, theme.base()))
+    );
     let heading = render_block(&doc.root().children[0], 30, &theme, &PLAIN);
     assert!(heading.row_text(0).contains("Title"));
 }
@@ -873,4 +949,220 @@ fn render_table_ignores_a_node_that_is_not_a_table() {
     let canvas = render_table(&doc.root().children[0], 20, &Theme::default_dark(), &PLAIN);
     assert!(canvas.is_empty());
     assert_eq!(canvas.width(), 20);
+}
+
+// --------------------------------------------------------------------- margins
+
+/// Markdown exercising every block that draws to the edge of its budget.
+const MARGIN_FIXTURE: &str = "\
+# Heading one
+
+A paragraph long enough to fill the width and wrap onto a second line of text.
+
+---
+
+| a | b |
+| - | - |
+| 1 | 2 |
+
+```rust
+fn wide() -> &'static str { \"a line long enough to be clipped by the frame\" }
+```
+
+> a quote
+
+- a list item
+";
+
+#[test]
+fn every_row_keeps_a_margin_on_both_sides() {
+    let doc = Doc::parse(MARGIN_FIXTURE);
+    let theme = Theme::default_dark();
+    for width in [20u16, 40, 60, 80, 100, 120] {
+        let canvas = render_document(&doc, width, &theme, &PLAIN);
+        let margin = usize::from(DOCUMENT_MARGIN);
+        for row in 0..canvas.height() {
+            let text = canvas.row_text(row);
+            let (head, rest) = crate::text::split_at_width(&text, margin);
+            let (body, tail) = crate::text::split_at_width(rest, usize::from(width) - 2 * margin);
+            assert_eq!(head, " ", "width {width} row {row}: left margin {text:?}");
+            assert_eq!(tail, " ", "width {width} row {row}: right margin {text:?}");
+            let _ = body;
+        }
+    }
+}
+
+#[test]
+fn the_margin_is_dropped_only_when_it_would_leave_no_body() {
+    assert_eq!(margins(0), 0);
+    assert_eq!(margins(1), 0);
+    assert_eq!(margins(2), 0);
+    assert_eq!(margins(3), DOCUMENT_MARGIN);
+    assert_eq!(margins(120), DOCUMENT_MARGIN);
+    // Degenerate widths still satisfy the canvas contract.
+    for width in 0..=4u16 {
+        let canvas = render(MARGIN_FIXTURE, width);
+        assert_eq!(canvas.width(), width);
+    }
+}
+
+// ------------------------------------------------------- table width negotiation
+
+#[test]
+fn a_table_stops_at_its_natural_width_however_wide_the_terminal() {
+    for width in [40u16, 80, 120] {
+        let out = lines("| Only |\n|------|\n| a |\n| b |\n", width);
+        assert_eq!(
+            out,
+            [
+                "╭──────╮",
+                "│ Only │",
+                "├──────┤",
+                "│ a    │",
+                "│ b    │",
+                "╰──────╯"
+            ],
+            "at width {width} the table must not become a {width}-column void"
+        );
+    }
+}
+
+#[test]
+fn a_table_with_no_body_rows_keeps_its_header_rule() {
+    let out = lines("| A | B |\n|---|---|\n", 40);
+    assert_eq!(out, ["╭───┬───╮", "│ A │ B │", "├───┼───┤", "╰───┴───╯"]);
+}
+
+#[test]
+fn identical_columns_negotiate_identical_widths() {
+    // Three columns wanting the same amount, with less room than they want between
+    // them: the rounding must not leave a visible one-column stagger.
+    let cell = "aaaa bbbb cccc dddd eeee";
+    let markdown = format!("| h | h | h |\n|---|---|---|\n| {cell} | {cell} | {cell} |\n");
+    let out = lines(&markdown, 40);
+    let widths: Vec<usize> = out[0]
+        .trim_matches(|c| c == '╭' || c == '╮')
+        .split('┬')
+        .map(display_width)
+        .collect();
+    assert_eq!(widths.len(), 3, "{:?}", out[0]);
+    assert_eq!(
+        widths[0], widths[1],
+        "columns with identical content must come out identical: {:?}",
+        out[0]
+    );
+    assert_eq!(widths[1], widths[2], "{:?}", out[0]);
+}
+
+#[test]
+fn a_column_gets_its_natural_width_rather_than_wrapping_beside_a_padded_neighbour() {
+    let markdown = "| feature | detail |\n|---|---|\n| nested table | see the doc |\n";
+    let out = lines(markdown, 80);
+    assert!(
+        out.iter().any(|row| row.contains("│ nested table │")),
+        "a 12-column cell must not wrap while its neighbour carries blanks: {out:?}"
+    );
+}
+
+#[test]
+fn a_cell_is_measured_as_a_sentence_not_as_its_longest_word() {
+    // Bare inline siblings in a cell wrap together, so they must be measured together.
+    let out = lines("| md |\n|----|\n| *em* and `code` |\n", 40);
+    assert!(
+        out.iter().any(|row| row.contains("em and code")),
+        "the run must be measured as one line: {out:?}"
+    );
+}
+
+// ------------------------------------------------------------------- footnotes
+
+#[test]
+fn footnote_references_are_numbered_in_document_order() {
+    let markdown = "one[^a] two[^long] three[^a]\n\n[^a]: first\n[^long]: second\n";
+    let out = lines(markdown, 40);
+    assert_eq!(out[0], "one[1] two[2] three[1]");
+    assert!(out.iter().any(|row| row == "[1] first"), "{out:?}");
+    assert!(out.iter().any(|row| row == "[2] second"), "{out:?}");
+}
+
+#[test]
+fn an_unreferenced_footnote_definition_keeps_its_name() {
+    // comrak may drop it entirely; if it survives, it must still be identifiable.
+    let out = lines("text\n\n[^ghost]: nobody points here\n", 40);
+    assert!(
+        !out.iter().any(|row| row.starts_with("[]")),
+        "a definition with no number must not render an empty label: {out:?}"
+    );
+}
+
+// ------------------------------------------------------------------ inline HTML
+
+#[test]
+fn a_br_tag_breaks_the_line_instead_of_leaving_a_marker() {
+    for spelling in ["<br>", "<br/>", "<br />", "<BR>"] {
+        let markdown = format!("| k | v |\n|---|---|\n| list | - one{spelling}- two |\n");
+        let out = lines(&markdown, 60);
+        assert!(
+            out.iter().any(|row| row.contains("- one"))
+                && out.iter().any(|row| row.contains("- two")),
+            "{spelling} must break the cell: {out:?}"
+        );
+        assert!(
+            !out.concat().contains(inline::HTML_MARKER),
+            "{spelling}: {out:?}"
+        );
+    }
+}
+
+#[test]
+fn other_html_leaves_a_spaced_marker_rather_than_a_word() {
+    let out = lines("before <b>middle</b> after\n", 40);
+    assert_eq!(out, ["before ⟨html⟩ middle after"]);
+}
+
+// ----------------------------------------------------------------------- links
+
+#[test]
+fn a_link_target_is_suppressed_inside_a_table_cell() {
+    let url = "https://example.com/a/very/long/url/that/keeps/going/and/going";
+    let markdown = format!("| k | v |\n|---|---|\n| link | [example]({url}) |\n");
+    let out = lines(&markdown, 80);
+    assert!(out.iter().any(|row| row.contains("example")), "{out:?}");
+    assert!(
+        !out.concat().contains("example.com"),
+        "one URL must not claim a whole row: {out:?}"
+    );
+}
+
+#[test]
+fn a_long_link_target_is_elided_in_the_middle() {
+    let url = "https://example.com/a/very/long/url/that/keeps/going/and/going";
+    let out = lines(&format!("[text]({url})\n"), 120);
+    let shown = out.concat();
+    assert!(shown.contains('…'), "{shown:?}");
+    assert!(shown.contains("https://"), "the host survives: {shown:?}");
+    assert!(shown.contains("going)"), "the tail survives: {shown:?}");
+    assert!(!shown.contains(url), "{shown:?}");
+}
+
+// ---------------------------------------------------------------------- images
+
+#[test]
+fn an_image_with_no_alt_text_does_not_say_image_twice() {
+    let out = lines("![](empty-alt.png)\n", 40);
+    assert_eq!(out[0].matches("image").count(), 1, "{out:?}");
+    assert!(
+        out.iter().any(|row| row.contains("empty-alt.png")),
+        "{out:?}"
+    );
+}
+
+// ---------------------------------------------------------------- block quotes
+
+#[test]
+fn nested_quotes_do_not_stack_a_gutter_per_level() {
+    let out = lines("> > > > level four\n", 40);
+    assert_eq!(out, ["▌▌▌▌ level four"]);
+    // A level that carries text of its own still gets its separating space.
+    assert_eq!(lines("> one\n", 40), ["▌ one"]);
 }

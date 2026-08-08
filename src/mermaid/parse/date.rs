@@ -6,11 +6,9 @@
 //! timezone concept and a pager has no business inventing one.
 
 use crate::error::MermaidError;
+use crate::mermaid::gantt::time::{DAY, HOUR, MINUTE, clamp_instant, clamp_span, days_from_civil};
 
 use super::lex;
-
-/// Seconds in one day.
-const DAY: i64 = 86_400;
 
 /// Parses `text` according to a Mermaid `dateFormat` string.
 ///
@@ -23,7 +21,9 @@ const DAY: i64 = 86_400;
 pub fn parse_date(text: &str, format: &str) -> Option<i64> {
     let text = text.trim();
     if format.trim() == "X" {
-        return text.parse::<i64>().ok();
+        // An arbitrary `i64` from the source is clamped to the drawable range: the
+        // renderer must never be handed an instant its arithmetic cannot survive.
+        return text.parse::<i64>().ok().map(clamp_instant);
     }
     let mut fields = Fields::default();
     let mut input = text;
@@ -105,19 +105,12 @@ fn to_epoch(year: i64, month: i64, day: i64, fields: Fields) -> Option<i64> {
     if fields.hour > 23 || fields.minute > 59 || fields.second > 59 {
         return None;
     }
+    // `month` and `day` are validated above, so the conversions cannot fail.
+    let month = u32::try_from(month).ok()?;
+    let day = u32::try_from(day).ok()?;
     let days = days_from_civil(year, month, day);
-    Some(days * DAY + fields.hour * 3600 + fields.minute * 60 + fields.second)
-}
-
-/// Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's algorithm).
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let month_index = (month + 9) % 12;
-    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
+    let seconds = days * DAY + fields.hour * HOUR + fields.minute * MINUTE + fields.second;
+    Some(clamp_instant(seconds))
 }
 
 /// Parses a duration literal such as `3d`, `2w`, `12h`, `90m` or `1.5d`.
@@ -143,8 +136,8 @@ pub fn parse_duration(text: &str, line: usize) -> Result<Option<i64>, MermaidErr
     let seconds = match unit.trim() {
         "ms" => 0.001,
         "s" => 1.0,
-        "m" | "min" | "minute" | "minutes" => 60.0,
-        "h" | "hour" | "hours" => 3600.0,
+        "m" | "min" | "minute" | "minutes" => MINUTE as f64,
+        "h" | "hour" | "hours" => HOUR as f64,
         "d" | "day" | "days" => DAY as f64,
         "w" | "week" | "weeks" => 7.0 * DAY as f64,
         "" => return Ok(None),
@@ -155,5 +148,7 @@ pub fn parse_duration(text: &str, line: usize) -> Result<Option<i64>, MermaidErr
             ));
         }
     };
-    Ok(Some((amount * seconds).round() as i64))
+    // The cast saturates rather than wrapping, and the clamp keeps even a saturated
+    // value inside the range the timeline can add to without overflowing.
+    Ok(Some(clamp_span((amount * seconds).round() as i64)))
 }

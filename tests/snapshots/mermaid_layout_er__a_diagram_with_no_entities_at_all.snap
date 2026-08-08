@@ -1,0 +1,5 @@
+---
+source: tests/mermaid_layout_er.rs
+expression: "render(&diagram(Vec::new(), Vec::new()), 30)"
+---
+

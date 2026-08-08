@@ -135,7 +135,7 @@ impl Builder {
             Some((head, body)) => (head.trim(), Some(body)),
             None => (rest.trim(), None),
         };
-        let (name, annotation) = split_annotation(head);
+        let (name, annotation) = lex::split_stereotype(head, line)?;
         if name.is_empty() {
             return Err(lex::syntax(line, "`class` without a name"));
         }
@@ -250,20 +250,6 @@ fn normalise_generics(text: &str) -> String {
         }
     }
     out
-}
-
-/// Splits a trailing `<<annotation>>` off a class head.
-fn split_annotation(head: &str) -> (&str, Option<&str>) {
-    match head.find("<<") {
-        Some(at) => {
-            let rest = &head[at + 2..];
-            match rest.find(">>") {
-                Some(close) => (head[..at].trim(), Some(rest[..close].trim())),
-                None => (head.trim(), None),
-            }
-        }
-        None => (head.trim(), None),
-    }
 }
 
 /// Maps a stereotype word to a [`ClassAnnotation`].

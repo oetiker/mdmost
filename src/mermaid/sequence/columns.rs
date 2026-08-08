@@ -287,15 +287,7 @@ fn collect(
                 }
             }
             SequenceItem::Note(note) => {
-                let text = note
-                    .text
-                    .lines
-                    .iter()
-                    .map(String::as_str)
-                    .map(display_width)
-                    .max()
-                    .unwrap_or(0)
-                    .min(profile.label_cap);
+                let text = chrome::label_natural_width(&note.text).min(profile.label_cap);
                 let box_width = text + 4;
                 let mut targets: Vec<usize> = note
                     .participants

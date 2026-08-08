@@ -422,24 +422,68 @@ fn backspacing_an_empty_prompt_closes_it() {
 }
 
 #[test]
-fn escape_closes_the_toc_before_it_quits() {
+fn escape_unwinds_state_and_never_quits() {
     let mut app = pager(SAMPLE);
+    app.resize(100, 30);
     app.act(Action::ToggleToc);
+    assert_eq!(app.focus(), Focus::Toc);
+
     app.act(Action::Cancel);
-    assert!(!app.should_quit(), "escape must close the pane first");
-    assert_eq!(app.focus(), Focus::Document);
+    assert_eq!(app.focus(), Focus::Document, "first Esc releases the pane");
+    assert!(app.toc_is_open(), "the pane is still on screen");
+
     app.act(Action::Cancel);
-    assert!(app.should_quit());
+    assert!(!app.toc_is_open(), "second Esc closes the pane");
+
+    // Escape from a bare document does nothing at all: `q` is the way out.
+    for _ in 0..5 {
+        app.act(Action::Cancel);
+        assert!(!app.should_quit(), "Esc must never quit");
+    }
+    assert!(app.notice().is_some(), "and it says so rather than sulking");
 }
 
 #[test]
-fn the_help_overlay_opens_and_any_key_dismisses_it() {
+fn escape_clears_the_search_before_anything_else() {
+    let mut app = pager(SAMPLE);
+    app.resize(100, 30);
+    app.act(Action::ToggleToc);
+    app.act(Action::Cancel);
+    app.run_search("Alpha");
+    assert!(!app.search().query().is_empty());
+
+    app.act(Action::Cancel);
+    assert!(app.search().query().is_empty(), "the search goes first");
+    assert!(app.toc_is_open(), "and the pane is left alone");
+    assert!(!app.should_quit());
+}
+
+#[test]
+fn escape_does_not_quit_with_an_overlay_open() {
+    let mut app = pager(SAMPLE);
+    app.act(Action::Help);
+    app.on_key(Key::plain(KeyCode::Esc));
+    assert_eq!(*app.overlay(), Overlay::None);
+    assert!(!app.should_quit());
+}
+
+#[test]
+fn the_help_overlay_opens_scrolls_and_dismisses() {
     let mut app = pager(SAMPLE);
     app.act(Action::Help);
     assert_eq!(*app.overlay(), Overlay::Help);
+
+    // Movement keys move the overlay, not the document behind it.
     app.on_key(Key::char('j'));
-    assert_eq!(*app.overlay(), Overlay::None);
-    assert_eq!(app.scroll(), 0, "the dismissing key must not also scroll");
+    assert_eq!(*app.overlay(), Overlay::Help, "j scrolls the help");
+    assert_eq!(app.help_scroll(), 1);
+    assert_eq!(app.scroll(), 0, "and never the document");
+    app.on_key(Key::char('k'));
+    assert_eq!(app.help_scroll(), 0);
+
+    app.on_key(Key::char('t'));
+    assert_eq!(*app.overlay(), Overlay::None, "anything else dismisses it");
+    assert_eq!(app.help_scroll(), 0, "and the overlay reopens at the top");
 }
 
 #[test]
@@ -633,10 +677,15 @@ fn a_forced_width_overrides_the_terminal() {
 fn the_meter_is_exactly_as_wide_as_asked() {
     for fraction in [0.0, 0.01, 0.5, 0.999, 1.0] {
         for width in [1usize, 4, 8, 20] {
+            let (filled, trough) = meter(fraction, width);
             assert_eq!(
-                crate::text::display_width(&meter(fraction, width)),
+                crate::text::display_width(&filled) + crate::text::display_width(&trough),
                 width,
                 "fraction {fraction} at width {width}"
+            );
+            assert!(
+                fraction > 0.0 || filled.is_empty(),
+                "an empty meter is all trough"
             );
         }
     }
@@ -650,5 +699,248 @@ fn a_document_with_no_headings_still_works() {
     app.act(Action::Confirm);
     app.act(Action::NextHeading);
     assert_eq!(app.scroll(), 0);
+    assert!(!app.should_quit());
+}
+
+/// A document whose code line and table both need far more room than any viewport.
+const WIDE: &str = "\
+# Wide
+
+Prose that must keep wrapping to the viewport, never to the widest block.
+
+```rust
+fn f() { let a = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaa\"; let b = \"bbbbbbbbbbbbbbbbbbbbbbbbbbbb\"; let c = \"cccccccccccccccccccccccccccc\"; }
+```
+
+| AlphaColumnOne | BetaColumnTwo | GammaColumnThree | DeltaColumnFour | EpsilonFive |
+|---|---|---|---|---|
+| 1 | 2 | 3 | 4 | 5 |
+";
+
+/// Builds an app over `source` at an explicit size.
+fn pager_at(source: &str, width: u16, height: u16) -> App {
+    let mut app = App::new(
+        Doc::parse(source),
+        Config::default(),
+        AppOptions {
+            title: "sample.md".to_string(),
+            icons: false,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(width, height);
+    let _ = app.canvas();
+    app
+}
+
+#[test]
+fn a_wide_block_makes_the_document_horizontally_scrollable() {
+    // The disqualifying bug: the canvas was rendered *at* viewport width, so there
+    // was never anything to the right of the viewport and `→` did nothing while the
+    // renderer went on painting truncation markers.
+    let mut app = pager_at(WIDE, 60, 16);
+    assert!(
+        app.hscroll_max() > 0,
+        "a document with an over-wide block must have somewhere to scroll to"
+    );
+
+    app.act(Action::ScrollRight);
+    let first = app.hscroll();
+    assert!(first > 0, "the right arrow must actually move");
+    app.act(Action::ScrollRight);
+    assert!(app.hscroll() > first, "and keep moving");
+
+    // And it stops at the end rather than wandering into blank space.
+    for _ in 0..200 {
+        app.act(Action::ScrollRight);
+    }
+    assert_eq!(app.hscroll(), app.hscroll_max());
+
+    app.act(Action::ScrollLeft);
+    assert!(app.hscroll() < app.hscroll_max());
+    for _ in 0..200 {
+        app.act(Action::ScrollLeft);
+    }
+    assert_eq!(app.hscroll(), 0, "and back to the left edge");
+}
+
+#[test]
+fn widening_a_block_does_not_reflow_the_prose() {
+    let app = pager_at(WIDE, 60, 16);
+    let viewport = usize::from(app.viewport_width());
+    assert!(app.rendered().width() > app.viewport_width());
+
+    let prose = (0..app.rendered().height())
+        .map(|row| app.rendered().row_text(row))
+        .find(|text| text.contains("Prose that must keep wrapping"))
+        .expect("the paragraph is in the render");
+    assert!(
+        crate::text::display_width(prose.trim_end()) <= viewport,
+        "prose must stay wrapped to the viewport, not to the widest block: {prose:?}"
+    );
+}
+
+#[test]
+fn a_document_that_fits_is_not_widened() {
+    let app = pager_at(SAMPLE, 80, 12);
+    assert_eq!(
+        app.rendered().width(),
+        app.content_width(),
+        "nothing is clipped, so nothing is widened"
+    );
+    assert_eq!(app.hscroll_max(), 0);
+}
+
+#[test]
+fn the_overflow_marker_matches_the_renderer() {
+    // `super::wide` cannot see `render::code`'s private constant, so it keeps its own
+    // copy. If the renderer ever changes the glyph, widening silently stops working;
+    // this is the tripwire.
+    let doc = Doc::parse("```text\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n```\n");
+    let canvas = crate::render::render_document(
+        &doc,
+        20,
+        &crate::theme::Theme::default_dark(),
+        &crate::render::RenderOptions::new(false, false),
+    );
+    let text = canvas.plain_text();
+    assert!(
+        text.contains(super::wide::OVERFLOW_MARKER),
+        "the renderer still marks clipped content with {:?}: {text}",
+        super::wide::OVERFLOW_MARKER
+    );
+}
+
+#[test]
+fn the_toc_tracks_the_section_being_read() {
+    let mut app = pager(SAMPLE);
+    app.act(Action::ToggleToc);
+    app.act(Action::Cancel); // release the pane, keep it on screen
+    assert_eq!(app.focus(), Focus::Document);
+    let at_top = app.toc_cursor();
+
+    app.act(Action::Bottom);
+    let current = app
+        .current_heading()
+        .expect("the last section is a heading");
+    assert_eq!(
+        app.toc_hits()[app.toc_cursor()].index,
+        current,
+        "the marker must follow the viewport, not wait for a Tab"
+    );
+    assert_ne!(app.toc_cursor(), at_top, "and it must actually have moved");
+
+    app.act(Action::Top);
+    assert_eq!(app.toc_cursor(), at_top, "and follow back up again");
+}
+
+#[test]
+fn tracking_leaves_the_pane_alone_while_it_has_focus() {
+    let mut app = pager(SAMPLE);
+    app.act(Action::ToggleToc);
+    app.act(Action::LineDown);
+    let chosen = app.toc_cursor();
+    app.on_scroll(1, false);
+    assert_eq!(
+        app.toc_cursor(),
+        chosen,
+        "scrolling the document must not yank the cursor someone is using"
+    );
+}
+
+#[test]
+fn closing_the_toc_forgets_its_filter() {
+    let mut app = pager(SAMPLE);
+    app.act(Action::ToggleToc);
+    app.act(Action::SearchForward);
+    for ch in "sum".chars() {
+        app.on_key(Key::char(ch));
+    }
+    assert_eq!(app.toc_hits().len(), 1);
+
+    app.act(Action::ToggleToc);
+    app.act(Action::ToggleToc);
+    assert_eq!(
+        app.toc_hits().len(),
+        app.toc().len(),
+        "a filter that survives a close leaves a permanently one-item map"
+    );
+    assert_eq!(app.toc_filter(), "");
+}
+
+#[test]
+fn one_enter_commits_the_filter_and_jumps() {
+    let mut app = pager(SAMPLE);
+    app.act(Action::ToggleToc);
+    app.act(Action::SearchForward);
+    for ch in "sum".chars() {
+        app.on_key(Key::char(ch));
+    }
+    app.on_key(Key::plain(KeyCode::Enter));
+    let target = app.toc().index_of("summary").expect("Summary is a heading");
+    let row = app.toc().row_of(target).expect("and it was rendered");
+    assert_eq!(app.scroll(), row.min(app.max_scroll()), "one Enter jumps");
+}
+
+#[test]
+fn a_repeat_count_multiplies_the_movement() {
+    let mut app = pager(SAMPLE);
+    for ch in "10".chars() {
+        app.on_key(Key::char(ch));
+    }
+    app.on_key(Key::char('j'));
+    assert_eq!(app.scroll(), 10usize.min(app.max_scroll()));
+    assert_eq!(app.pending_count(), "", "the count is consumed");
+
+    // And a plain `j` afterwards is one line, not ten.
+    let before = app.scroll();
+    app.on_key(Key::char('j'));
+    assert_eq!(app.scroll(), (before + 1).min(app.max_scroll()));
+}
+
+#[test]
+fn a_percentage_seek_lands_where_it_says() {
+    let mut app = pager_at(SAMPLE, 80, 6);
+    assert!(app.max_scroll() > 0);
+    for ch in "50".chars() {
+        app.on_key(Key::char(ch));
+    }
+    app.on_key(Key::char('%'));
+    assert_eq!(app.scroll(), app.max_scroll() / 2);
+
+    for ch in "100".chars() {
+        app.on_key(Key::char(ch));
+    }
+    app.on_key(Key::char('%'));
+    assert_eq!(app.scroll(), app.max_scroll());
+}
+
+#[test]
+fn the_position_report_names_the_file_and_the_lines() {
+    let mut app = pager(SAMPLE);
+    app.on_key(Key::ctrl('g'));
+    let notice = app.notice().expect("Ctrl-G answers").text.clone();
+    assert!(notice.contains("sample.md"), "{notice}");
+    assert!(notice.contains("lines 1-"), "{notice}");
+    assert!(!app.should_quit());
+}
+
+#[test]
+fn an_unbound_key_says_so_instead_of_nothing() {
+    let mut app = pager(SAMPLE);
+    app.on_key(Key::char('v'));
+    let notice = app.notice().expect("an unknown key must be answered");
+    assert!(notice.text.contains("help"), "{}", notice.text);
+}
+
+#[test]
+fn escape_clears_a_half_typed_count() {
+    let mut app = pager(SAMPLE);
+    app.on_key(Key::char('4'));
+    assert_eq!(app.pending_count(), "4");
+    app.on_key(Key::plain(KeyCode::Esc));
+    assert_eq!(app.pending_count(), "");
     assert!(!app.should_quit());
 }

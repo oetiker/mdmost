@@ -8,12 +8,32 @@
 use crate::canvas::Canvas;
 use crate::config::{Action, Config, Key, KeyCode};
 use crate::doc::Doc;
-use crate::render::{RenderOptions, render_document};
+use crate::render::RenderOptions;
 use crate::search::{Search, SearchMode};
 use crate::theme::Theme;
 use crate::toc::{FilterHit, Toc};
 
 use super::cache::RenderCache;
+
+/// The narrowest terminal the table-of-contents pane is offered in.
+const MIN_TOC_TERMINAL_WIDTH: u16 = 40;
+
+/// How many columns one press of the horizontal scroll keys moves.
+const HSCROLL_STEP: u16 = 8;
+
+/// The most digits a repeat count may have, so a leaned-on key cannot allocate.
+const MAX_COUNT_DIGITS: usize = 6;
+
+/// The most times one repeat count re-runs an action.
+///
+/// Movement is expressed as a single clamped jump, so this only bounds the actions
+/// that genuinely have to be stepped — matches and headings.
+const MAX_REPEAT: usize = 10_000;
+
+/// Whether `key` is a bare digit, and so part of a repeat count.
+fn is_count_digit(key: Key) -> bool {
+    matches!(key.code, KeyCode::Char(ch) if ch.is_ascii_digit()) && key.mods.is_empty()
+}
 
 /// Which pane the keyboard is talking to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +138,10 @@ pub struct App {
     toc_filter: String,
     toc_hits: Vec<FilterHit>,
     overlay: Overlay,
+    /// The first help row on screen, for a help overlay taller than the terminal.
+    help_scroll: usize,
+    /// The digits typed in front of a movement key, `less`-style.
+    pending_count: String,
     notice: Option<Notice>,
     search_index: Option<usize>,
     search_backward: bool,
@@ -165,6 +189,8 @@ impl App {
             toc_filter: String::new(),
             toc_hits: Vec::new(),
             overlay: Overlay::None,
+            help_scroll: 0,
+            pending_count: String::new(),
             notice,
             search_index: None,
             search_backward: false,
@@ -373,7 +399,23 @@ impl App {
 
     /// The heading whose section the viewport is in.
     pub fn current_heading(&self) -> Option<usize> {
-        self.toc.current(self.scroll)
+        self.toc.current(self.heading_probe_row())
+    }
+
+    /// The row the current section is read from.
+    ///
+    /// Normally the top of the viewport, which is what makes the status bar agree
+    /// with what the reader is about to read. At the very end of the document the
+    /// top row can sit several sections above everything on screen, and naming a
+    /// heading the reader scrolled past reads as simply wrong (usability P13), so
+    /// the last row is used there instead.
+    fn heading_probe_row(&self) -> usize {
+        let max = self.max_scroll();
+        if max > 0 && self.scroll >= max {
+            self.cache.canvas().height().saturating_sub(1)
+        } else {
+            self.scroll
+        }
     }
 
     /// Resizes the viewport, keeping the reader where they were.
@@ -395,6 +437,7 @@ impl App {
             self.scroll = self.row_for_source_offset(offset);
         }
         self.clamp();
+        self.track_toc();
     }
 
     /// Renders the document if the cache is stale, then re-attaches anchors and hits.
@@ -407,7 +450,7 @@ impl App {
         let stale =
             self.cache
                 .refresh(self.doc.version(), width, &self.theme.name, options, || {
-                    render_document(&self.doc, width, &self.theme, &options)
+                    super::wide::render_scrollable(&self.doc, width, &self.theme, &options)
                 });
         if stale {
             self.toc.attach_anchors(self.cache.canvas().anchors());
@@ -462,12 +505,14 @@ impl App {
             self.scroll.saturating_sub(delta.unsigned_abs())
         };
         self.scroll = target.min(max);
+        self.track_toc();
     }
 
     /// Puts `row` at the top of the viewport, clamped.
     pub fn scroll_to(&mut self, row: usize) {
         self.ensure_rendered();
         self.scroll = row.min(self.max_scroll());
+        self.track_toc();
     }
 
     /// Brings `row` into view, leaving a little context above it when scrolling up.
@@ -481,6 +526,48 @@ impl App {
             self.scroll = row + margin + 1 - height;
         }
         self.clamp();
+        self.track_toc();
+    }
+
+    /// Brings `row` into view with context on both sides of it.
+    ///
+    /// A match landing on the last visible row, with nothing after it, tells the
+    /// reader almost nothing (visual review P16); centring is what makes a hit
+    /// readable in its surroundings. A row already comfortably on screen is left
+    /// where it is, so stepping through nearby matches does not lurch.
+    pub fn reveal_centered(&mut self, row: usize) {
+        self.ensure_rendered();
+        let height = self.viewport_height();
+        let margin = (height / 4).max(1);
+        let comfortable = row >= self.scroll.saturating_add(margin)
+            && row + margin < self.scroll.saturating_add(height);
+        if comfortable {
+            return;
+        }
+        self.scroll = row.saturating_sub(height / 2).min(self.max_scroll());
+        self.track_toc();
+    }
+
+    /// Keeps the table-of-contents selection on the section being read.
+    ///
+    /// Design spec §9 asks for "the current section highlighted"; a map that stops
+    /// updating the moment the reader scrolls is worse than no map at all. The
+    /// selection is left alone while the pane has the keyboard, so tracking never
+    /// pulls the cursor out from under someone navigating it.
+    fn track_toc(&mut self) {
+        if self.focus == Focus::Toc {
+            return;
+        }
+        self.select_current_heading();
+    }
+
+    /// Puts the selection on the section the viewport is in, whatever has focus.
+    fn select_current_heading(&mut self) {
+        if let Some(current) = self.current_heading()
+            && let Some(position) = self.toc_hits.iter().position(|hit| hit.index == current)
+        {
+            self.toc_cursor = position;
+        }
     }
 
     /// Sets a transient status-bar message.
@@ -513,71 +600,252 @@ impl App {
             return;
         }
         if self.overlay == Overlay::Help {
-            // Any key other than an explicit re-toggle dismisses the help.
-            match self.config.keys.action(&key) {
-                Some(Action::Help | Action::Cancel) | None => self.overlay = Overlay::None,
-                Some(Action::Quit) => self.quit(),
-                Some(_) => self.overlay = Overlay::None,
-            }
+            self.help_key(key);
             return;
         }
-        let Some(action) = self.config.keys.action(&key) else {
-            return;
-        };
-        self.act(action);
+        match self.config.keys.action(&key) {
+            Some(action) => {
+                let count = self.take_count();
+                self.act_with_count(action, count);
+            }
+            // Digits in front of a movement key are a repeat count, the way `less`
+            // and vi read them. A digit that the user has bound to something wins,
+            // which is why the binding is consulted first.
+            None if is_count_digit(key) => self.push_count(key),
+            // Silence is the worst answer: a reader who typed something the pager
+            // does not know needs to be told, not left wondering whether it hung.
+            None => {
+                self.pending_count.clear();
+                self.notify(
+                    format!("{} is not bound — press h for help", key.label()),
+                    false,
+                );
+            }
+        }
     }
 
     /// Handles one action, dispatching on the focused pane.
     pub fn act(&mut self, action: Action) {
+        self.act_with_count(action, None);
+    }
+
+    /// Handles one action, repeated or parameterised by a leading count.
+    pub fn act_with_count(&mut self, action: Action, count: Option<usize>) {
         let height = self.viewport_height();
+        let times = count.unwrap_or(1).max(1);
+        let lines =
+            |per: usize| -> isize { isize::try_from(per.saturating_mul(times)).unwrap_or(0) };
         match action {
             Action::Quit => self.quit(),
-            Action::Cancel => {
-                if self.focus == Focus::Toc {
-                    self.focus = Focus::Document;
-                } else {
-                    self.quit();
-                }
+            Action::Cancel => self.cancel(),
+            Action::Help => {
+                self.overlay = Overlay::Help;
+                self.help_scroll = 0;
             }
-            Action::Help => self.overlay = Overlay::Help,
             Action::ToggleToc => self.toggle_toc(),
             Action::CycleTheme => self.cycle_theme(),
+            Action::ToggleLineNumbers => self.toggle_line_numbers(),
+            Action::ReportPosition => self.report_position(),
             // Design spec §9: `/` inside the table of contents filters it fuzzily
             // rather than searching the document.
             Action::SearchForward if self.focus == Focus::Toc => self.start_toc_filter(),
             Action::SearchForward => self.open_prompt(PromptKind::SearchForward),
             Action::SearchBackward => self.open_prompt(PromptKind::SearchBackward),
-            Action::NextMatch => self.step_match(!self.search_backward),
-            Action::PrevMatch => self.step_match(self.search_backward),
+            Action::NextMatch => self.repeat(times, |app| app.step_match(!app.search_backward)),
+            Action::PrevMatch => self.repeat(times, |app| app.step_match(app.search_backward)),
             Action::ToggleSearchMode => self.toggle_search_mode(),
             Action::Confirm if self.focus == Focus::Toc => self.jump_to_selected_heading(),
             Action::Confirm => {}
-            Action::ScrollLeft => self.hscroll = self.hscroll.saturating_sub(4),
+            Action::ScrollLeft => {
+                self.hscroll = self
+                    .hscroll
+                    .saturating_sub(HSCROLL_STEP.saturating_mul(u16::try_from(times).unwrap_or(1)));
+            }
             Action::ScrollRight => {
                 self.ensure_rendered();
-                self.hscroll = self.hscroll.saturating_add(4);
+                self.hscroll = self
+                    .hscroll
+                    .saturating_add(HSCROLL_STEP.saturating_mul(u16::try_from(times).unwrap_or(1)));
                 self.clamp();
             }
-            Action::PrevHeading => self.step_heading(false),
-            Action::NextHeading => self.step_heading(true),
-            _ if self.focus == Focus::Toc => self.toc_move(action, height),
-            Action::LineDown => self.scroll_by(1),
-            Action::LineUp => self.scroll_by(-1),
-            Action::HalfPageDown => self.scroll_by((height / 2).max(1) as isize),
-            Action::HalfPageUp => self.scroll_by(-((height / 2).max(1) as isize)),
-            Action::PageDown => self.scroll_by(height.saturating_sub(1).max(1) as isize),
-            Action::PageUp => self.scroll_by(-(height.saturating_sub(1).max(1) as isize)),
-            Action::Top => self.scroll_to(0),
-            Action::Bottom => {
-                self.ensure_rendered();
-                self.scroll = self.max_scroll();
+            Action::PrevHeading => self.repeat(times, |app| app.step_heading(false)),
+            Action::NextHeading => self.repeat(times, |app| app.step_heading(true)),
+            Action::Percent => self.scroll_to_percent(count.unwrap_or(0)),
+            _ if self.focus == Focus::Toc => self.toc_move(action, height, times),
+            Action::LineDown => self.scroll_by(lines(1)),
+            Action::LineUp => self.scroll_by(-lines(1)),
+            Action::HalfPageDown => self.scroll_by(lines((height / 2).max(1))),
+            Action::HalfPageUp => self.scroll_by(-lines((height / 2).max(1))),
+            Action::PageDown => self.scroll_by(lines(height.saturating_sub(1).max(1))),
+            Action::PageUp => self.scroll_by(-lines(height.saturating_sub(1).max(1))),
+            // `100g` goes to line 100, as it does in `less`; a bare `g` goes home.
+            Action::Top => self.scroll_to(count.map_or(0, |line| line.saturating_sub(1))),
+            Action::Bottom => match count {
+                Some(line) => self.scroll_to(line.saturating_sub(1)),
+                None => {
+                    self.ensure_rendered();
+                    let bottom = self.max_scroll();
+                    self.scroll_to(bottom);
+                }
+            },
+        }
+    }
+
+    /// Runs `step` `times` times.
+    fn repeat(&mut self, times: usize, step: impl Fn(&mut Self)) {
+        for _ in 0..times.min(MAX_REPEAT) {
+            step(self);
+        }
+    }
+
+    /// Appends a digit to the pending repeat count.
+    fn push_count(&mut self, key: Key) {
+        if let KeyCode::Char(ch) = key.code
+            && self.pending_count.len() < MAX_COUNT_DIGITS
+        {
+            self.pending_count.push(ch);
+        }
+        let count = self.pending_count.clone();
+        self.notify(format!("{count}…"), false);
+    }
+
+    /// Takes and clears the pending repeat count.
+    fn take_count(&mut self) -> Option<usize> {
+        let count = std::mem::take(&mut self.pending_count);
+        count.parse::<usize>().ok()
+    }
+
+    /// The repeat count typed so far, for the status bar.
+    pub fn pending_count(&self) -> &str {
+        &self.pending_count
+    }
+
+    /// The first help row on screen.
+    pub fn help_scroll(&self) -> usize {
+        self.help_scroll
+    }
+
+    /// Handles a key while the help overlay is up.
+    ///
+    /// Movement scrolls the overlay rather than the document, because an overlay too
+    /// tall for the terminal that cannot be scrolled is exactly the trap design spec
+    /// §10 is trying to avoid.
+    fn help_key(&mut self, key: Key) {
+        let height = self.viewport_height();
+        match self.config.keys.action(&key) {
+            Some(Action::Quit) => self.quit(),
+            Some(Action::LineDown) => self.help_scroll = self.help_scroll.saturating_add(1),
+            Some(Action::LineUp) => self.help_scroll = self.help_scroll.saturating_sub(1),
+            Some(Action::HalfPageDown) => {
+                self.help_scroll = self.help_scroll.saturating_add((height / 2).max(1));
+            }
+            Some(Action::HalfPageUp) => {
+                self.help_scroll = self.help_scroll.saturating_sub((height / 2).max(1));
+            }
+            Some(Action::PageDown) => self.help_scroll = self.help_scroll.saturating_add(height),
+            Some(Action::PageUp) => self.help_scroll = self.help_scroll.saturating_sub(height),
+            Some(Action::Top) => self.help_scroll = 0,
+            Some(Action::Bottom) => self.help_scroll = usize::MAX,
+            // Anything else — including Esc and a second `h` — puts the help away.
+            _ => {
+                self.overlay = Overlay::None;
+                self.help_scroll = 0;
             }
         }
     }
 
+    /// Clamps the help scroll to what the overlay actually has to show.
+    ///
+    /// Called by the drawing code, which is the only thing that knows how the rows
+    /// were laid out at this terminal size.
+    pub fn clamp_help_scroll(&mut self, max: usize) {
+        self.help_scroll = self.help_scroll.min(max);
+    }
+
+    /// Unwinds one step of state, and never quits.
+    ///
+    /// Design spec §10 calls `Esc` "cancel". The review that prompted this made the
+    /// case that a reader presses it precisely when they are unsure, so destroying
+    /// their position is the one thing it must not do: `q` quits, unambiguously and
+    /// on purpose. `Esc` therefore peels state off one layer at a time and, when
+    /// there is nothing left to peel, says so.
+    fn cancel(&mut self) {
+        if !self.pending_count.is_empty() {
+            self.pending_count.clear();
+            return;
+        }
+        if !self.search.query().is_empty() {
+            self.search = Search::empty();
+            self.search_index = None;
+            self.notify("search cleared", false);
+            return;
+        }
+        if !self.toc_filter.is_empty() {
+            self.toc_filter.clear();
+            self.refilter_toc();
+            self.sync_toc_selection();
+            self.notify("filter cleared", false);
+            return;
+        }
+        if self.toc_open && self.focus == Focus::Toc {
+            self.focus = Focus::Document;
+            return;
+        }
+        if self.toc_open {
+            self.close_toc();
+            return;
+        }
+        self.notify("nothing to cancel — press q to quit", false);
+    }
+
+    /// Reports the reading position, the way `less` answers `Ctrl-G`.
+    fn report_position(&mut self) {
+        self.ensure_rendered();
+        let total = self.rendered().height();
+        let first = self.scroll + 1;
+        let last = (self.scroll + self.viewport_height()).min(total);
+        let percent = (self.progress() * 100.0).round() as u16;
+        let heading = self
+            .current_heading()
+            .and_then(|index| self.toc.entries().get(index))
+            .map(|entry| format!(" — {}", entry.text))
+            .unwrap_or_default();
+        self.notify(
+            format!(
+                "{} lines {first}-{last} of {total} ({percent}%){heading}",
+                self.options.title
+            ),
+            false,
+        );
+    }
+
+    /// Jumps to a percentage of the document, the way `less` answers `50%`.
+    fn scroll_to_percent(&mut self, percent: usize) {
+        self.ensure_rendered();
+        let max = self.max_scroll();
+        let target = max.saturating_mul(percent.min(100)) / 100;
+        self.scroll_to(target);
+        self.notify(format!("{}%", percent.min(100)), false);
+    }
+
+    /// Turns the code-block line-number gutter on or off.
+    fn toggle_line_numbers(&mut self) {
+        self.config.line_numbers = !self.config.line_numbers;
+        self.ensure_rendered();
+        self.notify(
+            if self.config.line_numbers {
+                "line numbers on"
+            } else {
+                "line numbers off"
+            },
+            false,
+        );
+    }
+
     /// Moves the selection inside the table-of-contents pane.
-    fn toc_move(&mut self, action: Action, height: usize) {
+    fn toc_move(&mut self, action: Action, height: usize, times: usize) {
         let last = self.toc_hits.len().saturating_sub(1);
+        let by = |per: usize| -> isize { isize::try_from(per.saturating_mul(times)).unwrap_or(0) };
         let step = |cursor: usize, delta: isize| -> usize {
             if delta >= 0 {
                 cursor.saturating_add(delta.unsigned_abs()).min(last)
@@ -586,12 +854,12 @@ impl App {
             }
         };
         self.toc_cursor = match action {
-            Action::LineDown => step(self.toc_cursor, 1),
-            Action::LineUp => step(self.toc_cursor, -1),
-            Action::HalfPageDown => step(self.toc_cursor, (height / 2).max(1) as isize),
-            Action::HalfPageUp => step(self.toc_cursor, -((height / 2).max(1) as isize)),
-            Action::PageDown => step(self.toc_cursor, height.max(1) as isize),
-            Action::PageUp => step(self.toc_cursor, -(height.max(1) as isize)),
+            Action::LineDown => step(self.toc_cursor, by(1)),
+            Action::LineUp => step(self.toc_cursor, -by(1)),
+            Action::HalfPageDown => step(self.toc_cursor, by((height / 2).max(1))),
+            Action::HalfPageUp => step(self.toc_cursor, -by((height / 2).max(1))),
+            Action::PageDown => step(self.toc_cursor, by(height.max(1))),
+            Action::PageUp => step(self.toc_cursor, -by(height.max(1))),
             Action::Top => 0,
             Action::Bottom => last,
             _ => self.toc_cursor,
@@ -600,24 +868,41 @@ impl App {
 
     /// Shows or hides the table-of-contents pane, moving focus with it.
     fn toggle_toc(&mut self) {
-        self.toc_open = !self.toc_open;
         if self.toc_open {
-            self.focus = Focus::Toc;
-            self.sync_toc_selection();
-        } else {
-            self.focus = Focus::Document;
+            self.close_toc();
+            return;
         }
+        // Design spec §9 docks the pane at 30 columns and leaves the document 20; in
+        // a terminal too narrow for both, say so instead of doing nothing (P16).
+        if self.size.0 < MIN_TOC_TERMINAL_WIDTH {
+            self.notify("the terminal is too narrow for the contents pane", false);
+            return;
+        }
+        self.toc_open = true;
+        self.focus = Focus::Toc;
+        self.sync_toc_selection();
+        self.clamp();
+    }
+
+    /// Hides the table-of-contents pane, forgetting any filter with it.
+    ///
+    /// A filter that survives a close/reopen (visual review P15b) leaves the reader
+    /// with a permanently one-item map and no obvious way back.
+    fn close_toc(&mut self) {
+        self.toc_open = false;
+        self.focus = Focus::Document;
+        if !self.toc_filter.is_empty() {
+            self.toc_filter.clear();
+            self.refilter_toc();
+        }
+        self.sync_toc_selection();
         self.clamp();
     }
 
     /// Puts the selection on the section the viewport is currently in.
     fn sync_toc_selection(&mut self) {
         self.ensure_rendered();
-        if let Some(current) = self.current_heading()
-            && let Some(position) = self.toc_hits.iter().position(|hit| hit.index == current)
-        {
-            self.toc_cursor = position;
-        }
+        self.select_current_heading();
     }
 
     /// Jumps the document to the heading the table of contents has selected.
@@ -723,10 +1008,15 @@ impl App {
     /// Applies a prompt's input.
     fn accept_prompt(&mut self, kind: PromptKind, input: &str) {
         match kind {
+            // Design spec §9 says "`Enter` jumps". Committing the filter and then
+            // demanding a second `Enter` (usability P5) is not that.
             PromptKind::TocFilter => {
                 self.toc_filter = input.to_string();
                 self.refilter_toc();
                 self.focus = Focus::Toc;
+                if !self.toc_hits.is_empty() {
+                    self.jump_to_selected_heading();
+                }
             }
             PromptKind::SearchForward | PromptKind::SearchBackward => {
                 self.search_backward = kind == PromptKind::SearchBackward;
@@ -807,9 +1097,11 @@ impl App {
         };
         self.search_index = Some(index);
         if let Some(row) = self.search.hits()[index].row() {
-            self.reveal(row);
+            self.reveal_centered(row);
         }
-        self.notify(format!("match {}/{}", index + 1, self.search.len()), false);
+        // No notice: the status bar already carries `⌕ query n/m` on its right-hand
+        // side, and saying the same thing twice thirty columns apart (usability P7)
+        // costs the room the help hint needs.
     }
 
     /// Recomputes the filtered table of contents, keeping the selection in range.
@@ -832,9 +1124,7 @@ impl App {
             } else {
                 Action::LineUp
             };
-            for _ in 0..step.unsigned_abs() {
-                self.toc_move(action, self.viewport_height());
-            }
+            self.toc_move(action, self.viewport_height(), step.unsigned_abs());
         } else {
             self.scroll_by(delta * isize::try_from(self.config.scroll_step).unwrap_or(1));
         }

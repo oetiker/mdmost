@@ -53,15 +53,26 @@ pub fn run(app: &mut App) -> io::Result<()> {
     }
     let _guard = Restore;
 
+    // Laying out a large document takes real time, and an empty alternate screen is
+    // indistinguishable from a hang (usability review B5). One cheap frame first says
+    // what is being opened and that something is happening.
+    terminal.draw(|frame| draw::draw_splash(frame, app))?;
+
     while !app.should_quit() && !terminate.load(Ordering::Relaxed) {
         terminal.draw(|frame| draw::draw(frame, app))?;
         if !crossterm::event::poll(POLL_INTERVAL)? {
             continue;
         }
-        match crossterm::event::read()? {
-            Event::Key(key) => on_key(app, key),
-            Event::Mouse(mouse) => on_mouse(app, mouse, terminal.size()?.height),
-            Event::Resize(..) => {}
+        let mut event = Some(crossterm::event::read()?);
+        // A drag of the window edge arrives as a burst of resizes, and every one of
+        // them re-lays-out the whole document. Only the last matters, so the rest are
+        // thrown away before anything is re-rendered (usability review B5).
+        while matches!(event, Some(Event::Resize(..))) && crossterm::event::poll(Duration::ZERO)? {
+            event = Some(crossterm::event::read()?);
+        }
+        match event {
+            Some(Event::Key(key)) => on_key(app, key),
+            Some(Event::Mouse(mouse)) => on_mouse(app, mouse, terminal.size()?.height),
             _ => {}
         }
     }

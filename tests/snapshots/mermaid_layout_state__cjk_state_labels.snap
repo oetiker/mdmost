@@ -1,0 +1,12 @@
+---
+source: tests/mermaid_layout_state.rs
+expression: "render(&chart, 50)"
+---
+                    ╭────────╮                    
+                    │ 待機中 │                    
+                    ╰────┬───╯                    
+                         │開始                    
+                         ▼                        
+                   ╭──────────╮                   
+                   │ 実行中🏃 │                   
+                   ╰──────────╯

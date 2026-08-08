@@ -1,0 +1,29 @@
+---
+source: tests/mermaid_layout_er.rs
+expression: "render(&chart, 80)"
+---
+                               ┌──────────────┐                                 
+                               │   CUSTOMER   │                                 
+                               ├──────────────┤                                 
+                               │ string  name │                                 
+                               └───────┬──────┘                                 
+                                       ┼                                        
+                                       ┼                                        
+                                       │places                                  
+                                       ○                                        
+                                       ∧                                        
+                                ┌─────────────┐                                 
+                                │    ORDER    │                                 
+                                ├─────────────┤                                 
+                                │ int  id  PK │                                 
+                                └──────┬──────┘                                 
+                                       ┼                                        
+                                       ┼                                        
+                                       │contains                                
+                                       ┼                                        
+                                       ∧                                        
+                                 ┌───────────┐                                  
+                                 │ LINE_ITEM │                                  
+                                 ├───────────┤                                  
+                                 │ int  qty  │                                  
+                                 └───────────┘

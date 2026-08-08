@@ -9,6 +9,7 @@
 //! every [`SrcLine`], because every [`MermaidError`] variant reports one.
 
 use crate::error::MermaidError;
+use crate::mermaid::ast::NotePlacement;
 
 /// One significant source line together with its 1-based line number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,4 +207,52 @@ pub fn unsupported(line: usize, message: impl Into<String>) -> MermaidError {
         line,
         message: message.into(),
     }
+}
+
+/// Splits `A as Alice` — or `"Long description" as s2` — into its two halves.
+///
+/// The keyword match is case-insensitive, as Mermaid's is. Shared by the sequence and
+/// state parsers, which had byte-identical copies of this (design spec §14).
+pub fn split_as(text: &str) -> Option<(&str, &str)> {
+    let lowered = text.to_ascii_lowercase();
+    let at = lowered.find(" as ")?;
+    Some((text[..at].trim(), text[at + 4..].trim()))
+}
+
+/// Splits a leading `left of` / `right of` / `over` off a note statement.
+///
+/// Returns the placement and the rest of the line. A family that does not support
+/// every placement — the state parser has no `over` — checks the result and reports
+/// its own error, so the prefix matching itself lives in one place.
+pub fn split_note_placement(rest: &str) -> Option<(NotePlacement, &str)> {
+    let lowered = rest.to_ascii_lowercase();
+    for (prefix, placement) in [
+        ("left of", NotePlacement::LeftOf),
+        ("right of", NotePlacement::RightOf),
+        ("over", NotePlacement::Over),
+    ] {
+        if let Some(after) = lowered.strip_prefix(prefix) {
+            // `to_ascii_lowercase` preserves byte length, so the suffix lines up.
+            return Some((placement, &rest[rest.len() - after.len()..]));
+        }
+    }
+    None
+}
+
+/// Splits a trailing `<<annotation>>` off `head`.
+///
+/// Shared by the class parser (`<<interface>>`) and the state parser (`<<choice>>`).
+///
+/// # Errors
+///
+/// Returns a syntax error when `head` opens a `<<` it never closes.
+pub fn split_stereotype(head: &str, line: usize) -> Result<(&str, Option<&str>), MermaidError> {
+    let Some(at) = head.find("<<") else {
+        return Ok((head.trim(), None));
+    };
+    let after = &head[at + 2..];
+    let close = after
+        .find(">>")
+        .ok_or_else(|| syntax(line, "unterminated `<<…>>` annotation".to_string()))?;
+    Ok((head[..at].trim(), Some(after[..close].trim())))
 }

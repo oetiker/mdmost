@@ -1,0 +1,16 @@
+---
+source: tests/mermaid_layout_er.rs
+expression: "render(&chart, 60)"
+---
+                       ┌────────┐                           
+                       │ PARENT │                           
+                       └────┬───┘                           
+                            ┼                               
+                            ┼                               
+                            ┊may have                       
+                            ┊                               
+                            ○                               
+                            ∧                               
+                        ┌───────┐                           
+                        │ CHILD │                           
+                        └───────┘

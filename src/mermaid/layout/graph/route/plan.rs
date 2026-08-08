@@ -4,7 +4,7 @@
 //! half in [`super::route`] short enough to read in one go.
 
 use super::super::glyph::{Dir, Stroke};
-use super::super::spec::PortPolicy;
+use super::super::spec::{PortPolicy, Terminator};
 use super::{Gap, Input, Route, band_size, is_item};
 
 /// Port cross coordinates, by segment.
@@ -39,18 +39,36 @@ pub(super) fn assign_ports(input: &Input<'_>) -> Ports {
                     let seg = &input.layered.segs[index];
                     let edge = &input.edges[seg.edge];
                     let other = if outgoing { seg.b } else { seg.a };
-                    let hint = if outgoing {
-                        edge.from_hint
+                    let reach = if outgoing {
+                        edge.from_reach
                     } else {
-                        edge.to_hint
+                        edge.to_reach
                     };
-                    // Aim at the far end, but prefer the caller's hint when the item is
-                    // a frame around the real endpoint.
-                    let far = input.cross[other] + input.cross_size[other] / 2;
-                    (input.cross[id] + hint + far) / 2
+                    // A container aims at the real endpoint inside it, which is what
+                    // lets the line carry on through the frame and reach the node.
+                    if reach.is_some() {
+                        let hint = if outgoing {
+                            edge.from_hint
+                        } else {
+                            edge.to_hint
+                        };
+                        return input.cross[id] + hint;
+                    }
+                    // Where the two boxes overlap across the flow, both ends aim at the
+                    // middle of the overlap and the edge becomes a straight run with no
+                    // jog at all. Otherwise the port stays centred on its own box,
+                    // which is where an arrowhead reads best.
+                    let lo = input.cross[id].max(input.cross[other]);
+                    let hi = (input.cross[id] + input.cross_size[id])
+                        .min(input.cross[other] + input.cross_size[other]);
+                    if lo < hi {
+                        (lo + hi) / 2
+                    } else {
+                        input.cross[id] + input.cross_size[id] / 2
+                    }
                 })
                 .collect();
-            let placed = spread(&members, &wanted, input, id);
+            let placed = spread(&members, &wanted, input, id, outgoing);
             for (&index, &at) in members.iter().zip(&placed) {
                 if outgoing {
                     ports.out_port[index] = at;
@@ -63,40 +81,127 @@ pub(super) fn assign_ports(input: &Input<'_>) -> Ports {
     ports
 }
 
+/// How many different terminators the edges on one side draw where they meet the node.
+///
+/// `None` counts as one of them: a plain line meeting the border is as much a piece of
+/// notation as a diamond is, and merging it with a diamond loses it just the same.
+fn distinct_terminators(members: &[usize], input: &Input<'_>, outgoing: bool) -> usize {
+    let mut seen: Vec<Terminator> = Vec::new();
+    for &index in members {
+        let edge = &input.edges[input.layered.segs[index].edge];
+        let terminator = if outgoing { edge.tail } else { edge.head };
+        if !seen.contains(&terminator) {
+            seen.push(terminator);
+        }
+    }
+    seen.len()
+}
+
 /// Places `members` along one side of virtual node `id`.
 ///
-/// Ports keep the order of their wanted positions and are spread evenly when they do
-/// not fit distinctly, so an edge fan looks regular rather than merely legal.
-fn spread(members: &[usize], wanted: &[usize], input: &Input<'_>, id: usize) -> Vec<usize> {
+/// Each port is first aimed straight at what it connects to, so an edge that could be
+/// a straight run becomes one instead of jogging a cell or two; ports are then nudged
+/// apart in order. When the side is too narrow to hold them with a cell of air between
+/// them the edges share one port and merge into a single stem, which reads far better
+/// than a row of touching junctions.
+///
+/// Merging is only ever a matter of style, though, and only while the edges agree
+/// about what they draw where they meet the node. A flowchart fan is a bus because
+/// every edge ends in the same arrowhead; a class node's relations end in a triangle,
+/// a filled diamond, a hollow diamond and a plain line, and those glyphs *are* the
+/// meaning (design spec §6.3, §6.4). So when the edges on one side carry different
+/// terminators they are given distinct ports as long as any remain, and only share
+/// one when the side genuinely runs out of cells.
+fn spread(
+    members: &[usize],
+    wanted: &[usize],
+    input: &Input<'_>,
+    id: usize,
+    outgoing: bool,
+) -> Vec<usize> {
     let start = input.cross[id];
     let size = input.cross_size[id].max(1);
     let centre = start + size / 2;
     let count = members.len();
+    // A self loop owns the last cell of the side; forward ports keep off it.
+    let looped = input.loops.iter().any(|&(item, _)| item == id);
+    let size = size - usize::from(looped && size > 3);
     let usable = size.saturating_sub(2);
-    // Ports need a cell of air between them; when the side is too narrow for that the
-    // edges share one port and merge into a single stem, which reads far better than a
-    // row of touching junctions.
-    if input.ports[id] == PortPolicy::Center || size < 3 || count == 0 || count * 2 > usable {
+    if input.ports[id] == PortPolicy::Center || size < 3 || count == 0 {
         return vec![centre; count];
     }
+    // Merging is a style choice while the edges agree about their terminator: one
+    // stem reads better than a row of touching junctions, so it is taken as soon as
+    // the ports would lose their cell of air. When the terminators differ, merging
+    // destroys meaning instead of tidying it, so the ports spread as far as the side
+    // allows and only the overflow — if any — shares a cell.
+    let varied = distinct_terminators(members, input, outgoing) > 1;
+    if !varied && count * 2 > usable {
+        return vec![centre; count];
+    }
+    let (first, last) = (start + 1, start + size - 2);
     let mut order: Vec<usize> = (0..count).collect();
     order.sort_by_key(|&i| (wanted[i], members[i]));
     let mut out = vec![centre; count];
-    for (slot, &i) in order.iter().enumerate() {
-        out[i] = start + 1 + (usable * (2 * slot + 1)) / (2 * count);
+    // A lone edge takes the aim it asked for, which is what turns a near-miss into a
+    // straight run. Several edges on one side are spread evenly instead: aiming them
+    // individually can bunch two arrowheads together, which reads far worse than a
+    // regular fan.
+    let aimed = count == 1;
+    if aimed {
+        for &i in &order {
+            out[i] = wanted[i].clamp(first, last);
+        }
+    } else {
+        for (slot, &i) in order.iter().enumerate() {
+            out[i] = start + 1 + (usable * (2 * slot + 1)) / (2 * count);
+        }
+        let mut previous: Option<usize> = None;
+        for &i in &order {
+            let floor = previous.map_or(first, |p: usize| (p + 1).min(last));
+            out[i] = out[i].clamp(floor, last);
+            previous = Some(out[i]);
+        }
     }
-    // Keep the ports ordered and inside the side. When there are more edges than
-    // cells they share the last port, which merges into a single junction rather than
-    // spilling onto a corner glyph.
-    let first = start + 1;
-    let last = start + size - 2;
-    let mut previous: Option<usize> = None;
-    for &i in &order {
-        let floor = previous.map_or(first, |p| (p + 1).min(last));
-        out[i] = out[i].clamp(floor, last);
-        previous = Some(out[i]);
-    }
+    nudge_off_rules(&mut out, &order, input, id, first, last);
     out
+}
+
+/// Moves ports off any border cell that already carries an internal rule.
+///
+/// Only cells that are free and inside the side are considered, and a port that has
+/// nowhere better to go simply stays put: keeping the edge is always worth more than
+/// keeping the rule tidy.
+fn nudge_off_rules(
+    out: &mut [usize],
+    order: &[usize],
+    input: &Input<'_>,
+    id: usize,
+    first: usize,
+    last: usize,
+) {
+    let rules = &input.ruled[id];
+    if rules.iter().all(|ruled| !ruled) {
+        return;
+    }
+    let start = input.cross[id];
+    let ruled_at = |at: usize| rules.get(at - start).copied().unwrap_or(false);
+    for &i in order {
+        if !ruled_at(out[i]) {
+            continue;
+        }
+        let taken = out.to_vec();
+        let better = (1..=2)
+            .flat_map(|step| [out[i] + step, out[i].saturating_sub(step)])
+            .find(|&candidate| {
+                (first..=last).contains(&candidate)
+                    && !ruled_at(candidate)
+                    && !taken.contains(&candidate)
+            });
+        if let Some(candidate) = better {
+            out[i] = candidate;
+        }
+    }
 }
 
 /// Sizes one gap and assigns its channels and label bands.

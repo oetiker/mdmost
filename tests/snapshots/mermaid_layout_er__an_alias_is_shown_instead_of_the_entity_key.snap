@@ -1,0 +1,9 @@
+---
+source: tests/mermaid_layout_er.rs
+expression: "render(&diagram(vec![named], Vec::new()), 50)"
+---
+               ┌──────────────────┐               
+               │ Customer account │               
+               ├──────────────────┤               
+               │ string  name     │               
+               └──────────────────┘

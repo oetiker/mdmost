@@ -1,0 +1,5 @@
+---
+source: tests/mermaid_layout_state.rs
+expression: "render(&diagram(Vec::new(), StateScope::default()), 30)"
+---
+

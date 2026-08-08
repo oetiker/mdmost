@@ -49,12 +49,12 @@ pub use spec::{EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Ter
 use crate::canvas::{BorderSet, Canvas};
 use crate::error::MermaidError;
 use crate::mermaid::ast::Direction;
-use crate::text::{Line, Span};
+use crate::text::{Align, Line, Span};
 use crate::theme::Theme;
 
 use frame::{Frame, Pen};
 use rank::RawEdge;
-use route::{Input, LevelEdge, Routing};
+use route::{Input, LevelEdge, Reach, Routing};
 
 /// Spacing tried in turn until the drawing fits the width budget.
 ///
@@ -133,11 +133,64 @@ fn validate(spec: &GraphSpec) -> Result<(), MermaidError> {
     Ok(())
 }
 
+/// The cross offsets along `canvas`' sides that a port should keep off.
+///
+/// A node whose art draws internal rules — a class box's compartments, an entity's
+/// attribute table — shows a `├` or `┤` where a rule meets the border. An edge
+/// attaching there turns the rule into a line that appears to flow out of the box, so
+/// the router avoids those cells when it has a choice. This is read back off the
+/// drawn node rather than declared, so it works for any caller without widening the
+/// [`NodeArt`] seam.
+fn ruled_offsets(canvas: &Canvas, vertical: bool) -> Vec<bool> {
+    let rows = canvas.height();
+    let cols = usize::from(canvas.width());
+    let ruled = |row: usize, col: usize| -> bool {
+        canvas
+            .row(row)
+            .and_then(|cells| cells.get(col))
+            .map(|cell| cell.text())
+            .is_some_and(|text| matches!(text, "├" | "┤" | "┬" | "┴" | "┼" | "╋" | "┣" | "┫"))
+    };
+    if vertical {
+        (0..cols)
+            .map(|col| ruled(0, col) || ruled(rows.saturating_sub(1), col))
+            .collect()
+    } else {
+        (0..rows)
+            .map(|row| ruled(row, 0) || ruled(row, cols.saturating_sub(1)))
+            .collect()
+    }
+}
+
+/// Where a node sits inside its container box, measured along the parent's axes.
+///
+/// `inwards` asks for the distance from the edge an incoming line arrives at; otherwise
+/// it is the distance from the edge an outgoing line leaves by.
+fn reach_of(canvas: &Canvas, spot: Spot, direction: Direction, inwards: bool) -> Reach {
+    let rows = canvas.height();
+    let cols = usize::from(canvas.width());
+    let (near, far, lo, hi) = match direction {
+        Direction::TopToBottom => (spot.row, rows - (spot.row + spot.rows), spot.col, spot.cols),
+        Direction::BottomToTop => (rows - (spot.row + spot.rows), spot.row, spot.col, spot.cols),
+        Direction::LeftToRight => (spot.col, cols - (spot.col + spot.cols), spot.row, spot.rows),
+        Direction::RightToLeft => (cols - (spot.col + spot.cols), spot.col, spot.row, spot.rows),
+    };
+    Reach {
+        depth: if inwards { near } else { far },
+        lo,
+        hi: lo + hi,
+    }
+}
+
 /// Centres `canvas` in a canvas exactly `width` columns wide.
 fn centred(canvas: Canvas, width: u16, theme: &Theme) -> Canvas {
-    let slack = width.saturating_sub(canvas.width());
-    let left = slack / 2;
-    let mut out = canvas.indent(left, slack - left, theme.base());
+    let left = crate::canvas::align_offset(
+        usize::from(width),
+        usize::from(canvas.width()),
+        Align::Center,
+    );
+    let left = u16::try_from(left).unwrap_or(0);
+    let mut out = canvas.indent(left, width.saturating_sub(canvas.width() + left), theme.base());
     out.resize_width(width, theme.base());
     out
 }
@@ -154,16 +207,38 @@ struct Ctx<'a> {
 /// A drawn group: its canvas plus where each node it contains ended up.
 struct Drawn {
     canvas: Canvas,
-    /// Centre of every contained node, as `(row, col)` inside `canvas`.
-    hints: Vec<(NodeIdx, (usize, usize))>,
+    /// Where every node it contains ended up inside `canvas`.
+    hints: Vec<(NodeIdx, Spot)>,
+}
+
+/// The rectangle one node's box occupies inside a canvas.
+#[derive(Debug, Clone, Copy)]
+struct Spot {
+    row: usize,
+    col: usize,
+    rows: usize,
+    cols: usize,
+}
+
+impl Spot {
+    /// Moves the rectangle by `(rows, cols)`.
+    fn shifted(self, rows: usize, cols: usize) -> Self {
+        Self {
+            row: self.row + rows,
+            col: self.col + cols,
+            ..self
+        }
+    }
 }
 
 /// One box taking part in a level's layout.
 struct Item {
     canvas: Canvas,
     ports: PortPolicy,
-    hints: Vec<(NodeIdx, (usize, usize))>,
+    hints: Vec<(NodeIdx, Spot)>,
     members: Vec<NodeIdx>,
+    /// True when the box is a container frame rather than a node itself.
+    group: bool,
 }
 
 impl Ctx<'_> {
@@ -173,12 +248,18 @@ impl Ctx<'_> {
         let mut items = Vec::new();
         for &node in &group.nodes {
             let canvas = self.art.render(node, self.budget, self.theme);
-            let centre = (canvas.height() / 2, usize::from(canvas.width()) / 2);
+            let whole = Spot {
+                row: 0,
+                col: 0,
+                rows: canvas.height(),
+                cols: usize::from(canvas.width()),
+            };
             items.push(Item {
                 canvas,
                 ports: self.art.ports(node),
-                hints: vec![(node, centre)],
+                hints: vec![(node, whole)],
                 members: vec![node],
+                group: false,
             });
         }
         for child in &group.children {
@@ -189,6 +270,7 @@ impl Ctx<'_> {
                 ports: PortPolicy::Spread,
                 hints: drawn.hints,
                 members,
+                group: true,
             });
         }
         let inner = self.level(&items, direction);
@@ -218,7 +300,7 @@ impl Ctx<'_> {
         let hints = drawn
             .hints
             .into_iter()
-            .map(|(node, (row, col))| (node, (row + 2, col + 2)))
+            .map(|(node, spot)| (node, spot.shifted(2, 2)))
             .collect();
         Drawn { canvas, hints }
     }
@@ -233,7 +315,7 @@ impl Ctx<'_> {
             };
         }
         let owner = self.owners(items);
-        let (raw, mut level_edges, loops) = self.edges(items, &owner, vertical);
+        let (raw, mut level_edges, loops) = self.edges(items, &owner, direction);
         let mut layered = rank::build(items.len(), &raw);
         order::reduce(&mut layered);
         // An edge reversed to break a cycle is drawn against the flow, so its
@@ -242,6 +324,7 @@ impl Ctx<'_> {
             if *reversed {
                 std::mem::swap(&mut edge.tail, &mut edge.head);
                 std::mem::swap(&mut edge.from_hint, &mut edge.to_hint);
+                std::mem::swap(&mut edge.from_reach, &mut edge.to_reach);
             }
         }
 
@@ -251,6 +334,7 @@ impl Ctx<'_> {
         let mut place_size = vec![1usize; count];
         let mut loop_pad = vec![0usize; count];
         let mut ports = vec![PortPolicy::Center; count];
+        let mut ruled: Vec<Vec<bool>> = vec![Vec::new(); count];
         for (index, item) in items.iter().enumerate() {
             let (rows, cols) = (item.canvas.height(), usize::from(item.canvas.width()));
             let (cross, flow) = if vertical { (cols, rows) } else { (rows, cols) };
@@ -261,6 +345,7 @@ impl Ctx<'_> {
             place_size[index] = cross + if looped { 3 } else { 0 };
             loop_pad[index] = if looped { 2 } else { 0 };
             ports[index] = item.ports;
+            ruled[index] = ruled_offsets(&item.canvas, vertical);
         }
         let cross_gap = if vertical {
             self.gap
@@ -277,6 +362,7 @@ impl Ctx<'_> {
             edges: &level_edges,
             loops: &loops,
             loop_pad: &loop_pad,
+            ruled: &ruled,
             min_gap: if vertical { 1 } else { 3 },
             vertical,
         };
@@ -300,8 +386,8 @@ impl Ctx<'_> {
                 cross_size[index],
             );
             pen.canvas.blit(row, col, &item.canvas, self.theme.base());
-            for &(node, (hint_row, hint_col)) in &item.hints {
-                hints.push((node, (row + hint_row, col + hint_col)));
+            for &(node, spot) in &item.hints {
+                hints.push((node, spot.shifted(row, col)));
             }
         }
         routing.paint(&input, &mut pen);
@@ -326,8 +412,9 @@ impl Ctx<'_> {
         &self,
         items: &[Item],
         owner: &[Option<usize>],
-        vertical: bool,
+        direction: Direction,
     ) -> (Vec<RawEdge>, Vec<LevelEdge>, Vec<(usize, usize)>) {
+        let vertical = Frame::vertical(direction);
         let mut raw = Vec::new();
         let mut level = Vec::new();
         let mut pending = Vec::new();
@@ -335,13 +422,28 @@ impl Ctx<'_> {
             let (Some(from), Some(to)) = (owner[edge.from.0], owner[edge.to.0]) else {
                 continue;
             };
-            let hint = |item: usize, node: NodeIdx| -> usize {
+            let spot = |item: usize, node: NodeIdx| -> Option<Spot> {
                 items[item]
                     .hints
                     .iter()
                     .find(|&&(other, _)| other == node)
-                    .map(|&(_, (row, col))| if vertical { col } else { row })
-                    .unwrap_or(0)
+                    .map(|&(_, spot)| spot)
+            };
+            let hint = |item: usize, node: NodeIdx| -> usize {
+                spot(item, node).map_or(0, |spot| {
+                    if vertical {
+                        spot.col + spot.cols / 2
+                    } else {
+                        spot.row + spot.rows / 2
+                    }
+                })
+            };
+            let reach = |item: usize, node: NodeIdx, inwards: bool| -> Option<Reach> {
+                if !items[item].group {
+                    return None;
+                }
+                let spot = spot(item, node)?;
+                Some(reach_of(&items[item].canvas, spot, direction, inwards))
             };
             let described = LevelEdge {
                 stroke: edge.stroke,
@@ -352,6 +454,8 @@ impl Ctx<'_> {
                 head_label: edge.head_label.clone(),
                 from_hint: hint(from, edge.from),
                 to_hint: hint(to, edge.to),
+                from_reach: reach(from, edge.from, false),
+                to_reach: reach(to, edge.to, true),
             };
             if from == to {
                 // Both ends inside the same nested container: drawn one level down.

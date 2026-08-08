@@ -2,6 +2,7 @@
 
 use crate::canvas::{BorderSet, Canvas};
 use crate::mermaid::ast::Direction;
+use crate::text::Align;
 use crate::theme::Theme;
 
 use super::{EdgeSpec, GraphSpec, GroupSpec, NodeIdx, Stroke, Terminator, draw};
@@ -10,6 +11,18 @@ use super::{EdgeSpec, GraphSpec, GroupSpec, NodeIdx, Stroke, Terminator, draw};
 fn art(node: NodeIdx, _budget: u16, theme: &Theme) -> Canvas {
     let letter = char::from(b'A' + (node.0 % 26) as u8);
     Canvas::from_text(3, &format!(" {letter} "), theme.diagram.node_text).framed(
+        BorderSet::PLAIN,
+        theme.diagram.node_border,
+        None,
+        theme.base(),
+    )
+}
+
+/// A wider box, roomy enough to fan several ports across one side — the shape a class
+/// or entity node has.
+fn wide_art(node: NodeIdx, _budget: u16, theme: &Theme) -> Canvas {
+    let letter = char::from(b'A' + (node.0 % 26) as u8);
+    Canvas::from_text(9, &format!("    {letter}    "), theme.diagram.node_text).framed(
         BorderSet::PLAIN,
         theme.diagram.node_border,
         None,
@@ -251,4 +264,92 @@ fn end_notes_survive_a_left_to_right_graph() {
     canvas.check_invariants().expect("canvas contract holds");
     let text = canvas.plain_text();
     assert!(text.contains("0..*"), "{text}");
+}
+
+#[test]
+fn edges_with_different_terminators_keep_their_own_ports() {
+    // A class node's relations end in a triangle, two kinds of diamond, an arrow and
+    // a plain line. Merging them onto one port would draw a single glyph and silently
+    // change what four of the five edges mean (design spec §6.3).
+    let theme = Theme::default_dark();
+    let kinds = [
+        Terminator::HollowTriangle,
+        Terminator::FilledDiamond,
+        Terminator::HollowDiamond,
+        Terminator::Arrow,
+        Terminator::None,
+    ];
+    let edges: Vec<(usize, usize)> = (1..=kinds.len()).map(|to| (0, to)).collect();
+    let mut spec = spec(Direction::TopToBottom, kinds.len() + 1, &edges);
+    for (edge, kind) in spec.edges.iter_mut().zip(kinds) {
+        edge.tail = kind;
+        edge.head = Terminator::None;
+    }
+    let canvas = draw(&spec, &wide_art, 90, &theme).expect("fits");
+    let text = canvas.plain_text();
+    for glyph in ['△', '◆', '◇', '▲'] {
+        assert_eq!(
+            text.matches(glyph).count(),
+            1,
+            "terminator {glyph} survives\n{text}"
+        );
+    }
+}
+
+#[test]
+fn edges_sharing_one_terminator_still_merge_into_a_bus() {
+    // The flowchart case: five identical arrowheads read better as one stem than as
+    // five touching junctions, so the merge is kept where it costs no meaning.
+    let theme = Theme::default_dark();
+    let edges: Vec<(usize, usize)> = (1..=5).map(|to| (0, to)).collect();
+    let spec = spec(Direction::TopToBottom, 6, &edges);
+    let canvas = draw(&spec, &art, 90, &theme).expect("fits");
+    let stems = canvas
+        .rows()
+        .iter()
+        .take(3)
+        .map(|row| {
+            row.iter()
+                .filter(|cell| matches!(cell.text(), "┬" | "├" | "┼" | "┤"))
+                .count()
+        })
+        .sum::<usize>();
+    assert_eq!(stems, 1, "one shared stem\n{}", canvas.plain_text());
+}
+
+#[test]
+fn a_port_keeps_off_a_compartment_rule() {
+    // A three-compartment box, as a class or entity node draws one. In `LR` the ports
+    // sit on the left and right borders, where a rule shows as `├`/`┤`; attaching
+    // there makes the rule look like it flows out into the edge.
+    let theme = Theme::default_dark();
+    let compartments = |node: NodeIdx, _budget: u16, theme: &Theme| {
+        let letter = char::from(b'A' + (node.0 % 26) as u8);
+        // Five rows, so the compartment rule sits exactly on the middle row — which
+        // is where a single edge would otherwise aim its port.
+        let mut canvas = Canvas::new(9, 0, theme.base());
+        canvas.push_text("┌───────┐", Align::Left, theme.diagram.node_border);
+        canvas.push_text(
+            &format!("│   {letter}   │"),
+            Align::Left,
+            theme.diagram.node_text,
+        );
+        canvas.push_text("├───────┤", Align::Left, theme.diagram.node_border);
+        canvas.push_text("│ +x: i │", Align::Left, theme.diagram.node_text);
+        canvas.push_text("└───────┘", Align::Left, theme.diagram.node_border);
+        canvas
+    };
+    let spec = spec(Direction::LeftToRight, 2, &[(0, 1)]);
+    let canvas = draw(&spec, &compartments, 60, &theme).expect("fits");
+    let text = canvas.plain_text();
+    // A rule that reached the border would leave a `┼` or a `┤` with a line beyond it;
+    // every compartment rule must still end in its own tee with blank space outside.
+    for (row, line) in text.lines().enumerate() {
+        let cells: Vec<char> = line.chars().collect();
+        for (col, &ch) in cells.iter().enumerate() {
+            if ch == '┼' {
+                panic!("a port landed on a compartment rule at {row}:{col}\n{text}");
+            }
+        }
+    }
 }

@@ -1,0 +1,11 @@
+---
+source: tests/mermaid_layout_class.rs
+expression: "render(&diagram(vec![class(\"Wide\", members)], Vec::new()), 40)"
+---
+┌──────────────────────────────────────┐
+│                 Wide                 │
+├──────────────────────────────────────┤
+│ +aVeryLongFieldNameIndeed: SomeExtr… │
+├──────────────────────────────────────┤
+│ +anotherRatherLongMethodName(): Ano… │
+└──────────────────────────────────────┘

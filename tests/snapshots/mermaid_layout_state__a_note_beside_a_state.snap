@@ -1,0 +1,14 @@
+---
+source: tests/mermaid_layout_state.rs
+expression: "render(&chart, 70)"
+---
+                                  ●                                   
+                                  ▼                                   
+                              ╭───────╮                               
+                              │ Armed │                               
+                              ╰───┬───╯                               
+                                  ┊                                   
+                                  ┊                                   
+                      ╭───────────┴───────────╮                       
+                      │ only from the console │                       
+                      ╰───────────────────────╯

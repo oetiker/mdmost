@@ -48,7 +48,13 @@ pub fn compose(
         out.push_text_ellipsized(title, Align::Center, theme.diagram.title);
         out.push_blank_row(base);
     }
-    let left = usize::from(width - body.width()) / 2;
+    // `align_offset` saturates; the copy this replaced used a bare `width - body.width()`,
+    // which panics whenever a body is wider than the frame it is being centred in.
+    let left = crate::canvas::align_offset(
+        usize::from(width),
+        usize::from(body.width()),
+        Align::Center,
+    );
     let top = out.height();
     out.blit(top, left, body, base);
     Ok(out)
@@ -132,6 +138,18 @@ pub fn label_natural_width(label: &Label) -> usize {
         .map(display_width)
         .max()
         .unwrap_or(0)
+}
+
+/// The one-line body a family draws when it has nothing to draw.
+///
+/// Pie, gantt and sequence all reported "no slices" / "no tasks" / "no participants"
+/// with character-identical code; §14 makes that a defect, so it lives here.
+pub fn placeholder(text: &str, width: u16, theme: &Theme) -> Canvas {
+    let text = fit(text, usize::from(width));
+    let cols = u16::try_from(crate::text::display_width(&text)).unwrap_or(0);
+    let mut body = Canvas::new(cols, 0, theme.base());
+    body.push_text(&text, crate::text::Align::Left, theme.text.dim);
+    body
 }
 
 #[cfg(test)]

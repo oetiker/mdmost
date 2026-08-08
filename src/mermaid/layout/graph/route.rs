@@ -20,6 +20,23 @@ use super::spec::{PortPolicy, Terminator};
 
 use plan::{assign_ports, plan_gap, stack_ranks};
 
+/// How far inside a container box an edge's real endpoint sits.
+///
+/// An edge between two containers is lifted to the container that holds both, so its
+/// endpoint at this level is a *frame*, not the node the author wrote. `Reach` says
+/// where the real node is inside that frame, which lets the router carry the line
+/// through the frame's gutter and land it on the node itself rather than stopping at
+/// the border (design spec §6.1 subgraphs, §6.7 composite states).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Reach {
+    /// Flow cells from the container's edge to the node's own border.
+    pub depth: usize,
+    /// First cross offset the node covers inside the container.
+    pub lo: usize,
+    /// One past the last cross offset the node covers.
+    pub hi: usize,
+}
+
 /// An edge as the router sees it: already resolved to items of this level.
 #[derive(Debug, Clone)]
 pub(super) struct LevelEdge {
@@ -39,6 +56,11 @@ pub(super) struct LevelEdge {
     pub from_hint: usize,
     /// Preferred cross offset of the target port, relative to the target item.
     pub to_hint: usize,
+    /// Where the real source node sits inside the source item, when that item is a
+    /// container frame rather than the node itself.
+    pub from_reach: Option<Reach>,
+    /// Likewise for the target.
+    pub to_reach: Option<Reach>,
 }
 
 /// Everything the router needs to know about the placed graph.
@@ -59,6 +81,9 @@ pub(super) struct Input<'a> {
     pub loops: &'a [(usize, usize)],
     /// Extra flow cells reserved below a virtual node for its self loop.
     pub loop_pad: &'a [usize],
+    /// Per virtual node, the cross offsets whose border cell already carries an
+    /// internal rule, which a port should avoid landing on.
+    pub ruled: &'a [Vec<bool>],
     /// Smallest allowed gap between two ranks.
     pub min_gap: usize,
     /// True when the flow axis runs vertically, which decides whether a label is
@@ -172,7 +197,9 @@ impl Routing {
         let forward = pen.frame.forward();
         let is_source = is_item(input, a);
         let exit = if is_source {
-            self.flow[a] + input.flow_size[a].max(1) - 1
+            let edge_of_box = self.flow[a] + input.flow_size[a].max(1) - 1;
+            let deep = reach_into(pen, edge, a, route.src, input, edge_of_box, false);
+            edge_of_box - deep
         } else {
             self.band_end[rank] - 1
         };
@@ -202,7 +229,8 @@ impl Routing {
         // there, but the connection onwards is kept, so no corner is ever left open.
         let body = exit + 1;
         // The target's first cell is its border; a terminator sits just before it.
-        let entry = self.flow[b];
+        // For a container the line carries on through the gutter to the real node.
+        let entry = self.flow[b] + reach_into(pen, edge, b, route.dst, input, self.flow[b], true);
         let head_at = entry.saturating_sub(head_len);
         match route.channel {
             None => pen.run_flow(body, route.src, head_at.saturating_sub(body), edge.stroke),
@@ -242,9 +270,9 @@ impl Routing {
         let top = self.flow[item];
         let height = input.flow_size[item].max(1);
         let right = input.cross[item] + input.cross_size[item] - 1;
-        // Re-enter right of centre, clear of the port a forward edge would use, so the
-        // return rail never has to cross an outgoing line.
-        let centre = input.cross[item] + 1 + 3 * input.cross_size[item].saturating_sub(2) / 4;
+        // Re-enter at the far end of the side. `spread` keeps the forward ports off
+        // that cell, so the return never crowds an outgoing line or crosses one.
+        let centre = loop_port(input, item);
         let mid = top + height / 2;
         let arrow = top + height;
         let rail = arrow + 1;
@@ -294,6 +322,52 @@ fn label_extent(input: &Input<'_>, routes: &[Route]) -> usize {
         }
     }
     extent
+}
+
+/// The cross position a self loop returns to: the last cell of the item's side.
+fn loop_port(input: &Input<'_>, item: usize) -> usize {
+    let size = input.cross_size[item].max(1);
+    input.cross[item] + size.saturating_sub(2).max(1)
+}
+
+/// How many cells an edge may reach inside a container box before it meets the node
+/// the author actually named.
+///
+/// Returns zero unless the endpoint really is a container, the port lands within the
+/// inner node's own span, and every cell along the way is either blank or box art the
+/// line can merge with — so reaching inwards can never scribble over another box.
+fn reach_into(
+    pen: &Pen,
+    edge: &LevelEdge,
+    vnode: usize,
+    port: usize,
+    input: &Input<'_>,
+    border: usize,
+    inwards: bool,
+) -> usize {
+    if !is_item(input, vnode) {
+        return 0;
+    }
+    let Some(reach) = (if inwards {
+        edge.to_reach
+    } else {
+        edge.from_reach
+    }) else {
+        return 0;
+    };
+    let offset = port.saturating_sub(input.cross[vnode]);
+    if reach.depth == 0 || offset < reach.lo || offset >= reach.hi {
+        return 0;
+    }
+    let passable = (0..reach.depth).all(|step| {
+        let at = if inwards {
+            border + step
+        } else {
+            border - step
+        };
+        pen.passable(at, port)
+    });
+    if passable { reach.depth } else { 0 }
 }
 
 /// True when `vnode` is a real item rather than a routing dummy.

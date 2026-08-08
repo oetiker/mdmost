@@ -42,13 +42,24 @@ impl Cell {
         }
     }
 
-    /// A cell holding one grapheme cluster.
+    /// A cell holding one *one-cell piece* of text.
     ///
-    /// The cluster's display width is measured with [`grapheme_width`]. A zero-width
-    /// cluster yields a zero-width cell; callers that need the canvas invariants
-    /// should go through [`Canvas::write_str`](crate::canvas::Canvas::write_str)
-    /// instead, which merges such clusters into the preceding cell.
+    /// The piece must be no wider than two columns, which is what
+    /// [`cell_clusters`](crate::text::cell_clusters) yields — a whole grapheme cluster
+    /// where that fits in a cell, and a part of one where it does not. Handing this a
+    /// three-column cluster (a wide base plus a spacing mark) produces a cell that
+    /// claims two columns and draws three, which
+    /// [`Canvas::check_invariants`](crate::canvas::Canvas::check_invariants) rejects.
+    ///
+    /// A zero-width piece yields a zero-width cell; callers that need the canvas
+    /// invariants should go through
+    /// [`Canvas::write_str`](crate::canvas::Canvas::write_str) instead, which splits
+    /// its input properly and merges zero-width pieces into the preceding cell.
     pub fn new(cluster: &str, style: Style) -> Self {
+        debug_assert!(
+            crate::text::display_width(cluster) <= 2,
+            "a cell cannot hold {cluster:?}: split it with text::cell_clusters first"
+        );
         Self {
             text: CompactString::new(cluster),
             style,

@@ -77,22 +77,28 @@ pub const EIGHTHS: [&str; 9] = [
     "\u{2588}",
 ];
 
-/// Renders a fractional bar `width` cells wide, filled to `fraction` of its length.
-pub fn meter(fraction: f32, width: usize) -> String {
+/// The glyph the unfilled part of a meter is drawn with.
+///
+/// A gauge needs a track. Left blank, an empty meter is eight cells of bar colour and
+/// reads as a hole rather than as "nothing yet" (visual review P9).
+pub const TROUGH: &str = "\u{2591}";
+
+/// Renders a fractional bar `width` cells wide as its filled and unfilled halves.
+///
+/// The two are returned separately because they are drawn in different colours; their
+/// display widths always add up to exactly `width`.
+pub fn meter(fraction: f32, width: usize) -> (String, String) {
     let fraction = fraction.clamp(0.0, 1.0);
     let eighths = (fraction * (width * 8) as f32).round() as usize;
-    let full = eighths / 8;
+    let full = (eighths / 8).min(width);
     let remainder = eighths % 8;
-    let mut out = String::with_capacity(width * 3);
-    for _ in 0..full.min(width) {
-        out.push_str(EIGHTHS[8]);
+    let mut filled = String::with_capacity(width * 3);
+    for _ in 0..full {
+        filled.push_str(EIGHTHS[8]);
     }
     if full < width && remainder > 0 {
-        out.push_str(EIGHTHS[remainder]);
+        filled.push_str(EIGHTHS[remainder]);
     }
-    let drawn = full.min(width) + usize::from(full < width && remainder > 0);
-    for _ in drawn..width {
-        out.push(' ');
-    }
-    out
+    let drawn = full + usize::from(full < width && remainder > 0);
+    (filled, TROUGH.repeat(width - drawn))
 }

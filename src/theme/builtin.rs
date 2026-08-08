@@ -59,6 +59,39 @@ pub(super) fn light() -> Theme {
     )
 }
 
+/// How far each heading level is blended from [`Palette::accent`] towards
+/// [`Palette::muted`].
+///
+/// Depth must read as *recession*, so the ramp stays inside one hue family and loses
+/// saturation and contrast at every step instead of introducing a new hue. The step of
+/// `0.16` is chosen so adjacent levels stay perceptibly apart (≥ 24 in RGB Manhattan
+/// distance) in both built-in palettes; `theme_headings` asserts it.
+const HEADING_RAMP: [f32; 6] = [0.0, 0.16, 0.32, 0.48, 0.64, 0.80];
+
+/// The heading level at and above which the text is drawn bold.
+///
+/// The top three levels carry weight as well as colour; below that only the colour
+/// steps down, so a deep heading settles into the page rather than shouting from it.
+const HEADING_BOLD_THROUGH: usize = 3;
+
+/// How far a heading's prefix glyph is blended towards the page background.
+///
+/// The glyph takes the heading's own colour — that is the whole point of it — but one
+/// shade quieter, so the marker introduces the heading rather than competing with it.
+const HEADING_PREFIX_FADE: f32 = 0.15;
+
+/// How far a heading's rule is blended towards [`Palette::border`].
+///
+/// Kept small on purpose: the rule under the signature heading must not be fainter
+/// than the text it underlines, which is exactly what a plain border-coloured rule was.
+const HEADING_RULE_FADE: f32 = 0.12;
+
+/// The heading foreground for a zero-based level index.
+pub(super) fn heading_color(p: &Palette, index: usize) -> Color {
+    p.accent
+        .blend(p.muted, HEADING_RAMP[index.min(HEADING_RAMP.len() - 1)])
+}
+
 /// Builds a complete theme from a palette.
 pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
     // A style carrying the page background, used as the base for everything that is
@@ -68,18 +101,31 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
     let muted = Style::new().fg(p.muted).bg(p.bg);
     // Slightly stronger than `muted` so highlighted code still reads on the surface.
     let code_muted = Style::new().fg(p.muted).bg(p.surface);
+    // A quiet neutral for chrome that must be seen but must not read as an accent:
+    // scrollbar thumb, list bullets, overflow markers.
+    let chrome = p.muted.blend(p.fg, 0.5);
+
+    // One hue family, dimming with depth. `std::array::from_fn` keeps the ramp, the
+    // prefix tint and the rule derived from a single rule rather than six literals.
+    let headings: [Style; 6] = std::array::from_fn(|i| {
+        let style = base.fg(heading_color(&p, i));
+        if i < HEADING_BOLD_THROUGH {
+            style.bold()
+        } else {
+            style
+        }
+    });
+    let heading_prefixes: [Style; 6] =
+        std::array::from_fn(|i| base.fg(heading_color(&p, i).blend(p.bg, HEADING_PREFIX_FADE)));
+    let heading_rules: [Style; 6] =
+        std::array::from_fn(|i| base.fg(heading_color(&p, i).blend(p.border, HEADING_RULE_FADE)));
 
     Theme {
         name: name.to_string(),
         is_dark,
-        headings: [
-            base.fg(p.accent).bold(),
-            base.fg(p.cyan).bold(),
-            base.fg(p.green).bold(),
-            base.fg(p.yellow).bold(),
-            base.fg(p.orange),
-            base.fg(p.purple),
-        ],
+        headings,
+        heading_prefixes,
+        heading_rules,
         text: TextStyles {
             body: base,
             emphasis: base.italic(),
@@ -88,20 +134,26 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             link: base.fg(p.blue).underline(),
             link_url: muted,
             code: on_surface.fg(p.magenta),
-            footnote_ref: base.fg(p.accent),
+            // A footnote reference is a link to elsewhere in the document, so it wears
+            // the link hue rather than the heading accent.
+            footnote_ref: base.fg(p.blue),
             image_alt: base.fg(p.cyan).italic(),
             dim: muted,
         },
         block: BlockStyles {
             quote_bar: base.fg(p.accent),
             quote_text: base.fg(p.muted).italic(),
-            list_marker: base.fg(p.accent),
+            // Bullets are punctuation, not accents: they mark where an item starts and
+            // then get out of the way.
+            list_marker: base.fg(chrome),
             task_checked: base.fg(p.green),
             task_unchecked: base.fg(p.muted),
             rule: base.fg(p.border),
-            heading_rule: base.fg(p.border),
-            heading_prefix: base.fg(p.accent),
-            footnote_label: base.fg(p.accent).bold(),
+            // Level-aware variants live in `heading_rules` / `heading_prefixes`; these
+            // two keep the level-1 value so existing call sites stay correct.
+            heading_rule: heading_rules[0],
+            heading_prefix: heading_prefixes[0],
+            footnote_label: base.fg(p.blue).bold(),
             caption: muted.italic(),
             image_border: base.fg(p.border),
         },
@@ -111,7 +163,9 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             frame: Style::new().fg(p.border).bg(p.bg),
             language: Style::new().fg(p.accent).bg(p.bg),
             line_number: code_muted,
-            overflow_marker: on_surface.fg(p.orange),
+            // Neutral, not orange: orange is the current search match, and a truncation
+            // mark is chrome reporting on the layout, not content worth an accent.
+            overflow_marker: on_surface.fg(chrome),
             keyword: on_surface.fg(p.purple),
             string: on_surface.fg(p.green),
             number: on_surface.fg(p.orange),
@@ -139,38 +193,54 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
         },
         table: TableStyles {
             border: base.fg(p.border),
-            header: base.fg(p.accent).bold(),
+            // Weight, not hue: the accent belongs to the heading hierarchy, and a table
+            // header is already set apart by its rule and its position.
+            header: base.fg(p.fg).bold(),
             cell: base,
             row_alt: Style::new().bg(p.surface),
-            overflow_marker: base.fg(p.orange),
+            overflow_marker: base.fg(chrome),
         },
         diagram: DiagramStyles {
-            line: base.fg(p.border.blend(p.fg, 0.35)),
-            arrow: base.fg(p.accent),
+            // Lines are structure and must stay quieter than the labels riding on them,
+            // but not so quiet that the diagram falls apart — halfway to the text.
+            line: base.fg(p.border.blend(p.fg, 0.6)),
+            // One ink for the whole edge: the arrowhead is the end of the line it is
+            // attached to, and it shares the node hue so a diagram reads as one object.
+            arrow: base.fg(p.blue),
             node_border: base.fg(p.blue),
             node_text: base,
             group_border: base.fg(p.purple),
             group_title: base.fg(p.purple).bold(),
-            edge_label: base.fg(p.muted),
+            // In a sequence diagram the labels *are* the content, so they read at body
+            // weight while the lines they sit on stay dim.
+            edge_label: base,
             note: base.fg(p.yellow),
-            lifeline: base.fg(p.border),
+            // A lifeline is a line: it stays quieter than the messages riding on it,
+            // but it must not be the faintest ink on the page, which a bare border
+            // colour was. Kept one step under `line`, which carries arrowheads.
+            lifeline: base.fg(p.border.blend(p.fg, 0.55)),
             activation: base.fg(p.cyan),
             compartment: base.fg(p.border),
             stereotype: base.fg(p.magenta).italic(),
-            title: base.fg(p.fg).bold(),
+            // A diagram title is a heading of its own; giving it the heading hue stops
+            // it reading as a bold sentence of body text.
+            title: base.fg(heading_color(&p, 1)).bold(),
             axis: base.fg(p.muted),
             legend: base.fg(p.fg),
             task_done: base.fg(p.green),
-            task_active: base.fg(p.accent),
+            task_active: base.fg(p.blue),
             task_crit: base.fg(p.red),
             milestone: base.fg(p.yellow).bold(),
         },
         ui: UiStyles {
             status_bar: Style::new().fg(p.fg).bg(p.overlay),
-            status_accent: Style::new().fg(p.accent).bg(p.overlay).bold(),
+            // The file name is identity, not hierarchy: bold body text on the bar.
+            status_accent: Style::new().fg(p.fg).bg(p.overlay).bold(),
             status_key: Style::new().fg(p.yellow).bg(p.overlay),
             scrollbar_track: Style::new().fg(p.border).bg(p.bg),
-            scrollbar_thumb: Style::new().fg(p.accent).bg(p.bg),
+            // Chrome neutral. The scrollbar reports position; it is not a place the eye
+            // should be pulled to, and the accent is spoken for by the headings.
+            scrollbar_thumb: Style::new().fg(chrome).bg(p.bg),
             toc_border: base.fg(p.border),
             toc_item: base,
             toc_active: Style::new().fg(p.bg).bg(p.accent).bold(),
