@@ -162,6 +162,23 @@ Document
     Text("Duplicate heading")
   Heading(h2, #duplicate-heading-1)
     Text("Duplicate heading")
+  Heading(h2, #every-diagram-family-through-the-document-path)
+    Text("Every diagram family through the documen…")
+  Paragraph
+    Text("Each family is deliberately small: these…")
+    SoftBreak
+    Text("survives margins, block spacing and a 40…")
+    SoftBreak
+    Text("read would be rubber-stamped rather than…")
+  CodeBlock(mermaid)
+  CodeBlock(mermaid)
+  CodeBlock(mermaid)
+  CodeBlock(mermaid)
+  CodeBlock(mermaid)
+  CodeBlock(mermaid)
+  Paragraph
+    Text("A single-node graph is a degenerate case…")
+  CodeBlock(mermaid)
   FootnoteDefinition
     Paragraph
       Text("The footnote body.")

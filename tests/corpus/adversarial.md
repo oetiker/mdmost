@@ -98,3 +98,59 @@ A statement needing a source[^1].
 ## Duplicate heading
 
 ## Duplicate heading
+
+## Every diagram family through the document path
+
+Each family is deliberately small: these goldens exist to prove a diagram
+survives margins, block spacing and a 40-column budget, and a diff nobody can
+read would be rubber-stamped rather than reviewed.
+
+```mermaid
+sequenceDiagram
+  participant A as Ana
+  participant B as Bo
+  A->>B: ping
+  B-->>A: pong
+```
+
+```mermaid
+classDiagram
+  class Shape {
+    +area() f64
+  }
+  Shape <|-- Circle
+```
+
+```mermaid
+erDiagram
+  AUTHOR ||--o{ BOOK : writes
+```
+
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Busy : start
+  Busy --> [*]
+```
+
+```mermaid
+pie title Effort
+  "Design" : 3
+  "Build" : 5
+```
+
+```mermaid
+gantt
+  title Plan
+  dateFormat YYYY-MM-DD
+  section Work
+  design :a1, 2026-01-01, 3d
+  build  :after a1, 4d
+```
+
+A single-node graph is a degenerate case worth pinning.
+
+```mermaid
+flowchart TD
+  Only[Just one node]
+```
