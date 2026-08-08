@@ -294,8 +294,13 @@ Complete suite, all of it required before the project is considered done:
    (no overlapping nodes, no edges through nodes, deterministic output).
 2. **Golden snapshot tests** of `--render-once` at widths 40, 80, and 120 over a corpus
    of adversarial documents: nested tables, Markdown inside cells, deep lists, mixed
-   scripts, every Mermaid family, degenerate cases (empty table, single-node graph,
-   1000-node graph).
+   scripts, every Mermaid family, degenerate cases (empty table, single-node graph).
+
+   Deliberately **not** in the goldens: very large graphs. A 1000-node diagram produces a
+   snapshot diff no reviewer can read, so it would be rubber-stamped on every future
+   change and manufacture false confidence. Scale is covered by the property tests
+   (§13.3) and by the engine's own hundred-node case, both of which assert invariants
+   rather than exact output. A golden nobody reads is worse than no golden.
 3. **Property tests** (`proptest`): rendering never panics; every output line is exactly
    `width` display columns; rendering is idempotent; text content survives round-trip.
 4. **Integration tests**: stdin path, `$PAGER` path, non-TTY stdout, resize sequences
