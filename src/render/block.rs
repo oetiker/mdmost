@@ -40,7 +40,8 @@ pub fn render_blocks(nodes: &[Node], width: u16, theme: &Theme, options: &Render
 /// Renders a sequence of sibling blocks.
 ///
 /// `spaced` inserts one blank row between blocks, which is what separates paragraphs
-/// in a document and what a *tight* list suppresses between its items.
+/// in a document and what a *tight* list suppresses inside one of its items. The
+/// spacing *between* list items is not decided here — see [`list`].
 pub(crate) fn render_sequence(nodes: &[Node], width: u16, ctx: Ctx<'_>, spaced: bool) -> Canvas {
     let fill = ctx.base;
     let mut out = Canvas::empty(width);
@@ -201,16 +202,61 @@ fn quote(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
 const QUOTE_GUTTER: u16 = 2;
 
 /// A bullet, ordered or task list.
+///
+/// # Spacing between items (design spec §9)
+///
+/// A list whose items each occupy a single row is drawn dense. **As soon as any one
+/// item is taller than one row, a blank row is placed between every pair of items in
+/// that list.** Multi-line items packed edge to edge read as one grey mass: the reader
+/// cannot see where one item ends and the next begins, because the only remaining cue
+/// is the marker column.
+///
+/// Four decisions this rule rests on, none of them free:
+///
+/// * **Per list, not per item.** Spacing only the items adjacent to a tall one gives
+///   ragged gaps that track item length rather than structure — worse than either
+///   extreme. The whole list switches together.
+/// * **Composed with `CommonMark` looseness by disjunction.** A list the source already
+///   made loose (blank lines between its items) is spaced by `!info.tight` alone; this
+///   rule can only turn a tight list loose, never add a second blank row to a list that
+///   is already spaced. Intra-item spacing stays on `info.tight` — the presentation
+///   rule is about the seam *between* items and must not silently restyle the blocks
+///   inside one.
+/// * **"More than one line" means the rendered item is taller than one row** — a
+///   wrapped paragraph, but equally a nested list, a code block, a table, several
+///   paragraphs. Measuring the drawn height rather than enumerating node kinds is what
+///   keeps this honest: the criterion is exactly the crowding the reader sees, and it
+///   cannot fall behind as new block kinds are added. A consequence worth naming: an
+///   item carrying a sublist is always taller than one row, so a list with nesting is
+///   always spaced at the level that does the nesting, at every width.
+/// * **Each level decides for itself.** A wrapping outer item does not force its
+///   children apart; the sublist is measured on its own items and stays dense if they
+///   are short. Cascading would make one long outer item blow up an entire subtree, and
+///   since "wraps" is width-dependent that subtree would inflate and collapse on
+///   resize. Deciding locally means the spacing appears exactly where the crowding is.
+///
+/// The decision is width-dependent by construction — the same list is dense at 120
+/// columns and spaced at 60 — which is intended, because narrow is precisely when the
+/// items wrap and look cramped. It is taken here, during layout, at a known width, and
+/// never at parse time (design spec §3); the render cache is keyed on width, so a
+/// resize re-renders and re-decides rather than serving a stale choice.
 fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
     let inner = ctx.in_list();
     let field = marker_field(&node.children, info);
     let indent = u16::try_from(field).unwrap_or(u16::MAX).min(width);
+    // Rendered up front because the spacing decision needs every item's drawn height
+    // before the first item can be placed. No item is rendered twice.
+    let items: Vec<Canvas> = node
+        .children
+        .iter()
+        .map(|item| render_sequence(&item.children, width - indent, inner, !info.tight))
+        .collect();
+    let spaced = !info.tight || items.iter().any(|item| item.height() > 1);
     let mut out = Canvas::empty(width);
-    for (index, item) in node.children.iter().enumerate() {
+    for (index, (item, content)) in node.children.iter().zip(&items).enumerate() {
         let marker = marker_line(item, info, index, field, ctx);
-        let content = render_sequence(&item.children, width - indent, inner, !info.tight);
-        let part = hanging(&marker, &content, ctx.base);
-        if !info.tight && !out.is_empty() {
+        let part = hanging(&marker, content, ctx.base);
+        if spaced && !out.is_empty() {
             out.push_blank_row(ctx.base);
         }
         out.append(&part, ctx.base);

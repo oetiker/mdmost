@@ -29,7 +29,9 @@ expression: canvas.plain_text()
      ⁃ level three                                                              
        1. ordered inside unordered                                              
        2. second                                                                
+                                                                                
  ☑ a finished task                                                              
+                                                                                
  ☐ an unfinished task                                                           
                                                                                 
  ◈ Table with Markdown inside cells                                             

@@ -265,6 +265,86 @@ fn tight_lists_are_dense_and_loose_lists_are_spaced() {
     assert_eq!(rows("- one\n\n- two\n", 20), ["• one", "", "• two"]);
 }
 
+/// The document the wrapping-spaces-the-list rule is asserted against.
+///
+/// Three items, one of which is long enough to wrap at a narrow budget and short
+/// enough to fit at a wide one.
+const THREE_BULLETS: &str = "- one\n- alpha beta gamma delta epsilon\n- three\n";
+
+#[test]
+fn a_list_stays_tight_while_every_item_fits_on_one_line() {
+    assert_eq!(
+        rows(THREE_BULLETS, 40),
+        ["• one", "• alpha beta gamma delta epsilon", "• three"]
+    );
+}
+
+#[test]
+fn a_list_is_spaced_throughout_as_soon_as_one_item_wraps() {
+    // The rule is per-list, not per-item: the gap appears between *every* pair, not
+    // only around the item that wrapped, or the spacing would be ragged.
+    assert_eq!(
+        rows(THREE_BULLETS, 20),
+        [
+            "• one",
+            "",
+            "• alpha beta gamma",
+            "  delta epsilon",
+            "",
+            "• three"
+        ]
+    );
+}
+
+#[test]
+fn a_list_already_loose_by_commonmark_does_not_gain_a_second_blank_row() {
+    let loose = "- one\n\n- alpha beta gamma delta epsilon\n\n- three\n";
+    assert_eq!(
+        rows(loose, 20),
+        [
+            "• one",
+            "",
+            "• alpha beta gamma",
+            "  delta epsilon",
+            "",
+            "• three"
+        ]
+    );
+}
+
+#[test]
+fn ordered_and_task_lists_follow_the_same_rule() {
+    assert_eq!(
+        rows("1. one\n2. alpha beta gamma delta\n", 16),
+        ["1. one", "", "2. alpha beta", "   gamma delta"]
+    );
+    assert_eq!(
+        rows("- [ ] one\n- [x] alpha beta gamma delta\n", 16),
+        ["☐ one", "", "☑ alpha beta", "  gamma delta"]
+    );
+}
+
+#[test]
+fn each_list_level_decides_its_own_spacing() {
+    // The outer item carries a sublist, so it is more than one line tall and the outer
+    // level spaces out; the inner items each fit on one line, so the sublist stays
+    // tight. Spacing appears exactly where the crowding is.
+    assert_eq!(
+        rows("- outer one\n  - in a\n  - in b\n- outer two\n", 30),
+        ["• outer one", "  ◦ in a", "  ◦ in b", "", "• outer two"]
+    );
+}
+
+#[test]
+fn the_spacing_decision_is_re_taken_at_every_width() {
+    // Width-dependent by construction: the same document is tight where it is roomy
+    // and spaced where the items would look cramped. Rendering is a pure function of
+    // (AST, width, theme, options), so a resize re-renders and re-decides.
+    assert_eq!(rows(THREE_BULLETS, 40).len(), 3);
+    assert_eq!(rows(THREE_BULLETS, 20).len(), 6);
+    assert_eq!(rows(THREE_BULLETS, 40).len(), 3);
+}
+
 #[test]
 fn a_list_inside_a_quote_inside_a_list_still_composes() {
     assert_eq!(
