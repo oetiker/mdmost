@@ -215,7 +215,7 @@ fn render_placed(
         return render_widened(node, measure.full, theme, options, clip);
     }
     let exempt = is_exempt(node);
-    let mut canvas = if exempt {
+    let canvas = if exempt {
         render_widened(node, measure.full, theme, options, clip)
     } else {
         let capped = render_block(node, measure.prose, theme, options);
