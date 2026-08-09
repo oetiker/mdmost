@@ -25,6 +25,20 @@ const WIDE_PLUS_SPACING_MARK: &str = "\u{17000}\u{1A57}";
 /// the joined halves.
 const ZWJ_PLUS_SPACING_MARK: &str = "\u{1f600}\u{200d}\u{1f600}\u{1A57}";
 
+/// U+17D8 KHMER SIGN BEYYAL: a *single scalar* that draws three columns. It is the only
+/// one in Unicode under `unicode-width` 0.2, but the interesting thing about it is not
+/// its identity — it is that no split of it exists at all, because there is nothing
+/// inside it to split. A cluster like that cannot be put in cells; it is replaced.
+const INDIVISIBLE_TOO_WIDE: &str = "\u{17D8}";
+
+/// The same sign carrying a spacing mark (`Mc`): four columns, and still nothing that a
+/// width-preserving split could cut, because the only interior boundary leaves a
+/// three-column head.
+const INDIVISIBLE_TOO_WIDE_MARKED: &str = "\u{17D8}\u{093B}";
+
+/// The marker an unplaceable cluster is replaced by.
+const MARKER: &str = "\u{FFFD}";
+
 #[test]
 fn display_width_counts_columns_not_bytes() {
     assert_eq!(display_width("abc"), 3);
@@ -105,6 +119,111 @@ fn cell_clusters_split_width_preservingly_across_the_corpus() {
             pieces.iter().map(|p| display_width(p)).sum::<usize>(),
             display_width(text),
             "pieces of {text:?} do not account for its columns: {pieces:?}"
+        );
+    }
+}
+
+#[test]
+fn cell_clusters_replace_a_cluster_that_cannot_be_split_at_all() {
+    // U+17D8 is one scalar drawing three columns. There is no boundary inside it, so
+    // no split can preserve its width; handing it to a cell would make the cell claim
+    // two columns and draw three. It is replaced by a marker padded to its own width,
+    // which keeps the column arithmetic every caller already did with `display_width`
+    // exactly right.
+    assert_eq!(display_width(INDIVISIBLE_TOO_WIDE), 3);
+    let pieces: Vec<&str> = cell_clusters(INDIVISIBLE_TOO_WIDE).collect();
+    assert_eq!(pieces, vec![MARKER, " ", " "]);
+    assert_eq!(
+        pieces.iter().map(|p| display_width(p)).sum::<usize>(),
+        display_width(INDIVISIBLE_TOO_WIDE)
+    );
+}
+
+#[test]
+fn cell_clusters_replace_the_whole_cluster_marks_and_all() {
+    // The marks belong to the base that was replaced; leaving one behind would strand a
+    // combining mark against a blank.
+    assert_eq!(display_width(INDIVISIBLE_TOO_WIDE_MARKED), 4);
+    let pieces: Vec<&str> = cell_clusters(INDIVISIBLE_TOO_WIDE_MARKED).collect();
+    assert_eq!(pieces, vec![MARKER, " ", " ", " "]);
+    assert_eq!(
+        pieces.iter().map(|p| display_width(p)).sum::<usize>(),
+        display_width(INDIVISIBLE_TOO_WIDE_MARKED)
+    );
+}
+
+#[test]
+fn cell_clusters_replace_only_what_they_cannot_split() {
+    // Neighbouring text is untouched, and the replacement is exactly as wide as the
+    // cluster it stands in for, so everything after it stays in its column.
+    let pieces: Vec<&str> = cell_clusters("a\u{17D8}日").collect();
+    assert_eq!(pieces, vec!["a", MARKER, " ", " ", "日"]);
+    assert_eq!(
+        pieces.iter().map(|p| display_width(p)).sum::<usize>(),
+        display_width("a\u{17D8}日")
+    );
+}
+
+#[test]
+fn every_cell_piece_of_every_scalar_fits_in_a_cell() {
+    // The class, not the instance: whatever Unicode adds next, no piece may be wider
+    // than a cell and the pieces must account for exactly the columns the text draws.
+    // This is the property `Cell::new`'s assertion defends, proved without relying on
+    // a randomly seeded test having tried the right character.
+    let mut buffer = [0u8; 4];
+    for scalar in 0u32..=0x10FFFF {
+        let Some(ch) = char::from_u32(scalar) else {
+            continue;
+        };
+        let text: &str = ch.encode_utf8(&mut buffer);
+        let pieces: Vec<&str> = cell_clusters(text).collect();
+        for piece in &pieces {
+            assert!(
+                display_width(piece) <= 2,
+                "U+{scalar:04X}: piece {piece:?} draws {} columns",
+                display_width(piece)
+            );
+        }
+        assert_eq!(
+            pieces.iter().map(|p| display_width(p)).sum::<usize>(),
+            display_width(text),
+            "U+{scalar:04X}: pieces {pieces:?} do not account for its columns"
+        );
+    }
+}
+
+#[test]
+fn cell_pieces_account_for_the_columns_of_composed_clusters() {
+    // The families that share the failure mode: an over-wide base with marks on it, a
+    // joined sequence with a mark, a flag with a mark, a variation-selected emoji, and
+    // an unsplittable sign with and without marks.
+    for text in [
+        INDIVISIBLE_TOO_WIDE,
+        INDIVISIBLE_TOO_WIDE_MARKED,
+        "\u{17D8}\u{0301}",
+        "\u{17D8}\u{17D8}",
+        WIDE_PLUS_SPACING_MARK,
+        ZWJ_PLUS_SPACING_MARK,
+        "\u{1f1e8}\u{1f1ed}\u{1A57}",
+        "\u{2764}\u{fe0f}",
+        "\u{2764}\u{fe0f}\u{1A57}",
+        "日\u{1A57}",
+        "日\u{0301}",
+        "\u{1f469}\u{200d}\u{1f4bb}\u{1A57}",
+        "a\u{17D8}b\u{17000}\u{1A57}日",
+    ] {
+        let pieces: Vec<&str> = cell_clusters(text).collect();
+        for piece in &pieces {
+            assert!(
+                display_width(piece) <= 2,
+                "{text:?}: piece {piece:?} draws {} columns",
+                display_width(piece)
+            );
+        }
+        assert_eq!(
+            pieces.iter().map(|p| display_width(p)).sum::<usize>(),
+            display_width(text),
+            "{text:?}: pieces {pieces:?} do not account for its columns"
         );
     }
 }

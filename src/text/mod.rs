@@ -11,6 +11,9 @@
 //!   `char`s;
 //! * text is split only on **grapheme cluster** boundaries via `unicode-segmentation`,
 //!   so combining marks, ZWJ emoji sequences and regional-indicator flags stay intact.
+//!   The one exception is [`cell_clusters`], which fills terminal cells and must go
+//!   inside a cluster that no cell can hold — and even there the cut is chosen by
+//!   measurement, and a cluster with no honest cut is replaced rather than mangled.
 
 mod span;
 mod wrap;
@@ -59,12 +62,15 @@ pub fn display_width(text: &str) -> usize {
 /// whole of the project's early life.
 ///
 /// Callers that are filling cells must therefore split their text with
-/// [`cell_clusters`] first, which never yields a piece wider than two columns; the
-/// clamp here then never fires. A width of `0` (a lone combining mark, a zero-width
-/// joiner) is legal and is merged into the preceding cell by the canvas.
+/// [`cell_clusters`] first, which never yields a piece wider than two columns — it
+/// divides what can be divided and replaces what cannot — so the clamp here never
+/// fires. A width of `0` (a lone combining mark, a zero-width joiner) is legal and is
+/// merged into the preceding cell by the canvas.
 ///
-/// ZWJ emoji sequences and regional-indicator flags are *not* affected: `unicode-width`
-/// already measures those clusters as two columns, which is what terminals draw.
+/// Whether a given cluster is affected is a question of measurement, never of which
+/// script or sequence it belongs to. A ZWJ emoji sequence and a regional-indicator flag
+/// each *measure* two columns and so pass through untouched; the same sequence carrying
+/// a spacing mark measures three and does not.
 pub fn grapheme_width(cluster: &str) -> u8 {
     match cluster.width() {
         0 => 0,
@@ -73,43 +79,84 @@ pub fn grapheme_width(cluster: &str) -> u8 {
     }
 }
 
+/// The glyph standing in for a cluster no arrangement of cells can hold.
+///
+/// One column wide, which is what makes it usable as the head of a padded run.
+pub const UNPLACEABLE: &str = "\u{FFFD}";
+
 /// Splits `text` into pieces that each occupy exactly one terminal cell.
 ///
-/// This is [`graphemes`] with one extra rule: a cluster too wide for a single cell is
-/// broken at the widest point that preserves its total width (see `leading_cell`). Only
-/// clusters of three columns or more are ever broken — in practice a spacing mark
-/// (category `Mc`) attached to something already two columns wide.
+/// This is [`graphemes`] with two extra rules, both stated as measurements:
+///
+/// * a cluster too wide for a single cell is broken at the widest point that *preserves
+///   its total width* (see `leading_cell`) — in practice a spacing mark (category `Mc`)
+///   attached to something already two columns wide;
+/// * a cluster too wide for a single cell that admits **no** width-preserving break is
+///   replaced by [`UNPLACEABLE`] followed by blanks, together exactly as wide as the
+///   cluster it stands in for.
 ///
 /// A ZWJ emoji sequence or a flag is never broken *on its own*, because `unicode-width`
 /// measures those at two columns and they never enter the splitting path. But do not
 /// read that as "sequences are untouched": a ZWJ sequence carrying a spacing mark
 /// measures three and does enter it, and the cut must then fall after the joined run
-/// rather than inside it. Splitting inside a join is the failure this function is
-/// written to avoid, so the rule is stated as a measurement, not as a list of
-/// characters that may not be separated.
+/// rather than inside it. Splitting inside a join is one of the two failures this
+/// function is written to avoid, so neither rule is stated as a list of characters.
 ///
-/// Two guarantees hold for the pieces: they concatenate back to `text` exactly, so
-/// nothing the author wrote is lost, and their widths sum to `display_width(text)`, so
-/// a row filled from them is as wide as the cells claim.
+/// The guarantee that holds for every input is about *columns*: the widths of the pieces
+/// sum to exactly `display_width(text)`, and no piece is wider than two columns. A row
+/// filled from them is therefore as wide as the cells claim, which is what design spec
+/// §4 requires and what [`Cell::new`](crate::canvas::Cell::new) asserts.
+///
+/// The pieces also concatenate back to `text` exactly — *except* for a replaced cluster,
+/// where the author's character is gone. That is not a lapse: a cluster of three columns
+/// with nothing inside it to divide (U+17D8 KHMER SIGN BEYYAL is the only such scalar
+/// under `unicode-width` 0.2, but composed clusters reach the same state) cannot be put
+/// into cells at all. The alternatives were to let a cell claim two columns and draw
+/// three, which is the canvas-contract violation this whole area exists to prevent, or
+/// to widen the contract so a cell may be three columns wide, which changes every
+/// consumer of the grid for one sign. Standing a same-width marker in its place keeps
+/// the grid honest, keeps the column arithmetic callers already did with
+/// [`display_width`] exact — so everything after it stays in the column it was laid out
+/// in — and leaves a visible sign that something was there, rather than deleting it
+/// silently.
 pub fn cell_clusters(text: &str) -> CellClusters<'_> {
-    CellClusters { rest: text }
+    CellClusters {
+        rest: text,
+        blanks: 0,
+    }
 }
 
 /// The iterator returned by [`cell_clusters`].
 #[derive(Debug, Clone)]
 pub struct CellClusters<'a> {
     rest: &'a str,
+    /// Blank columns still owed for a cluster that was replaced by a marker.
+    blanks: usize,
 }
 
 impl<'a> Iterator for CellClusters<'a> {
     type Item = &'a str;
 
     fn next(&mut self) -> Option<&'a str> {
+        if self.blanks > 0 {
+            self.blanks -= 1;
+            return Some(" ");
+        }
         let cluster = graphemes(self.rest).next()?;
         let piece = if display_width(cluster) <= 2 {
             cluster
         } else {
-            leading_cell(cluster)
+            match leading_cell(cluster) {
+                Some(head) => head,
+                None => {
+                    // Nothing can be cut off this cluster without changing how many
+                    // columns it draws, and it does not fit a cell whole. Replace it.
+                    self.rest = &self.rest[cluster.len()..];
+                    self.blanks = display_width(cluster) - 1;
+                    debug_assert_eq!(display_width(UNPLACEABLE), 1);
+                    return Some(UNPLACEABLE);
+                }
+            }
         };
         // Every branch consumes at least one character, so this cannot spin.
         debug_assert!(!piece.is_empty(), "cell piece must make progress");
@@ -118,7 +165,8 @@ impl<'a> Iterator for CellClusters<'a> {
     }
 }
 
-/// The leading one-cell piece of an over-wide cluster.
+/// The leading one-cell piece of an over-wide cluster, if the cluster can be divided at
+/// all.
 ///
 /// The split point is chosen by *measurement*, not by character category: the longest
 /// prefix that still fits a cell (at most two columns) and whose width, plus the width
@@ -134,11 +182,11 @@ impl<'a> Iterator for CellClusters<'a> {
 /// invariant check. Measuring the remainder catches every such join without having to
 /// enumerate which characters join.
 ///
-/// If no width-preserving split exists, the fallback is the first character together
-/// with any zero-width characters trailing it, which always makes progress. That piece
-/// may then misreport its width; the row check in `Canvas::check_invariants` is what
-/// catches that case.
-fn leading_cell(cluster: &str) -> &str {
+/// `None` means no such prefix exists — either the cluster is a single character, or
+/// every boundary in it would change the total. There is then no honest way to fill
+/// cells from it, and [`cell_clusters`] replaces it rather than cutting it somewhere
+/// that lies about its width.
+fn leading_cell(cluster: &str) -> Option<&str> {
     let whole = display_width(cluster);
     let mut split = None;
     for (at, _) in cluster.char_indices().skip(1) {
@@ -147,27 +195,7 @@ fn leading_cell(cluster: &str) -> &str {
             split = Some(at);
         }
     }
-    let end = split.unwrap_or_else(|| fallback_cell_end(cluster));
-    &cluster[..end]
-}
-
-/// Where to cut an over-wide cluster that has no width-preserving split: after its first
-/// character and any zero-width characters trailing it.
-fn fallback_cell_end(cluster: &str) -> usize {
-    let mut end = cluster.len();
-    for (at, ch) in cluster.char_indices() {
-        if at == 0 {
-            end = ch.len_utf8();
-            continue;
-        }
-        if display_width(ch.encode_utf8(&mut [0u8; 4])) == 0 {
-            end = at + ch.len_utf8();
-        } else {
-            end = at;
-            break;
-        }
-    }
-    end
+    split.map(|end| &cluster[..end])
 }
 
 /// Hands `extra` columns out across `slots`, as evenly as whole columns allow.

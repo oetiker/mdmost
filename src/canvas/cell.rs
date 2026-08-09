@@ -12,7 +12,14 @@ use crate::theme::Style;
 /// The design spec sketches `Cell { ch: char, .. }`. A `char` cannot hold a grapheme
 /// cluster — `"é"` (e + U+0301), `"👩‍💻"` (ZWJ sequence) and `"🇨🇭"` (regional indicator
 /// pair) are each several `char`s but exactly one cell. `Cell` therefore stores the
-/// whole cluster. Everything else about the spec's contract is unchanged.
+/// whole cluster.
+///
+/// §4 also says grapheme clusters are never split. That holds for wrapping, but not
+/// literally for filling cells: a cluster measuring more than two columns has to be
+/// divided across cells, or replaced when it cannot be divided (see
+/// [`cell_clusters`](crate::text::cell_clusters)). The rule §4 is really protecting —
+/// a cell draws exactly the width it claims, and a row is exactly `width` columns — is
+/// unchanged, and is what the assertion below and `Canvas::check_invariants` enforce.
 ///
 /// # Invariants
 ///
@@ -46,9 +53,10 @@ impl Cell {
     ///
     /// The piece must be no wider than two columns, which is what
     /// [`cell_clusters`](crate::text::cell_clusters) yields — a whole grapheme cluster
-    /// where that fits in a cell, and a part of one where it does not. Handing this a
-    /// three-column cluster (a wide base plus a spacing mark) produces a cell that
-    /// claims two columns and draws three, which
+    /// where that fits in a cell, a part of one where the cluster can be divided without
+    /// changing its width, and a same-width marker run where it cannot. Handing this a
+    /// three-column cluster (a wide base plus a spacing mark, or U+17D8 on its own)
+    /// produces a cell that claims two columns and draws three, which
     /// [`Canvas::check_invariants`](crate::canvas::Canvas::check_invariants) rejects.
     ///
     /// A zero-width piece yields a zero-width cell; callers that need the canvas

@@ -228,6 +228,12 @@ impl Canvas {
     ///   this write and the cell to the left is blank, they are dropped.
     /// * Overwriting either half of an existing double-width cell replaces the orphaned
     ///   half with a blank, so the row stays exactly [`Canvas::width`] columns wide.
+    /// * A cluster that no cell can hold and that cannot be divided without changing its
+    ///   width — U+17D8, a wide sign carrying a spacing mark — is drawn as
+    ///   [`text::UNPLACEABLE`](crate::text::UNPLACEABLE) padded to the cluster's own
+    ///   width, so the columns after it are unmoved. At the right edge such a run is cut
+    ///   like any other text rather than dropped whole, which leaves the marker visible
+    ///   in the last column; the row still measures exactly [`Canvas::width`].
     pub fn write_str(&mut self, row: usize, col: usize, text: &str, style: Style) -> usize {
         let width = usize::from(self.width);
         let Some(cells) = self.rows.get_mut(row) else {
@@ -240,7 +246,8 @@ impl Canvas {
         let mut last_written: Option<usize> = None;
         // `cell_clusters`, not `graphemes`: a cluster wider than two columns (a wide
         // base plus a spacing mark) has to occupy more than one cell, or the cells
-        // would claim a width their own text does not have.
+        // would claim a width their own text does not have. Where such a cluster cannot
+        // be divided at all, what arrives here is the marker run that stands in for it.
         for cluster in cell_clusters(text) {
             let cluster_width = usize::from(grapheme_width(cluster));
             if cluster_width == 0 {

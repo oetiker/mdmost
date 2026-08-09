@@ -38,10 +38,24 @@ A `Cell` must draw exactly the width it claims. `check_invariants` asserts
 matching `debug_assert`.
 
 The subtlety: a grapheme cluster can legitimately occupy more than two columns — a wide
-base plus a *spacing* mark (Unicode category `Mc`, not `Mn`) measures three. Clamping
-such a cluster to two makes the cell lie, and every row containing one comes out a column
-too wide. `text::cell_clusters` splits those; ZWJ sequences and flags already measure
-correctly at two columns, so splitting never fires for an emoji.
+base plus a *spacing* mark (Unicode category `Mc`, not `Mn`) measures three, and U+17D8
+KHMER SIGN BEYYAL measures three all by itself. Clamping such a cluster to two makes the
+cell lie, and every row containing one comes out a column too wide. `text::cell_clusters`
+handles them, and it decides what to do purely by measuring:
+
+- a cluster measuring at most two columns is passed through whole — which is why a bare
+  ZWJ sequence or flag is never touched, *but* the same sequence carrying a spacing mark
+  measures three and is;
+- a wider cluster is cut at a point that preserves its total width, never inside a join
+  (two adjacent cells that re-form one cluster draw narrower together than apart, and the
+  row comes up short while every per-cell check passes — that has happened);
+- a wider cluster with no such cut — one scalar of three columns, or one whose every
+  boundary changes the total — cannot be put into cells at all, so it is replaced by
+  `text::UNPLACEABLE` (`�`) padded with blanks to exactly the width it drew. The grid
+  stays honest and everything after it keeps the column the layout gave it.
+
+Do not "fix" the third case by widening the cell contract; it is one sign, and every
+consumer of the grid assumes 0/1/2.
 
 That clamp was found in three separate places over the project's life. Treat any
 arithmetic built on `grapheme_width` as suspect until checked.

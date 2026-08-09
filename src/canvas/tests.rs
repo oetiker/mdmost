@@ -618,14 +618,45 @@ fn a_cluster_too_wide_for_one_cell_is_spread_over_two() {
     assert_eq!(display_width(&canvas.row_text(0)), 6);
 }
 
+/// U+17D8 KHMER SIGN BEYYAL: three columns in one scalar, so there is nothing inside it
+/// to split. `render_property` shrank to this at width 5.
+const INDIVISIBLE_TOO_WIDE: &str = "\u{17D8}";
+
+#[test]
+fn a_cluster_that_cannot_be_split_is_replaced_by_a_marker_of_its_width() {
+    let mut canvas = Canvas::new(6, 1, base());
+    let written = canvas.write_str(0, 0, INDIVISIBLE_TOO_WIDE, base());
+
+    assert_eq!(
+        written, 3,
+        "the replacement occupies the columns the sign drew"
+    );
+    ok(&canvas);
+    assert_eq!(canvas.row_text(0), "\u{FFFD}     ");
+}
+
+#[test]
+fn text_after_an_unplaceable_cluster_keeps_its_column() {
+    // The point of padding the marker to the cluster's width: everything the layout
+    // measured with `display_width` still lands where it was measured to land.
+    let mut canvas = Canvas::new(8, 1, base());
+    canvas.write_str(0, 0, "a\u{17D8}b", base());
+    ok(&canvas);
+    assert_eq!(canvas.row_text(0), "a\u{FFFD}  b   ");
+}
+
 #[test]
 fn no_cell_ever_claims_a_width_its_text_does_not_draw() {
     // The invariant that makes this class of bug impossible to reintroduce.
     let samples = [
         WIDE_PLUS_SPACING_MARK,
+        INDIVISIBLE_TOO_WIDE,
+        "\u{17D8}\u{093B}",
+        "a\u{17D8}日",
         ZWJ,
         FLAG,
         COMBINING,
+        "\u{2764}\u{fe0f}",
         "日本語",
         "plain",
         "\u{17000}\u{1A57}\u{17000}\u{1A57}",
