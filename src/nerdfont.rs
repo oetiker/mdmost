@@ -255,7 +255,7 @@ mod tests {
         // the chrome, and the renderer's unticked task box for the document. (The
         // renderer's heading markers used to stand for the second half; they were
         // removed on 2026-08-09, and the bullets that might have replaced them are
-        // plain Unicode in both sets now.) Both now live in the Material range that
+        // ASCII in both sets now.) Both now live in the Material range that
         // only Nerd Fonts v3 carries — the task boxes moved there on 2026-08-09 to be
         // a matched pair — so a v2 patch fails detection and gets plain Unicode,
         // which is the safe direction of the rule.

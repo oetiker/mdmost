@@ -418,24 +418,53 @@ fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> (Canvas, bool)
     (out, spaced)
 }
 
+/// The columns of air between a task checkbox and the text of its item.
+///
+/// **Two, not one**, at the owner's request on 2026-08-09: "the checkbox is a large
+/// double char affair which matches nicely between checked and unchecked, but it hugs
+/// the text following it… so I guess two spaces would be in order". A checkbox is a
+/// *box* — it fills its cell edge to edge, unlike a bullet, which is a small mark
+/// floating in the middle of one — so the single space that suits a bullet leaves a
+/// box looking welded to the word after it.
+///
+/// The gap is deliberately **the same in both glyph sets**. It would be tempting to
+/// read the complaint as being about the Nerd Font boxes specifically, and to widen
+/// only those; don't. The module rule in [`crate::render::glyphs`] is that turning
+/// icons off changes what a glyph *looks like* and nothing about *where anything
+/// sits*, so a set-dependent gap would make `--no-icons` shift every task list
+/// sideways — exactly the class of surprise that rule exists to forbid. And how much
+/// of its cell any given box actually fills is a property of the reader's font, which
+/// this program does not know and must not pretend to (see [`crate::render::glyphs`]
+/// for what assuming otherwise has cost). `☐` and `☑` are boxes on their own merits.
+const TASK_GAP: usize = 2;
+
+/// The columns a plain bullet or ordinal keeps between itself and its text.
+const MARKER_GAP: usize = 1;
+
 /// How many columns the marker column of a list occupies, including its trailing space.
 ///
 /// An *ordered* task list spends both fields: the ordinal is the item's identity — it
 /// is how the item is referred to — and the box is its state, and neither answers for
-/// the other. The two are laid out side by side as `1. ☑ `, so the field is the ordinal
-/// field plus the box and its space. Keeping only the box dropped the number the item
-/// is named by and left the ordinal's columns behind as a second space — a list that
-/// rendered `☑  first` where the unordered form rendered `☑ first`.
+/// the other. The two are laid out side by side as `1. ☑  `, so the field is the
+/// ordinal field plus the box and its gap. Keeping only the box dropped the number the
+/// item is named by and left the ordinal's columns behind as a second space — a list
+/// that rendered `☑  first` where the unordered form rendered `☑ first`.
+///
+/// An *unordered* list widens the same way when it holds tasks. The field is a
+/// property of the list, not of the item, so a plain bullet among checkboxes is padded
+/// to the identical width and every item's text starts in one column — the alternative,
+/// giving the wider gap only to the items that have a box, would set the text edge
+/// ragged in exactly the list where the boxes make the ragging most visible.
 fn marker_field(items: &[Node], info: ListInfo, ctx: Ctx<'_>) -> usize {
     if !info.ordered {
-        return 2;
+        return task_field(items, ctx).max(1 + MARKER_GAP);
     }
     let last = info.start + items.len().saturating_sub(1);
-    let ordinal = display_width(&format!("{last}.")) + 1;
+    let ordinal = display_width(&format!("{last}.")) + MARKER_GAP;
     ordinal + task_field(items, ctx)
 }
 
-/// The columns an ordered list's checkbox column takes, or zero if it has no tasks.
+/// The columns a list's checkbox column takes, or zero if it has no tasks.
 fn task_field(items: &[Node], ctx: Ctx<'_>) -> usize {
     let has_task = items
         .iter()
@@ -446,7 +475,7 @@ fn task_field(items: &[Node], ctx: Ctx<'_>) -> usize {
     // Both boxes are the same width in both glyph sets, but measuring beats assuming:
     // an icon set whose boxes differed would otherwise set the text ragged.
     let box_width = display_width(ctx.glyphs.task(true)).max(display_width(ctx.glyphs.task(false)));
-    box_width + 1
+    box_width + TASK_GAP
 }
 
 /// The marker of one list item, padded to the marker field width.
@@ -493,7 +522,7 @@ fn marker_line(
         theme.block.list_marker,
     )]);
     if boxes > 0 {
-        // `1. ☑ `. The ordinal is the item's identity and the box is its state; the
+        // `1. ☑  `. The ordinal is the item's identity and the box is its state; the
         // box used to be drawn *instead of* the ordinal, which silently renumbered the
         // author's list to nothing.
         match checked {
@@ -523,8 +552,9 @@ fn task_style(checked: bool, theme: &Theme) -> Style {
 fn ordinal(info: ListInfo, index: usize, field: usize) -> String {
     let text = format!("{}.", info.start + index);
     format!(
-        "{} ",
-        pad_to_width(&text, field.saturating_sub(1), Align::Right)
+        "{}{}",
+        pad_to_width(&text, field.saturating_sub(MARKER_GAP), Align::Right),
+        " ".repeat(MARKER_GAP)
     )
 }
 

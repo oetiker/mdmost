@@ -69,31 +69,44 @@ which one is in force never affects layout (§9).
 *Amended 2026-08-09.* This section used to say the three marker families — heading
 prefixes, list bullets, task boxes — each own a distinct shape vocabulary and never share
 a glyph. Two of those three are gone as icon families. Heading prefixes were removed
-outright (§9.1). List bullets are now the *same plain Unicode in both sets* (`●`, `–`,
-`▪`, `▫`, by nesting depth), because the level-one bullet's size has been in question
-twice, in both directions, and plain Unicode is the set with the grades to answer it:
-`·`, `•` and `●` are three sizes of the same mark, where every filled circle a Nerd
-Font offers — `nf-fa-circle`, `nf-md-circle`, `nf-md-circle-medium` — is one heavy disc
-at icon size. What remains is the rule that bullets and task boxes never share a glyph,
-still tested, and the width rule, which now holds trivially for bullets. Detection
-therefore no longer demands the four bullet code points.
+outright (§9.1). List bullets are now the *same text in both sets*, so detection no
+longer demands the four bullet code points. What remains is the rule that bullets and
+task boxes never share a glyph, still tested, and the width rule, which now holds
+trivially for bullets.
 
-*Amended again 2026-08-09*, after the owner found `·` U+00B7 too small to read as a
-marker and chose `⦁` U+2981 from a rendered selection. U+2981 **cannot ship**: it is
-absent from CommitMono Nerd Font (and from DejaVu), so it draws as a blank — the same
-defect that removed `◦` U+25E6 earlier the same day. Measured at a 200-unit em, the
-owner's pick is 0.44 em and the shipping font's `●` is 0.54 em against `•`'s 0.24, so
-`●` is what the ladder starts with. **Rasterise a candidate glyph in the font before
-believing it exists.**
+*Amended again 2026-08-09.* The depth-1 bullet was reopened three times in one day —
+`·` U+00B7 was too small, `⦁` U+2981 was picked from a rendered selection but is absent
+from many fonts, and a Unicode ladder of `‣ ⁃ • ◦` was drafted and then found to be
+missing from patched fonts at three of its four rungs. The owner ended it: "since lists
+are so important … why play games at all … how about we use `*`,`>`,`+`,`-`". **The
+bullet ladder is now ASCII — `*`, `>`, `+`, `-` by nesting depth, in both glyph sets.**
+Lists appear in nearly every document, so the bullet is the element that can least
+afford to be invisible; ASCII is the only class with universal coverage and guaranteed
+single-column width, and three of the four are the Markdown source bullets themselves.
+
+**The method lesson, which cost three rounds: do not choose glyphs by rasterised
+metrics or by what one machine's fonts contain — you do not control the reader's font.
+Prefer characters that render everywhere.** Earlier revisions of this section carried
+em-fractions and named a specific patched font as "the shipping font"; that font was an
+early session's guess about the owner's setup, never evidence, and was then cited back
+as authority by every session after. Those claims have been deleted, not corrected.
 
 *The task boxes moved in the same pass.* The Nerd Font pair was `nf-fa-square_o` and
-`nf-fa-check_square_o`, which rasterise at 120×121 and 97×97 — the unticked box is a
-quarter larger than the ticked one, which is what the owner saw. They are now
-`nf-md-checkbox_blank_outline` / `nf-md-checkbox_marked_outline`, drawn as a pair at
-72×73 each. These are Nerd Fonts v3 code points, so a v2 patch now fails detection and
-gets plain Unicode — the safe direction of §2.1's rule. The plain boxes are unchanged:
-`☒` U+2612 was weighed against `☑` and is *further* from `☐` by ink (42% against 34%,
-`☐` being 27%), all three being the same 145×146 box in the fallback face.
+`nf-fa-check_square_o`, which are the same drawing at two different sizes — the
+unticked box looks larger than the ticked one, which is what the owner saw. They are
+now `nf-md-checkbox_blank_outline` / `nf-md-checkbox_marked_outline`, which Material
+Design draws *as a pair*: one box, with and without a tick. These are Nerd Fonts v3
+code points, so a v2 patch now fails detection and gets plain Unicode — the safe
+direction of §2.1's rule. The plain boxes are unchanged at `☐` U+2610 and `☑` U+2611;
+`☒` U+2612 was weighed and rejected because it means *rejected*, not *done*.
+
+*Amended 2026-08-09, marker spacing.* A task checkbox is followed by **two** spaces,
+not one: "the checkbox … hugs the text following it … so I guess two spaces would be in
+order". A checkbox fills its cell edge to edge where a bullet is a small mark floating
+in the middle of one, so the single space that suits a bullet leaves a box welded to
+its word. The gap belongs to the *list*, not the item, so a plain bullet among
+checkboxes pads to the same field and every item's text starts in one column; and it is
+identical in both glyph sets, because `--no-icons` must never move anything sideways.
 
 ## 3. The central architectural rule
 
