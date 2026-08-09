@@ -165,6 +165,46 @@ fn body_text_clears_the_text_contrast_floor() {
     }
 }
 
+/// A highlight the reader is looking straight at must stay readable under it.
+///
+/// The three washes that can cover document text — the two search colours and the
+/// mouse selection — replace the background wholesale, so the ink on top of them is a
+/// different pairing from anything else the palette is checked for. A selection is also
+/// the one of the three the reader makes *while watching it*, which is exactly when an
+/// illegible wash is most annoying.
+#[test]
+fn text_under_a_highlight_clears_the_text_contrast_floor() {
+    for theme in themes() {
+        let name = &theme.name;
+        for (slot, style) in [
+            ("the selection wash", theme.ui.selection),
+            ("an ordinary search match", theme.ui.search_match),
+            ("the current search match", theme.ui.search_current),
+        ] {
+            let ground = style
+                .bg
+                .unwrap_or_else(|| panic!("{name}: {slot} needs a background"));
+            at_least(name, slot, fg(slot, style), ground, TEXT_FLOOR);
+        }
+    }
+}
+
+/// A selection and a search hit can be on screen together and mean different things.
+#[test]
+fn the_selection_does_not_borrow_a_search_colour() {
+    for theme in themes() {
+        let name = &theme.name;
+        assert_ne!(
+            theme.ui.selection.bg, theme.ui.search_match.bg,
+            "{name}: the selection wash is the search-match wash"
+        );
+        assert_ne!(
+            theme.ui.selection.bg, theme.ui.search_current.bg,
+            "{name}: the selection wash is the current-match wash"
+        );
+    }
+}
+
 /// Structure must stay quieter than the content riding on it.
 ///
 /// The floors above push in one direction only; without this, "fix the contrast" has

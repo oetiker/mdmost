@@ -14,8 +14,24 @@ path = "src/lib.rs"
 name = "mdless"
 path = "src/main.rs"
 
+[features]
+default = ["clipboard"]
+# The local display server's clipboard, as the belt-and-braces second half of a copy
+# (`src/tui/clipboard.rs`). OSC 52 is written unconditionally and needs no dependency;
+# this is what lets the status bar say "copied" instead of "sent", and it is what makes
+# a copy work on a terminal that refuses OSC 52. Optional because it links against
+# X11/Wayland, which is not something to force on a build for a headless box: without
+# it the pager still copies, it simply cannot confirm it.
+clipboard = ["dep:arboard"]
+
 [dependencies]
 anyhow = "1.0.104"
+# `default-features = false` drops `image-data`, which would pull in the whole `image`
+# crate to support copying bitmaps — this copies text. `wayland-data-control` is asked
+# for explicitly so a Wayland session is not silently served by XWayland alone.
+arboard = { version = "3.6.1", default-features = false, features = [
+    "wayland-data-control",
+], optional = true }
 clap = { version = "4.6.6", features = ["derive"] }
 compact_str = "0.10.0"
 comrak = { version = "0.54.0", default-features = false }

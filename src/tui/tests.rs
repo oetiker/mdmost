@@ -2181,6 +2181,91 @@ fn an_edge_marker_never_stands_on_a_column_of_the_document() {
     );
 }
 
+// --- Mouse selection, and the source behind it ---------------------------------
+
+use super::select::{self, Pos, Selection};
+use crate::canvas::Canvas;
+
+/// A document exercising every construct whose source differs from what is drawn.
+const MARKUP: &str = "\
+# Wide diagram
+
+The **bold** word and a [link](https://example.com/a) here.
+
+- item one
+
+```
+fn main() {}
+```
+
+After the fence.
+";
+
+/// Where `needle` was drawn: its row, its first column and its width.
+///
+/// The whole point of the selection code is that a *cell rectangle* comes back as
+/// source, so tests address cells the way a reader does — by pointing at what they can
+/// see — rather than by quoting span offsets the implementation chose.
+fn drawn(canvas: &Canvas, needle: &str) -> (usize, u16, u16) {
+    for row in 0..canvas.height() {
+        let text = canvas.row_text(row);
+        if let Some(at) = text.find(needle) {
+            let col = crate::text::display_width(&text[..at]);
+            return (
+                row,
+                u16::try_from(col).expect("a test canvas is narrow"),
+                u16::try_from(crate::text::display_width(needle)).expect("short needle"),
+            );
+        }
+    }
+    panic!("{needle:?} was never drawn:\n{}", canvas.plain_text());
+}
+
+/// Drags over `needle` exactly, and returns what the clipboard would have got.
+fn drag_over(canvas: &Canvas, source: &str, needle: &str) -> select::Extract {
+    let (row, col, cols) = drawn(canvas, needle);
+    let selection = drag(Pos::new(row, col), Pos::new(row, col + cols - 1));
+    select::extract(canvas, source, selection).expect("the drag covered something")
+}
+
+/// A finished drag between two canvas positions.
+fn drag(from: Pos, to: Pos) -> Selection {
+    let mut selection = Selection::started(from);
+    selection.drag_to(to);
+    selection.finish();
+    selection
+}
+
+#[test]
+fn a_drag_over_a_heading_yields_its_markdown() {
+    let mut app = pager(MARKUP);
+    let canvas = app.canvas().clone();
+    assert_eq!(
+        drag_over(&canvas, MARKUP, "Wide diagram").text,
+        "# Wide diagram",
+        "the `#` is markup the reader could not have dragged over, so it comes along"
+    );
+}
+
+#[test]
+fn a_drag_over_emphasis_brings_its_delimiters() {
+    let mut app = pager(MARKUP);
+    let canvas = app.canvas().clone();
+    assert_eq!(drag_over(&canvas, MARKUP, "bold").text, "**bold**");
+}
+
+#[test]
+fn a_drag_over_a_link_brings_its_target() {
+    let mut app = pager(MARKUP);
+    let canvas = app.canvas().clone();
+    assert_eq!(
+        drag_over(&canvas, MARKUP, "link").text,
+        "[link](https://example.com/a)",
+        "the rendered ` (url)` is synthesised, so the source target has to come from \
+         the markup walk rather than from a span"
+    );
+}
+
 #[test]
 fn an_edge_marker_stays_off_the_code_beside_a_pinned_gutter() {
     // The pinned case, which is where the chevron cost a character of *code* rather than
@@ -2502,4 +2587,341 @@ fn a_resize_drops_a_scrollbar_grab() {
     // every line under it.
     app.resize(80, 30);
     assert!(!app.scrollbar_grabbed(), "the anchor died with the layout");
+}
+
+fn a_drag_over_a_list_item_brings_its_marker() {
+    let mut app = pager(MARKUP);
+    let canvas = app.canvas().clone();
+    assert_eq!(drag_over(&canvas, MARKUP, "item one").text, "- item one");
+}
+
+#[test]
+fn a_partial_drag_returns_the_covered_source_verbatim() {
+    let mut app = pager(MARKUP);
+    let canvas = app.canvas().clone();
+    let (row, col, _) = drawn(&canvas, "bold");
+    // The first three of the four cells of `bold`: the drag started at the run's edge,
+    // so the opening `**` comes with it, and ended inside rendered text, so nothing is
+    // invented on the right. `**bol` is exactly what was pointed at.
+    assert_eq!(
+        select::extract(
+            &canvas,
+            MARKUP,
+            drag(Pos::new(row, col), Pos::new(row, col + 2))
+        )
+        .expect("covered")
+        .text,
+        "**bol"
+    );
+    // And a drag that starts inside the run picks up no delimiter at all.
+    assert_eq!(
+        select::extract(
+            &canvas,
+            MARKUP,
+            drag(Pos::new(row, col + 1), Pos::new(row, col + 2))
+        )
+        .expect("covered")
+        .text,
+        "ol"
+    );
+}
+
+#[test]
+fn a_drag_over_a_code_block_falls_back_to_what_is_drawn() {
+    let mut app = pager(MARKUP);
+    let canvas = app.canvas().clone();
+    // Code blocks carry no search spans — only `render::inline` records them — so there
+    // is nothing to invert and the rendered cells are the answer. For code that is the
+    // source, modulo the frame.
+    let extract = drag_over(&canvas, MARKUP, "fn main() {}");
+    assert_eq!(extract.text, "fn main() {}");
+    assert!(
+        !extract.from_source,
+        "the pager must not claim this came from the source map"
+    );
+}
+
+#[test]
+fn a_drag_across_a_code_fence_takes_the_fence_from_the_source() {
+    let mut app = pager(MARKUP);
+    let canvas = app.canvas().clone();
+    let (top, col, _) = drawn(&canvas, "item one");
+    let (bottom, end, cols) = drawn(&canvas, "After the fence.");
+    let extract = select::extract(
+        &canvas,
+        MARKUP,
+        drag(Pos::new(top, col), Pos::new(bottom, end + cols - 1)),
+    )
+    .expect("covered");
+    assert!(extract.from_source);
+    assert!(
+        extract.text.contains("```\nfn main() {}"),
+        "a hull that reaches prose on both sides picks the fence up verbatim, got {:?}",
+        extract.text
+    );
+}
+
+/// Pins the limitation `select`'s module docs admit to, so it stays a decision.
+#[test]
+fn a_drag_ending_inside_spanless_content_stops_at_the_last_mapped_byte() {
+    let mut app = pager(MARKUP);
+    let canvas = app.canvas().clone();
+    let (top, col, _) = drawn(&canvas, "item one");
+    let (code, _, _) = drawn(&canvas, "fn main() {}");
+    let extract = select::extract(
+        &canvas,
+        MARKUP,
+        drag(Pos::new(top, col), Pos::new(code, 40)),
+    )
+    .expect("covered");
+    assert_eq!(
+        extract.text, "- item one",
+        "the far end of the hull is a source offset and those cells have none; \
+         guessing one would either over-copy the block or invent an offset"
+    );
+}
+
+#[test]
+fn a_multi_row_drag_yields_source_line_structure_not_the_renderers() {
+    // Prose long enough to be reflowed across three rows at this width.
+    let source = "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu \
+                  nu xi omicron pi rho sigma tau upsilon phi chi psi omega.\n";
+    let mut app = App::new(
+        Doc::parse(source),
+        Config::default(),
+        AppOptions {
+            title: "t.md".to_string(),
+            icons: false,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: Some(30),
+            config_path: None,
+        },
+    );
+    app.resize(32, 12);
+    let canvas = app.canvas().clone();
+    assert!(canvas.height() >= 3, "the paragraph must have wrapped");
+    let extract = select::extract(
+        &canvas,
+        source,
+        drag(Pos::new(0, 0), Pos::new(canvas.height() - 1, 29)),
+    )
+    .expect("covered");
+    assert!(
+        !extract.text.trim_end().contains('\n'),
+        "the source is one line; the wraps are the renderer's and must not be copied: \
+         {:?}",
+        extract.text
+    );
+    assert!(extract.text.starts_with("Alpha beta"));
+    assert!(extract.text.trim_end().ends_with("omega."));
+}
+
+#[test]
+fn a_double_width_column_maps_back_to_its_own_bytes() {
+    let source = "日本語テキスト\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (row, col, _) = drawn(&canvas, "日本語");
+    // Two columns per cluster: columns `col..col+4` are exactly the first two.
+    let extract = select::extract(
+        &canvas,
+        source,
+        drag(Pos::new(row, col), Pos::new(row, col + 3)),
+    )
+    .expect("covered");
+    assert_eq!(extract.text, "日本");
+    // Three columns, which is where counting bytes instead of columns diverges: the
+    // third column is the lead cell of `本`, and a cluster is never half-copied.
+    let extract = select::extract(
+        &canvas,
+        source,
+        drag(Pos::new(row, col), Pos::new(row, col + 2)),
+    )
+    .expect("covered");
+    assert_eq!(extract.text, "日本");
+}
+
+#[test]
+fn a_selection_is_anchored_to_the_document_not_to_the_viewport() {
+    let mut app = pager(SAMPLE);
+    app.begin_selection(1, 2);
+    let before = app.selection().expect("a drag started");
+    app.on_scroll(1, false);
+    let after = app.selection().expect("scrolling does not cancel a drag");
+    assert_eq!(
+        before, after,
+        "the anchor is a canvas position, so scrolling under it changes nothing"
+    );
+    assert!(app.scroll() > 0, "and the document did move");
+}
+
+#[test]
+fn dragging_past_the_bottom_of_the_viewport_scrolls() {
+    let mut app = pager(SAMPLE);
+    app.begin_selection(1, 0);
+    let height = app.viewport_height();
+    app.drag_selection(1, u16::try_from(height - 1).expect("small viewport"));
+    assert_eq!(
+        app.scroll(),
+        1,
+        "a drag at the last row pulls the document up"
+    );
+}
+
+#[test]
+fn a_resize_drops_the_selection() {
+    let mut app = pager(SAMPLE);
+    app.begin_selection(1, 1);
+    app.drag_selection(20, 1);
+    assert!(app.selection().is_some());
+    app.resize(60, 12);
+    let _ = app.canvas();
+    assert!(
+        app.selection().is_none(),
+        "a reflow moves every row, so the cells the reader picked are not the same \
+         cells any more"
+    );
+}
+
+#[test]
+fn a_height_only_resize_keeps_the_selection() {
+    let mut app = pager(SAMPLE);
+    app.begin_selection(1, 1);
+    app.drag_selection(20, 1);
+    app.resize(80, 20);
+    let _ = app.canvas();
+    assert!(
+        app.selection().is_some(),
+        "nothing was re-laid-out, so there is nothing to invalidate"
+    );
+}
+
+#[test]
+fn a_click_is_not_a_selection() {
+    let mut app = pager(SAMPLE);
+    app.begin_selection(3, 0);
+    app.end_selection();
+    assert!(app.selection().is_none());
+    assert!(app.take_pending_copy().is_none());
+}
+
+#[test]
+fn escape_clears_the_selection_before_anything_else() {
+    let mut app = pager(SAMPLE);
+    app.begin_selection(1, 0);
+    app.drag_selection(20, 0);
+    app.end_selection();
+    assert!(app.selection().is_some());
+    app.act(Action::Cancel);
+    assert!(app.selection().is_none());
+    assert_eq!(
+        app.notice().map(|notice| notice.text.as_str()),
+        Some("selection cleared")
+    );
+}
+
+#[test]
+fn finishing_a_drag_offers_the_text_exactly_once() {
+    let mut app = pager(MARKUP);
+    let canvas = app.canvas().clone();
+    let (row, col, cols) = drawn(&canvas, "Wide diagram");
+    let y = u16::try_from(row).expect("small canvas");
+    app.begin_selection(col, y);
+    app.drag_selection(col + cols - 1, y);
+    app.end_selection();
+    let extract = app.take_pending_copy().expect("a drag produced text");
+    assert_eq!(extract.text, "# Wide diagram");
+    assert!(extract.from_source);
+    assert!(app.take_pending_copy().is_none(), "and not a second time");
+}
+
+#[test]
+fn a_drag_after_scrolling_reads_the_row_the_reader_is_looking_at() {
+    let mut source = String::new();
+    for index in 0..20 {
+        source.push_str(&format!("Paragraph {index}.\n\n"));
+    }
+    source.push_str("# Wide diagram\n\n");
+    for index in 0..20 {
+        source.push_str(&format!("Tail {index}.\n\n"));
+    }
+    let mut app = pager(&source);
+    let canvas = app.canvas().clone();
+    let (row, col, cols) = drawn(&canvas, "Wide diagram");
+    assert!(row > 4, "the heading must be off the first screen");
+    app.scroll_to(row - 2);
+    assert_eq!(app.scroll(), row - 2, "the scroll must not have clamped");
+    // Viewport row 2 is canvas row `row`: if the anchor forgot to add the scroll
+    // offset it would land on `Paragraph 18.` instead.
+    app.begin_selection(col, 2);
+    app.drag_selection(col + cols - 1, 2);
+    app.end_selection();
+    assert_eq!(
+        app.take_pending_copy().expect("text").text,
+        "# Wide diagram"
+    );
+}
+
+#[test]
+fn the_selection_highlight_is_painted_and_does_not_borrow_a_search_colour() {
+    let mut app = pager(MARKUP);
+    let theme = app.theme().clone();
+    let selection = super::draw::term_style(theme.ui.selection).bg;
+    assert_ne!(selection, super::draw::term_style(theme.ui.search_match).bg);
+    assert_ne!(
+        selection,
+        super::draw::term_style(theme.ui.search_current).bg
+    );
+
+    let canvas = app.canvas().clone();
+    let (row, col, cols) = drawn(&canvas, "Wide diagram");
+    let y = u16::try_from(row).expect("small canvas");
+    app.begin_selection(col, y);
+    app.drag_selection(col + cols - 1, y);
+    let buffer = framed_buffer(&mut app, 80, 12);
+    let painted = (col..col + cols)
+        .filter(|x| buffer[(*x, y)].style().bg == selection)
+        .count();
+    assert_eq!(
+        painted,
+        usize::from(cols),
+        "every selected cell carries the selection wash"
+    );
+}
+
+#[test]
+fn base64_matches_the_rfc_4648_vectors() {
+    for (plain, encoded) in [
+        ("", ""),
+        ("f", "Zg=="),
+        ("fo", "Zm8="),
+        ("foo", "Zm9v"),
+        ("foob", "Zm9vYg=="),
+        ("fooba", "Zm9vYmE="),
+        ("foobar", "Zm9vYmFy"),
+    ] {
+        assert_eq!(
+            super::clipboard::encode_for_test(plain.as_bytes()),
+            encoded,
+            "base64({plain:?})"
+        );
+    }
+}
+
+#[test]
+fn the_copy_report_claims_only_what_the_route_can_prove() {
+    use super::clipboard::Delivery;
+    assert_eq!(
+        Delivery::Confirmed.message(47, true),
+        ("copied 47 bytes of Markdown source".to_string(), false)
+    );
+    let (text, is_error) = Delivery::Sent.message(47, false);
+    assert!(
+        text.contains("unconfirmed") && text.contains("rendered text"),
+        "OSC 52 is fire-and-forget and the bar must not pretend otherwise: {text:?}"
+    );
+    assert!(!is_error);
+    let (text, is_error) = Delivery::Failed("no clipboard".to_string()).message(47, true);
+    assert!(is_error && text.contains("no clipboard"));
 }

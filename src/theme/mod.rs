@@ -278,6 +278,13 @@ pub struct UiStyles {
     pub search_match: Style,
     /// The search match the cursor is on.
     pub search_current: Style,
+    /// Cells covered by a mouse selection.
+    ///
+    /// A slot of its own rather than a reuse of the search colours: a selection and a
+    /// search hit can be on screen at the same moment and mean entirely different
+    /// things, so they must not be the same wash. See
+    /// [`tui::select`](crate::tui::select).
+    pub selection: Style,
     /// Prompt line for search input.
     pub prompt: Style,
     /// Error messages shown in the UI.
