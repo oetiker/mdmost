@@ -8,17 +8,19 @@
 //!             2024-01-01   2024-01-08   2024-01-15
 //!            ├───────────┬────────────┬────────────
 //! Design     │
-//!   Spec     │░░░░░░░░
-//!   Review   │        ▓▓▓▓▓▓
+//!   Spec     │████████
+//!   Review   │        ██████
 //! Build      │
 //!   Core     │              ████████████
 //!   Ship     │                          ◆
 //! ```
 //!
-//! Bars are whole cells: their texture (`░` done, `█` active, `▒` planned, `▓`
-//! critical) carries the task state even in a plain-text dump, where colour cannot.
-//! A `crit` task uses the critical texture whatever its progress, matching Mermaid,
-//! where criticality is the louder signal.
+//! Bars are whole cells — a bar is a span of dates, and half a cell of one is not a
+//! fact the chart knows — and every one of them is solid. State is carried by colour
+//! alone, with the legend below the chart naming the states; the fill textures that
+//! used to double-encode it are gone, and [`task_glyph`] says why. A `crit` task is
+//! coloured critical whatever its progress, matching Mermaid, where criticality is
+//! the louder signal.
 
 pub mod time;
 

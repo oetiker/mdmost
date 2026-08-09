@@ -2008,13 +2008,18 @@ fn a_long_file_name_is_elided_before_the_horizontal_chip_is_dropped() {
 }
 
 #[test]
-fn the_meters_part_filled_cell_sits_on_the_track_colour() {
-    // Owner report: "the background color of the progressive bar char is not set to
-    // the non-active bar color causing an odd effect". An eighth block paints only the
-    // left fraction of its cell and lets the cell's background through on the right, so
-    // drawn on the status bar's background that one cell had a bar-coloured gap in it
-    // while the trough cells beside it were track-coloured — a visible break at exactly
-    // the boundary the eye reads the value off.
+fn the_meters_part_filled_cell_shares_the_troughs_exact_colour() {
+    // Owner report: "the background color of the progressive bar char is not set to the
+    // non-active bar color causing an odd effect", and then, once the cell had been
+    // given a background: "the half chars ... not the same color as the chars
+    // representing the empty part of the progressbar".
+    //
+    // An eighth block paints only the left fraction of its cell and lets the cell's own
+    // background through on the right, so that background has to be the trough's
+    // colour. It could not be, while the trough was `░` inked in `scrollbar_track.fg`:
+    // a quarter-coverage dither shows a quarter of its ink mixed into the bar, so a
+    // *background* painted `scrollbar_track.fg` landed about four times as heavy beside
+    // it. The trough is now a flat colour, and both runs are handed the same one.
     //
     // This asserts styles, not glyphs: the bug never changed which characters appear,
     // so a test that read the row as text would pass with it present.
@@ -2022,45 +2027,87 @@ fn the_meters_part_filled_cell_sits_on_the_track_colour() {
         let mut app = themed_pager(PAINTED, theme_name, 80, 10);
         let theme = app.theme().clone();
         let thumb = super::draw::term_style(theme.ui.scrollbar_thumb).fg;
-        let track_fill = theme
+        let bar_bg = super::draw::term_style(theme.ui.status_bar).bg;
+        let surface = theme
+            .ui
+            .status_bar
+            .bg
+            .expect("the status bar has a background of its own");
+        let track_ink = theme
             .ui
             .scrollbar_track
             .fg
             .expect("the track has a colour of its own");
-        let behind = super::draw::term_style(crate::theme::Style::new().bg(track_fill)).bg;
+        // What the track is meant to be: its ink laid over the bar at the coverage the
+        // shade glyph used to have, so the gauge looks as it did but as a flat colour.
+        let track = super::draw::term_style(
+            crate::theme::Style::new()
+                .bg(surface.blend(track_ink, crate::canvas::meter::TRACK_INK)),
+        )
+        .bg;
         assert_ne!(
-            behind,
-            super::draw::term_style(theme.ui.status_bar).bg,
-            "{theme_name}: the test is only meaningful while the two differ"
+            track, bar_bg,
+            "{theme_name}: the test is only meaningful while the track is visible \
+             against the bar"
+        );
+        assert_ne!(
+            track,
+            super::draw::term_style(crate::theme::Style::new().bg(track_ink)).bg,
+            "{theme_name}: and while the track is laid over the bar rather than \
+             painted in the neat ink colour, which is far heavier"
         );
 
         // Progress that lands on a cell boundary draws no partial cell at all, and the
         // scroll positions that produce one are not a constant, so walk the document.
         let mut seen = 0usize;
+        let mut paired = 0usize;
         for _ in 0..app.max_scroll() + 1 {
             let area = Rect::new(0, 0, 80, 1);
             let mut buffer = Buffer::empty(area);
             super::chrome::draw_status(&mut buffer, area, &app);
             let rows = buffer_rows(&buffer, 80, 1);
+            let mut troughs = 0usize;
+            let mut partials = 0usize;
             for x in 0..80u16 {
                 let cell = &buffer[(x, 0)];
-                if !crate::canvas::meter::EIGHTH_BLOCKS[1..8].contains(&cell.symbol()) {
+                if crate::canvas::meter::EIGHTH_BLOCKS[1..8].contains(&cell.symbol()) {
+                    partials += 1;
+                    seen += 1;
+                    assert_eq!(
+                        cell.style().bg,
+                        track,
+                        "{theme_name}: the part-filled cell {:?} at column {x} is not \
+                         on the same colour as the trough beside it: {:?}",
+                        cell.symbol(),
+                        rows[0]
+                    );
+                    assert_eq!(
+                        cell.style().fg,
+                        thumb,
+                        "{theme_name}: and its filled fraction is still the thumb colour"
+                    );
                     continue;
                 }
-                seen += 1;
-                assert_eq!(
-                    cell.style().bg,
-                    behind,
-                    "{theme_name}: the part-filled cell {:?} at column {x} shows \
-                     something other than the track behind it: {:?}",
-                    cell.symbol(),
-                    rows[0]
-                );
-                assert_eq!(
-                    cell.style().fg,
-                    thumb,
-                    "{theme_name}: and its filled fraction is still the thumb colour"
-                );
+                // A trough cell owes its whole appearance to its background, so it is
+                // the cells carrying the track colour that count — and each must be
+                // blank, because an inked glyph is the very thing a neighbouring
+                // background cannot match.
+                if cell.style().bg == track {
+                    troughs += 1;
+                    assert_eq!(
+                        cell.symbol(),
+                        crate::canvas::meter::TROUGH,
+                        "{theme_name}: the track cell at column {x} is inked with a \
+                         glyph, so its apparent colour is no longer its background: \
+                         {:?}",
+                        rows[0]
+                    );
+                }
+            }
+            // A value in the last cell leaves no trough at all, so a row without one
+            // proves nothing; it is enough that some row put the two side by side.
+            if partials > 0 && troughs > 0 {
+                paired += 1;
             }
             app.act(Action::LineDown);
         }
@@ -2068,6 +2115,11 @@ fn the_meters_part_filled_cell_sits_on_the_track_colour() {
             seen > 0,
             "{theme_name}: no scroll position drew a part-filled cell, so the \
              assertion above never ran"
+        );
+        assert!(
+            paired > 0,
+            "{theme_name}: no scroll position put a part-filled cell next to a \
+             trough, which is the only arrangement where the seam is visible"
         );
     }
 }

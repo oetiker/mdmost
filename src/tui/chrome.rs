@@ -13,7 +13,7 @@ use ratatui::style::Style as TermStyle;
 use ratatui::text::{Line as TermLine, Span as TermSpan};
 use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
-use crate::canvas::meter::meter;
+use crate::canvas::meter::{TRACK_INK, meter};
 use crate::search::SearchMode;
 use crate::text::{Align, display_width, truncate_to_width};
 use crate::theme::Theme;
@@ -262,17 +262,25 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     left.push(Segment::new(Drop::Never, position));
 
     // The meter sits on a visible trough: eight blank cells at 0 % read as a hole in
-    // the bar rather than as an empty gauge (visual review P9), and the whole gauge
-    // takes the bar's own background so it is part of the bar, not a patch on it.
+    // the bar rather than as an empty gauge (visual review P9).
     //
-    // The part-filled cell is the exception, and the reason `meter` returns three runs.
-    // An eighth block paints only the left fraction of its cell; the rest shows the
-    // cell's background, so on the bar's background that one cell had a bar-coloured
-    // gap in it while the trough beside it was track-coloured — a discontinuity at
-    // exactly the boundary the eye reads the value off (owner report). Putting the
-    // track colour behind it makes the cell read as "part filled" instead.
+    // The part-filled cell is the reason `meter` returns three runs. An eighth block
+    // paints only the left fraction of its cell; the rest shows the cell's own
+    // background, so that background has to be whatever the trough beside it is, or the
+    // gauge breaks at exactly the boundary the eye reads the value off (owner report,
+    // twice).
+    //
+    // Which is why the trough is a *flat colour* and not a shade glyph. It used to be
+    // `░` inked in `scrollbar_track.fg` with no background, so what the screen showed
+    // there was a quarter of that ink mixed into the bar — and giving the part-filled
+    // cell `scrollbar_track.fg` as a background therefore did not match it, it dropped
+    // a slab about four times as heavy next to it. On the light theme at 1 % the `▏`
+    // cell went out on a solid rgb(142,136,118) beside troughs reading as roughly
+    // rgb(206,202,191). Both runs now take one background, `track_surface`, so a
+    // background and a glyph no longer have to be talked into agreeing.
     let gauge = meter(f64::from(app.progress()), METER_WIDTH);
     let thumb = on_bar(theme.ui.scrollbar_thumb, theme);
+    let track = track_surface(theme);
     left.push(Segment::new(
         Drop::Meter,
         vec![
@@ -281,14 +289,11 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
             TermSpan::styled(
                 gauge.partial,
                 term_style(crate::theme::Style {
-                    bg: theme.ui.scrollbar_track.fg,
+                    bg: track.bg,
                     ..thumb
                 }),
             ),
-            TermSpan::styled(
-                gauge.trough,
-                term_style(on_bar(theme.ui.scrollbar_track, theme)),
-            ),
+            TermSpan::styled(gauge.trough, term_style(track)),
         ],
     ));
 
@@ -524,6 +529,31 @@ fn lay_out(
         spans.extend(segment.spans);
     }
     spans
+}
+
+/// The surface the meter's unfilled track is painted with.
+///
+/// A flat background rather than an inked glyph, so that the part-filled cell — whose
+/// unpainted fraction is a *background* — can be handed the identical colour and match
+/// it exactly. The colour is the track ink laid over the bar at [`TRACK_INK`], which is
+/// the coverage the old `░` glyph had, so this reproduces what the theme was tuned to
+/// look like rather than restyling the gauge.
+///
+/// The foreground goes along for the ride: the run is spaces, but a style with no
+/// foreground would let a stray reverse-video attribute elsewhere show the bar's.
+/// Falls back to the bar's own background when a colour is missing, since there is
+/// then nothing to lay anything over.
+fn track_surface(theme: &Theme) -> crate::theme::Style {
+    let base = on_bar(theme.ui.scrollbar_track, theme);
+    let (Some(surface), Some(ink)) = (theme.ui.status_bar.bg, theme.ui.scrollbar_track.fg) else {
+        return base;
+    };
+    let blended = surface.blend(ink, TRACK_INK);
+    crate::theme::Style {
+        fg: Some(blended),
+        bg: Some(blended),
+        ..base
+    }
 }
 
 /// Puts a style's foreground on the status bar's own background.
