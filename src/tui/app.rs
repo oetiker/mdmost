@@ -356,6 +356,14 @@ impl App {
         self.cache.reach()
     }
 
+    /// How many leading columns of each row the horizontal offset must leave alone.
+    ///
+    /// One entry per canvas row; see [`super::wide::pinned_prefix`]. This is what keeps
+    /// a code block's line-number gutter on screen while its long lines scroll under it.
+    pub fn pinned(&self) -> &[u16] {
+        self.cache.pinned()
+    }
+
     /// The width the document is rendered at.
     ///
     /// The terminal's, unless `--width` forced another; the surplus of a forced width
@@ -465,11 +473,11 @@ impl App {
     fn ensure_rendered(&mut self) {
         let width = self.content_width();
         let options = self.render_options();
-        let stale =
-            self.cache
-                .refresh(self.doc.version(), width, &self.theme.name, options, || {
-                    super::wide::render_scrollable(&self.doc, width, &self.theme, &options)
-                });
+        let stale = self
+            .cache
+            .refresh(self.doc.version(), width, &self.theme, options, || {
+                super::wide::render_scrollable(&self.doc, width, &self.theme, &options)
+            });
         if stale {
             self.toc.attach_anchors(self.cache.canvas().anchors());
             self.search

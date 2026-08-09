@@ -45,6 +45,13 @@ pub const OVERFLOW_MARKER: &str = "\u{203a}";
 /// pinned to it by [`super::tests::the_quote_bar_matches_the_renderer`].
 pub const QUOTE_BAR: &str = "\u{258c}";
 
+/// The glyph a numbered code block draws between its line numbers and its code.
+///
+/// Duplicated from `render::code` for the same reason as [`OVERFLOW_MARKER`], and pinned
+/// to it — glyph, style and layout together — by
+/// [`super::tests::the_gutter_rule_matches_the_renderer`].
+pub const GUTTER_RULE: &str = "\u{2502}";
+
 /// The widest a single block is ever grown to.
 ///
 /// A bound is needed because a pathological document — one enormous minified line —
@@ -231,6 +238,115 @@ pub fn scroll_reach(canvas: &Canvas, width: u16) -> Vec<u16> {
         start = end;
     }
     reach
+}
+
+/// How many leading columns of each row stay put while the rest scrolls sideways.
+///
+/// `render::code` keeps the line-number gutter out of its *own* clip, so a long line is
+/// cut to the right of the numbers rather than over them. That says nothing about the
+/// pager: the horizontal offset moved every column of the row alike, so the numbers slid
+/// off to the left exactly when a line long enough to scroll made them useful. A pinned
+/// prefix is the fix — [`super::draw::blit`] draws these columns unscrolled and starts
+/// the offset after them.
+///
+/// Where the gutter ends is read off the drawn canvas rather than recomputed from the
+/// renderer's arithmetic, the way [`scroll_reach`] reads extents and the way
+/// `mermaid::layout::graph::ruled_offsets` reads a node's rules. The signal is the
+/// *style*: the gutter's digits are the only cells painted in `theme.code.line_number`,
+/// which is far more reliable than counting digits or matching `│` — a glyph this
+/// project's own documents are full of. The rule that closes the gutter is then the next
+/// [`GUTTER_RULE`] in `theme.code.frame`, and the pinned prefix runs one column past it,
+/// so the blank column separating gutter from code is kept and offset zero stays
+/// byte-identical to no pinning at all.
+///
+/// A fence's language label is pinned on top of that, by the third style —
+/// `theme.code.language`, which nothing else is painted in. It is chrome exactly as the
+/// numbers are, and a prefix that stopped short of it would leave half a word standing in
+/// a box rule. That extension is per row and only applies where the run is pinned
+/// already; see the loop.
+///
+/// The prefix is spread over each *contiguous* non-blank run — the same run rule
+/// [`scroll_reach`] starts from, deliberately not its merged one. Within a run it keeps a
+/// fence's `╭`, `┬` and `╰` aligned with the rule below them, so the box does not open up
+/// as the code slides under it; using the merged runs instead would pin the first columns
+/// of a wide *table* that happens to sit next to a numbered fence, which is a design
+/// question nobody has asked.
+///
+/// One consequence worth naming, in the same family as the `‹` that ends up pointing at
+/// nothing: when a merged run drags a numbered block far past its own content, the
+/// numbers stay while the code they belong to has scrolled entirely behind them. They are
+/// still the right numbers for the rows they sit on.
+///
+/// The returned vector has one entry per canvas row.
+pub fn pinned_prefix(canvas: &Canvas, theme: &Theme) -> Vec<u16> {
+    let mut pinned: Vec<u16> = canvas
+        .rows()
+        .iter()
+        .map(|row| gutter_end(row, theme))
+        .collect();
+    let mut start = 0;
+    while start < pinned.len() {
+        if row_extent(&canvas.rows()[start]) == 0 {
+            start += 1;
+            continue;
+        }
+        let mut end = start;
+        while end < pinned.len() && row_extent(&canvas.rows()[end]) > 0 {
+            end += 1;
+        }
+        let widest = pinned[start..end].iter().copied().max().unwrap_or(0);
+        for (row, cells) in pinned[start..end]
+            .iter_mut()
+            .zip(&canvas.rows()[start..end])
+        {
+            // The label a fence writes into its top rule is chrome for the same reason
+            // the numbers are, and cut in the middle it leaves a fragment of a word
+            // sitting in a box rule — `╭  ru────╮`. It is extended per row and only where
+            // the run is pinned already: an unnumbered fence pinning its label alone
+            // would hold its top-left corner still while its code slid out from under it.
+            *row = widest.max(if widest > 0 {
+                title_end(cells, theme)
+            } else {
+                0
+            });
+        }
+        start = end;
+    }
+    pinned
+}
+
+/// The first column of code on a numbered code row, or zero when the row has no gutter.
+fn gutter_end(cells: &[Cell], theme: &Theme) -> u16 {
+    let number = cells
+        .iter()
+        .position(|cell| !cell.is_blank() && cell.style() == theme.code.line_number);
+    let Some(number) = number else { return 0 };
+    cells
+        .iter()
+        .enumerate()
+        .skip(number)
+        .find(|(_, cell)| cell.text() == GUTTER_RULE && cell.style() == theme.code.frame)
+        .map_or(0, |(index, _)| {
+            u16::try_from(index).unwrap_or(u16::MAX).saturating_add(2)
+        })
+}
+
+/// The column one past a fence's language label, blank separator included.
+///
+/// Zero on every row that carries no label, which is every row but a fence's top rule:
+/// `theme.code.language` is painted nowhere else, icon included.
+fn title_end(cells: &[Cell], theme: &Theme) -> u16 {
+    cells
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, cell)| !cell.is_blank() && cell.style() == theme.code.language)
+        .map_or(0, |(index, cell)| {
+            u16::try_from(index)
+                .unwrap_or(u16::MAX)
+                .saturating_add(u16::from(cell.width()))
+                .saturating_add(1)
+        })
 }
 
 /// The column one past the last thing a row actually draws.
