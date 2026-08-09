@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 1e0f8a494eab33456b459570d522533593245d0a653b3e80831ed217343e7a07 # shrinks to markdown = "𗀀ᩗ", width = 2
 cc 06e9700e1fc689080148c2679bad7df6f6628d172352de07f3ff0f66de709e61 # shrinks to markdown = "###### 😀\u{200d}😀ᩗ", width = 8
+cc 138c39488df92edc6b19b6196a487e239a6ebd7fd76a2e53d964587e0a31992f # shrinks to markdown = "៘", width = 5
