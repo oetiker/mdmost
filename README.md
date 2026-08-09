@@ -75,7 +75,7 @@ mdless --render-once --width 80 --no-icons doc.md > snapshot.txt
 | `--theme NAME` | The theme to start in. |
 | `--no-icons` | Use plain Unicode instead of Nerd Font glyphs, at the same display width. |
 | `--icons` | Use Nerd Font glyphs even if none appears to be installed. |
-| `--mouse` | Capture the mouse: wheel scrolls, clicks select in the contents pane. |
+| `--mouse` | Capture the mouse: wheel scrolls, the scrollbar drags, clicks select in the contents pane. |
 | `--toc` | Start with the table-of-contents pane open. |
 | `--config PATH` | Read configuration from this file instead of the default. |
 
@@ -190,7 +190,7 @@ binding costs you that binding and nothing else.
 theme        = "dark"    # name of a built-in or a [themes.*] table
 icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to detect
 line_numbers = false     # line-number gutter in fenced code blocks
-mouse        = false     # wheel scrolls, clicks select in the contents pane
+mouse        = false     # wheel scrolls, scrollbar drags, clicks select in the contents pane
 scroll_step  = 3         # document lines per mouse-wheel notch
 body_width   = 100       # widest the prose body is laid out; 0 for no cap
 

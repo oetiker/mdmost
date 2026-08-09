@@ -284,6 +284,20 @@ fn on_mouse(app: &mut App, event: MouseEvent, height: u16) {
     match event.kind {
         MouseEventKind::ScrollDown => app.on_scroll(1, in_toc),
         MouseEventKind::ScrollUp => app.on_scroll(-1, in_toc),
+        // The scrollbar. Its track is the body area — everything but the status bar —
+        // exactly as `draw`'s `bar_area` is. Note what the drag and the release do
+        // *not* look at: the column. A one-column bar is impossible to stay on while
+        // dragging, so the grab is held in `App` and the pointer may go where it likes
+        // until the button comes up.
+        MouseEventKind::Down(MouseButton::Left) if chrome::in_scrollbar(app, event.column) => {
+            app.scrollbar_press(height.saturating_sub(1), event.row);
+        }
+        MouseEventKind::Drag(MouseButton::Left) if app.scrollbar_grabbed() => {
+            app.scrollbar_drag(height.saturating_sub(1), event.row);
+        }
+        MouseEventKind::Up(MouseButton::Left) if app.scrollbar_grabbed() => {
+            app.scrollbar_release();
+        }
         MouseEventKind::Down(MouseButton::Left) if in_toc => {
             let body_height = height.saturating_sub(1);
             if let Some(row) = chrome::toc_row_at(app, body_height, event.row) {

@@ -88,6 +88,20 @@ pub enum Overlay {
     },
 }
 
+/// A scrollbar drag in progress: where the press landed, and where the document was.
+///
+/// Both halves are needed and neither is rewritten while the drag runs. Tracking the
+/// pointer's *absolute* position instead would make the thumb jump to a fixed grip the
+/// moment it moved; rewriting the anchor on every event would accumulate the rounding
+/// of every intermediate row, and a drag delivers one event per row crossed.
+#[derive(Debug, Clone, Copy)]
+struct BarGrab {
+    /// The track row the button went down on.
+    row: u16,
+    /// The scroll offset once that press had been handled.
+    scroll: usize,
+}
+
 /// A transient message shown in place of the status bar's usual contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notice {
@@ -139,6 +153,8 @@ pub struct App {
     size: (u16, u16),
     scroll: usize,
     hscroll: u16,
+    /// The scrollbar drag in progress, if the reader is holding the thumb.
+    bar_grab: Option<BarGrab>,
     focus: Focus,
     toc_open: bool,
     toc_cursor: usize,
@@ -186,6 +202,7 @@ impl App {
             size: (80, 24),
             scroll: 0,
             hscroll: 0,
+            bar_grab: None,
             focus: if toc_open {
                 Focus::Toc
             } else {
@@ -445,6 +462,162 @@ impl App {
         }
     }
 
+    /// The column the document scrollbar is drawn in.
+    ///
+    /// The bar has the last column of the terminal to itself — see `draw`'s
+    /// `bar_area` — which is also why [`App::viewport_width`] subtracts one.
+    pub fn scrollbar_column(&self) -> u16 {
+        self.size.0.saturating_sub(1)
+    }
+
+    /// Where the scrollbar's thumb sits, in half-cells, for a track `height` cells tall.
+    ///
+    /// `(start, length)`, measured in half-cells from the top of the track, because
+    /// the painter positions the thumb to half-cell precision with the half-block
+    /// glyphs. Both the painter and the mouse hit test go through this, so the two
+    /// cannot disagree about which rows the thumb occupies — the same reason
+    /// [`App::toc_first_visible`] is derived rather than stored.
+    ///
+    /// `length` depends only on how much of the document fits, never on where the
+    /// reader is, which is what lets a drag compute its gain once and keep it.
+    pub fn scrollbar_thumb(&self, height: u16) -> (usize, usize) {
+        let halves = usize::from(height) * 2;
+        if halves == 0 {
+            return (0, 0);
+        }
+        let total = self.rendered().height().max(1);
+        let visible = self.viewport_height().min(total);
+        let length = ((visible * halves) / total).clamp(2, halves);
+        let start = ((halves - length) as f32 * self.progress()).round() as usize;
+        (start, length)
+    }
+
+    /// How far the thumb's top may travel, in half-cells. Zero when it cannot move.
+    fn scrollbar_span(&self, height: u16) -> usize {
+        let (_, length) = self.scrollbar_thumb(height);
+        (usize::from(height) * 2).saturating_sub(length)
+    }
+
+    /// The scroll offset a press on track row `row` means.
+    ///
+    /// The thumb is *centred* on the pointer, clamped to the track. That is the
+    /// proportional mapping written in the painter's own coordinates rather than in
+    /// the track's, and it is worth the arithmetic for three reasons: it is the exact
+    /// inverse of [`App::scrollbar_thumb`], so the thumb always lands under the
+    /// pointer; it uses the same gain a drag does, so click-then-drag has no seam;
+    /// and for any document long enough for the thumb to sit at its two-half-cell
+    /// minimum it *is* the naive `row / height * max` mapping, which is the case that
+    /// matters.
+    ///
+    /// The first and last rows of the track are the two ends of the document, taken
+    /// before any arithmetic. A thumb with extent cannot centre itself on either end
+    /// row, so rounding alone leaves the last line unreachable by up to half a row's
+    /// worth of gain; there is nothing above the first row or below the last, so the
+    /// only honest reading of a press there is "the top" and "the bottom".
+    fn scrollbar_scroll_at(&self, height: u16, row: u16) -> usize {
+        let max = self.max_scroll();
+        if height == 0 || max == 0 {
+            return 0;
+        }
+        if row == 0 {
+            return 0;
+        }
+        if usize::from(row) + 1 >= usize::from(height) {
+            return max;
+        }
+        let (_, length) = self.scrollbar_thumb(height);
+        // Quarter-cells, so that the half-cell the pointer's own centre sits at stays
+        // an integer: the pointer's centre is `2·row + ½` half-cells down, and the
+        // thumb's is `start + length/2`.
+        let span = self.scrollbar_span(height) * 2;
+        if span == 0 {
+            return 0;
+        }
+        let start = (4 * i64::from(row) + 1 - length as i64).clamp(0, span as i64) as usize;
+        (start * max + span / 2) / span
+    }
+
+    /// Whether a scrollbar drag is in progress.
+    ///
+    /// The event loop asks this instead of testing the pointer's column, which is what
+    /// keeps the grab sticky: once the thumb is held, the drag survives the pointer
+    /// wandering off a bar one column wide, which it does constantly.
+    pub fn scrollbar_grabbed(&self) -> bool {
+        self.bar_grab.is_some()
+    }
+
+    /// Handles a left button press on track row `row` of a scrollbar `height` tall.
+    ///
+    /// A press on the thumb grabs it where it is and moves nothing — snapping the
+    /// thumb's top to the pointer would throw the document a screenful the moment it
+    /// was touched. A press anywhere else on the track jumps there first and then
+    /// grabs, so the reader can carry straight on dragging.
+    pub fn scrollbar_press(&mut self, height: u16, row: u16) {
+        self.ensure_rendered();
+        let (start, length) = self.scrollbar_thumb(height);
+        let top = usize::from(row) * 2;
+        // The cell covers half-cells `top` and `top + 1`; the thumb covers
+        // `start..start + length`.
+        let on_thumb = length > 0 && top < start + length && top + 1 >= start;
+        if !on_thumb {
+            let target = self.scrollbar_scroll_at(height, row);
+            self.scroll_to(target);
+        }
+        self.bar_grab = Some(BarGrab {
+            row,
+            scroll: self.scroll,
+        });
+    }
+
+    /// Handles the pointer moving to row `row` while the thumb is held.
+    ///
+    /// Relative to the anchor taken at the press, never to the pointer's absolute
+    /// position, so the thumb keeps whatever grip the reader took on it. The anchor is
+    /// never rewritten, which is what makes dragging past the end and back land
+    /// exactly where it started rather than a rounding error away from it.
+    pub fn scrollbar_drag(&mut self, height: u16, row: u16) {
+        let Some(grab) = self.bar_grab else {
+            return;
+        };
+        self.ensure_rendered();
+        let max = self.max_scroll();
+        if max == 0 {
+            return;
+        }
+        // The ends of the track are the ends of the document, for the reason given at
+        // `scrollbar_scroll_at` — and this is also where a pointer dragged off the
+        // bottom of the terminal arrives.
+        // The ends of the track are the ends of the document, for the reason given at
+        // `scrollbar_scroll_at` — and this is also where a pointer dragged off the
+        // bottom of the terminal arrives.
+        if row == 0 {
+            self.scroll_to(0);
+            return;
+        }
+        if usize::from(row) + 1 >= usize::from(height) {
+            self.scroll_to(max);
+            return;
+        }
+        let span = self.scrollbar_span(height) as i64;
+        if span == 0 {
+            return;
+        }
+        // One row of pointer is two half-cells of thumb.
+        let numerator = 2 * (i64::from(row) - i64::from(grab.row)) * max as i64;
+        let moved = if numerator >= 0 {
+            (numerator + span / 2) / span
+        } else {
+            -((-numerator + span / 2) / span)
+        };
+        let target = (grab.scroll as i64 + moved).clamp(0, max as i64) as usize;
+        self.scroll_to(target);
+    }
+
+    /// Ends a scrollbar drag.
+    pub fn scrollbar_release(&mut self) {
+        self.bar_grab = None;
+    }
+
     /// The heading whose section the viewport is in.
     pub fn current_heading(&self) -> Option<usize> {
         self.toc.current(self.heading_probe_row())
@@ -478,6 +651,9 @@ impl App {
             return;
         }
         self.ensure_rendered();
+        // A drag cannot survive this: its anchor is a row of a track that is about to
+        // change height, and the reflow moves every line under it.
+        self.bar_grab = None;
         let anchor = self.source_offset_at(self.scroll);
         self.size = (width, height);
         self.ensure_rendered();

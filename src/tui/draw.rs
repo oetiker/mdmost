@@ -569,6 +569,8 @@ fn highlight_matches(buffer: &mut Buffer, area: Rect, app: &App, top: usize, lef
 ///
 /// The thumb is positioned to half-cell precision using the upper and lower half-block
 /// glyphs, so scrolling a long document moves it smoothly rather than in whole rows.
+/// Where it sits is [`App::scrollbar_thumb`]'s answer, not this function's, because the
+/// mouse has to invert exactly this mapping to make the bar draggable.
 fn scrollbar(buffer: &mut Buffer, area: Rect, app: &App) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -577,11 +579,9 @@ fn scrollbar(buffer: &mut Buffer, area: Rect, app: &App) {
     let track = term_style(theme.ui.scrollbar_track);
     let thumb = term_style(theme.ui.scrollbar_thumb);
 
-    let halves = usize::from(area.height) * 2;
-    let total = app.rendered().height().max(1);
-    let visible = app.viewport_height().min(total);
-    let length = ((visible * halves) / total).clamp(2, halves);
-    let start = ((halves - length) as f32 * app.progress()).round() as usize;
+    // Geometry lives on `App` because the mouse needs to invert it; see
+    // [`App::scrollbar_thumb`].
+    let (start, length) = app.scrollbar_thumb(area.height);
 
     for y in 0..area.height {
         let upper = usize::from(y) * 2;

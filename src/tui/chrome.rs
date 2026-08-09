@@ -750,6 +750,14 @@ pub fn in_toc(app: &App, column: u16) -> bool {
     app.toc_is_open() && column < app.toc_width()
 }
 
+/// Whether `column` falls in the one-column gutter the document scrollbar is drawn in.
+///
+/// The bar is always there, whatever the contents pane is doing, so unlike
+/// [`in_toc`] this asks nothing about state beyond the terminal's width.
+pub fn in_scrollbar(app: &App, column: u16) -> bool {
+    column == app.scrollbar_column()
+}
+
 /// The table-of-contents list row a mouse click at `row` landed on, if any.
 ///
 /// The pane's row 0 and row `area_height - 1` are its border, so the list occupies

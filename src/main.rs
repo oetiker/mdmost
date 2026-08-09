@@ -79,7 +79,7 @@ struct Cli {
     #[arg(long, conflicts_with = "no_icons")]
     icons: bool,
 
-    /// Capture the mouse: wheel scrolls, clicks select in the contents pane.
+    /// Capture the mouse: wheel scrolls, the scrollbar drags, clicks select in the contents pane.
     ///
     /// Off by default because capturing takes the terminal's own drag-select away.
     #[arg(long)]
