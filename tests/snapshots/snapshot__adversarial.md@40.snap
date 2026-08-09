@@ -71,6 +71,17 @@ expression: canvas.plain_text()
  │   │                                  
  ╰───╯                                  
                                         
+ ◇ Wider than the page                  
+                                        
+ ╭───────────┬────────────────┬───────╮ 
+ │ Component │ Responsibility │ Owners› 
+ ├───────────┼────────────────┼───────┤ 
+ │ renderer  │ turns a tree   │ core  › 
+ │           │ into a canvas  │       › 
+ │ pager     │ scrolls the    │ tui   › 
+ │           │ canvas         │       › 
+ ╰───────────┴────────────────┴───────╯ 
+                                        
  ◈ Code                                 
  ────────────────────────────────────── 
                                         

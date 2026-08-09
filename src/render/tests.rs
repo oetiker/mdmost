@@ -505,6 +505,43 @@ fn a_cell_too_narrow_for_a_nested_table_still_renders() {
 }
 
 #[test]
+fn a_clipped_table_closes_its_rules_and_marks_only_its_content() {
+    // `docs/qa/visual-review-3.md` §11: the chevron was stamped on the rule rows too, so
+    // a clipped table showed a `╭` with no `╮` and read as a rendering fault rather than
+    // as something to scroll. A rule ends in its own corner or tee; the chevron belongs
+    // on the content rows, which are what is actually cut off.
+    let markdown = "| aaaaaaaaaa | bbbbbbbbbb |\n|---|---|\n| cccccccccc | dddddddddd |\n";
+    let rows = body_rows(&render_body(markdown, 14, &PLAIN));
+    let last = |row: usize| rows[row].chars().last();
+    assert_eq!(last(0), Some('╮'), "top rule: {:?}", rows[0]);
+    assert_eq!(last(2), Some('┤'), "header rule: {:?}", rows[2]);
+    assert_eq!(last(4), Some('╯'), "bottom rule: {:?}", rows[4]);
+    for row in [1, 3] {
+        assert_eq!(last(row), Some('›'), "content row: {:?}", rows[row]);
+    }
+}
+
+#[test]
+fn a_clipped_code_block_of_box_art_still_carries_the_marker() {
+    // The pager decides whether to re-render a block wider by hunting for the overflow
+    // marker (`tui::wide::ClipTest`). A fence whose *content* is box art — this
+    // project's own documentation is full of it — must therefore keep its chevrons: a
+    // clip that closed those lines into corners instead would leave the block unmarked
+    // and switch its horizontal scrolling off in silence.
+    let art = "╭─────────────────────────────╮";
+    let markdown = format!("```text\n{art}\n{art}\n```\n");
+    let canvas = render_body(&markdown, 16, &PLAIN);
+    let rows = body_rows(&canvas);
+    for row in [1, 2] {
+        assert!(
+            rows[row].contains('›'),
+            "the fence's own content is still marked, not closed: {:?}",
+            rows[row]
+        );
+    }
+}
+
+#[test]
 fn a_table_narrower_than_its_minimums_is_clipped_with_a_marker() {
     let markdown = "| aaaaaaaaaa | bbbbbbbbbb |\n|---|---|\n| cccccccccc | dddddddddd |\n";
     let canvas = render_body(markdown, 12, &PLAIN);

@@ -44,6 +44,13 @@ supercalifragilisticexpialidociousantidisestablishmentarianism
 |-|
 | |
 
+### Wider than the page
+
+| Component | Responsibility | Ownership | Status | Milestones | Since | Tickets |
+|-----------|----------------|-----------|--------|------------|-------|---------|
+| renderer | turns a tree into a canvas | core | green | two | 2024 | 17 |
+| pager | scrolls the canvas | tui | amber | one | 2025 | 4 |
+
 ## Code
 
 ```rust

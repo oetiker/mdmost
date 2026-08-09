@@ -14,7 +14,7 @@
 //! 5. draw rounded borders and honour the GFM per-column alignment;
 //! 6. size each row to its tallest cell, top-aligning the shorter ones.
 
-use crate::canvas::{BorderSet, Canvas};
+use crate::canvas::{BorderSet, Canvas, Rule, Side};
 use crate::doc::{Node, NodeKind, TableInfo};
 use crate::text::{Align, display_width};
 use crate::theme::{Style, Theme};
@@ -37,10 +37,34 @@ pub fn render_table(node: &Node, width: u16, theme: &Theme, options: &RenderOpti
 
 /// Renders a table with an explicit context, clipping it to `width`.
 pub(crate) fn render_table_node(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
-    let mut canvas = lay_out(node, info, width, ctx);
-    canvas.clip_with_marker(width, OVERFLOW_MARKER, ctx.theme.table.overflow_marker);
+    let Layout { mut canvas, rules } = lay_out(node, info, width, ctx);
+    // A rule cut short closes with its own corner or tee; only the *content* rows, which
+    // are what actually gets cut off, carry the "there is more to the right" chevron.
+    // The rules are named from the layout rather than sniffed out of the finished
+    // canvas: the renderer knows exactly which rows it drew, and a canvas full of box
+    // art inside a table cell must not be mistaken for one.
+    let set = BorderSet::ROUNDED;
+    canvas.clip_with_edges(
+        width,
+        OVERFLOW_MARKER,
+        ctx.theme.table.overflow_marker,
+        |row| {
+            rules
+                .iter()
+                .find(|(at, _)| *at == row)
+                .map(|(_, rule)| set.close(*rule, Side::Right))
+        },
+    );
     canvas.resize_width(width, ctx.base);
     canvas
+}
+
+/// A laid-out table and the rows of it that are horizontal rules.
+struct Layout {
+    /// The table at the width its columns negotiated, which may exceed the budget.
+    canvas: Canvas,
+    /// Every rule row, by index into `canvas`, and which edge of the box it is.
+    rules: Vec<(usize, Rule)>,
 }
 
 /// One source row of a table.
@@ -64,7 +88,11 @@ fn rows(node: &Node) -> Vec<Row<'_>> {
 }
 
 /// Lays a table out at the width its columns negotiated, which may exceed `width`.
-fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
+///
+/// The rule rows are reported alongside the canvas because the clip that follows has to
+/// close them rather than mark them, and by then they are indistinguishable from any
+/// other row of box art.
+fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Layout {
     let rows = rows(node);
     let columns = rows
         .iter()
@@ -73,7 +101,10 @@ fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
         .max()
         .unwrap_or(0);
     if columns == 0 || rows.is_empty() {
-        return Canvas::empty(width);
+        return Layout {
+            canvas: Canvas::empty(width),
+            rules: Vec::new(),
+        };
     }
 
     let inner = ctx.in_table();
@@ -86,6 +117,7 @@ fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
     let border = ctx.theme.table.border;
     let set = BorderSet::ROUNDED;
     let mut out = Canvas::empty(full);
+    let mut rules = vec![(out.height(), Rule::Top)];
     out.append(
         &border_row(
             &widths,
@@ -109,12 +141,14 @@ fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
         // empty table.
         let last_header = row.header && !rows.get(index + 1).is_some_and(|next| next.header);
         if last_header {
+            rules.push((out.height(), Rule::Middle));
             out.append(
                 &border_row(&widths, set.tee_right, set.cross, set.tee_left, set, border),
                 ctx.base,
             );
         }
     }
+    rules.push((out.height(), Rule::Bottom));
     out.append(
         &border_row(
             &widths,
@@ -126,7 +160,7 @@ fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
         ),
         ctx.base,
     );
-    out
+    Layout { canvas: out, rules }
 }
 
 /// Draws one horizontal border row.

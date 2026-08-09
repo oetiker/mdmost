@@ -62,6 +62,38 @@ impl Canvas {
     /// sprout a misleading marker. A `width` of `0`, or a marker too wide for the last
     /// column, clips without stamping. Widening is a no-op, since nothing was lost.
     pub fn clip_with_marker(&mut self, width: u16, marker: &str, style: Style) {
+        self.clip_with_edges(width, marker, style, |_| None);
+    }
+
+    /// [`clip_with_marker`](Canvas::clip_with_marker), except that rows `edge` names
+    /// end with the frame glyph it returns instead of with the marker.
+    ///
+    /// A box drawn wider than the room it has is cut on a *rule* row as readily as on a
+    /// content row, and stamping "there is more to the right" over the rule leaves a
+    /// `╭` with no `╮`: the shape stops reading as a table and starts reading as a
+    /// rendering fault (`docs/qa/visual-review-3.md` §11). Closing the rule with its own
+    /// corner or tee says the same thing more honestly — the box is whole, and the
+    /// *content* is what continues.
+    ///
+    /// `edge` is asked about every row, by index into the canvas as it was *before*
+    /// clipping, and only consulted for rows that actually lost something. The glyph it
+    /// returns is drawn in the style the cut cell already had, which is the frame's own
+    /// style — a border closing itself in the overflow-marker colour would be a
+    /// different kind of wrong.
+    ///
+    /// **Callers that own a clipped-block detector must keep the marker reachable.**
+    /// `tui::wide::ClipTest` decides whether to re-render a block wider by looking for
+    /// the marker, so a caller that named *every* row as an edge would produce a clipped
+    /// canvas carrying no marker at all and silently lose horizontal scrolling. Naming
+    /// only rule rows is safe: a box always has content rows between its rules, and they
+    /// are cut by exactly the same amount.
+    pub fn clip_with_edges(
+        &mut self,
+        width: u16,
+        marker: &str,
+        style: Style,
+        edge: impl Fn(usize) -> Option<char>,
+    ) {
         if width >= self.width {
             return;
         }
@@ -76,12 +108,21 @@ impl Canvas {
         self.truncate_width(width, style);
 
         let marker_width = display_width(marker);
-        if keep == 0 || marker_width == 0 || marker_width > keep {
-            return;
-        }
-        let at = keep - marker_width;
         for (row, _) in clipped.iter().enumerate().filter(|(_, cut)| **cut) {
-            self.write_str(row, at, marker, style);
+            // A frame glyph is one column, so it fits wherever a row survives at all,
+            // even where the marker would not.
+            if let Some(glyph) = edge(row)
+                && keep > 0
+                && let Some(cut) = self.rows[row].get(keep - 1)
+            {
+                let style = cut.style();
+                self.write_str(row, keep - 1, &glyph.to_string(), style);
+                continue;
+            }
+            if keep == 0 || marker_width == 0 || marker_width > keep {
+                continue;
+            }
+            self.write_str(row, keep - marker_width, marker, style);
         }
     }
 

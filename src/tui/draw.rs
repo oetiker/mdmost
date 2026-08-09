@@ -9,7 +9,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color as TermColor, Modifier, Style as TermStyle};
 
-use crate::canvas::Canvas;
+use crate::canvas::{BorderSet, Canvas, Cell, Rule, Side};
 use crate::theme::{Attributes, Color, Style};
 
 use super::app::{App, Overlay};
@@ -29,6 +29,13 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let base = app.theme().base();
     let marker_style = term_style(app.theme().code.overflow_marker);
     let dim_style = term_style(app.theme().text.dim);
+    // The styles a box's own glyphs are painted in, so a viewport edge that cuts a rule
+    // can close it rather than stamp a chevron over it. Diagram box art is deliberately
+    // not here: a widened diagram takes plain chevrons at the edge, which is the
+    // behaviour before this list existed. Whoever makes diagrams scrollable extends it
+    // with `theme.diagram.node_border` — after checking that `leading_rule`'s scan of the
+    // row means anything on a canvas whose rules are not full-width.
+    let frame_styles = [app.theme().code.frame, app.theme().table.border];
 
     let buffer = frame.buffer_mut();
     buffer.set_style(area, term_style(base));
@@ -64,6 +71,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         scroll,
         hscroll,
         marker_style,
+        &frame_styles,
     );
     highlight_matches(buffer, doc_area, app, scroll, hscroll);
     scrollbar(buffer, bar_area, app);
@@ -153,13 +161,20 @@ fn blit(buffer: &mut Buffer, area: Rect, canvas: &Canvas, top: usize, left: u16,
 /// *window*, not of the render. Marking both edges is what tells them there is more
 /// to the right and — the half that was missing entirely — that something is already
 /// off to the left.
-fn edge_markers(
+///
+/// A row cut on a box's *rule* is closed with that box's own corner or tee instead. A
+/// chevron sitting where a `╮` belongs turns a table or a code fence into a frame that
+/// never closes, which reads as a rendering fault rather than as scrollable content
+/// (`docs/qa/visual-review-3.md` §11). The content rows between the rules still carry
+/// the chevron, because they are what is actually cut off.
+pub(super) fn edge_markers(
     buffer: &mut Buffer,
     area: Rect,
     canvas: &Canvas,
     top: usize,
     left: u16,
     style: TermStyle,
+    frames: &[Style],
 ) {
     if area.width == 0 {
         return;
@@ -173,21 +188,63 @@ fn edge_markers(
                 .get(range)
                 .is_some_and(|slice| slice.iter().any(|cell| !cell.text().trim().is_empty()))
         };
-        if left > 0
-            && occupied(0..usize::from(left))
-            && let Some(cell) = buffer.cell_mut((area.x, area.y + y))
-        {
-            cell.set_symbol(LEFT_MARKER);
-            cell.set_style(style);
+        let mark = |buffer: &mut Buffer, x: u16, col: usize, side: Side| {
+            let Some(cell) = buffer.cell_mut((x, area.y + y)) else {
+                return;
+            };
+            match frame_close(cells, col, side, frames) {
+                Some((glyph, frame)) => {
+                    cell.set_symbol(&glyph.to_string());
+                    cell.set_style(term_style(frame));
+                }
+                None => {
+                    cell.set_symbol(match side {
+                        Side::Left => LEFT_MARKER,
+                        Side::Right => RIGHT_MARKER,
+                    });
+                    cell.set_style(style);
+                }
+            }
+        };
+        if left > 0 && occupied(0..usize::from(left)) {
+            mark(buffer, area.x, usize::from(left), Side::Left);
         }
         let right = usize::from(left) + usize::from(area.width);
-        if occupied(right..cells.len())
-            && let Some(cell) = buffer.cell_mut((area.x + area.width - 1, area.y + y))
-        {
-            cell.set_symbol(RIGHT_MARKER);
-            cell.set_style(style);
+        if occupied(right..cells.len()) {
+            mark(buffer, area.x + area.width - 1, right - 1, Side::Right);
         }
     }
+}
+
+/// The glyph that closes a frame cut at `col`, when the cut lands on one.
+///
+/// Two conditions, and both are needed. The cut cell has to be *drawn in a frame style*,
+/// which is what keeps a code block whose content happens to be box art — this project's
+/// own documentation is full of it — from having its text quietly rewritten into a
+/// corner. And the glyph has to belong to a horizontal rule: a `│` is a cut through
+/// content, not through a rule, and takes the chevron.
+///
+/// A bare `─` cannot say which edge it is, so the row is scanned for the first glyph in
+/// the same style that can: a table's or a fence's top rule always starts `╭`, whatever
+/// margin or quote bar precedes it.
+fn frame_close(cells: &[Cell], col: usize, side: Side, frames: &[Style]) -> Option<(char, Style)> {
+    let cut = cells.get(col)?;
+    if !frames.contains(&cut.style()) {
+        return None;
+    }
+    let (set, named) = BorderSet::rule_glyph(cut.text().chars().next()?)?;
+    let rule = named.or_else(|| leading_rule(cells, cut.style()))?;
+    Some((set.close(rule, side), cut.style()))
+}
+
+/// Which edge of a box a row is, taken from the first glyph in it that says.
+fn leading_rule(cells: &[Cell], style: Style) -> Option<Rule> {
+    cells.iter().find_map(|cell| {
+        if cell.style() != style {
+            return None;
+        }
+        BorderSet::rule_glyph(cell.text().chars().next()?)?.1
+    })
 }
 
 /// Says so, rather than showing a screenful of nothing (usability P14).

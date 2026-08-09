@@ -130,6 +130,14 @@ fn render_widened(
 /// its own border — so the whole row has to be searched. Matching the glyph alone
 /// would then mistake a document that merely *contains* the character for a clipped
 /// one, so the marker's style has to match too.
+///
+/// Not every row of a clipped block carries the marker: a table closes its cut rules
+/// with `╮ ┤ ╯` rather than marking them, so that the frame reads as a box that
+/// continues rather than a box that broke. Detection therefore rests on the *content*
+/// rows, which are cut by exactly the same amount and always exist — a box with no rows
+/// between its rules is not a table. A renderer that ever marked no row at all would
+/// switch horizontal scrolling off for its blocks in silence;
+/// [`super::tests::a_clipped_table_is_still_detected_and_widened`] is the tripwire.
 struct ClipTest {
     /// The styles the renderers paint the marker in.
     styles: [crate::theme::Style; 2],

@@ -250,7 +250,9 @@ Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
   Combining marks, ZWJ emoji sequences and regional-indicator flags are never split, and
   every rendered row is exactly the requested width.
 - **Wide content scrolls, it does not mangle.** A table or code line too wide for the
-  terminal keeps its shape and is reached with `←`/`→`, marked with a `›` at the edge.
+  terminal keeps its shape and is reached with `←`/`→`. A cut line is marked with a `›`
+  at the edge — or a `‹` once you have scrolled — while a box's own rules close with the
+  corner they belong to, so the frame still reads as a box that continues.
 
 ## Development
 
