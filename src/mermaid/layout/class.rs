@@ -26,7 +26,9 @@ use crate::mermaid::ast::{
 use crate::text::wrap_plain;
 use crate::theme::Theme;
 
-use super::graph::{self, EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator};
+use super::graph::{
+    self, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
+};
 use super::record::{self, Row};
 
 /// Widest a relation label is allowed to get before it is wrapped.
@@ -34,12 +36,30 @@ const LABEL_WIDTH: usize = 18;
 
 /// Draws a class diagram into a canvas exactly `width` columns wide.
 ///
+/// The engine may degrade the drawing as far as [`Fit::COMPACT`] allows; use
+/// [`draw_with`] to say otherwise.
+///
 /// # Errors
 ///
 /// Returns [`MermaidError::TooNarrow`] when the diagram cannot be made to fit.
 pub fn draw(diagram: &ClassDiagram, width: u16, theme: &Theme) -> Result<Canvas, MermaidError> {
+    draw_with(diagram, width, theme, Fit::COMPACT)
+}
+
+/// Draws a class diagram under the given fit policy.
+///
+/// # Errors
+///
+/// Returns [`MermaidError::TooNarrow`] when the diagram cannot be made to fit within
+/// what `fit` allows.
+pub fn draw_with(
+    diagram: &ClassDiagram,
+    width: u16,
+    theme: &Theme,
+    fit: Fit,
+) -> Result<Canvas, MermaidError> {
     let spec = build(diagram);
-    graph::draw(&spec, &Art { diagram }, width, theme)
+    graph::draw(&spec, &Art { diagram }, width, theme, fit)
 }
 
 /// Draws class boxes for the engine.

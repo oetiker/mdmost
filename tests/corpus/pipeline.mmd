@@ -1,0 +1,17 @@
+flowchart LR
+    Read[Read file] --> Parse[Parse Markdown]
+    Parse --> Inline[Inline spans]
+    Inline --> Wrap[Wrap text]
+    Wrap --> Tables[Lay out tables]
+    Tables --> Code[Highlight code]
+    Code --> Mermaid[Draw diagrams]
+    Mermaid --> Assemble[Assemble canvas]
+    Assemble --> Anchors[Collect anchors]
+    Anchors --> Search[Index search spans]
+    Search --> Paint[Paint viewport]
+    Paint --> Input[Wait for key]
+    Input --> Scroll[Scroll]
+    Scroll --> Paint
+    Input --> Quit[Quit]
+    Parse --> Error[Report error]
+    Error --> Quit

@@ -5,6 +5,7 @@
 
 use mdless::canvas::{BorderSet, Canvas};
 use mdless::error::MermaidError;
+use mdless::mermaid::Fit;
 use mdless::mermaid::ast::Direction;
 use mdless::mermaid::layout::graph::{
     self, EdgeSpec, GraphSpec, GroupSpec, NodeIdx, Stroke, Terminator,
@@ -93,7 +94,7 @@ proptest! {
         let theme = Theme::default_dark();
         let spec = build(dir, count, &pairs, grouped);
         // A graph too wide for its budget must be reported, never drawn over the edge.
-        let canvas = match graph::draw(&spec, &art, width, &theme) {
+        let canvas = match graph::draw(&spec, &art, width, &theme, Fit::COMPACT) {
             Ok(canvas) => canvas,
             Err(error) => {
                 prop_assert!(matches!(error, MermaidError::TooNarrow { .. }), "{:?}", error);
@@ -117,7 +118,7 @@ proptest! {
     ) {
         let theme = Theme::default_dark();
         let spec = build(dir, count, &pairs, grouped);
-        let canvas = graph::draw(&spec, &art, 200, &theme).expect("a small graph always fits");
+        let canvas = graph::draw(&spec, &art, 200, &theme, Fit::COMPACT).expect("a small graph always fits");
         let text = canvas.plain_text();
         for node in 0..count {
             let letter = char::from(b'a' + node as u8);
@@ -141,8 +142,8 @@ proptest! {
     ) {
         let theme = Theme::default_dark();
         let spec = build(dir, count, &pairs, grouped);
-        let first = graph::draw(&spec, &art, 200, &theme).expect("fits");
-        let second = graph::draw(&spec, &art, 200, &theme).expect("fits");
+        let first = graph::draw(&spec, &art, 200, &theme, Fit::COMPACT).expect("fits");
+        let second = graph::draw(&spec, &art, 200, &theme, Fit::COMPACT).expect("fits");
         prop_assert!(first == second);
     }
 
@@ -155,7 +156,7 @@ proptest! {
     ) {
         let theme = Theme::default_dark();
         let spec = build(dir, count, &pairs, 0);
-        let canvas = graph::draw(&spec, &art, 200, &theme).expect("fits");
+        let canvas = graph::draw(&spec, &art, 200, &theme, Fit::COMPACT).expect("fits");
         let text = canvas.plain_text();
         // Every label keeps its blank on both sides; an edge cutting through a box
         // would have replaced one of them with a line glyph.

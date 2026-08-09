@@ -1317,3 +1317,59 @@ fn going_to_the_top_also_goes_back_to_the_left_edge() {
         assert_eq!(app.hscroll(), 0, "{key:?} goes to the first column too");
     }
 }
+
+/// A chart that fits an 80-column viewport.
+const FITTING_FENCE: &str = "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n";
+
+/// The chart from `tests/corpus/pipeline.mmd`, which needs 188 columns to draw.
+const WIDE_FENCE: &str = concat!(
+    "```mermaid\n",
+    include_str!("../../tests/corpus/pipeline.mmd"),
+    "```\n"
+);
+
+/// Renders a document the way the pager does, counting diagram layouts.
+fn layouts_for(markdown: &str, width: u16) -> (crate::canvas::Canvas, usize) {
+    let doc = Doc::parse(markdown);
+    crate::render::bridge::counting_layouts(|| {
+        super::wide::render_scrollable(
+            &doc,
+            width,
+            &crate::theme::Theme::default_dark(),
+            &crate::render::RenderOptions::new(false, false),
+        )
+    })
+}
+
+#[test]
+fn a_diagram_that_fits_is_laid_out_exactly_once() {
+    // The seam returns the canvas as well as the width precisely so that this stays 1.
+    // A seam that returned only the width would send every fitting diagram through the
+    // engine twice — measured at +43 % startup on a diagram-heavy document — and no
+    // output test would notice, because both layouts produce the same canvas.
+    let (canvas, layouts) = layouts_for(FITTING_FENCE, 80);
+    assert_eq!(canvas.width(), 80, "this chart fits; nothing to widen");
+    assert_eq!(layouts, 1, "a fitting diagram was laid out {layouts} times");
+}
+
+#[test]
+fn a_diagram_that_must_be_widened_is_laid_out_exactly_twice() {
+    // One layout to learn it does not fit and what it needs, one at that width. The
+    // clip hunt this replaced re-rendered the *source dump* several times over and
+    // never drew the diagram at all.
+    let (canvas, layouts) = layouts_for(WIDE_FENCE, 80);
+    assert!(canvas.width() > 80, "the chart should have been widened");
+    assert_eq!(layouts, 2, "a widened diagram was laid out {layouts} times");
+}
+
+#[test]
+fn a_renderer_that_reports_no_floor_stays_inside_the_probe_cap() {
+    // `pie` returns `needed: None`, so the search has nothing to aim at and doubles
+    // instead. Without a probe cap this walks to the width cap one column at a time.
+    let pie = "```mermaid\npie title Votes\n    \"Yes\" : 10\n    \"No\" : 3\n```\n";
+    let (_, layouts) = layouts_for(pie, 16);
+    assert_eq!(
+        layouts, 2,
+        "doubling should have found this pie on the second layout"
+    );
+}

@@ -9,20 +9,27 @@
 //! Widening the *whole* document would be the easy answer and the wrong one: prose
 //! reflowed to the width of one long code line would need horizontal scrolling to read
 //! a paragraph. So the widening is per block. Every top-level block is rendered at the
-//! viewport width; the ones that come back clipped — and only those — are re-rendered
-//! at the width they actually want. [`Canvas::append`] then stacks the parts, padding
-//! the narrow ones, and translates their anchors and search spans, so the result obeys
-//! the canvas contract exactly as a plain [`render_document`] would.
+//! viewport width; the ones that come back clipped are re-rendered at the width they
+//! actually want. [`Canvas::append`] then stacks the parts, padding the narrow ones, and
+//! translates their anchors and search spans, so the result obeys the canvas contract
+//! exactly as a plain [`render_document`] would.
 //!
-//! The common document has nothing clipped, pays for no extra render, and comes out
-//! byte-identical to [`render_document`] — including its side margins, which are
-//! applied here for the same reason and in the same place. That claim used to be false
-//! in exactly that one respect, and being false only about the margins is what made it
-//! survive: the pager looked right until you noticed nothing had a gutter.
+//! A Mermaid fence is the exception to "clipped" being the signal, and to matching
+//! [`render_document`] block for block. It never comes back clipped — a diagram that
+//! does not fit comes back as a *dump of its own source*, which fits fine — so it is
+//! asked first, through [`crate::render::diagram`], and it is asked under a policy that
+//! refuses to mince labels ([`Fit::ROOMY`](crate::mermaid::Fit::ROOMY)). A fence the
+//! piped renderer squeezes into the viewport may therefore be drawn wide here instead.
+//! That is the one deliberate difference; everything else in a document with nothing
+//! over-wide comes out byte-identical to [`render_document`] — including its side
+//! margins, which are applied here for the same reason and in the same place. That claim
+//! used to be false in exactly one other respect, and being false only about the margins
+//! is what made it survive: the pager looked right until you noticed nothing had a
+//! gutter.
 
 use crate::canvas::{Canvas, Cell};
 use crate::doc::{Doc, Node, NodeKind};
-use crate::render::{RenderOptions, margins, render_block, render_document};
+use crate::render::{Limits, RenderOptions, margins, render_block, render_document};
 use crate::theme::Theme;
 
 /// The glyph the renderers paint in a row's last column when content is cut off.
@@ -84,7 +91,32 @@ pub fn render_scrollable(doc: &Doc, width: u16, theme: &Theme, options: &RenderO
     out
 }
 
+/// How much wider than the viewport a diagram must want before it is granted the width.
+///
+/// A diagram needing one more column than it has is not worth giving the whole document
+/// a horizontal scrollbar, a chevron on every row and an `↔ 1/1` readout for. Below this
+/// it takes the fit ladder's answer instead, squeezed or dumped — the same thing it got
+/// before diagrams could scroll at all.
+const MIN_SURPLUS: u16 = 8;
+
+/// How many viewports wide a diagram may be laid out.
+///
+/// Past this the source dump is the better answer: crossing a diagram three screens wide
+/// is already 160 arrow presses, and [`Canvas::append`] pads every row of the document to
+/// the widest part, so the whole canvas pays for it. Revisit if a page-left/right or
+/// jump-to-edge binding ever lands.
+const VIEWPORTS: u16 = 3;
+
+/// The most layouts the width search may spend on one diagram.
+const DIAGRAM_PROBES: u8 = 8;
+
 /// Renders one block, at its own width if `width` would clip it.
+///
+/// A Mermaid fence is asked first, because "this does not fit" reaches the clip hunt as
+/// a *dump of Mermaid source* — a block that is not clipped at all and would never be
+/// widened, only side-scrolled as raw text if some other line in it happened to be long.
+/// [`crate::render::diagram`] answers with the diagram itself, at the narrowest width
+/// that draws it, and that width is what the block is laid out at.
 fn render_widened(
     node: &Node,
     width: u16,
@@ -92,6 +124,15 @@ fn render_widened(
     options: &RenderOptions,
     clip: &ClipTest,
 ) -> Canvas {
+    let limits = Limits::new(
+        MAX_BLOCK_WIDTH.min(width.saturating_mul(VIEWPORTS)),
+        DIAGRAM_PROBES,
+    );
+    if let Some((at, canvas)) = crate::render::diagram(node, width, limits, theme, options)
+        && (at == width || at - width >= MIN_SURPLUS)
+    {
+        return canvas;
+    }
     let narrow = render_block(node, width, theme, options);
     let is_clipped = |canvas: &Canvas| clip.is_clipped(canvas);
     if !is_clipped(&narrow) || width >= MAX_BLOCK_WIDTH {
