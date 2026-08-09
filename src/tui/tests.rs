@@ -2589,6 +2589,7 @@ fn a_resize_drops_a_scrollbar_grab() {
     assert!(!app.scrollbar_grabbed(), "the anchor died with the layout");
 }
 
+#[test]
 fn a_drag_over_a_list_item_brings_its_marker() {
     let mut app = pager(MARKUP);
     let canvas = app.canvas().clone();
