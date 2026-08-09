@@ -13,14 +13,16 @@
 Handoff commit: the last commit touching this file — `git log -1 -- docs/controller-handoff.md`
 Date: 2026-08-09   Reason: context budget
 Worktree / branch: main checkout (`/home/oetiker/checkouts/mdless`) @ `main`
-Trunk at time of writing: `main` @ `06dfc3a` — **reader: if trunk has moved, §2
+Trunk at time of writing: `main` @ `bd87674` — **reader: if trunk has moved, §2
 is provisionally stale; if trunk now contains this branch's HEAD, this file is a
-tombstone** (`git merge-base --is-ancestor HEAD main`). At that commit: 922
-tests / 28 suites green, clippy and fmt clean. **Re-derive anyway** (§8).
+tombstone** (`git merge-base --is-ancestor HEAD main`). At that commit: 924
+tests / 28 suites green, `fmt --check` clean, and `clippy --all-targets --
+-D warnings` clean. **Re-derive anyway** (§8).
 Sibling worktrees: 33 entries under `/scratch/oetiker/claude-worktrees/`, one per
 `isolation: worktree` subagent, **almost all merged and dead**. Only
-`icons-autodetect` (tombstone only) and `checkbox-double-indent` (§3.1, real and
-unmerged) show as unmerged. `git worktree list` + `git branch -a --no-merged main` is the only
+`icons-autodetect` (tombstone only) showed as unmerged;
+`checkbox-double-indent` was merged into `main` as `bd87674` after this file was
+first written, and its worktree still holds seven untracked scratch scripts. `git worktree list` + `git branch -a --no-merged main` is the only
 authority. Four dead scratch worktrees from the original build (`mdless-gate`,
 `-layout`, `-qa`, `-rendercheck`) the owner chose to leave alone. **A second
 controller session was live in this repo during this one** — check `pgrep -af
@@ -69,30 +71,32 @@ At `06dfc3a`, four owner findings from this session are fixed and merged:
   `n/N next/prev` and `or Ctrl-↓/Ctrl-↑` chips generated from the live key
   table, and `ctrl-up`/`ctrl-down` are bound as aliases.
 
-Also: every "CommitMono is the shipping font" claim and every rasterised
-em-fraction measurement is **deleted** repo-wide — they were an early session's
-guess laundered into a premise (§4.9). `git grep -i commitmono` must stay empty.
+A fifth landed after the handoff was first written: **`bd87674` reserves two
+columns for the Nerd Font task boxes** (`Glyphs::task_cells`, 2 with icons / 1
+without), because those boxes are *drawn* at twice an ASCII advance while their
+private-use code points make `unicode-width` answer 1. The earlier two-space gap
+only half-worked — the box was eating one of the spaces. Read §4.10 for what this
+does and does not mean.
+
+Also: every "the shipping font is X" claim and every rasterised em-fraction
+measurement is **deleted** — they were an early session's guess laundered into a
+premise (§4.9). The check is
+`git grep -il commitmono -- src/ tests/ README.md docs/superpowers/` , which must
+stay empty; this handoff names the font on purpose, so do not grep the whole tree
+and think you have found a survivor.
 
 Integration state above is true as of the handoff commit only — **re-derive**
 (§8).
 
 ## 3. Do this next
 
-1. **Decide whether to merge `checkbox-double-indent`** (`7016411`, one commit
-   ahead of `main`, 924 tests green, +2 `#[test]`). It implements option (a) of
-   §7.1 — `Glyphs::task_cells` reserves 2 columns for the Nerd boxes, 1 for
-   `☐`/`☑`. **The owner has NOT chosen between the options**; the branch was
-   built by a resumed agent, and an agent's confidence is not the owner's
-   consent. Ask before merging. Read §4.10 first — the obvious diagnosis of this
-   defect is wrong, and the branch's own commit message states the mechanism
-   more strongly than the evidence supports.
-2. **Search does not match inside fenced code blocks at all.** `/word` over a
+1. **Search does not match inside fenced code blocks at all.** `/word` over a
    ` ```text ` fence containing that word returns no match, while the same word
    in prose or a table cell is found. Pre-existing and apparently known (a test
    comment in `src/tui/tests.rs` says "unlike code, table cells carry search
    spans"), but for a pager aimed at code documents this reads as search being
    broken. Highest-value untouched defect.
-3. **The light theme's heading ramp is flat and non-monotone** — last measured
+2. **The light theme's heading ramp is flat and non-monotone** — last measured
    4.80 → 4.89 → 4.92 → 4.95 → 4.90 → 4.86:1, so it *rises* through H4. Dark
    steps correctly but every heading is dimmer than the body it introduces.
    More urgent since the prefix glyphs went: in light, H3/H4/H5 are separated by
@@ -120,11 +124,18 @@ has not answered. **Do not delete without asking.**
    hazard here. `touch src/lib.rs && cargo build` before believing a surprise.
 2. **Never read a gate's result through a pipe.** `cargo test 2>&1 | tail`
    returns tail's exit code and has hidden a red suite here.
-3. **Exit code is necessary and not sufficient — clippy exits 0 on warnings.**
-   A merge landed a doc comment that tripped `doc_markdown`. All three agents and
-   the merge agent reported "clippy exit 0", truthfully, and trunk had been
-   warning-free. What caught it was comparing the *warning count* against the
-   known-clean baseline. **Gate on counts against a baseline, not just status.**
+3. **The standing clippy gate is `cargo clippy --all-targets -- -D warnings`.**
+   Plain `cargo clippy` **exits 0 on warnings**, so a gate read only by exit code
+   is blind to them — and "read the exit code, not a pipe" (§4.2) actively
+   encourages that blindness. This bit twice in one session. First a merge landed
+   a `doc_markdown` warning that four agents all truthfully reported as "clippy
+   exit 0"; comparing the *warning count* to the known-clean baseline caught it.
+   Then a branch cut from before that fix still carried the un-backticked text and
+   **merging it would have silently reverted the fix** — its own agent sailed past
+   the warning three times on exit code alone, and only found it by asking what
+   the trunk commit it was missing actually did. **Gate on `-D warnings`, and when
+   you are behind trunk, read what you are missing rather than trusting a green
+   run on stale code.**
 4. **Verify a subagent's arithmetic, not its adjectives.** Test COUNT is the
    check that catches a silently dropped test, because a test that stops running
    looks exactly like one that passes. Know the expected sum before merging
@@ -271,18 +282,24 @@ has not answered. **Do not delete without asking.**
    the deciding information lives in the font file, not in Unicode. Nothing is
    visually broken today, so it can wait. Read §4.10 before re-diagnosing.
 
-   **Option (a) is BUILT but UNMERGED** on `checkbox-double-indent` (`7016411`).
-   It adds `Glyphs::task_cells` (2 with icons, 1 without) so text starts at
-   column 4 with icons and 3 without. Its consequence, which the owner has not
-   seen yet: the task box becomes **the one place where the two glyph sets differ
-   in layout, not just appearance** — `--no-icons` shifts a task list by a column.
-   That contradicts the width rule the earlier commit argued for; the branch
-   rewrites that rule rather than leaving it false, and re-points the two tests
-   that guarded the old absolute so they still catch any *other* glyph that
-   shifts layout. Note also that the agent measured **both** the proportional and
-   the `Mono` variants at 241 vs 121 — if that holds, it weakens the (a)-is-wrong-
-   for-`Mono` objection above, but it was not independently re-verified and the
-   two claims should be reconciled before merging.
+   **RESOLVED: the owner chose option (a) and it is merged** (`bd87674`).
+   `Glyphs::task_cells` is 2 with icons, 1 without, so text starts at column 4
+   with icons and 3 without. Its live consequence: the task box is now **the one
+   place where the two glyph sets differ in layout, not just appearance** —
+   `--no-icons` shifts a task list by a column. The width rule in
+   `render::glyphs`, `RenderOptions::icons`, the README and the design spec was
+   rewritten rather than left asserting the old absolute, and the two tests that
+   guarded it (`icons_change_the_glyphs_but_never_the_layout` and the
+   `render_property` sweep over widths 4..=120) now filter task items out so they
+   still guard the general rule, with the exception covered by two tests of its
+   own.
+
+   **One premise here was never independently verified**, and it is the one the
+   whole reservation rests on: the agent reports **both** the proportional and the
+   `Mono` faces measuring 241 vs 121. That is surprising — the `Mono` variants
+   exist precisely to be single-advance — and if it is wrong, `Mono` readers now
+   get a spurious extra column. Nobody has checked it outside that agent. If a
+   `Mono` user reports a gap that is too wide, start here.
 2. **`fc-list` as the macOS icon probe** is untested there; detection falls back
    to plain, which is safe but pessimistic.
 3. **Nested diagrams are never widened** (list, blockquote) while nested tables
@@ -307,10 +324,12 @@ has not answered. **Do not delete without asking.**
   anything started after the handoff commit is invisible here. A *second
   controller session* was active in this repo while this was written; assume
   concurrency rather than sole ownership.
-- Re-run the gates, and check clippy's warning COUNT, not just its exit code
-  (§4.3):
-  `export CARGO_TARGET_DIR=/scratch/oetiker/cargo-target-mdless-lead && touch src/lib.rs && CARGO_BUILD_JOBS=2 cargo test`
-  — and read the exit code, not the tail of a pipe (§4.2).
+- Re-run the gates. Clippy MUST be run as `-- -D warnings` (§4.3); a bare
+  `cargo clippy` exit code is blind to the warnings that have twice slipped
+  through here:
+  `export CARGO_TARGET_DIR=/scratch/oetiker/cargo-target-mdless-lead && touch src/lib.rs && CARGO_BUILD_JOBS=2 cargo test && CARGO_BUILD_JOBS=2 cargo clippy --all-targets -- -D warnings && cargo fmt --check`
+  — and read the exit code, not the tail of a pipe (§4.2). Expect 924 tests and
+  913 `#[test]` attributes at the handoff commit.
 - Every width, ratio and contrast measurement in this file and in the QA reviews
   describes a past tree. §4.17 exists because that has already cost real work.
 - The §3 backlog below the top three is inherited from the previous handoff and
