@@ -34,8 +34,19 @@ toml = "1.1.4"
 unicode-segmentation = "1.13.3"
 unicode-width = "0.2.2"
 
+# The event loop watches its own terminal descriptor for a hangup, which needs `poll`.
+# `rustix` rather than `libc` because the crate forbids `unsafe`, and this is the same
+# `poll` crossterm itself is built on. Linux only: `poll` on `/dev/tty` is documented
+# not to work on macOS, and answering "your terminal is gone" wrongly would be worse
+# than the spin this prevents.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1.1.4", features = ["event"] }
+
 [dev-dependencies]
 insta = "1.48.0"
+# `tests/pty_hangup.rs` builds a real pty and destroys it; that is raw `openpty`,
+# `setsid` and `TIOCSCTTY` territory, which is fine in a test crate.
+libc = "0.2.189"
 portable-pty = "0.9.0"
 pretty_assertions = "1.4.1"
 proptest = "1.11.0"
