@@ -101,16 +101,15 @@ from them.
 Work `visual-review-3.md` first; it is the harsher and more specific list, and
 its severes are the difference between "yes" and "no" on the headline question.
 
-1. **A seven-node `flowchart LR` will not draw below 92 columns** — it gives up
-   and dumps raw Mermaid source (`visual-review-3.md` §1, SEVERE). The reviewer
-   bisected it: falls back at 80/84/88, draws from 92. Box art is the feature
-   this project leads with and 80 columns is *the* default terminal width, so
-   this one finding is most of the "no". **The same graph as `flowchart TD`
-   draws fine at 80**, so the engine is capable and it is the LR path's width
-   budget that overruns — start there rather than in the shared layout code.
-   Related and cheap: §23, the "cannot draw" message is truncated mid-word and
-   sits in the fence *footer*, where it reads as decoration rather than as the
-   explanation it is.
+1. ~~**A seven-node `flowchart LR` will not draw below 92 columns**~~ — **done**,
+   commits `89e9c54` and `7de4506`. It draws from 76 now. The reviewer's guess
+   ("the LR path's width budget overruns") was wrong and the real cause is worth
+   carrying: `LADDER`'s share caps *one node's* label, which bounds the whole
+   drawing only on the cross axis — a `TD` chart. Laid out `LR` the boxes sit
+   side by side and their widths *add*, so six ranks of ordinary labels overran
+   80 while every node sat inside a quarter of it. Two tighter rungs fixed it.
+   §12 went with it: `TooNarrow` now carries a floor and the caption says "needs
+   at least N", not the width you already have.
 2. **Heading hierarchy is carried almost entirely by hue** (§16, SEVERE), so
    every heading is *dimmer* than the body text it introduces, and the light
    theme's six-level ramp is flat — the reviewer measured contrast ratios of
@@ -205,7 +204,31 @@ Both visual reviews end with a "what looks good — do not break this" section a
     than a `match` specifically so the icons could be *enumerated*, which is
     what lets font detection derive its probe from the glyphs that actually
     draw. Any second hand-written list of the same code points would drift.
-12. **Do not hand-edit insta snapshots.** Use
+12. **The fit ladder is a first-fit search, which makes new rungs free.** Adding
+    `(1, 6)` and `(1, 8)` could not change any diagram that already drew — the
+    loop returns at the first fit, so the new rungs are reachable *only* at the
+    widths that previously dumped source. The whole suite being byte-identical
+    was the check that this reasoning held, and it is the check to repeat before
+    touching `LADDER` again. The counterfactual at a new rung is never a
+    prettier diagram; it is the source dump. That is why hard mid-word breaks at
+    very narrow widths (`Star`/`t` at 70 columns) were accepted rather than
+    guarded with a "never break a word" floor — such a floor would apply at
+    *every* rung and would turn currently-drawing charts into source dumps.
+13. **Fit is not monotone in width, and the new caption walks around that.** The
+    probe chart draws at inner width 61-65, *fails* at 66, and draws again at
+    67: `budget = width / share` quantises, so one more column can hand every
+    node a wider budget and overshoot. Nobody has filed this yet; it is a real
+    wart. The "needs at least N" floor is still honest because it only ever
+    claims something about *widening* from where you are, which is the only
+    direction a reader moves — but do not restate it as "N always draws".
+14. **`visual-review-3.md` §23 is not the cheap fix it looks like.** The seven
+    family names plus their separators are ~80 columns on their own, so the list
+    cannot fit a one-line footer at width 80 under *any* wording. Fixing it
+    means a multi-row caption or a notice row inside the block — a design
+    decision against spec §6 ("a dim caption"), not a truncation tweak. The §12
+    work already front-loads the number in the other over-long caption, so what
+    survives elision is now the useful part.
+15. **Do not hand-edit insta snapshots.** Use
     `INSTA_UPDATE=always cargo test --test <target>` and review each diff.
 
 ## 5. Don'ts & constraints
