@@ -39,6 +39,12 @@ use crate::theme::Theme;
 /// [`super::tests::overflow_marker_matches_the_renderer`] pins the two together.
 pub const OVERFLOW_MARKER: &str = "\u{203a}";
 
+/// The bar a block quote paints down its left edge, on every row it owns.
+///
+/// Duplicated from `render::block` for the same reason as [`OVERFLOW_MARKER`], and
+/// pinned to it by [`super::tests::the_quote_bar_matches_the_renderer`].
+pub const QUOTE_BAR: &str = "\u{258c}";
+
 /// The widest a single block is ever grown to.
 ///
 /// A bound is needed because a pathological document — one enormous minified line —
@@ -182,13 +188,18 @@ fn render_widened(
 ///
 /// * Consecutive non-blank rows belong to one run and share the run's widest extent.
 ///   [`render_scrollable`] separates top-level blocks with a blank row, so a run is
-///   normally exactly one block.
-/// * Runs on both sides of a blank gap are merged when *both* reach past `width`, the
-///   width the document was laid out at. A block with a blank row inside it — a loose
-///   list, a diagram with a gap between ranks — is thereby kept in one piece whenever
-///   the gap separates two over-wide parts. Two adjacent over-wide blocks are merged
-///   too, and then scroll together; that is the price of not being told where the block
-///   boundaries are, and it costs the narrower of the two some blank space on the right.
+///   normally exactly one block. A row drawing nothing but block-prefix decoration
+///   counts as blank — see [`row_extent`], and without that a block quote is a single
+///   run and one wide fence inside it drags every quoted sentence off the screen.
+/// * Runs on both sides of a gap are merged when *both* reach past `width`, the width
+///   the document was laid out at. Any number of blank rows is bridged, not just one, so
+///   a block with a gap inside it — a loose list, a diagram with a gap between ranks — is
+///   kept in one piece whenever the gap separates two over-wide parts. Two adjacent
+///   over-wide blocks are merged too, and then scroll together; that is the price of not
+///   being told where the block boundaries are, and the narrower of the two pays it. It
+///   is not merely some blank space on the right: the narrower block travels the wider
+///   one's distance, so at the far end of a 137-column table a merged 86-column table is
+///   off-screen altogether, leaving its `‹` markers pointing at nothing.
 /// * A run that fits within the viewport gets an offset of zero from the `min` above,
 ///   which is the whole point: prose, headings and narrow blocks stay at column 0.
 ///
@@ -223,12 +234,32 @@ pub fn scroll_reach(canvas: &Canvas, width: u16) -> Vec<u16> {
 }
 
 /// The column one past the last thing a row actually draws.
+///
+/// Block-prefix decoration is not content. A block quote paints its bar on *every* row
+/// it owns, including the rows that separate its parts, so a row whose only content is
+/// that bar is a blank row in a costume — and counting it as content welded a whole
+/// quote into one run, handing the quoted prose the reach of whatever wide fence or
+/// table sat between the sentences. That is the whole-page scroll drag the per-run
+/// offsets were introduced to remove, one nesting level down.
+///
+/// Splitting on such a row is safe for the ragged blocks runs exist to protect: box art
+/// never draws a row of bars and nothing else, and if a widened block ever did, both
+/// halves would reach past the render width and [`scroll_reach`]'s merge rule would put
+/// it back together.
 fn row_extent(cells: &[Cell]) -> u16 {
+    let drawn = |cell: &Cell| !cell.is_blank() && !cell.is_continuation();
+    if !cells
+        .iter()
+        .filter(|cell| drawn(cell))
+        .any(|cell| cell.text() != QUOTE_BAR)
+    {
+        return 0;
+    }
     cells
         .iter()
         .enumerate()
         .rev()
-        .find(|(_, cell)| !cell.is_blank() && !cell.is_continuation())
+        .find(|(_, cell)| drawn(cell))
         .map_or(0, |(index, cell)| {
             u16::try_from(index)
                 .unwrap_or(u16::MAX)

@@ -273,6 +273,20 @@ pub(super) fn edge_markers(
         }
         let right = usize::from(left) + usize::from(area.width);
         if occupied(right..cells.len()) {
+            // A double-width glyph whose lead lands in the second-to-last column owns the
+            // last one, and is painted straight over anything stamped there — so on every
+            // second terminal width a CJK or emoji document was given no cut indication
+            // at all. `blit` already blanks a lead it cannot fit; do the same here rather
+            // than move the marker, which would leave the rail zigzagging by one column
+            // from row to row depending on what each row happens to end in.
+            if area.width >= 2
+                && cells
+                    .get(right - 1)
+                    .is_some_and(|cell| cell.is_continuation())
+                && let Some(lead) = buffer.cell_mut((area.x + area.width - 2, area.y + y))
+            {
+                lead.set_symbol(" ");
+            }
             mark(buffer, area.x + area.width - 1, right - 1, Side::Right);
         }
     }
