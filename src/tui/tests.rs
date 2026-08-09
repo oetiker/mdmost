@@ -957,12 +957,12 @@ fn the_quote_bar_matches_the_renderer() {
 
 #[test]
 fn the_gutter_rule_matches_the_renderer() {
-    // The third private thing `super::wide` recognises by sight, and the one with the
-    // most to go wrong: not just a glyph but a glyph in a style, after a run of digits in
-    // *another* style. If the renderer changes any of the three — or the order it writes
-    // them in — the pager stops pinning the gutter and the numbers scroll away again,
-    // silently. Asserting the detected column rather than only the constant is what makes
-    // this a tripwire for the layout too.
+    // The renderer publishes where its gutter ends, as a canvas pin, and the arithmetic
+    // it publishes is not the arithmetic it draws with — one is `1 + padding + gutter`,
+    // the other a `write_str` per column. If the drawn layout moves and the pin does not,
+    // the pager holds the wrong columns still and either cuts the numbers in half or eats
+    // the first character of the code. Assert the published column against the drawn one,
+    // which is the only thing that keeps the two honest.
     let doc = Doc::parse("```javascript\nfirst\nsecond\n```\n");
     let theme = crate::theme::Theme::default_dark();
     let canvas = crate::render::render_document(
@@ -971,12 +971,11 @@ fn the_gutter_rule_matches_the_renderer() {
         &theme,
         &crate::render::RenderOptions::new(false, true),
     );
-    let pinned = super::wide::pinned_prefix(&canvas, &theme);
+    let pinned = super::wide::pinned_prefix(&canvas);
     let text = canvas.plain_text();
     assert!(
-        text.contains(&format!("1 {} first", super::wide::GUTTER_RULE)),
-        "the renderer still draws `N {} code`: {text}",
-        super::wide::GUTTER_RULE
+        text.contains("1 │ first"),
+        "the renderer still draws `N │ code`: {text}"
     );
     // ` │ 1 │ first`: margin, frame, padding, one digit, blank, rule, blank — code at 7.
     let row = (0..canvas.height())
@@ -1109,7 +1108,7 @@ fn edge_column(
     // The real per-row reach, so this test cannot disagree with the pager about which
     // rows move: a row that has nowhere to go is not cut, and must not be marked.
     let reach = super::wide::scroll_reach(canvas, width);
-    let pinned = super::wide::pinned_prefix(canvas, theme);
+    let pinned = super::wide::pinned_prefix(canvas);
     let offsets = super::draw::Offsets::scrolled_to(&reach, &pinned, left, width);
     let rows = painted(width, height, |buffer, area| {
         super::draw::edge_markers(
@@ -1767,6 +1766,130 @@ fn the_line_number_gutter_stays_put_while_the_code_scrolls_under_it() {
     assert!(
         after.iter().any(|row| row.contains("ZEBRA")),
         "what the reader scrolled to is on screen: {after:?}"
+    );
+}
+
+/// A numbered fence and an over-wide table inside the *same list item*.
+///
+/// A container emits its children with no blank row between them, so the two blocks are
+/// one contiguous non-blank run of canvas rows — the unit a prefix inferred from the
+/// drawn canvas was spread over.
+const NESTED_FENCE_AND_TABLE: &str = "\
+- ```rust
+  let a = 1 + 2;
+  ```
+  | aaaaaaaaaaaaaaaaaaaaaaaaa | bbbbbbbbbbbbbbbbbbbbbbbbb | ccccccccccccccccccccccccc | \
+                                          ddddddddddddddddddddddddd |
+  |--|--|--|--|
+  | 1 | 2 | 3 | 4 |
+";
+
+#[test]
+fn a_table_beside_a_fence_in_one_list_item_keeps_none_of_its_gutter() {
+    // The prefix belongs to the block that has a gutter, and a table has none. Spread
+    // over a contiguous run instead, the fence's four gutter columns were frozen at the
+    // left edge of every row of the table below it: the header read `aaaa‹bbbb…`, text
+    // that exists nowhere in the document, and the second column was unreachable.
+    let mut app = numbered_pager_at(NESTED_FENCE_AND_TABLE, 80, 24);
+    assert!(app.hscroll_max() > 0, "the probe document must scroll");
+    assert_eq!(app.scroll(), 0, "the probe document fits vertically");
+    let header = (0..app.rendered().height())
+        .find(|&row| app.rendered().row_text(row).contains("aaaaaaaaaa"))
+        .expect("the table's header row is drawn");
+    assert_eq!(
+        app.pinned()[header],
+        0,
+        "a table has no gutter to pin, whatever block shares its run: {:?}",
+        app.rendered().row_text(header)
+    );
+    // The fence above it still has one, or this passes on a build that pins nothing.
+    let code = (0..app.rendered().height())
+        .find(|&row| app.rendered().row_text(row).contains("let a = 1 + 2;"))
+        .expect("the fence's one code line is drawn");
+    assert!(
+        app.pinned()[code] > 0,
+        "the numbered fence in the same run keeps its own gutter: {:?}",
+        app.rendered().row_text(code)
+    );
+
+    for _ in 0..30 {
+        app.act(Action::ScrollRight);
+    }
+    assert!(app.hscroll() > 0, "and must have been scrolled");
+    let truth = app.rendered().row_text(header);
+    let rows = framed(&mut app, 80, 24);
+    // The document occupies every column but the scrollbar's, and the outermost one on
+    // each side is the marker rail; what is left is document and nothing else.
+    let drawn: String = rows[header].chars().skip(1).take(77).collect();
+    assert!(
+        truth.contains(drawn.trim_end()),
+        "every column of a scrolled table row comes from one contiguous window of the \
+         row itself.\n  drawn: {drawn:?}\n  row:   {truth:?}"
+    );
+}
+
+#[test]
+fn an_unnumbered_fence_pins_nothing_however_its_code_is_coloured() {
+    // The detector used to rest on a style coincidence: `theme.code.line_number` is not
+    // unique — both shipped themes paint `code.operator` in the very same value — so the
+    // `=` in an *unnumbered* fence was read as a line number, the fence's right border
+    // as the rule closing the gutter, and a prefix as wide as the block came back. It was
+    // masked only by `Offsets` clamping a prefix wider than the viewport to zero, which
+    // is one theme tweak or one `--width` away from not masking it.
+    let doc = Doc::parse("```rust\nlet a = 1 + 2;\n```\n");
+    let theme = crate::theme::Theme::default_dark();
+    let canvas = crate::render::render_document(
+        &doc,
+        40,
+        &theme,
+        // Line numbers *off*: this block has no gutter, so nothing may be pinned.
+        &crate::render::RenderOptions::new(false, false),
+    );
+    let pinned = super::wide::pinned_prefix(&canvas);
+    assert!(
+        pinned.iter().all(|&prefix| prefix == 0),
+        "a fence with no gutter pins nothing: {pinned:?}\n{}",
+        canvas.plain_text()
+    );
+}
+
+#[test]
+fn a_numbered_fence_in_a_table_cell_pins_nothing() {
+    // The other half of "a pin is a claim about the whole row". A fence in a cell draws a
+    // real gutter and publishes a real pin, and the table then blits the cell into the
+    // middle of a row it shares with the cells beside it — where the claim is false.
+    // `Canvas::blit` drops it there, which is what keeps the first column of a table from
+    // freezing because the second one holds numbered code.
+    // A fence inside a cell is not something the parser will produce from markdown; the
+    // renderer's own tests build it by putting a parsed block into a cell, and so does
+    // this one.
+    let outer = Doc::parse("| h | i |\n|---|---|\n| x | y |\n");
+    let inner = Doc::parse("```rust\nlet x = 1;\nlet y = 2;\n```\n");
+    let mut table = outer.root().children[0].clone();
+    let row = table
+        .children
+        .iter_mut()
+        .find(|node| matches!(node.kind, crate::doc::NodeKind::TableRow { header: false }))
+        .expect("a body row");
+    row.children[1].children = inner.root().children.clone();
+
+    let theme = crate::theme::Theme::default_dark();
+    let canvas = crate::render::render_block(
+        &table,
+        60,
+        &theme,
+        &crate::render::RenderOptions::new(false, true),
+    );
+    assert!(
+        canvas.plain_text().contains("1 │ let x = 1;"),
+        "the cell really does draw a numbered gutter:\n{}",
+        canvas.plain_text()
+    );
+    let pinned = super::wide::pinned_prefix(&canvas);
+    assert!(
+        pinned.iter().all(|&prefix| prefix == 0),
+        "nothing inside a table cell pins the row it shares: {pinned:?}\n{}",
+        canvas.plain_text()
     );
 }
 

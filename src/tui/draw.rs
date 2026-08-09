@@ -444,8 +444,9 @@ pub(super) fn edge_markers(
         //
         // The rail is the column immediately left of the scrolling region, which is blank
         // on every row that has one: the document's margin on a plain row, and the gutter's
-        // own separator — the blank column `pinned_prefix` deliberately keeps between the
-        // rule and the code — on a pinned one. Only a viewport too narrow for the renderer
+        // own separator — the blank column `render::code` deliberately keeps inside the pin
+        // it publishes, between the rule and the code — on a pinned one. Only a viewport
+        // too narrow for the renderer
         // to have inset a margin at all has no rail, and there the old stamp-over-content
         // behaviour is what is left; at two columns there is nothing to protect.
         let hidden = usize::from(pinned)..usize::from(pinned) + usize::from(offset);

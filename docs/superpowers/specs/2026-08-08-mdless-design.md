@@ -173,13 +173,16 @@ reads as a layout mistake, and the common centre line reads as a decision.
 
 **Interaction with horizontal scrolling.** Nothing past the full body width changes: a
 block that still does not fit is widened and reached with `←`/`→` exactly as before.
-`scroll_reach` and `pinned_prefix` both measure the canvas *as drawn*, so a centred block
+`scroll_reach` measures the canvas *as drawn*, so a centred block
 simply has a larger left extent; capped rows stay well inside the render width and
 therefore keep an offset of zero, which is what stops one wide table dragging the prose
 sideways. One thing this depends on: a block placed with the prose is **cropped to the
 cap before it is indented**, because a canvas padded out to the full width and then
 indented would push every row's extent past the render width and hand the whole document
-to `scroll_reach` as a single over-wide run.
+to `scroll_reach` as a single over-wide run. `pinned_prefix` is *not* a measurement: a
+block's chrome prefix — a code fence's line-number gutter — is published by the renderer
+that drew it as a `Canvas` pin and translated by the indent, because nothing readable off
+the drawn cells says which block a row belongs to.
 
 ## 4. The `Canvas` contract
 
@@ -192,8 +195,16 @@ pub struct Canvas {
     pub rows: Vec<Vec<Cell>>,
     pub anchors: Vec<Anchor>,   // heading ids -> row, for TOC jumps
     pub spans: Vec<SearchSpan>, // source-text offsets -> (row, col), for search
+    pub pins: Vec<Pin>,         // row -> leading columns that are the block's own chrome
 }
 ```
+
+The three metadata channels are how `render` tells `tui` something about a row that only
+the renderer which drew it can know, without `render` depending on `tui`. `Pin` is the
+newest: it carries a code fence's line-number gutter to the horizontal scroll, which holds
+those columns still while the code slides under them. A pin is a claim about a *whole*
+row, so it travels through `append` and `indent` and is dropped by `blit` — a canvas
+placed at an arbitrary column of a shared row (a table cell) has no standing to make one.
 
 Rules:
 

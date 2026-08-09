@@ -18,13 +18,18 @@
 //! a long line horizontally never scrolls the numbers away", which was true of the clip
 //! and false of the pager, where the horizontal offset moved every column of a row alike
 //! and carried the gutter off the left edge with the code. Keeping the numbers on screen
-//! there is `tui`'s job: `tui::wide::pinned_prefix` finds this block's chrome by reading
-//! the drawn canvas, by style — the digits are the only cells in
-//! `theme.code.line_number`, the rule closing them is `GUTTER_RULE` in
-//! `theme.code.frame`, and the label in the top rule is the only `theme.code.language` —
-//! and `tui::draw` holds those columns still while the rest of each row scrolls under
-//! them. Changing a glyph, a style, or the order they are written in will move that seam;
-//! `tui::tests::the_gutter_rule_matches_the_renderer` is the tripwire.
+//! there is `tui`'s job, and this file tells it where they end: [`pin_gutter`] records the
+//! seam on the canvas as a [`Pin`](crate::canvas::Pin), the third metadata channel beside
+//! anchors and search spans, and `tui::draw` holds those columns still while the rest of
+//! each row scrolls under them.
+//!
+//! The pager used to *infer* the seam instead, by matching cell styles on the drawn
+//! canvas. Do not restore that: `theme.code.line_number` is not unique — both shipped
+//! themes give `code.operator` the same value — so an unnumbered fence containing an `=`
+//! was read as having a gutter, and the inferred prefix was spread over a contiguous run
+//! of non-blank rows, which inside a list item is this fence and the block after it.
+//! `tui::tests::the_gutter_rule_matches_the_renderer` pins the published column to the
+//! layout drawn here.
 
 use crate::canvas::{BorderSet, Canvas};
 use crate::error::MermaidError;
@@ -119,7 +124,44 @@ fn framed_code(
         theme.code.background,
     );
     join_gutter(&mut out, gutter, padding, ctx);
+    pin_gutter(&mut out, gutter, padding, title.as_ref());
     out
+}
+
+/// Publishes the columns of this block that are chrome, for the pager to hold still.
+///
+/// The seam between gutter and code is arithmetic only this function has: the frame's
+/// column, the padding, and the gutter [`code_area`] drew. Handing it to the pager as a
+/// [`Canvas`] pin is what lets `tui::draw` keep the numbers on screen while a long line
+/// scrolls under them, without the pager having to guess where the gutter ended.
+///
+/// It used to guess, by matching cell styles: the digits were "the only cells painted in
+/// `theme.code.line_number`". They are not — `theme.code.operator` is the same value in
+/// both shipped themes — and the guess was then spread over a contiguous run of non-blank
+/// rows, which inside a list item is this fence *and the table under it*. A published pin
+/// is per block by construction and rests on no style at all.
+fn pin_gutter(out: &mut Canvas, gutter: usize, padding: u16, title: Option<&Line>) {
+    if gutter == 0 {
+        return;
+    }
+    // Frame, padding, gutter: the column the code starts at, the blank column after the
+    // gutter's rule included, so offset zero is byte-identical to no pinning at all.
+    let prefix = u16::try_from(1 + usize::from(padding) + gutter)
+        .unwrap_or(u16::MAX)
+        .min(out.width());
+    for row in 0..out.height() {
+        out.add_pin(row, prefix);
+    }
+    // The label in the top rule is chrome for the same reason the numbers are, and a
+    // prefix stopping short of it leaves a fragment of a word standing in a box rule —
+    // `╭  ru────╮`. `framed` writes it one column in from the corner, with a space on
+    // either side, and clips it to the inner width so the corner always survives.
+    if let Some(title) = title {
+        let label = u16::try_from(2 + title.width() + 1)
+            .unwrap_or(u16::MAX)
+            .min(out.width());
+        out.add_pin(0, label.max(prefix));
+    }
 }
 
 /// Blank columns between the code frame and the code inside it.
@@ -250,6 +292,7 @@ fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Ca
     );
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
     join_gutter(&mut out, gutter, padding, ctx);
+    pin_gutter(&mut out, gutter, padding, Some(&title));
     out
 }
 
