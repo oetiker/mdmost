@@ -54,16 +54,46 @@ pub fn eighth_bar(eighths: usize, max_cells: usize) -> String {
     out
 }
 
-/// Splits a meter `width` cells wide into its filled and unfilled halves.
+/// A meter split into the three runs it is drawn in, left to right.
 ///
-/// The two are returned separately because they are drawn in different colours; their
-/// display widths always add up to exactly `width`, so a caller can write them one
-/// after the other and land where it expected.
-pub fn meter(fraction: f64, width: usize) -> (String, String) {
-    let filled = eighth_bar(eighths_of(fraction, width), width);
-    let drawn = crate::text::display_width(&filled);
-    let trough = TROUGH.repeat(width.saturating_sub(drawn));
-    (filled, trough)
+/// They are separate because each takes a different style, and in particular because
+/// the partial cell needs *both* colours at once — see [`meter`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Meter {
+    /// The whole cells that are filled, drawn in the fill colour alone.
+    pub full: String,
+    /// The one cell that is part filled, or empty when the value lands on a boundary.
+    ///
+    /// A left-aligned eighth block paints only its left fraction; the rest of the cell
+    /// shows through as background, so this run must be drawn with the fill colour in
+    /// front of the *track* colour.
+    pub partial: String,
+    /// The cells past the value, drawn in the track colour alone.
+    pub trough: String,
+}
+
+/// Splits a meter `width` cells wide into its filled, part-filled and unfilled runs.
+///
+/// The three are returned separately because they are drawn in three different styles:
+/// the fill colour, the fill colour over the track colour, and the track colour. That
+/// middle style is the whole reason this is not a two-way split — an eighth block
+/// covers only the left fraction of its cell, so drawing it over anything but the
+/// track leaves a hole exactly where the eye reads the value off.
+///
+/// Their display widths always add up to exactly `width`, so a caller can write them
+/// one after the other and land where it expected.
+pub fn meter(fraction: f64, width: usize) -> Meter {
+    let bar = eighth_bar(eighths_of(fraction, width), width);
+    // `eighth_bar` emits full blocks followed by at most one partial block, so the
+    // boundary is simply the first glyph that is not a full block.
+    let split = bar.find(|glyph| glyph != '\u{2588}').unwrap_or(bar.len());
+    let (full, partial) = bar.split_at(split);
+    let drawn = crate::text::display_width(&bar);
+    Meter {
+        full: full.to_string(),
+        partial: partial.to_string(),
+        trough: TROUGH.repeat(width.saturating_sub(drawn)),
+    }
 }
 
 #[cfg(test)]
@@ -105,9 +135,11 @@ mod tests {
     fn a_meter_always_fills_exactly_its_width() {
         for width in 0..12usize {
             for percent in 0..=100 {
-                let (filled, trough) = meter(f64::from(percent) / 100.0, width);
+                let bar = meter(f64::from(percent) / 100.0, width);
                 assert_eq!(
-                    display_width(&filled) + display_width(&trough),
+                    display_width(&bar.full)
+                        + display_width(&bar.partial)
+                        + display_width(&bar.trough),
                     width,
                     "{percent}% of {width}"
                 );
@@ -116,13 +148,53 @@ mod tests {
     }
 
     #[test]
-    fn a_full_meter_has_no_trough_and_an_empty_one_is_all_trough() {
-        let (filled, trough) = meter(1.0, 6);
-        assert_eq!(filled, "██████");
-        assert!(trough.is_empty());
+    fn the_partial_run_is_one_cell_at_most_and_never_a_full_block() {
+        // The whole point of the split is that this run alone needs the track colour
+        // behind it, so it must hold exactly the cell that is part filled: no full
+        // blocks (they would then be drawn over a track they completely hide) and
+        // never more than one cell (there is only ever one boundary).
+        for width in 0..12usize {
+            for permille in 0..=1000 {
+                let bar = meter(f64::from(permille) / 1000.0, width);
+                assert!(
+                    display_width(&bar.partial) <= 1,
+                    "{permille}‰ of {width}: {:?}",
+                    bar.partial
+                );
+                assert!(
+                    !bar.partial.contains('\u{2588}'),
+                    "{permille}‰ of {width}: {:?}",
+                    bar.partial
+                );
+                assert!(
+                    bar.full.chars().all(|glyph| glyph == '\u{2588}'),
+                    "{permille}‰ of {width}: {:?}",
+                    bar.full
+                );
+            }
+        }
+    }
 
-        let (filled, trough) = meter(0.0, 6);
-        assert!(filled.is_empty());
-        assert_eq!(trough, TROUGH.repeat(6));
+    #[test]
+    fn a_meter_splits_a_fractional_cell_out_of_the_fill() {
+        // 3/8 of the way across four cells is one and a half cells: one full block,
+        // then a half block that must not be lumped in with it.
+        let bar = meter(0.375, 4);
+        assert_eq!(bar.full, "█");
+        assert_eq!(bar.partial, "▌");
+        assert_eq!(bar.trough, TROUGH.repeat(2));
+    }
+
+    #[test]
+    fn a_full_meter_has_no_trough_and_an_empty_one_is_all_trough() {
+        let bar = meter(1.0, 6);
+        assert_eq!(bar.full, "██████");
+        assert!(bar.partial.is_empty());
+        assert!(bar.trough.is_empty());
+
+        let bar = meter(0.0, 6);
+        assert!(bar.full.is_empty());
+        assert!(bar.partial.is_empty());
+        assert_eq!(bar.trough, TROUGH.repeat(6));
     }
 }

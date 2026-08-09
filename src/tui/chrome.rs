@@ -262,15 +262,33 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     left.push(Segment::new(Drop::Never, position));
 
     // The meter sits on a visible trough: eight blank cells at 0 % read as a hole in
-    // the bar rather than as an empty gauge (visual review P9), and both halves take
-    // the bar's own background so the gauge is part of the bar, not a patch on it.
-    let (filled, trough) = meter(f64::from(app.progress()), METER_WIDTH);
+    // the bar rather than as an empty gauge (visual review P9), and the whole gauge
+    // takes the bar's own background so it is part of the bar, not a patch on it.
+    //
+    // The part-filled cell is the exception, and the reason `meter` returns three runs.
+    // An eighth block paints only the left fraction of its cell; the rest shows the
+    // cell's background, so on the bar's background that one cell had a bar-coloured
+    // gap in it while the trough beside it was track-coloured — a discontinuity at
+    // exactly the boundary the eye reads the value off (owner report). Putting the
+    // track colour behind it makes the cell read as "part filled" instead.
+    let gauge = meter(f64::from(app.progress()), METER_WIDTH);
+    let thumb = on_bar(theme.ui.scrollbar_thumb, theme);
     left.push(Segment::new(
         Drop::Meter,
         vec![
             TermSpan::styled(" ", bar),
-            TermSpan::styled(filled, term_style(on_bar(theme.ui.scrollbar_thumb, theme))),
-            TermSpan::styled(trough, term_style(on_bar(theme.ui.scrollbar_track, theme))),
+            TermSpan::styled(gauge.full, term_style(thumb)),
+            TermSpan::styled(
+                gauge.partial,
+                term_style(crate::theme::Style {
+                    bg: theme.ui.scrollbar_track.fg,
+                    ..thumb
+                }),
+            ),
+            TermSpan::styled(
+                gauge.trough,
+                term_style(on_bar(theme.ui.scrollbar_track, theme)),
+            ),
         ],
     ));
 
