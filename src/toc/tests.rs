@@ -3,9 +3,49 @@
 use super::*;
 use crate::canvas::Anchor;
 
-/// Builds a table of contents from Markdown.
+/// Builds a table of contents from Markdown, numbered as the pager would number it.
 fn toc(source: &str) -> Toc {
-    Toc::from_doc(&Doc::parse(source))
+    let doc = Doc::parse(source);
+    Toc::from_doc(&doc, &Numbering::for_doc(&doc))
+}
+
+/// The same, with section numbering switched off.
+fn unnumbered_toc(source: &str) -> Toc {
+    Toc::from_doc(&Doc::parse(source), &Numbering::none())
+}
+
+/// The section number of every entry, `""` where there is none.
+fn numbers(toc: &Toc) -> Vec<String> {
+    toc.entries()
+        .iter()
+        .map(|entry| entry.number.clone().unwrap_or_default())
+        .collect()
+}
+
+/// A deeply nested document carries its numbers into the pane, title excepted.
+#[test]
+fn entries_carry_the_section_number_the_page_draws() {
+    let toc = toc("# T\n\n## A\n\n### B\n\n#### C\n\n## D\n");
+    assert_eq!(numbers(&toc), ["", "1", "1.1", "1.1.1", "2"]);
+    // And it is beside the text, never inside it: the fuzzy filter must go on seeing
+    // the document as the author wrote it.
+    assert_eq!(toc.entries()[1].text, "A");
+    assert_eq!(toc.filter("1").len(), 0);
+}
+
+/// A flat document is unnumbered in the pane too.
+#[test]
+fn a_flat_document_has_no_numbers_in_the_pane() {
+    assert_eq!(numbers(&toc("# A\n\n## B\n\n# C\n")), ["", "", ""]);
+}
+
+/// The setting reaches the pane, not only the page.
+#[test]
+fn numbering_can_be_switched_off_for_the_pane() {
+    assert_eq!(
+        numbers(&unnumbered_toc("# A\n\n## B\n\n### C\n")),
+        ["", "", ""]
+    );
 }
 
 /// A convenient anchor literal.

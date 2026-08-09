@@ -12,6 +12,7 @@
 
 use crate::canvas::{Anchor, BorderSet, Canvas};
 use crate::doc::{ListInfo, Node, NodeKind};
+use crate::numbering::Numbering;
 use crate::text::{Align, Line, Span, display_width, pad_to_width, repeat_to_width};
 use crate::theme::{Style, Theme};
 
@@ -59,6 +60,22 @@ pub(crate) fn heading_rule(level: u8) -> Option<&'static str> {
 /// nothing.
 pub fn render_block(node: &Node, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
     render_block_ctx(node, width, Ctx::new(theme, options))
+}
+
+/// Renders one block of a document whose sections are numbered (design spec §9.3).
+///
+/// The same as [`render_block`] except that a heading in `numbers` is drawn with its
+/// number in front of it. This is what a caller assembling the top level block by block
+/// — the pager's [`crate::tui::wide::render_scrollable`] — needs: the numbering is a
+/// property of the whole document, so it is computed there, once, and handed down.
+pub fn render_block_numbered(
+    node: &Node,
+    width: u16,
+    theme: &Theme,
+    options: &RenderOptions,
+    numbers: &Numbering,
+) -> Canvas {
+    render_block_ctx(node, width, Ctx::new(theme, options).numbered(numbers))
 }
 
 /// Renders a sequence of blocks at `width` columns, separated by blank rows.
@@ -163,14 +180,36 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
     canvas
 }
 
+/// The narrowest the text of a numbered heading may be squeezed to.
+///
+/// A `1.2.3 ` prefix costs six columns of a forty-column line, and a deep enough
+/// document can make that prefix longer than the heading. Below this many columns of
+/// text the number stops being orientation and starts being the thing you read, so the
+/// heading drops it and keeps its words — the number is an aid, and an aid that eats
+/// the content it annotates has stopped helping. The threshold is on the *text*, not
+/// on the prefix, so it degrades by width rather than by number length.
+const NUMBER_MIN_TEXT: u16 = 8;
+
 /// A heading: coloured text starting at the margin, over a rule that says which level
-/// it is (design spec §9).
+/// it is (design spec §9), and — in a deeply nested document — its section number in
+/// front of it (§9.3).
+///
+/// The number is a hanging marker, exactly as a list ordinal is: the heading's second
+/// line wraps under its own first word rather than under the digits, so the text stays
+/// a block the eye can follow and the numbers stay a column of their own.
 pub(crate) fn heading(node: &Node, level: u8, id: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     let theme = ctx.theme;
     let style = theme.heading(level);
-    let mut out = render_inline(&node.children, width, style, ctx);
+    let marker = section_number(id, width, ctx);
+    let text_width = marker.as_ref().map_or(width, |marker| {
+        width - u16::try_from(marker.width()).unwrap_or(width)
+    });
+    let mut out = render_inline(&node.children, text_width, style, ctx);
     if out.is_empty() {
         out.push_blank_row(style);
+    }
+    if let Some(marker) = marker {
+        out = hanging(&marker, &out, ctx.base);
     }
     out.add_anchor(Anchor {
         id: id.to_string(),
@@ -183,6 +222,21 @@ pub(crate) fn heading(node: &Node, level: u8, id: &str, width: u16, ctx: Ctx<'_>
         out.push_rule(glyph, theme.heading_rule(level));
     }
     out
+}
+
+/// The section-number marker for a heading, if it has one and it fits.
+///
+/// `None` for an unnumbered document, for the title of a titled one, for a fragment
+/// rendered outside a document (a table cell), and for a heading too narrow to carry
+/// its number and still say anything — see [`NUMBER_MIN_TEXT`].
+fn section_number(id: &str, width: u16, ctx: Ctx<'_>) -> Option<Line> {
+    let label = ctx.numbers?.label(id)?;
+    let text = format!("{label} ");
+    let cost = u16::try_from(display_width(&text)).unwrap_or(u16::MAX);
+    if width.saturating_sub(cost) < NUMBER_MIN_TEXT {
+        return None;
+    }
+    Some(Line::new(vec![Span::new(text, ctx.theme.heading_number)]))
 }
 
 /// A paragraph.
@@ -422,13 +476,18 @@ fn html_marker(width: u16, ctx: Ctx<'_>) -> Canvas {
 ///
 /// This is the hanging indent shared by list items, footnote definitions and
 /// headings; `content` must already have been rendered at the reduced width.
+///
+/// The indent is the marker's full width, **even when the marker is wider than the
+/// content beside it** — a `1.1.1.1.1.1 ` section number at twenty columns, or a long
+/// footnote label at any width. It used to be clamped to the content's width, on the
+/// grounds that a pathological label would otherwise allocate a canvas wider than the
+/// caller was ever going to keep; what the clamp actually did was slide the content
+/// left *under* the marker, so the marker overwrote its first few columns and the row
+/// read `1.1.1.1.1.1 ion`. Every caller already sizes its marker against the width
+/// before rendering the content at what is left, which is the right place to stop the
+/// pathological case and the only place that knows the width.
 pub(crate) fn hanging(marker: &Line, content: &Canvas, fill: Style) -> Canvas {
-    // Clamped, as `heading` and `list` already clamp their own marker fields: a
-    // pathological footnote label would otherwise allocate a canvas that wide before
-    // the caller resizes it back.
-    let indent = u16::try_from(marker.width())
-        .unwrap_or(u16::MAX)
-        .min(content.width());
+    let indent = u16::try_from(marker.width()).unwrap_or(u16::MAX);
     let mut out = content.indent(indent, 0, fill);
     if out.is_empty() {
         out.push_blank_row(fill);

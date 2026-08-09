@@ -314,6 +314,19 @@ pub struct Theme {
     /// text: a rule under the signature heading must not be the least visible thing on
     /// the line. Read it through [`Theme::heading_rule`].
     pub heading_rules: [Style; 6],
+    /// Style of the section number drawn in front of a heading (design spec §9.3).
+    ///
+    /// One style for all six levels, on purpose: the numbers are one system laid over
+    /// the document rather than six ranks of heading, and letting them climb the
+    /// heading ramp would make a top-level number compete with the title it prefixes.
+    ///
+    /// **A slot of its own, not a borrowed one.** These digits are not in the author's
+    /// document, and the reader has to be able to tell that at a glance — so they sit
+    /// in the muted family the code gutter's line numbers use, outside the heading hue
+    /// entirely, quieter than every heading level in both built-in themes while still
+    /// clearing the 4.5:1 text floor. `tests/theme_contrast.rs` holds both halves of
+    /// that; see [`Theme::heading_number`].
+    pub heading_number: Style,
     /// Inline text styles.
     pub text: TextStyles,
     /// Block-level styles.

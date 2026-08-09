@@ -404,6 +404,77 @@ rather than truncated, wrapped or scrolled, which is what makes a 40-column term
 safe; and `title_banner = false` declines it always. The banner keeps the heading's TOC
 anchor and carries one search span per character per row, so the title is still jumped to
 and still found by search.
+
+### 9.3 A deeply nested document is given section numbers
+
+**Added 2026-08-09 at the owner's request:** *"for documents with deeply nested sections
+we should supply section numbering in a light color (to make clear the numbering is ours)
+to provide orientation. Again we should differentiate between documents that have a
+single `#` at the start where this is the title and not the first level section."*
+
+A document that nests three or more section levels is one you lose your place in: the
+heading rules say how *deep* you are but never *where*, and by the third `###` of the
+fourth `##` the reader is navigating from memory. Such a document gets a `1.2.3` in
+front of every heading, **in the body and in the contents pane alike** — the pane is
+where orientation is mostly sought, and two places showing different numbers would be
+worse than neither showing any.
+
+*The rule*, which `crate::numbering` owns and both the page and the pane read:
+
+- A document **titled** by a lone `#` — *exactly one level-1 heading and it is the first
+  block*, `Doc::lone_title`, **the same predicate §9.2's banner turns on** — leaves that
+  title unnumbered and numbers from the level below it: `1`, `2`, `3` for its `##`s,
+  `1.1` for their `###`s. A document without such a title numbers its `#`s themselves.
+  The predicate is shared rather than reimplemented: a document that was banner'd but
+  numbered from the wrong level, or numbered its own banner, would be the exact defect
+  two copies of a condition produce. The banner adds conditions of its own *on top* —
+  it must be switched on, and the art must be drawable at this width — but those decide
+  whether the art can be drawn, never which heading is the title. A title whose banner
+  is declined for a CJK character is still the title, and still goes unnumbered.
+- The **top level** is the shallowest heading level that gets numbered. A document
+  written entirely in `###` numbers `1`, `2`, `3`, not `0.0.1`.
+- A heading of level `L` owns component `L − top`, counting from zero, and entering a
+  component resets everything below it.
+- **Skipped levels** — `#` straight to `###`, which is common and legal — put a `0`
+  where the ancestor the author did not write would be: `1.0.1`. This is pandoc's
+  `--number-sections` rule, and it is a *rule* rather than a list of cases: the number
+  of components follows from the level alone, so two headings at different levels can
+  never be given sibling numbers and the numbering can never contradict the hierarchy
+  the heading rules draw. The same zero covers the leading case (a `###` before the
+  document's first `##`) without a second rule.
+- The threshold is **three or more distinct numbered levels**. Two levels is `1` and
+  `1.1`, a shape the reader holds in their head; the third is where orientation starts
+  to cost something, and a flat document given numbers is pure noise. The title does not
+  count towards the three, because it is not a section — and because otherwise adding a
+  `#` title to a document would conjure numbering it did not have.
+- A heading inside a block quote is numbered, because it is in `Doc::headings` and
+  therefore in the contents pane: the page and the pane agree by construction.
+
+*The colour is the third requirement, not a detail.* These digits are not in the
+author's document, so they are drawn in `Theme::heading_number` — a slot of their own,
+one style for all six levels, in the muted family the code gutter numbers its lines in
+and outside the heading hue entirely. `tests/theme_contrast.rs` pins both halves of what
+"light" has to mean here: at least 4.5:1 against the page (5.04:1 dark, 4.71:1 light)
+because they are text somebody reads, and quieter than *every* heading level including
+the sixth (5.56:1 dark, 4.80:1 light) because a number as loud as the words beside it
+has stopped announcing itself as an annotation.
+
+*Layout.* The number is a hanging marker, as a list ordinal is: the heading's second
+line wraps under its own first word, not under the digits. A number that would leave
+fewer than eight columns for the text is dropped for that heading — at twenty columns a
+`1.1.1.1.1.1 ` prefix is no longer an aid — and nothing is ever truncated to make room.
+
+*Configuration.* `section_numbers = true` by default, alongside `title_banner` and for
+the same reasons: it is what the owner asked for, and it costs nothing on a document
+that does not qualify. The key is for the reader who wants the author's headings and
+nothing else. Like `title_banner` it has no command-line flag of its own, since it is a
+property of how documents are typeset rather than of this invocation.
+
+*Where it is computed.* Once per render, over the whole document, by `render_document`
+and by the pager's `tui::wide::render_scrollable` — never at parse time (§3), and never
+in a block renderer, which can see a heading's level but not whether it is the only `#`
+in the document. Section numbering and the title banner are the two decisions that need
+the whole document in view, and they are taken side by side for that reason.
 - Nerd Font glyphs for heading bullets, list markers, code-fence language icons, and
   the status bar, used when a Nerd Font is detected (§2.1). `--no-icons` and
   `icons = false` substitute plain Unicode of the same display width, as does detection

@@ -29,7 +29,8 @@
 
 use crate::canvas::{Canvas, Cell};
 use crate::doc::{Doc, Node, NodeKind};
-use crate::render::{Limits, RenderOptions, margins, render_block, render_document};
+use crate::numbering::Numbering;
+use crate::render::{Limits, RenderOptions, margins, render_block_numbered, render_document};
 use crate::theme::Theme;
 
 /// The glyph the renderers paint in a row's last column when content is cut off.
@@ -96,10 +97,15 @@ pub fn render_scrollable(
     // body measure like any other block, so a capped body centres it with the prose
     // rather than letting the art run to the terminal edge on its own.
     let mut banner = crate::render::title_banner(doc, measure.prose, theme, options);
+    // Section numbering is the other whole-document decision (design spec §9.3), and
+    // for the same reason: a block renderer cannot see whether the document nests
+    // deeply enough to want numbers. Computed once here and handed to every block, so
+    // the pager and the piped renderer number identically.
+    let numbers = Numbering::enabled(doc, options.section_numbers);
     for (index, node) in blocks.iter().enumerate() {
         let part = match banner.take() {
             Some(banner) if index == 0 => placed(banner, measure, fill),
-            _ => render_placed(node, measure, theme, options, &clipped, fill),
+            _ => render_placed(node, measure, theme, options, &numbers, &clipped, fill),
         };
         if part.is_empty() {
             continue;
@@ -208,21 +214,22 @@ fn render_placed(
     measure: Measure,
     theme: &Theme,
     options: &RenderOptions,
+    numbers: &Numbering,
     clip: &ClipTest,
     fill: crate::theme::Style,
 ) -> Canvas {
     if !measure.is_capped() {
-        return render_widened(node, measure.full, theme, options, clip);
+        return render_widened(node, measure.full, theme, options, numbers, clip);
     }
     let exempt = is_exempt(node);
     let canvas = if exempt {
-        render_widened(node, measure.full, theme, options, clip)
+        render_widened(node, measure.full, theme, options, numbers, clip)
     } else {
-        let capped = render_block(node, measure.prose, theme, options);
+        let capped = render_block_numbered(node, measure.prose, theme, options, numbers);
         if clip.is_clipped(&capped) {
             // The cap would cut this block short, so it takes the whole body — and
             // beyond it, if the whole body is not enough either.
-            render_widened(node, measure.full, theme, options, clip)
+            render_widened(node, measure.full, theme, options, numbers, clip)
         } else {
             capped
         }
@@ -297,6 +304,7 @@ fn render_widened(
     width: u16,
     theme: &Theme,
     options: &RenderOptions,
+    numbers: &Numbering,
     clip: &ClipTest,
 ) -> Canvas {
     let limits = Limits::new(
@@ -308,12 +316,12 @@ fn render_widened(
     {
         return canvas;
     }
-    let narrow = render_block(node, width, theme, options);
+    let narrow = render_block_numbered(node, width, theme, options, numbers);
     let is_clipped = |canvas: &Canvas| clip.is_clipped(canvas);
     if !is_clipped(&narrow) || width >= MAX_BLOCK_WIDTH {
         return narrow;
     }
-    let render = |at: u16| render_block(node, at, theme, options);
+    let render = |at: u16| render_block_numbered(node, at, theme, options, numbers);
 
     // Double until the block fits, which bounds the search; then bisect for the
     // narrowest width that still fits, so the scrollable extent matches the content

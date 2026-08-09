@@ -78,6 +78,15 @@ pub struct Config {
     /// and only level-1 heading, and it declines itself when the art will not fit the
     /// pane, so the reader who wants no banners at all is the one this key is for.
     pub title_banner: bool,
+    /// Whether a deeply nested document gets section numbers (design spec §9.3).
+    ///
+    /// On by default, on the same reasoning as `title_banner`: the owner asked for the
+    /// feature, and it applies itself only where it earns its keep — a document has to
+    /// use three or more distinct heading levels below its title before a single digit
+    /// is drawn, so the flat documents most people read are untouched. What the key is
+    /// for is the reader who would rather see the author's headings and nothing else,
+    /// and the writer checking their document against a renderer that adds nothing.
+    pub section_numbers: bool,
     /// Whether the table-of-contents pane starts open.
     pub toc_open: bool,
     /// The width of the table-of-contents pane, in columns.
@@ -124,6 +133,7 @@ impl Default for Config {
             icons: None,
             line_numbers: false,
             title_banner: true,
+            section_numbers: true,
             toc_open: false,
             toc_width: DEFAULT_TOC_WIDTH,
             mouse: false,
@@ -296,6 +306,7 @@ struct RawConfig {
     icons: Option<bool>,
     line_numbers: Option<bool>,
     title_banner: Option<bool>,
+    section_numbers: Option<bool>,
     mouse: Option<bool>,
     scroll_step: Option<u16>,
     body_width: Option<u16>,
@@ -357,6 +368,9 @@ impl RawConfig {
         }
         if let Some(title_banner) = self.title_banner {
             config.title_banner = title_banner;
+        }
+        if let Some(section_numbers) = self.section_numbers {
+            config.section_numbers = section_numbers;
         }
         if let Some(mouse) = self.mouse {
             config.mouse = mouse;
@@ -557,6 +571,7 @@ const KNOWN_KEYS: &[&str] = &[
     "icons",
     "line_numbers",
     "title_banner",
+    "section_numbers",
     "mouse",
     "scroll_step",
     "body_width",

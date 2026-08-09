@@ -235,3 +235,48 @@ fn borders_stay_quieter_than_the_text_they_frame() {
         );
     }
 }
+
+/// Section numbers are ours, and have to look it — without becoming unreadable.
+///
+/// The numbers `mdless` puts in front of a deeply nested document's headings (design
+/// spec §9.3) are not in the author's text, so the owner asked for them "in a light
+/// colour, to make clear the numbering is ours". That is two requirements pulling
+/// against each other and both are asserted here: the digits clear the 4.5:1 text
+/// floor, because they are text the reader reads; and they stay quieter than *every*
+/// heading level, including the sixth, because a number as loud as the words beside it
+/// has stopped announcing itself as an annotation.
+///
+/// Measured on the built-ins when this was written: 5.04:1 against the dark page
+/// (quietest heading 5.56:1) and 4.71:1 against the light one (quietest heading
+/// 4.80:1). The light theme's margin is thin because its heading ramp is nearly flat —
+/// a known finding, and the reason this is a test rather than a comment.
+#[test]
+fn section_numbers_are_readable_but_quieter_than_every_heading() {
+    for theme in themes() {
+        let name = &theme.name;
+        let page = theme.palette.bg;
+        let number = fg("the section number", theme.heading_number);
+        at_least(
+            name,
+            "a section number on the page",
+            number,
+            page,
+            TEXT_FLOOR,
+        );
+        let numbered = contrast(number, page);
+        for level in 1..=6u8 {
+            let heading = contrast(fg("a heading", theme.heading(level)), page);
+            assert!(
+                numbered < heading,
+                "{name}: the section number ({numbered:.2}:1) must stay quieter than \
+                 the level-{level} heading it prefixes ({heading:.2}:1)"
+            );
+            // And it is a slot of its own, not the heading colour worn thin.
+            assert_ne!(
+                theme.heading_number.fg,
+                theme.heading(level).fg,
+                "{name}: the section number borrows the level-{level} heading colour"
+            );
+        }
+    }
+}

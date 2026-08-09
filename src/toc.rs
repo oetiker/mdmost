@@ -11,10 +11,11 @@
 //!
 //! ```
 //! use mdless::doc::Doc;
+//! use mdless::numbering::Numbering;
 //! use mdless::toc::Toc;
 //!
 //! let doc = Doc::parse("# One\n\n## Two\n\n# Three\n");
-//! let toc = Toc::from_doc(&doc);
+//! let toc = Toc::from_doc(&doc, &Numbering::for_doc(&doc));
 //! assert_eq!(toc.len(), 3);
 //! assert_eq!(toc.entries()[1].depth, 1);
 //! ```
@@ -26,6 +27,7 @@ use std::collections::BTreeMap;
 
 use crate::canvas::Anchor;
 use crate::doc::Doc;
+use crate::numbering::Numbering;
 
 /// One heading in the table of contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +43,14 @@ pub struct TocEntry {
     /// A document whose headings jump from `#` to `###` still indents by one step, so
     /// the pane never shows a ragged gap the author did not intend.
     pub depth: usize,
+    /// The section number of this heading, if the document is numbered (spec §9.3).
+    ///
+    /// Kept beside the text rather than folded into it: the number is ours, not the
+    /// author's, so the fuzzy filter, the status bar's breadcrumb and every other
+    /// reader of `text` must go on seeing the document as it was written. The pane
+    /// draws it in [`Theme::heading_number`](crate::theme::Theme::heading_number), the
+    /// same quiet slot the body uses.
+    pub number: Option<String>,
     /// The index of the parent entry, if any.
     pub parent: Option<usize>,
     /// The row this heading was rendered at, once anchors have been attached.
@@ -56,8 +66,15 @@ pub struct Toc {
 }
 
 impl Toc {
-    /// Builds the table of contents from a parsed document.
-    pub fn from_doc(doc: &Doc) -> Self {
+    /// Builds the table of contents from a parsed document and its section numbering.
+    ///
+    /// The numbering is passed in rather than derived here so that the pane and the
+    /// page can never show different numbers for the same heading: there is one
+    /// [`Numbering`] per document, built by the same
+    /// [`Numbering::for_doc`](crate::numbering::Numbering::for_doc) the renderer uses.
+    /// Pass [`Numbering::none`](crate::numbering::Numbering::none) for an unnumbered
+    /// table of contents.
+    pub fn from_doc(doc: &Doc, numbers: &Numbering) -> Self {
         let mut entries: Vec<TocEntry> = Vec::with_capacity(doc.headings().len());
         // Stack of (level, index) of the ancestors of the entry being added.
         let mut ancestors: Vec<(u8, usize)> = Vec::new();
@@ -75,6 +92,7 @@ impl Toc {
                 text: heading.text.clone(),
                 level: heading.level,
                 depth,
+                number: numbers.label(&heading.id).map(ToString::to_string),
                 parent,
                 row: None,
                 source_start: heading.source.start,

@@ -123,6 +123,14 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
         is_dark,
         headings,
         heading_rules,
+        // The muted neutral, unweighted: a section number has to be legible (it clears
+        // 4.5:1 on both built-in pages — 5.04:1 dark, 4.71:1 light) and has to read as
+        // *ours* rather than as the author's text. Both come from staying out of the
+        // heading hue altogether, in the same grey the code gutter numbers its lines
+        // in, below the quietest heading level in either theme (5.56:1 dark, 4.80:1
+        // light). Deriving it from the palette rather than fixing a colour is what
+        // makes a `[themes.<name>]` block inherit the relationship.
+        heading_number: muted,
         text: TextStyles {
             body: base,
             emphasis: base.italic(),

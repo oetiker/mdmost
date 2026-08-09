@@ -13,6 +13,13 @@ and a document whose first block is its one and only `#` heading opens with that
 set in the FIGlet *Small* font, falling back to an ordinary heading whenever the art
 would not fit or the title is not plain ASCII (`title_banner = false` turns it off).
 
+A document that nests three or more section levels also gets **section numbers** — `1`,
+`1.1`, `1.1.1` — in front of its headings and in the contents pane, drawn in a quiet
+grey of their own so it is obvious they are `mdless`'s and not the author's. A lone `#`
+title is not a section: it stays unnumbered and its `##`s are numbered `1`, `2`, `3`. A
+flat document gets nothing, because it needs nothing. `section_numbers = false` turns
+them off.
+
 ```
  ╭──────────┬───────────┬─────────────╮
  │ Language │ Extension │ Highlighted │
@@ -222,6 +229,7 @@ theme        = "dark"    # name of a built-in or a [themes.*] table
 icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to detect
 line_numbers = false     # line-number gutter in fenced code blocks
 title_banner = true      # set a document's lone `#` heading as a FIGlet banner
+section_numbers = true   # number headings when a document nests three levels or more
 mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies source
 scroll_step  = 3         # document lines per mouse-wheel notch
 body_width   = 100       # widest the prose body is laid out; 0 for no cap

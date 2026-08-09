@@ -318,6 +318,143 @@ fn the_title_banner_can_be_switched_off() {
     assert_eq!(drawn[0], "Title");
 }
 
+// ------------------------------------------------------------ section numbers
+
+/// A document with no title: the `#`s are the top level and number themselves.
+#[test]
+fn a_deeply_nested_document_numbers_its_sections() {
+    let markdown = "# One\n\n## First\n\n### Deep\n\n## Second\n\n# Two\n";
+    let drawn = lines(markdown, 40);
+    for wanted in ["1 One", "1.1 First", "1.1.1 Deep", "1.2 Second", "2 Two"] {
+        assert!(
+            drawn.contains(&wanted.to_string()),
+            "{wanted:?} in {drawn:?}"
+        );
+    }
+}
+
+/// A lone `#` is the title: it is unnumbered and the `##`s are the top level.
+///
+/// Written with the banner declined so the title is a row of text to assert on; the
+/// banner'd shape is [`a_banner_title_is_not_numbered`], and the numbers below it are
+/// the same either way.
+#[test]
+fn a_titled_document_numbers_from_the_second_level() {
+    let markdown = "# Title\n\n## First\n\n### Deep\n\n#### Deeper\n\n## Second\n";
+    let drawn = body_rows(&render_with(markdown, 40, &NO_BANNER))
+        .into_iter()
+        .filter(|row| !row.is_empty())
+        .collect::<Vec<_>>();
+    assert!(drawn.contains(&"Title".to_string()), "{drawn:?}");
+    assert!(drawn.contains(&"1 First".to_string()), "{drawn:?}");
+    assert!(drawn.contains(&"1.1 Deep".to_string()), "{drawn:?}");
+    assert!(drawn.contains(&"1.1.1 Deeper".to_string()), "{drawn:?}");
+    assert!(drawn.contains(&"2 Second".to_string()), "{drawn:?}");
+}
+
+/// The `FIGlet` title is unnumbered, and the sections under it number as they always do.
+#[test]
+fn a_banner_title_is_not_numbered() {
+    let markdown = "# Title\n\n## First\n\n### Deep\n\n#### Deeper\n";
+    let drawn = lines(markdown, 40);
+    // The banner is art, drawn from the title's own text and nothing else: no row of
+    // it carries a number, and the numbering below it is what it would be anyway.
+    let art = &drawn[..4];
+    assert!(art.iter().all(|row| !row.contains('1')), "{art:?}");
+    assert!(drawn.contains(&"1 First".to_string()), "{drawn:?}");
+    assert!(drawn.contains(&"1.1 Deep".to_string()), "{drawn:?}");
+}
+
+/// A flat document needs no orientation aid and gets none.
+#[test]
+fn a_flat_document_is_not_numbered() {
+    // Two `#`s so this is not a titled document: two levels in use, and no numbers.
+    let markdown = "# One\n\n## A\n\n## B\n\n# Two\n\n## C\n";
+    let drawn = lines(markdown, 40);
+    assert!(drawn.contains(&"One".to_string()), "{drawn:?}");
+    assert!(drawn.contains(&"A".to_string()), "{drawn:?}");
+    assert!(!drawn.iter().any(|row| row.starts_with("1")), "{drawn:?}");
+    // And a titled document with only two levels under the title is flat as well: the
+    // title is not a section, so it cannot make the document deep.
+    let titled = body_rows(&render_with("# T\n\n## A\n\n### B\n", 40, &NO_BANNER));
+    assert!(titled.contains(&"A".to_string()), "{titled:?}");
+}
+
+/// A skipped level leaves a `0` where the ancestor the author did not write would be.
+#[test]
+fn a_skipped_level_numbers_the_missing_ancestor_zero() {
+    let markdown = "# One\n\n### Deep\n\n## Back\n\n#### Deeper\n\n# Two\n";
+    let drawn = lines(markdown, 40);
+    assert!(drawn.contains(&"1 One".to_string()), "{drawn:?}");
+    assert!(drawn.contains(&"1.0.1 Deep".to_string()), "{drawn:?}");
+    assert!(drawn.contains(&"1.1 Back".to_string()), "{drawn:?}");
+    assert!(drawn.contains(&"1.1.0.1 Deeper".to_string()), "{drawn:?}");
+}
+
+/// The number is drawn in its own style, not the heading's.
+#[test]
+fn the_section_number_is_quieter_than_its_heading() {
+    let theme = Theme::default_dark();
+    // No `#` at all, so the `##`s are the top level and row 0 is `1 A`.
+    let canvas = render_body("## A\n\n### B\n\n#### C\n", 40, &PLAIN);
+    let number = style_at(&canvas, 0, BODY_COL);
+    let text = style_at(&canvas, 0, BODY_COL + 2);
+    assert_eq!(
+        number, theme.heading_number,
+        "the number wears its own slot"
+    );
+    assert_eq!(text, theme.heading(2), "the heading text is unchanged");
+    assert_ne!(number, text);
+}
+
+/// Numbering is a setting, and off means no numbers anywhere.
+#[test]
+fn section_numbers_can_be_switched_off() {
+    let markdown = "## A\n\n### B\n\n#### C\n";
+    let plain = PLAIN.with_section_numbers(false);
+    let drawn = body_rows(&render_with(markdown, 40, &plain));
+    assert!(drawn.contains(&"A".to_string()), "{drawn:?}");
+    // The same document with the setting on is the control.
+    let on = body_rows(&render_with(markdown, 40, &PLAIN));
+    assert!(on.contains(&"1 A".to_string()), "{on:?}");
+}
+
+/// A numbered heading wraps under its own text, not under its number.
+#[test]
+fn a_numbered_heading_wraps_under_its_text() {
+    let markdown = "## A heading long enough to wrap twice over\n\n### B\n\n#### C\n";
+    let drawn = lines(markdown, 24);
+    assert_eq!(drawn[0], "1 A heading long enough");
+    assert_eq!(drawn[1], "  to wrap twice over");
+}
+
+/// A number that would leave no room for words is dropped, and the words stay.
+#[test]
+fn a_heading_too_narrow_for_its_number_keeps_its_words() {
+    // Ten deep, so the number is `1.1.1.1.1.1.1.1.1 ` — eighteen columns.
+    let mut markdown = String::new();
+    for level in 1..=6 {
+        markdown.push_str(&format!("{} Section\n\n", "#".repeat(level)));
+    }
+    markdown.push_str("# Second\n");
+    // Twenty columns still pays for the twelve-column number and leaves eight for the
+    // word, which is the floor.
+    let roomy = lines(&markdown, 20);
+    assert!(
+        roomy.contains(&"1.1.1.1.1.1 Section".to_string()),
+        "{roomy:?}"
+    );
+    // Sixteen does not, so the deepest heading drops its number and keeps its word.
+    // The shallower ones, whose numbers still fit, keep theirs.
+    let tight = lines(&markdown, 16);
+    assert!(tight.contains(&"Section".to_string()), "{tight:?}");
+    assert!(tight.contains(&"1.1.1 Section".to_string()), "{tight:?}");
+    // And nothing is ever cut: every heading still says its whole word.
+    for row in tight.iter().filter(|row| row.ends_with("Section")) {
+        assert!(row.ends_with(" Section") || row == "Section", "{row:?}");
+    }
+}
+
 // ----------------------------------------------------------------------- lists
 
 #[test]
