@@ -69,13 +69,31 @@ which one is in force never affects layout (§9).
 *Amended 2026-08-09.* This section used to say the three marker families — heading
 prefixes, list bullets, task boxes — each own a distinct shape vocabulary and never share
 a glyph. Two of those three are gone as icon families. Heading prefixes were removed
-outright (§9.1). List bullets are now the *same plain Unicode in both sets* (`·`, `–`,
-`▪`, `▫`, by nesting depth), because the owner asked for a less prominent bullet and
-every filled circle a Nerd Font offers — `nf-fa-circle`, `nf-md-circle`,
-`nf-md-circle-medium` — is a heavy disc at icon size, which is the complaint itself;
-plain Unicode has the finer grades. What remains is the rule that bullets and task boxes
-never share a glyph, still tested, and the width rule, which now holds trivially for
-bullets. Detection therefore no longer demands the four bullet code points.
+outright (§9.1). List bullets are now the *same plain Unicode in both sets* (`●`, `–`,
+`▪`, `▫`, by nesting depth), because the level-one bullet's size has been in question
+twice, in both directions, and plain Unicode is the set with the grades to answer it:
+`·`, `•` and `●` are three sizes of the same mark, where every filled circle a Nerd
+Font offers — `nf-fa-circle`, `nf-md-circle`, `nf-md-circle-medium` — is one heavy disc
+at icon size. What remains is the rule that bullets and task boxes never share a glyph,
+still tested, and the width rule, which now holds trivially for bullets. Detection
+therefore no longer demands the four bullet code points.
+
+*Amended again 2026-08-09*, after the owner found `·` U+00B7 too small to read as a
+marker and chose `⦁` U+2981 from a rendered selection. U+2981 **cannot ship**: it is
+absent from CommitMono Nerd Font (and from DejaVu), so it draws as a blank — the same
+defect that removed `◦` U+25E6 earlier the same day. Measured at a 200-unit em, the
+owner's pick is 0.44 em and the shipping font's `●` is 0.54 em against `•`'s 0.24, so
+`●` is what the ladder starts with. **Rasterise a candidate glyph in the font before
+believing it exists.**
+
+*The task boxes moved in the same pass.* The Nerd Font pair was `nf-fa-square_o` and
+`nf-fa-check_square_o`, which rasterise at 120×121 and 97×97 — the unticked box is a
+quarter larger than the ticked one, which is what the owner saw. They are now
+`nf-md-checkbox_blank_outline` / `nf-md-checkbox_marked_outline`, drawn as a pair at
+72×73 each. These are Nerd Fonts v3 code points, so a v2 patch now fails detection and
+gets plain Unicode — the safe direction of §2.1's rule. The plain boxes are unchanged:
+`☒` U+2612 was weighed against `☑` and is *further* from `☐` by ink (42% against 34%,
+`☐` being 27%), all three being the same 145×146 box in the fallback face.
 
 ## 3. The central architectural rule
 
@@ -500,7 +518,13 @@ the whole document in view, and they are taken side by side for that reason.
   measured on the rendered item, so a nested list, a code block or a table counts as
   readily as a wrapped paragraph; one consequence is that a list carrying a sublist is
   spaced at the nesting level, at every width. Each list level decides for itself — a
-  wrapping outer item does not force its children apart. The decision is therefore
+  wrapping outer item does not force its children apart. **A spaced list is separated
+  from everything it touches, not only from itself** (amended 2026-08-09 on the owner's
+  report): the blank row belongs to the seams of the list, and a nested list has one
+  more seam than it has gaps between items — the one against the item that introduces
+  it, and the one against any content following it in that item. Placing rows only
+  between items left a five-deep nest packed solid on the way down while every list
+  below it breathed. The decision is therefore
   width-dependent (dense at 120 columns, spaced at 60, which is exactly when the items
   look cramped) and is taken during layout at a known width, never at parse time (§3);
   the render cache is keyed on width, so a resize re-decides.

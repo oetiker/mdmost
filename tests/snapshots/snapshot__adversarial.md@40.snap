@@ -31,9 +31,11 @@ expression: canvas.plain_text()
  Lists                                  
  ────────────────────────────────────── 
                                         
- · level one                            
+ ● level one                            
+                                        
    – level two with a longer line that  
      has to wrap somewhere sensible     
+                                        
      ▪ level three                      
        1. ordered inside unordered      
        2. second                        
