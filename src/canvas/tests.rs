@@ -371,6 +371,50 @@ fn blit_translates_anchors_and_spans() {
 }
 
 #[test]
+fn a_pin_travels_with_whole_rows_and_no_further() {
+    // The rule that makes the pin channel per block: a pin is a claim about a row's
+    // *first* columns, so it survives the operations that move whole rows and dies in
+    // the one that drops a canvas into the middle of somebody else's row. Without that
+    // asymmetry a numbered fence inside a table cell would pin the columns of the cells
+    // to its left — the very corruption the channel replaced.
+    let mut src = Canvas::new(4, 2, base());
+    src.add_pin(1, 3);
+    assert_eq!(src.pinned_prefix(), vec![0, 3], "one entry per row");
+
+    let indented = src.indent(2, 1, base());
+    ok(&indented);
+    assert_eq!(
+        indented.pinned_prefix(),
+        vec![0, 5],
+        "an indent moves the whole row, so the chrome starts two columns later"
+    );
+
+    let mut stacked = Canvas::new(4, 1, base());
+    stacked.append(&src, base());
+    ok(&stacked);
+    assert_eq!(
+        stacked.pinned_prefix(),
+        vec![0, 0, 3],
+        "stacking moves a pin down and leaves its columns alone"
+    );
+
+    let mut dst = Canvas::new(9, 2, base());
+    dst.blit(0, 5, &src, base());
+    ok(&dst);
+    assert_eq!(
+        dst.pinned_prefix(),
+        vec![0, 0],
+        "a canvas placed at column five owns none of the row's first five columns"
+    );
+
+    assert_eq!(
+        stacked.slice_rows(2, 1).pinned_prefix(),
+        vec![3],
+        "a viewport slice keeps the pins of the rows it kept"
+    );
+}
+
+#[test]
 fn append_widens_the_narrower_canvas() {
     let mut top = Canvas::from_text(3, "ab", base());
     let bottom = Canvas::from_text(6, "wide!!", base());

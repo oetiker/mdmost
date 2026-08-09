@@ -4,6 +4,13 @@
 //! [`Canvas`]. The viewport does nothing but blit a vertical slice of the document
 //! canvas onto the terminal.
 //!
+//! Beside the cells a canvas carries three metadata channels, each answering something
+//! about a row that only the renderer which drew it can know: [`Anchor`]s for the table of
+//! contents, [`SearchSpan`]s mapping source bytes to cells, and [`Pin`]s marking the
+//! leading columns that are a block's own chrome. They are how `render` tells `tui` things
+//! without `render` depending on `tui`, and adding one is cheaper than teaching the pager
+//! to infer the same fact from the drawn cells — which it did for the pin, wrongly.
+//!
 //! # The contract
 //!
 //! A canvas is a rectangle of [`Cell`]s that is **exactly [`Canvas::width`] display
@@ -68,6 +75,34 @@ pub struct SearchSpan {
     pub cols: u16,
 }
 
+/// The leading columns of one row that are chrome rather than content.
+///
+/// The third metadata channel, beside [`Anchor`] and [`SearchSpan`], and it exists for
+/// the same reason they do: the pager needs to know something about a row that only the
+/// renderer that drew it can know. Here it is where a block's own chrome stops — a code
+/// fence's line-number gutter — so that the horizontal scroll can hold those columns
+/// still while the code slides underneath them.
+///
+/// **A pin is a claim about the whole row**: columns `0..cols` of row `row` belong to a
+/// block that owns the row from its first column. That is why it travels through
+/// [`Canvas::append`] and [`Canvas::indent`], which stack and inset whole rows, and not
+/// through [`Canvas::blit`], which drops any pin the source carried — a canvas placed at
+/// an arbitrary column of a row it shares with other content (a table cell) cannot make a
+/// claim about that row's first columns.
+///
+/// This channel replaced a detector that inferred the same seam by matching cell styles
+/// against `theme.code.line_number`. That was unsound twice over: the style is not unique
+/// (`code.operator` is the same value in both shipped themes, so an *unnumbered* fence
+/// tripped it), and the inferred prefix was spread over a contiguous run of non-blank
+/// rows, which in a list item is the fence *and the table under it*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pin {
+    /// The row whose leading columns are chrome.
+    pub row: usize,
+    /// How many leading columns, counted from column zero of the row.
+    pub cols: u16,
+}
+
 /// A rectangle of styled cells, exactly [`Canvas::width`] columns wide on every row.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Canvas {
@@ -75,6 +110,7 @@ pub struct Canvas {
     rows: Vec<Vec<Cell>>,
     anchors: Vec<Anchor>,
     spans: Vec<SearchSpan>,
+    pins: Vec<Pin>,
 }
 
 impl Canvas {
@@ -92,6 +128,7 @@ impl Canvas {
             rows: Vec::new(),
             anchors: Vec::new(),
             spans: Vec::new(),
+            pins: Vec::new(),
         }
     }
 
@@ -177,6 +214,37 @@ impl Canvas {
     /// Records a source-to-canvas mapping.
     pub fn add_span(&mut self, span: SearchSpan) {
         self.spans.push(span);
+    }
+
+    /// The pinned chrome prefixes recorded in this canvas.
+    pub fn pins(&self) -> &[Pin] {
+        &self.pins
+    }
+
+    /// Records that columns `0..cols` of `row` are the row's own chrome.
+    ///
+    /// A `cols` of zero is not recorded: no pin and a pin of nothing are the same claim,
+    /// and only one of them costs an entry.
+    pub fn add_pin(&mut self, row: usize, cols: u16) {
+        if cols > 0 {
+            self.pins.push(Pin { row, cols });
+        }
+    }
+
+    /// How many leading columns of each row are chrome; one entry per row.
+    ///
+    /// The [`Pin`] channel, expanded to the shape the viewport wants. Rows with no pin
+    /// get zero, and a row with more than one pin — which nothing records today, but
+    /// which the channel does not forbid — gets the widest, because a prefix has to cover
+    /// every claim made about the row for the chrome to stay whole.
+    pub fn pinned_prefix(&self) -> Vec<u16> {
+        let mut pinned = vec![0u16; self.rows.len()];
+        for pin in &self.pins {
+            if let Some(slot) = pinned.get_mut(pin.row) {
+                *slot = (*slot).max(pin.cols);
+            }
+        }
+        pinned
     }
 
     /// Appends a blank row and returns its index.

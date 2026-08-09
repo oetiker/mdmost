@@ -4,7 +4,7 @@
 //! from. Every one of them preserves the canvas contract described in
 //! [`crate::canvas`].
 
-use super::{Anchor, BorderSet, Canvas, Cell, SearchSpan};
+use super::{Anchor, BorderSet, Canvas, Cell, Pin, SearchSpan};
 use crate::error::CanvasError;
 use crate::text::{Align, Line, display_width};
 use crate::theme::Style;
@@ -262,6 +262,11 @@ impl Canvas {
     /// * Search spans are translated verbatim, including spans whose cells were
     ///   clipped at the right edge; consumers must clamp a span to the canvas width
     ///   before highlighting it.
+    /// * `src`'s [`Pin`]s are **dropped**. A pin is a claim about a row's first columns
+    ///   (see [`Pin`]), and a blit puts `src` somewhere on a row it may well share with
+    ///   other content — a table cell is the case that matters — where it has no standing
+    ///   to make one. The operations that do keep a pin are [`Canvas::append`] and
+    ///   [`Canvas::indent`], which move whole rows.
     /// * Cells of `src` that are blank *and* carry no style still overwrite the
     ///   destination; use [`Canvas::blit_opaque`] semantics deliberately — a canvas is
     ///   a rectangle, not a sprite with transparency.
@@ -309,10 +314,24 @@ impl Canvas {
         }));
     }
 
+    /// Translates and merges `src`'s pins into `self`.
+    ///
+    /// Separate from [`Canvas::merge_metadata`] because pins travel with whole rows and
+    /// the other two channels travel with cells: only the operations that place `src`
+    /// across the full width of the destination rows may call this.
+    fn merge_pins(&mut self, src: &Canvas, top: usize, left: u16) {
+        self.pins.extend(src.pins.iter().map(|pin| Pin {
+            row: pin.row + top,
+            cols: pin.cols.saturating_add(left),
+        }));
+    }
+
     /// Appends `other` below `self`.
     ///
     /// The result is as wide as the wider of the two; the narrower one is padded on
     /// the right with blanks in `fill`.
+    ///
+    /// Whole rows are stacked, so `other`'s [`Pin`]s come with them unchanged.
     pub fn append(&mut self, other: &Canvas, fill: Style) {
         let width = self.width.max(other.width);
         let _ = self.pad_to_width(width, fill);
@@ -320,6 +339,7 @@ impl Canvas {
         self.rows
             .extend(other.rows.iter().map(|cells| pad_cells(cells, width, fill)));
         self.merge_metadata(other, top, 0);
+        self.merge_pins(other, top, 0);
     }
 
     /// Stacks canvases vertically, in order.
@@ -367,9 +387,14 @@ impl Canvas {
     /// Returns a copy of `self` inset by `left` and `right` blank columns.
     ///
     /// Used for list indentation and block quote gutters.
+    ///
+    /// Every row moves right by `left` in one piece, so a [`Pin`] moves with it: the
+    /// columns the indent added are chrome of the container, and a gutter two spaces into
+    /// a list item is still welded to the left edge of the page.
     pub fn indent(&self, left: u16, right: u16, fill: Style) -> Canvas {
         let mut out = Canvas::new(self.width + left + right, self.height(), fill);
         out.blit(0, usize::from(left), self, fill);
+        out.merge_pins(self, 0, left);
         out
     }
 
@@ -399,6 +424,15 @@ impl Canvas {
             .map(|s| SearchSpan {
                 row: s.row - start,
                 ..*s
+            })
+            .collect();
+        out.pins = self
+            .pins
+            .iter()
+            .filter(|pin| (start..end).contains(&pin.row))
+            .map(|pin| Pin {
+                row: pin.row - start,
+                cols: pin.cols,
             })
             .collect();
         out
