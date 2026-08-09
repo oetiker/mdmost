@@ -838,6 +838,98 @@ fn the_overflow_marker_matches_the_renderer() {
     );
 }
 
+/// A table wide enough that a fourteen-column viewport has to cut it.
+const WIDE_TABLE: &str = "| aaaaaaaaaa | bbbbbbbbbb |\n|---|---|\n| cccccccccc | dddddddddd |\n";
+
+/// Renders `markdown` the way the pager does: per block, widening anything clipped.
+fn scrollable(markdown: &str, width: u16) -> (crate::canvas::Canvas, crate::theme::Theme) {
+    let doc = Doc::parse(markdown);
+    let theme = crate::theme::Theme::default_dark();
+    let options = crate::render::RenderOptions::new(false, false);
+    let canvas = super::wide::render_scrollable(&doc, width, &theme, &options);
+    (canvas, theme)
+}
+
+/// The edge glyphs `edge_markers` paints down one side of a viewport.
+fn edge_column(
+    canvas: &crate::canvas::Canvas,
+    theme: &crate::theme::Theme,
+    left: u16,
+) -> Vec<char> {
+    let width = 14u16;
+    let height = u16::try_from(canvas.height()).expect("a short document");
+    let frames = [theme.code.frame, theme.table.border];
+    let rows = painted(width, height, |buffer, area| {
+        super::draw::edge_markers(
+            buffer,
+            area,
+            canvas,
+            0,
+            left,
+            ratatui::style::Style::default(),
+            &frames,
+        );
+    });
+    let at = if left > 0 { 0 } else { usize::from(width) - 1 };
+    rows.iter()
+        .map(|row| row.chars().nth(at).unwrap_or(' '))
+        .collect()
+}
+
+#[test]
+fn a_clipped_table_is_still_detected_and_widened() {
+    // The tripwire `wide.rs` names: a table now closes its cut rules instead of marking
+    // them, and `ClipTest` finds clipped blocks by looking for that marker. If the
+    // renderer ever stopped marking the content rows as well, this document would come
+    // back at viewport width with its second column gone for good.
+    let (canvas, _) = scrollable(WIDE_TABLE, 14);
+    assert!(
+        canvas.width() > 14,
+        "the clipped table was widened to {} columns",
+        canvas.width()
+    );
+    assert!(
+        canvas.plain_text().contains("bbbbbbbbbb"),
+        "the column that did not fit is reachable: {}",
+        canvas.plain_text()
+    );
+}
+
+#[test]
+fn a_viewport_edge_closes_the_frame_it_cuts() {
+    // `docs/qa/visual-review-3.md` §11, in the pager rather than the renderer: the
+    // window, not the render, is what truncates a widened block, so the edge markers are
+    // where a table or a fence gets its frame broken. A rule ends in its own glyph on
+    // whichever side it was cut; the content rows between them keep the chevron.
+    let (canvas, theme) = scrollable(WIDE_TABLE, 14);
+    assert_eq!(
+        edge_column(&canvas, &theme, 0),
+        vec!['╮', '›', '┤', '›', '╯'],
+        "the right edge closes the frame it cuts"
+    );
+    assert_eq!(
+        edge_column(&canvas, &theme, 5),
+        vec!['╭', '‹', '├', '‹', '╰'],
+        "and so does the left edge, once the reader has scrolled"
+    );
+}
+
+#[test]
+fn a_viewport_edge_marks_box_art_inside_a_fence_rather_than_closing_it() {
+    // The pager's rule is a guess made from the glyph under the cut, so it is gated on
+    // the glyph being painted in a *frame* style. Without that gate a fence full of box
+    // art would have its content rewritten into corners, which is both a lie about the
+    // content and — in the renderer, where the same guess would have to be made — a way
+    // to lose horizontal scrolling.
+    let art = "╭─────────────────────────────╮";
+    let (canvas, theme) = scrollable(&format!("```text\n{art}\n{art}\n```\n"), 14);
+    assert_eq!(
+        edge_column(&canvas, &theme, 0),
+        vec!['╮', '›', '›', '╯'],
+        "the fence's own frame closes; its content is marked"
+    );
+}
+
 #[test]
 fn the_toc_tracks_the_section_being_read() {
     let mut app = pager(SAMPLE);

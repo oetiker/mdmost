@@ -1,7 +1,10 @@
 //! Fenced and indented code blocks, and the Mermaid fences routed out of them.
 //!
 //! Code never wraps (design spec §8): a line wider than the frame is clipped and the
-//! last column carries an overflow marker, the same way an over-wide table is clipped.
+//! last column carries an overflow marker. The clip happens to the code *area*, before
+//! the frame is drawn around it, so the marker lands inside the box and the box still
+//! closes — a table, whose borders are laid out with its content, has to close its cut
+//! rules explicitly instead (see `render::table`).
 //! A ```` ```mermaid ```` fence goes to the diagram renderer instead; when that fails
 //! the block degrades to a syntax-highlighted code block with a dim caption naming the
 //! reason (design spec §6).

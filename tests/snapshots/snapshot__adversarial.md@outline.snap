@@ -121,6 +121,54 @@ Document
       TableCell
     TableRow(header=false)
       TableCell
+  Heading(h3, #wider-than-the-page)
+    Text("Wider than the page")
+  Table(7 columns)
+    TableRow(header=true)
+      TableCell
+        Text("Component")
+      TableCell
+        Text("Responsibility")
+      TableCell
+        Text("Ownership")
+      TableCell
+        Text("Status")
+      TableCell
+        Text("Milestones")
+      TableCell
+        Text("Since")
+      TableCell
+        Text("Tickets")
+    TableRow(header=false)
+      TableCell
+        Text("renderer")
+      TableCell
+        Text("turns a tree into a canvas")
+      TableCell
+        Text("core")
+      TableCell
+        Text("green")
+      TableCell
+        Text("two")
+      TableCell
+        Text("2024")
+      TableCell
+        Text("17")
+    TableRow(header=false)
+      TableCell
+        Text("pager")
+      TableCell
+        Text("scrolls the canvas")
+      TableCell
+        Text("tui")
+      TableCell
+        Text("amber")
+      TableCell
+        Text("one")
+      TableCell
+        Text("2025")
+      TableCell
+        Text("4")
   Heading(h2, #code)
     Text("Code")
   CodeBlock(rust)

@@ -32,7 +32,7 @@ mod ops;
 #[cfg(test)]
 mod tests;
 
-pub use border::BorderSet;
+pub use border::{BorderSet, Rule, Side};
 pub use cell::Cell;
 
 use crate::text::{Align, Line, cell_clusters, display_width, grapheme_width, pad_to_width};

@@ -61,6 +61,17 @@ expression: canvas.plain_text()
  │   │                                                                          
  ╰───╯                                                                          
                                                                                 
+ ◇ Wider than the page                                                          
+                                                                                
+ ╭───────────┬────────────────┬───────────┬────────┬────────────┬───────┬─────╮ 
+ │ Component │ Responsibility │ Ownership │ Status │ Milestones │ Since │ Tick› 
+ ├───────────┼────────────────┼───────────┼────────┼────────────┼───────┼─────┤ 
+ │ renderer  │ turns a tree   │ core      │ green  │ two        │ 2024  │ 17  › 
+ │           │ into a canvas  │           │        │            │       │     › 
+ │ pager     │ scrolls the    │ tui       │ amber  │ one        │ 2025  │ 4   › 
+ │           │ canvas         │           │        │            │       │     › 
+ ╰───────────┴────────────────┴───────────┴────────┴────────────┴───────┴─────╯ 
+                                                                                
  ◈ Code                                                                         
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
