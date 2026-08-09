@@ -168,6 +168,30 @@ fn bad_arguments_exit_with_two() {
     assert_eq!(output.status.code(), Some(2));
 }
 
+/// `--licenses` is how the third-party syntax notices reach whoever has the binary, so
+/// it has to work with no document, no config and no terminal — the state an auditor is
+/// in — and it has to come out as something `mdless` itself can read back.
+#[test]
+fn licenses_prints_the_bundled_notices_and_exits_cleanly() {
+    let output = run(&["--licenses"]);
+    assert_eq!(output.status.code(), Some(0));
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("Permission is hereby granted"),
+        "no MIT notice"
+    );
+    assert!(text.contains("Copyright"), "no copyright notice");
+    assert!(!text.contains("<details>"), "the listing must be HTML-free");
+
+    // …and it really is Markdown mdless can render.
+    let rendered = run_with_stdin(&["--render-once", "--width", "80"], &text);
+    assert_eq!(rendered.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&rendered.stdout).contains("Third-party syntax definitions"),
+        "the licence listing did not survive being rendered"
+    );
+}
+
 #[test]
 fn a_zero_width_is_a_usage_error() {
     let output = run_with_stdin(&["--render-once", "--width", "0"], SAMPLE);

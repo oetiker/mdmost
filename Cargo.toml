@@ -47,6 +47,15 @@ signal-hook = "0.4.4"
 syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
 thiserror = "2.0.20"
 toml = "1.1.4"
+# The syntax definitions `bat` curates — 213 of them against syntect's 2016-vintage 75,
+# which had no TypeScript, Kotlin, Swift, Zig, Nix or even TOML. Roughly +0.6 MiB in the
+# binary. `default-features = false` is load-bearing: the default feature is
+# `syntect-onig`, which would drag oniguruma and a C toolchain into the build; the crate
+# ships a separate dump built for `fancy-regex`, and `syntect-fancy` is the one that has
+# to match syntect's `default-fancy` above. The definitions `fancy-regex` cannot compile
+# (PowerShell, ARM assembly) are absent from that dump by design and fall back to plain
+# text — README and design spec §8 say so.
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 unicode-segmentation = "1.13.3"
 unicode-width = "0.2.2"
 

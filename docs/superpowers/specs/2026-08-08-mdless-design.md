@@ -328,9 +328,35 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
 
 - Fenced code blocks are highlighted by language tag. Unknown or absent tag → plain,
   themed, still framed.
-- Implementation uses `syntect` with its default syntax set, themes mapped from the
-  active `mdless` theme rather than syntect's own, so code sits inside the palette
-  instead of clashing with it.
+- Implementation uses `syntect` for parsing, with themes mapped from the active `mdless`
+  theme rather than syntect's own, so code sits inside the palette instead of clashing
+  with it.
+- **The syntax set is `bat`'s, not `syntect`'s.** `syntect::SyntaxSet::load_defaults` is
+  the Sublime Text bundle as it stood in 2016: 75 syntaxes, with no TypeScript, Kotlin,
+  Swift, Zig, Nix, Terraform, Elixir, Dart, Julia, Protobuf, GraphQL, Vue, Svelte or
+  SCSS — and no TOML, which is `mdless`'s own configuration format. The set comes from
+  `two-face` instead (`syntax::extra_newlines`, 213 syntaxes, ~0.6 MiB embedded), which
+  re-packages `bat`'s curation behind the same API and is versioned against a `bat`
+  release.
+- **The pure-Rust regex engine is a constraint, not an accident.** `syntect`'s
+  `default-fancy` and `two-face`'s `syntect-fancy` must be selected together, so the
+  build needs no C toolchain. The price is the two definitions `fancy-regex` cannot
+  compile — PowerShell and ARM assembly — which fall back to plain text and are named in
+  the README. Anything that would drag oniguruma in is a regression.
+- Tag resolution is `find_syntax_by_token` (every syntax name, every declared file
+  extension, case-insensitively) with a small alias table for what it misses or
+  misresolves. The alias table is a last resort: an entry that the bundled set has since
+  learned to resolve on its own is a defect, and `aliases_only_cover_tags_syntect_misses_or_misresolves`
+  fails on it.
+- `mdless` ships two syntax definitions of its own, for TOML and Dockerfile, in a second
+  `SyntaxSet` consulted first. They are kept because they measurably beat the bundled
+  ones against the scope table, not because the bundled ones are absent — see the tests
+  named in `src/highlight.rs`. The two sets are never merged: merging re-links every
+  bundled syntax on first use.
+- **Attribution is part of the feature.** The bundled definitions include MIT, BSD and
+  Apache-2.0 licensed work, whose notices must be reproduced in binary distributions.
+  `mdless --licenses` prints them, as plain Markdown (no HTML — see §1), generated from
+  `two_face::acknowledgement` so it cannot drift from the definitions actually embedded.
 - Code blocks are framed with the language name in the frame's top edge, line numbers
   optional via config, and never wrap: long lines scroll horizontally with the table
   mechanism.
@@ -483,6 +509,7 @@ mdless [FILE]              # file, or stdin when FILE is absent or "-"
   --mouse / --no-mouse     # mouse capture; off leaves native drag-select working
   --toc                    # start with TOC pane open
   --config PATH
+  --licenses               # third-party syntax-definition notices, then exit 0 (§8)
 ```
 
 - When input is stdin, the process reopens `/dev/tty` for keyboard input so
@@ -549,6 +576,12 @@ Complete suite, all of it required before the project is considered done:
 1. **Unit tests** per module: wrapping (CJK, emoji, ZWJ, combining marks, zero-width),
    table column negotiation, each mermaid parser, each layout engine's invariants
    (no overlapping nodes, no edges through nodes, deterministic output).
+   For the highlighter this means two things at once, because "the definition is
+   present" and "the definition works" are different claims and only the second is worth
+   anything: every language `tests/highlight_languages.rs` names must resolve to the
+   syntax a Markdown author means by that tag — `ts` to TypeScript, not to JavaScript —
+   *and* must produce at least three distinct styles over a few lines of ordinary code,
+   in both built-in themes. A definition that loads and understands nothing produces one.
 2. **Golden snapshot tests** of `--render-once` at widths 40, 80, and 120 over a corpus
    of adversarial documents: nested tables, Markdown inside cells, deep lists, mixed
    scripts, every Mermaid family, degenerate cases (empty table, single-node graph).

@@ -258,6 +258,173 @@ fn go_java_ruby_sql_are_highlighted_at_all() {
     });
 }
 
+/// A sample of each language the bundled set is expected to cover, as a Markdown author
+/// would tag it: `(fence tag, the syntax it must resolve to, a sample)`.
+///
+/// The sample is deliberately a few lines of ordinary code rather than a single keyword,
+/// because the question these cases answer is not "is the definition present" but "does
+/// it actually parse this and give the tokens different meanings".
+const MODERN_LANGUAGES: &[(&str, &str, &str)] = &[
+    (
+        "toml",
+        "TOML",
+        "# note\n[server]\nport = 8080\nname = \"api\"\n",
+    ),
+    (
+        "typescript",
+        "TypeScript",
+        "interface P { x: number }\nconst f = (p: P): string => `${p.x}`;\n",
+    ),
+    (
+        "tsx",
+        "TypeScriptReact",
+        "const A = (): JSX.Element => <div className=\"a\">{1}</div>;\n",
+    ),
+    (
+        "dockerfile",
+        "Dockerfile",
+        "# base\nFROM alpine:3 AS build\nRUN apk add curl\n",
+    ),
+    (
+        "nix",
+        "Nix",
+        "{ pkgs, ... }:\nlet x = 1; in pkgs.mkShell { name = \"s\"; }\n",
+    ),
+    (
+        "kotlin",
+        "Kotlin",
+        "fun main() {\n    val n: Int = 42 // note\n    println(\"n=$n\")\n}\n",
+    ),
+    (
+        "swift",
+        "Swift",
+        "struct P { let x: Int }\nfunc f(_ p: P) -> String { return \"\\(p.x)\" }\n",
+    ),
+    (
+        "zig",
+        "Zig",
+        "const std = @import(\"std\");\npub fn main() void {\n    var n: u32 = 1;\n}\n",
+    ),
+    (
+        "terraform",
+        "Terraform",
+        "resource \"aws_s3_bucket\" \"b\" {\n  bucket = \"name\"\n  count  = 2\n}\n",
+    ),
+    (
+        "elixir",
+        "Elixir",
+        "defmodule M do\n  # note\n  def f(x), do: {:ok, x + 1}\nend\n",
+    ),
+    (
+        "dart",
+        "Dart",
+        "class P {\n  final int x;\n  P(this.x);\n}\nvoid main() => print('hi');\n",
+    ),
+    (
+        "julia",
+        "Julia",
+        "function f(x::Int)\n    # note\n    return x + 1\nend\n",
+    ),
+    (
+        "proto",
+        "Protocol Buffer",
+        "syntax = \"proto3\";\nmessage P {\n  string name = 1;\n}\n",
+    ),
+    (
+        "graphql",
+        "GraphQL",
+        "type Query {\n  user(id: ID!): User\n}\n",
+    ),
+    (
+        "vue",
+        "Vue Component",
+        "<template>\n  <div class=\"a\">{{ n }}</div>\n</template>\n",
+    ),
+    (
+        "svelte",
+        "Svelte",
+        "<script>\n  let n = 1;\n</script>\n<p>{n}</p>\n",
+    ),
+    ("scss", "SCSS", "$c: red;\n.a {\n  color: $c; // note\n}\n"),
+    (
+        "cmake",
+        "CMake",
+        "cmake_minimum_required(VERSION 3.20)\nproject(demo C)\n",
+    ),
+    (
+        "asm",
+        "x86_64 Assembly",
+        "section .text\nglobal _start\n_start:\n    mov rax, 60\n",
+    ),
+    ("f#", "F#", "let f (x: int) = x + 1 // note\n"),
+    (
+        "solidity",
+        "Solidity",
+        "contract C {\n    uint256 public n = 1;\n}\n",
+    ),
+    (
+        "groovy",
+        "Groovy",
+        "plugins { id 'java' }\ndef n = 1 // note\n",
+    ),
+    ("jq", "JQ", ".items[] | select(.n > 1) | .name\n"),
+    ("nim", "Nim", "proc f(x: int): int =\n  result = x + 1\n"),
+    ("lua", "Lua", "local function f(x)\n  return x + 1\nend\n"),
+    ("ini", "INI", "; note\n[section]\nkey = value\n"),
+    (
+        "nginx",
+        "nginx",
+        "server {\n    listen 80;\n    root /srv;\n}\n",
+    ),
+];
+
+/// The number of distinct styles the highlighter used across a whole block.
+fn distinct_styles(lines: &[Line]) -> usize {
+    let mut seen: Vec<Style> = Vec::new();
+    for span in lines.iter().flat_map(|line| &line.spans) {
+        if !seen.contains(&span.style) {
+            seen.push(span.style);
+        }
+    }
+    seen.len()
+}
+
+/// Every tag in [`MODERN_LANGUAGES`] must reach the syntax a Markdown author means by it.
+///
+/// Resolving to *something* is not enough: before the bundled set was widened, `ts` and
+/// `typescript` resolved to `JavaScript`, which parses most TypeScript but silently
+/// mis-colours the half that is types.
+#[test]
+fn modern_language_tags_reach_the_syntax_they_name() {
+    for (tag, want, _) in MODERN_LANGUAGES {
+        assert_eq!(
+            syntax_name(Some(tag)),
+            Some(*want),
+            "fence tag `{tag}` does not resolve to {want}"
+        );
+    }
+}
+
+/// …and must really be parsed, not merely matched by name.
+///
+/// Three styles is the bar: a definition that loads but understands nothing produces one
+/// (all text), and one that only finds comments or only finds strings produces two.
+#[test]
+fn modern_languages_are_really_highlighted_in_both_themes() {
+    for_each_builtin_theme(|theme| {
+        for (tag, _, src) in MODERN_LANGUAGES {
+            let lines = highlight(Some(tag), src, theme);
+            let styles = distinct_styles(&lines);
+            assert!(
+                styles >= 3,
+                "{}: `{tag}` produced only {styles} distinct style(s) — it is not really \
+                 being highlighted",
+                theme.name
+            );
+        }
+    });
+}
+
 /// Every style the highlighter emits must come from the active theme's code slots.
 ///
 /// This is the guard against a `syntect` theme creeping back in: a colour from
@@ -331,8 +498,6 @@ fn aliases_resolve_to_the_same_syntax_as_their_canonical_tag() {
         ("js", "javascript"),
         ("mjs", "javascript"),
         ("jsx", "javascript"),
-        ("ts", "javascript"),
-        ("tsx", "javascript"),
         ("sh", "bash"),
         ("zsh", "bash"),
         ("shell", "bash"),
@@ -346,6 +511,19 @@ fn aliases_resolve_to_the_same_syntax_as_their_canonical_tag() {
         ("jsonc", "json"),
         ("text", "txt"),
         ("plaintext", "txt"),
+        ("csharp", "cs"),
+        ("fsharp", "f#"),
+        ("objc", "objective-c"),
+        ("graphviz", "dot"),
+        ("fortran", "f90"),
+        ("scheme", "scm"),
+        ("kt", "kotlin"),
+        ("tf", "terraform"),
+        ("hcl", "terraform"),
+        ("ex", "elixir"),
+        ("jl", "julia"),
+        ("gql", "graphql"),
+        ("protobuf", "proto"),
     ] {
         let resolved = syntax_name(Some(alias));
         assert!(resolved.is_some(), "alias {alias} resolves to nothing");
