@@ -1909,6 +1909,7 @@ fn themed_pager(source: &str, theme: &str, width: u16, height: u16) -> App {
             theme: theme.to_string(),
             toc_open: false,
             width: None,
+            config_path: None,
         },
     );
     app.resize(width, height);
