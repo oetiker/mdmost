@@ -256,9 +256,13 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         ],
     ));
 
-    // Design spec §10: a horizontally scrolled table or code block must say so, or a
-    // reader who bumps the arrow key cannot tell why the text moved.
-    if app.hscroll() > 0 {
+    // Design spec §10: a document with content past the right edge must say so, or a
+    // reader who bumps the arrow key cannot tell why part of the page moved — and a
+    // reader who never bumps it is never told the content was there. So the chip
+    // appears at offset 0 as well, reading `↔ 0/57`. It outranks the breadcrumb when
+    // the bar is too narrow for both: the heading is on screen, the missing columns
+    // are not.
+    if app.hscroll_max() > 0 {
         let mut spans = Vec::new();
         sep(&mut spans);
         spans.push(TermSpan::styled(

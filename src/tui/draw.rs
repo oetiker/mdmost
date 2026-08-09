@@ -54,18 +54,22 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
 
     // Render before reading scroll extents, so the first frame is already correct.
     let scroll = app.scroll();
-    let hscroll = app.hscroll();
     let _ = app.canvas();
-    blit(buffer, doc_area, app.rendered(), scroll, hscroll, base);
+    // One offset per row, so that the block that is too wide scrolls and the prose
+    // around it does not. Computed once and shared: the document, its edge markers and
+    // its search highlights disagreeing about where a row starts would paint chevrons
+    // and highlights on the wrong columns.
+    let hscroll = Offsets::new(app, doc_area.width);
+    blit(buffer, doc_area, app.rendered(), scroll, &hscroll, base);
     edge_markers(
         buffer,
         doc_area,
         app.rendered(),
         scroll,
-        hscroll,
+        &hscroll,
         marker_style,
     );
-    highlight_matches(buffer, doc_area, app, scroll, hscroll);
+    highlight_matches(buffer, doc_area, app, scroll, &hscroll);
     scrollbar(buffer, bar_area, app);
     if app.rendered().is_empty() {
         empty_notice(buffer, doc_area, dim_style);
@@ -115,15 +119,56 @@ pub fn draw_splash(frame: &mut Frame<'_>, app: &App) {
     );
 }
 
+/// Where each document row starts, horizontally, in the viewport.
+///
+/// The horizontal offset is a single number the reader moves with `←`/`→`, but applying
+/// it to every row drags the whole page sideways for the sake of one wide block. A row
+/// is therefore moved only as far as it has anywhere to go — see
+/// [`super::wide::scroll_reach`] for what "anywhere" means and why it is a property of
+/// a run of rows rather than of one row.
+struct Offsets<'a> {
+    /// How far each row may be scrolled; one entry per canvas row.
+    reach: &'a [u16],
+    /// The offset the reader has scrolled to.
+    offset: u16,
+    /// The number of columns of document on screen.
+    viewport: u16,
+}
+
+impl<'a> Offsets<'a> {
+    /// Reads the offsets for the current frame.
+    fn new(app: &'a App, viewport: u16) -> Self {
+        Self {
+            reach: app.reach(),
+            offset: app.hscroll(),
+            viewport,
+        }
+    }
+
+    /// The first canvas column drawn on `row`.
+    fn at(&self, row: usize) -> u16 {
+        let reach = self.reach.get(row).copied().unwrap_or(0);
+        self.offset.min(reach.saturating_sub(self.viewport))
+    }
+}
+
 /// Copies a vertical slice of the document canvas into the frame buffer.
 ///
 /// This is the only place canvas cells become terminal cells. Double-width characters
 /// keep their trailing continuation cell, and a wide character sliced in half by the
 /// horizontal offset is drawn as a space rather than a broken glyph.
-fn blit(buffer: &mut Buffer, area: Rect, canvas: &Canvas, top: usize, left: u16, base: Style) {
+fn blit(
+    buffer: &mut Buffer,
+    area: Rect,
+    canvas: &Canvas,
+    top: usize,
+    left: &Offsets<'_>,
+    base: Style,
+) {
     for y in 0..area.height {
         let row = top + usize::from(y);
         let Some(cells) = canvas.row(row) else { break };
+        let left = left.at(row);
         for x in 0..area.width {
             let column = usize::from(left) + usize::from(x);
             let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) else {
@@ -152,22 +197,25 @@ fn blit(buffer: &mut Buffer, area: Rect, canvas: &Canvas, top: usize, left: u16,
 /// (see [`super::wide`]), so the truncation the reader can see is a property of the
 /// *window*, not of the render. Marking both edges is what tells them there is more
 /// to the right and — the half that was missing entirely — that something is already
-/// off to the left.
+/// off to the left. Each row is measured against its own offset, so a row that stayed
+/// at column 0 while a wide block scrolled past it is marked as what it is: whole.
 fn edge_markers(
     buffer: &mut Buffer,
     area: Rect,
     canvas: &Canvas,
     top: usize,
-    left: u16,
+    left: &Offsets<'_>,
     style: TermStyle,
 ) {
     if area.width == 0 {
         return;
     }
     for y in 0..area.height {
-        let Some(cells) = canvas.row(top + usize::from(y)) else {
+        let row = top + usize::from(y);
+        let Some(cells) = canvas.row(row) else {
             break;
         };
+        let left = left.at(row);
         let occupied = |range: std::ops::Range<usize>| {
             cells
                 .get(range)
@@ -199,11 +247,12 @@ fn empty_notice(buffer: &mut Buffer, area: Rect, style: TermStyle) {
 }
 
 /// Repaints search matches on top of the document.
-fn highlight_matches(buffer: &mut Buffer, area: Rect, app: &App, top: usize, left: u16) {
+fn highlight_matches(buffer: &mut Buffer, area: Rect, app: &App, top: usize, left: &Offsets<'_>) {
     let theme = app.theme();
     let current = app.search_index();
     for y in 0..area.height {
         let row = top + usize::from(y);
+        let left = left.at(row);
         for (index, segment) in app.search().segments_on_row(row) {
             let style = if Some(index) == current {
                 theme.ui.search_current

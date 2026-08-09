@@ -34,6 +34,8 @@ struct CacheKey {
 pub struct RenderCache {
     key: Option<CacheKey>,
     canvas: Canvas,
+    reach: Vec<u16>,
+    max_reach: u16,
 }
 
 impl Default for RenderCache {
@@ -41,6 +43,8 @@ impl Default for RenderCache {
         Self {
             key: None,
             canvas: Canvas::empty(0),
+            reach: Vec::new(),
+            max_reach: 0,
         }
     }
 }
@@ -71,6 +75,10 @@ impl RenderCache {
             return false;
         }
         self.canvas = render();
+        // Derived here rather than in the viewport because it is a property of the
+        // render — a scan of every cell, which would otherwise happen on every frame.
+        self.reach = super::wide::scroll_reach(&self.canvas, width);
+        self.max_reach = self.reach.iter().copied().max().unwrap_or(0);
         self.key = Some(CacheKey {
             version,
             width,
@@ -83,5 +91,17 @@ impl RenderCache {
     /// The cached canvas. Empty until the first [`RenderCache::refresh`].
     pub fn canvas(&self) -> &Canvas {
         &self.canvas
+    }
+
+    /// How far each row of the cached canvas may be scrolled sideways.
+    ///
+    /// See [`super::wide::scroll_reach`]; one entry per canvas row.
+    pub fn reach(&self) -> &[u16] {
+        &self.reach
+    }
+
+    /// The widest reach of any row, which is how far the document scrolls at all.
+    pub fn max_reach(&self) -> u16 {
+        self.max_reach
     }
 }
