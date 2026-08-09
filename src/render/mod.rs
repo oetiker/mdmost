@@ -34,8 +34,9 @@
 //! ```
 
 pub mod block;
-mod bridge;
+pub(crate) mod bridge;
 pub(crate) mod code;
+mod diagram;
 pub(crate) mod glyphs;
 pub mod inline;
 pub mod table;
@@ -50,6 +51,7 @@ use crate::theme::{Style, Theme};
 use glyphs::Glyphs;
 
 pub use block::{render_block, render_blocks};
+pub(crate) use diagram::{Limits, diagram};
 pub use inline::wrap;
 pub use table::render_table;
 

@@ -22,7 +22,7 @@
 
 use crate::canvas::{Canvas, Cell};
 use crate::doc::{Doc, Node, NodeKind};
-use crate::render::{RenderOptions, margins, render_block, render_document};
+use crate::render::{Limits, RenderOptions, margins, render_block, render_document};
 use crate::theme::Theme;
 
 /// The glyph the renderers paint in a row's last column when content is cut off.
@@ -84,7 +84,32 @@ pub fn render_scrollable(doc: &Doc, width: u16, theme: &Theme, options: &RenderO
     out
 }
 
+/// How much wider than the viewport a diagram must want before it is granted the width.
+///
+/// A diagram needing one more column than it has is not worth giving the whole document
+/// a horizontal scrollbar, a chevron on every row and an `↔ 1/1` readout for. Below this
+/// it takes the fit ladder's answer instead, squeezed or dumped — the same thing it got
+/// before diagrams could scroll at all.
+const MIN_SURPLUS: u16 = 8;
+
+/// How many viewports wide a diagram may be laid out.
+///
+/// Past this the source dump is the better answer: crossing a diagram three screens wide
+/// is already 160 arrow presses, and [`Canvas::append`] pads every row of the document to
+/// the widest part, so the whole canvas pays for it. Revisit if a page-left/right or
+/// jump-to-edge binding ever lands.
+const VIEWPORTS: u16 = 3;
+
+/// The most layouts the width search may spend on one diagram.
+const DIAGRAM_PROBES: u8 = 8;
+
 /// Renders one block, at its own width if `width` would clip it.
+///
+/// A Mermaid fence is asked first, because "this does not fit" reaches the clip hunt as
+/// a *dump of Mermaid source* — a block that is not clipped at all and would never be
+/// widened, only side-scrolled as raw text if some other line in it happened to be long.
+/// [`crate::render::diagram`] answers with the diagram itself, at the narrowest width
+/// that draws it, and that width is what the block is laid out at.
 fn render_widened(
     node: &Node,
     width: u16,
@@ -92,6 +117,15 @@ fn render_widened(
     options: &RenderOptions,
     clip: &ClipTest,
 ) -> Canvas {
+    let limits = Limits::new(
+        MAX_BLOCK_WIDTH.min(width.saturating_mul(VIEWPORTS)),
+        DIAGRAM_PROBES,
+    );
+    if let Some((at, canvas)) = crate::render::diagram(node, width, limits, theme, options)
+        && (at == width || at - width >= MIN_SURPLUS)
+    {
+        return canvas;
+    }
     let narrow = render_block(node, width, theme, options);
     let is_clipped = |canvas: &Canvas| clip.is_clipped(canvas);
     if !is_clipped(&narrow) || width >= MAX_BLOCK_WIDTH {

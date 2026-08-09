@@ -13,7 +13,7 @@ use crate::text::wrap_plain;
 use crate::theme::Theme;
 
 use super::graph::{
-    self, EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke, Terminator,
+    self, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke, Terminator,
 };
 
 /// Widest an edge label is allowed to get before it is wrapped.
@@ -21,12 +21,30 @@ const LABEL_WIDTH: usize = 18;
 
 /// Draws a flowchart into a canvas exactly `width` columns wide.
 ///
+/// The engine may degrade the drawing as far as [`Fit::COMPACT`] allows; use
+/// [`draw_with`] to say otherwise.
+///
 /// # Errors
 ///
 /// Returns [`MermaidError::TooNarrow`] when the diagram cannot be made to fit.
 pub fn draw(chart: &Flowchart, width: u16, theme: &Theme) -> Result<Canvas, MermaidError> {
+    draw_with(chart, width, theme, Fit::COMPACT)
+}
+
+/// Draws a flowchart under the given fit policy.
+///
+/// # Errors
+///
+/// Returns [`MermaidError::TooNarrow`] when the diagram cannot be made to fit within
+/// what `fit` allows.
+pub fn draw_with(
+    chart: &Flowchart,
+    width: u16,
+    theme: &Theme,
+    fit: Fit,
+) -> Result<Canvas, MermaidError> {
     let spec = build(chart);
-    graph::draw(&spec, &Art { chart }, width, theme)
+    graph::draw(&spec, &Art { chart }, width, theme, fit)
 }
 
 /// Draws flowchart nodes for the engine.

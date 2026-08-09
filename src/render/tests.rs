@@ -1248,7 +1248,7 @@ fn a_too_narrow_caption_names_a_width_worth_widening_to() {
     let last = out.last().cloned().unwrap_or_default();
     let needed: u16 = last
         .split_whitespace()
-        .skip_while(|word| *word != "least")
+        .skip_while(|word| *word != "needs")
         .nth(1)
         .and_then(|word| word.parse().ok())
         .unwrap_or_else(|| panic!("caption names a floor: {last:?}"));
@@ -1256,17 +1256,24 @@ fn a_too_narrow_caption_names_a_width_worth_widening_to() {
         needed > width - 2,
         "the floor is a width we do not have: {last:?}"
     );
-    // The block spends two columns on its frame, so the reader widens the pane to
-    // `needed + 2`. Every width from there up must draw, or the advice sends them to a
-    // place that fails.
-    for pane in needed + 2..needed + 8 {
-        let out = lines(markdown, pane);
+    // `lines` budgets the body at exactly this many columns, which is what the caption
+    // is counting. Every width from the named one up must draw, or the advice sends the
+    // reader somewhere that fails.
+    for body in needed..needed + 8 {
+        let out = lines(markdown, body);
         let last = out.last().cloned().unwrap_or_default();
         assert!(
-            !last.contains("needs at least"),
-            "widening to {pane} was supposed to be enough: {last:?}"
+            !last.contains("needs"),
+            "widening to {body} was supposed to be enough: {last:?}"
         );
     }
+    // And one column short of it must still fail: the caption states a width flatly,
+    // with no "at least" to hide behind, so it has to be the exact one.
+    let short = lines(markdown, needed - 1);
+    assert!(
+        short.last().cloned().unwrap_or_default().contains("needs"),
+        "the caption names {needed} columns, but one fewer already draws"
+    );
 }
 
 #[test]

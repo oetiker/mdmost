@@ -16,6 +16,7 @@
 
 use crate::canvas::{BorderSet, Canvas};
 use crate::error::MermaidError;
+use crate::mermaid::Fit;
 use crate::text::{Line, Span, display_width};
 
 use super::{Ctx, bridge};
@@ -29,7 +30,20 @@ pub(crate) const OVERFLOW_MARKER: &str = "›";
 /// The glyph separating the line-number gutter from the code.
 const GUTTER_RULE: &str = "│";
 
+/// Whether a fence's info string routes it to the diagram renderer.
+///
+/// The one place that decision is made. [`super::diagram::diagram`] has to ask the same
+/// question one layer up, and a second spelling of it there is exactly the kind of
+/// duplicated predicate that drifts apart unnoticed.
+pub(crate) fn is_mermaid(language: Option<&str>) -> bool {
+    language == Some(MERMAID)
+}
+
 /// Renders a code block, routing Mermaid fences to the diagram renderer.
+///
+/// Diagrams are drawn under [`Fit::COMPACT`]: this path has nowhere to scroll, so a
+/// squeezed drawing beats a dump of Mermaid source. The pager's top-level fences go
+/// through [`super::diagram::diagram`] instead and are drawn under [`Fit::ROOMY`].
 pub(crate) fn render_code_block(
     language: Option<&str>,
     literal: &str,
@@ -37,16 +51,23 @@ pub(crate) fn render_code_block(
     width: u16,
     ctx: Ctx<'_>,
 ) -> Canvas {
-    if language == Some(MERMAID) {
-        return match bridge::mermaid(literal, width, ctx.theme) {
-            Ok(mut canvas) => {
-                canvas.resize_width(width, ctx.base);
-                canvas
-            }
+    if is_mermaid(language) {
+        return match bridge::mermaid(literal, width, ctx.theme, Fit::COMPACT) {
+            Ok(canvas) => diagram_block(canvas, width, ctx),
             Err(error) => fallback(literal, &error, width, ctx),
         };
     }
     framed_code(language, literal, fenced, width, ctx)
+}
+
+/// A drawn diagram as a block of the document: the canvas, padded to the block width.
+///
+/// Shared with [`super::diagram::diagram`], which builds the same block at a width the
+/// viewport does not have, so that the two cannot disagree about what a diagram block
+/// *is*.
+pub(crate) fn diagram_block(mut canvas: Canvas, width: u16, ctx: Ctx<'_>) -> Canvas {
+    canvas.resize_width(width, ctx.base);
+    canvas
 }
 
 /// Draws the framed, highlighted code block.
@@ -252,13 +273,18 @@ fn caption(error: &MermaidError) -> String {
         }
         // The old wording — "needs more than {width}" — restated the width the reader
         // already had, so widening the terminal was a guessing game with no way to know
-        // when to stop. Name the target instead, and say "at least", because the
-        // renderer's figure is a floor rather than a promise.
+        // when to stop. Name the target instead, and name it flatly: the hedge this
+        // used to carry ("at least") was true of a search that stopped at the first
+        // rung it liked, and false of the one that replaced it. Every renderer that
+        // reports a floor now reports the exact width its diagram starts drawing at,
+        // which `every_reported_floor_is_the_width_the_diagram_starts_drawing_at`
+        // checks across all seven families — a hedge here would be a worse answer than
+        // the truth, because the reader has to act on it.
         MermaidError::TooNarrow {
             width,
             needed: Some(needed),
         } if *needed > *width => {
-            format!("needs at least {needed} columns to draw — this block has {width}")
+            format!("needs {needed} columns to draw — this block has {width}")
         }
         MermaidError::TooNarrow { width, .. } => {
             format!("needs more than {width} columns to draw")

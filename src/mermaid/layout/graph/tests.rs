@@ -5,7 +5,7 @@ use crate::mermaid::ast::Direction;
 use crate::text::Align;
 use crate::theme::Theme;
 
-use super::{EdgeSpec, GraphSpec, GroupSpec, NodeIdx, Stroke, Terminator, draw};
+use super::{EdgeSpec, Fit, GraphSpec, GroupSpec, NodeIdx, Stroke, Terminator, draw};
 
 /// A one-letter box, so a label can never be wrapped away by the width ladder.
 fn art(node: NodeIdx, _budget: u16, theme: &Theme) -> Canvas {
@@ -59,7 +59,7 @@ fn every_direction_keeps_the_canvas_contract() {
     let theme = Theme::default_dark();
     for direction in DIRECTIONS {
         let spec = spec(direction, 5, &[(0, 1), (0, 2), (1, 3), (2, 3), (3, 4)]);
-        let canvas = draw(&spec, &art, 80, &theme).expect("fits in 80 columns");
+        let canvas = draw(&spec, &art, 80, &theme, Fit::COMPACT).expect("fits in 80 columns");
         assert_eq!(canvas.width(), 80);
         canvas.check_invariants().expect("canvas contract holds");
     }
@@ -74,7 +74,7 @@ fn every_node_survives_the_layout() {
             6,
             &[(0, 1), (1, 2), (2, 3), (0, 4), (4, 5), (5, 3)],
         );
-        let canvas = draw(&spec, &art, 100, &theme).expect("fits");
+        let canvas = draw(&spec, &art, 100, &theme, Fit::COMPACT).expect("fits");
         let text = canvas.plain_text();
         for node in 0..6 {
             let letter = char::from(b'A' + node as u8);
@@ -95,9 +95,12 @@ fn layout_is_deterministic() {
         7,
         &[(0, 3), (1, 3), (2, 4), (3, 5), (4, 5), (5, 6), (6, 0)],
     );
-    let first = draw(&spec, &art, 90, &theme).expect("fits");
+    let first = draw(&spec, &art, 90, &theme, Fit::COMPACT).expect("fits");
     for _ in 0..3 {
-        assert_eq!(draw(&spec, &art, 90, &theme).expect("fits"), first);
+        assert_eq!(
+            draw(&spec, &art, 90, &theme, Fit::COMPACT).expect("fits"),
+            first
+        );
     }
 }
 
@@ -105,7 +108,7 @@ fn layout_is_deterministic() {
 fn a_cycle_does_not_hang_and_keeps_its_arrow() {
     let theme = Theme::default_dark();
     let spec = spec(Direction::TopToBottom, 3, &[(0, 1), (1, 2), (2, 0)]);
-    let canvas = draw(&spec, &art, 60, &theme).expect("fits");
+    let canvas = draw(&spec, &art, 60, &theme, Fit::COMPACT).expect("fits");
     let text = canvas.plain_text();
     assert!(text.contains('▼') || text.contains('▲'), "{text}");
 }
@@ -113,7 +116,14 @@ fn a_cycle_does_not_hang_and_keeps_its_arrow() {
 #[test]
 fn a_single_node_needs_no_edges() {
     let theme = Theme::default_dark();
-    let canvas = draw(&spec(Direction::TopToBottom, 1, &[]), &art, 20, &theme).expect("fits");
+    let canvas = draw(
+        &spec(Direction::TopToBottom, 1, &[]),
+        &art,
+        20,
+        &theme,
+        Fit::COMPACT,
+    )
+    .expect("fits");
     assert_eq!(canvas.height(), 3);
     assert_eq!(canvas.width(), 20);
 }
@@ -121,7 +131,14 @@ fn a_single_node_needs_no_edges() {
 #[test]
 fn disconnected_nodes_sit_side_by_side() {
     let theme = Theme::default_dark();
-    let canvas = draw(&spec(Direction::TopToBottom, 3, &[]), &art, 40, &theme).expect("fits");
+    let canvas = draw(
+        &spec(Direction::TopToBottom, 3, &[]),
+        &art,
+        40,
+        &theme,
+        Fit::COMPACT,
+    )
+    .expect("fits");
     assert_eq!(canvas.height(), 3);
     assert_eq!(canvas.plain_text().matches('A').count(), 1);
 }
@@ -131,7 +148,7 @@ fn a_hundred_nodes_stay_within_the_budget() {
     let theme = Theme::default_dark();
     let edges: Vec<(usize, usize)> = (1..100).map(|node| (node / 3, node)).collect();
     let spec = spec(Direction::LeftToRight, 100, &edges);
-    let canvas = draw(&spec, &art, 200, &theme).expect("fits in 200 columns");
+    let canvas = draw(&spec, &art, 200, &theme, Fit::COMPACT).expect("fits in 200 columns");
     assert_eq!(canvas.width(), 200);
     canvas.check_invariants().expect("canvas contract holds");
 }
@@ -140,7 +157,8 @@ fn a_hundred_nodes_stay_within_the_budget() {
 fn an_impossible_width_is_reported_rather_than_overflowing() {
     let theme = Theme::default_dark();
     let spec = spec(Direction::TopToBottom, 8, &[]);
-    let error = draw(&spec, &art, 6, &theme).expect_err("cannot fit eight boxes in six columns");
+    let error = draw(&spec, &art, 6, &theme, Fit::COMPACT)
+        .expect_err("cannot fit eight boxes in six columns");
     let crate::error::MermaidError::TooNarrow { width: 6, needed } = error else {
         panic!("expected TooNarrow at the given width, got {error:?}");
     };
@@ -163,7 +181,7 @@ fn a_node_in_two_groups_is_rejected() {
     });
     // An inconsistent specification is *our* bug, not the diagram author's, so it must
     // never come back as a complaint about their syntax on a line that does not exist.
-    match draw(&spec, &art, 40, &theme) {
+    match draw(&spec, &art, 40, &theme, Fit::COMPACT) {
         Err(crate::error::MermaidError::Internal { message }) => {
             assert!(message.contains("subgraph"), "{message}");
         }
@@ -185,7 +203,7 @@ fn an_inconsistent_specification_never_blames_the_source() {
         .push(EdgeSpec::arrow(NodeIdx(0), NodeIdx(9)));
 
     for bad in [orphan, stray_edge] {
-        match draw(&bad, &art, 40, &theme) {
+        match draw(&bad, &art, 40, &theme, Fit::COMPACT) {
             Err(crate::error::MermaidError::Internal { .. }) => {}
             other => panic!("expected an internal error, got {other:?}"),
         }
@@ -207,7 +225,9 @@ fn nested_groups_are_framed_from_the_inside_out() {
         }],
         ..GroupSpec::default()
     }];
-    let text = draw(&spec, &art, 60, &theme).expect("fits").plain_text();
+    let text = draw(&spec, &art, 60, &theme, Fit::COMPACT)
+        .expect("fits")
+        .plain_text();
     assert!(text.contains("outer"), "{text}");
     assert!(text.contains("inner"), "{text}");
     let outer = text.find("outer").expect("outer title");
@@ -222,7 +242,9 @@ fn strokes_and_terminators_reach_the_canvas() {
     spec.edges[0].stroke = Stroke::Dotted;
     spec.edges[1].stroke = Stroke::Thick;
     spec.edges[2].head = Terminator::HollowTriangle;
-    let text = draw(&spec, &art, 40, &theme).expect("fits").plain_text();
+    let text = draw(&spec, &art, 40, &theme, Fit::COMPACT)
+        .expect("fits")
+        .plain_text();
     assert!(text.contains('┊'), "dotted stroke\n{text}");
     assert!(text.contains('┃'), "thick stroke\n{text}");
     assert!(text.contains('▽'), "hollow triangle\n{text}");
@@ -233,7 +255,7 @@ fn a_self_loop_draws_beside_its_node() {
     let theme = Theme::default_dark();
     let mut spec = spec(Direction::TopToBottom, 2, &[(0, 1)]);
     spec.edges.push(EdgeSpec::arrow(NodeIdx(0), NodeIdx(0)));
-    let canvas = draw(&spec, &art, 40, &theme).expect("fits");
+    let canvas = draw(&spec, &art, 40, &theme, Fit::COMPACT).expect("fits");
     canvas.check_invariants().expect("canvas contract holds");
     let text = canvas.plain_text();
     assert!(text.contains('▲'), "the loop returns into its node\n{text}");
@@ -252,7 +274,7 @@ fn parallel_edges_get_their_own_ports_when_the_box_is_wide_enough() {
         )
     };
     let spec = spec(Direction::TopToBottom, 2, &[(0, 1), (0, 1)]);
-    let canvas = draw(&spec, &wide, 40, &theme).expect("fits");
+    let canvas = draw(&spec, &wide, 40, &theme, Fit::COMPACT).expect("fits");
     assert_eq!(
         canvas.plain_text().matches('▼').count(),
         2,
@@ -265,7 +287,7 @@ fn parallel_edges_get_their_own_ports_when_the_box_is_wide_enough() {
 fn parallel_edges_merge_into_one_port_on_a_narrow_box() {
     let theme = Theme::default_dark();
     let spec = spec(Direction::TopToBottom, 2, &[(0, 1), (0, 1)]);
-    let canvas = draw(&spec, &art, 40, &theme).expect("fits");
+    let canvas = draw(&spec, &art, 40, &theme, Fit::COMPACT).expect("fits");
     assert_eq!(
         canvas.plain_text().matches('▼').count(),
         1,
@@ -281,7 +303,9 @@ fn end_notes_are_drawn_beside_their_terminators() {
     spec.edges[0].tail_label = Some("1".to_string());
     spec.edges[0].head_label = Some("0..*".to_string());
     spec.edges[0].head = Terminator::HollowDiamond;
-    let text = draw(&spec, &art, 40, &theme).expect("fits").plain_text();
+    let text = draw(&spec, &art, 40, &theme, Fit::COMPACT)
+        .expect("fits")
+        .plain_text();
     assert!(text.contains('1'), "tail note\n{text}");
     assert!(text.contains("0..*"), "head note\n{text}");
     assert!(text.contains('◇'), "hollow diamond\n{text}");
@@ -293,7 +317,7 @@ fn end_notes_survive_a_left_to_right_graph() {
     let mut spec = spec(Direction::LeftToRight, 2, &[(0, 1)]);
     spec.edges[0].tail_label = Some("1".to_string());
     spec.edges[0].head_label = Some("0..*".to_string());
-    let canvas = draw(&spec, &art, 60, &theme).expect("fits");
+    let canvas = draw(&spec, &art, 60, &theme, Fit::COMPACT).expect("fits");
     canvas.check_invariants().expect("canvas contract holds");
     let text = canvas.plain_text();
     assert!(text.contains("0..*"), "{text}");
@@ -318,7 +342,7 @@ fn edges_with_different_terminators_keep_their_own_ports() {
         edge.tail = kind;
         edge.head = Terminator::None;
     }
-    let canvas = draw(&spec, &wide_art, 90, &theme).expect("fits");
+    let canvas = draw(&spec, &wide_art, 90, &theme, Fit::COMPACT).expect("fits");
     let text = canvas.plain_text();
     for glyph in ['△', '◆', '◇', '▲'] {
         assert_eq!(
@@ -336,7 +360,7 @@ fn edges_sharing_one_terminator_still_merge_into_a_bus() {
     let theme = Theme::default_dark();
     let edges: Vec<(usize, usize)> = (1..=5).map(|to| (0, to)).collect();
     let spec = spec(Direction::TopToBottom, 6, &edges);
-    let canvas = draw(&spec, &art, 90, &theme).expect("fits");
+    let canvas = draw(&spec, &art, 90, &theme, Fit::COMPACT).expect("fits");
     let stems = canvas
         .rows()
         .iter()
@@ -373,7 +397,7 @@ fn a_port_keeps_off_a_compartment_rule() {
         canvas
     };
     let spec = spec(Direction::LeftToRight, 2, &[(0, 1)]);
-    let canvas = draw(&spec, &compartments, 60, &theme).expect("fits");
+    let canvas = draw(&spec, &compartments, 60, &theme, Fit::COMPACT).expect("fits");
     let text = canvas.plain_text();
     // A rule that reached the border would leave a `┼` or a `┤` with a line beyond it;
     // every compartment rule must still end in its own tee with blank space outside.

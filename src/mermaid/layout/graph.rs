@@ -9,7 +9,7 @@
 //!
 //! ```no_run
 //! use mdless::mermaid::ast::Direction;
-//! use mdless::mermaid::layout::graph::{self, EdgeSpec, GraphSpec, NodeIdx};
+//! use mdless::mermaid::layout::graph::{self, EdgeSpec, Fit, GraphSpec, NodeIdx};
 //! use mdless::theme::Theme;
 //! use mdless::canvas::Canvas;
 //!
@@ -22,7 +22,7 @@
 //!     Canvas::from_text(5, "  A  ", theme.base())
 //!         .framed(Default::default(), theme.diagram.node_border, None, theme.base())
 //! };
-//! let canvas = graph::draw(&spec, &art, 40, &theme).expect("fits");
+//! let canvas = graph::draw(&spec, &art, 40, &theme, Fit::COMPACT).expect("fits");
 //! ```
 //!
 //! # Determinism
@@ -81,6 +81,12 @@ const LADDER: &[(usize, u16)] = &[
     (1, 8),
 ];
 
+/// How many rungs of [`LADDER`] a caller with somewhere to scroll may use.
+///
+/// The last two rungs are the word-breaking ones: they are tight enough to cut `Start`
+/// into `Star`/`t`. See [`Fit::ROOMY`].
+const ROOMY_RUNGS: usize = 6;
+
 /// The narrowest label budget the engine will hand a node, at any width.
 ///
 /// Every rung floors at this value, so a layout at `(1, MIN_BUDGET)` is the smallest
@@ -88,38 +94,109 @@ const LADDER: &[(usize, u16)] = &[
 /// `width` at all. That is what makes fit monotone: see [`draw`].
 const MIN_BUDGET: u16 = 6;
 
+/// The narrowest label budget a caller with somewhere to scroll will accept.
+///
+/// A node box spends four columns on its outline and padding, so this leaves ten for
+/// the label text — enough for `Markdown`, `viewport` or `anchors` to survive whole.
+/// It is a heuristic and openly a blunt one: a single word longer than ten columns is
+/// still broken, and a chart of two-letter labels is widened long before it needs to be.
+/// What it buys is that the *usual* label is not minced. See [`Fit::ROOMY`].
+const ROOMY_BUDGET: u16 = 14;
+
+/// How hard a caller is willing to let the engine degrade a drawing to make it fit.
+///
+/// The engine has always had one answer to "it does not fit": squeeze. That is right
+/// when the alternative is a dump of Mermaid source — a pipe has nowhere to scroll —
+/// and wrong when the caller can instead lay the diagram out wide and let the reader
+/// scroll to it, because a diagram whose labels have been minced *looks like the
+/// diagram is the information* while telling the reader nothing.
+///
+/// Both policies keep fit monotone in width, because both floor every rung's budget at
+/// [`Fit::floor`] and probe that same width-independent floor before giving up. See
+/// [`draw`] for why that is what monotonicity rests on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fit {
+    /// The rungs of [`LADDER`] this policy may use, tightest last.
+    ladder: &'static [(usize, u16)],
+    /// The narrowest label budget the engine may hand a node under this policy.
+    floor: u16,
+}
+
+impl Fit {
+    /// Squeeze as hard as the engine can: the whole ladder, down to [`MIN_BUDGET`].
+    ///
+    /// For a caller whose only other option is dumping the source — `--render-once` and
+    /// every diagram nested where the pager cannot widen it.
+    pub const COMPACT: Self = Self {
+        ladder: LADDER,
+        floor: MIN_BUDGET,
+    };
+
+    /// Degrade only as far as a drawing stays worth looking at; be wide instead.
+    ///
+    /// For the pager's top-level fences, which can be laid out wider than the viewport
+    /// and scrolled to. Two things are given up relative to [`Fit::COMPACT`], and both
+    /// cost something:
+    ///
+    /// * the word-breaking rungs `(1, 6)` and `(1, 8)`, and
+    /// * label budgets below [`ROOMY_BUDGET`].
+    ///
+    /// **The price:** a chart whose labels are all short enough that `(1, 6)` would have
+    /// fitted it into the viewport *without breaking a single word* is now widened and
+    /// scrolled instead. The engine is not told which labels broke — that would need
+    /// information the [`NodeArt`] seam deliberately does not carry — so the policy is
+    /// stated in columns rather than in words, and columns cannot tell the two cases
+    /// apart.
+    ///
+    /// **Why the rungs alone would not do it:** dropping them changes nothing on their
+    /// own. The bisection below the tightest rung runs from the floor upward and finds
+    /// the *largest* budget that fits, so it recovers everything a dropped rung would
+    /// have found. The floor is the part of this policy that has teeth; the rungs are
+    /// dropped because leaving them in a policy that then refuses their budgets would be
+    /// a lie about what the ladder is for.
+    pub const ROOMY: Self = Self {
+        ladder: LADDER.split_at(ROOMY_RUNGS).0,
+        floor: ROOMY_BUDGET,
+    };
+}
+
 /// Lays out `spec` into a canvas exactly `width` columns wide.
 ///
 /// The drawing is centred in the canvas. Nodes are drawn by `art`, which is called
 /// once per node per attempt at fitting the width budget.
 ///
-/// The search runs [`LADDER`] first and takes the first rung that fits, then — only if
-/// every rung overflowed — bisects the label budget below the tightest rung's. The
-/// second phase exists because a rung's budget is `width / share`, which *grows* with
-/// `width`: without it, one more column could hand every node a wider budget, overshoot,
-/// and turn a chart that drew at some width into an error one column wider.
+/// The search runs `fit`'s rungs first and takes the first that fits, then — only if
+/// every rung overflowed — bisects the label budget below the tightest rung's, down to
+/// `fit`'s floor. The second phase exists because a rung's budget is `width / share`,
+/// which *grows* with `width`: without it, one more column could hand every node a wider
+/// budget, overshoot, and turn a chart that drew at some width into an error one column
+/// wider.
 ///
 /// Fit is therefore monotone in `width` — and the reason is the bisection's *first*
-/// probe rather than the bisection. That probe is `(1, MIN_BUDGET)`, whose drawing does
-/// not depend on `width` at all, so this function succeeds when a rung fits **or**
-/// `width` is at least that floor drawing's width. The rung half is still not monotone
-/// on its own — the rungs quantise exactly as they always did — but it is absorbed: no
-/// rung is tighter than `(1, MIN_BUDGET)` in either gap or budget, and the drawing only
-/// grows with each, so a rung that fits at `width` already means `width` clears the
-/// floor. Success collapses to `width >= floor`, which is monotone whatever the layout
-/// does in between. That the drawing really is nondecreasing in gap and budget is an
-/// empirical claim about the layout, checked by `tests/mermaid_layout_monotone.rs`.
+/// probe rather than the bisection. That probe is `(tightest gap, fit.floor)`, whose
+/// drawing does not depend on `width` at all, so this function succeeds when a rung fits
+/// **or** `width` is at least that floor drawing's width. The rung half is still not
+/// monotone on its own — the rungs quantise exactly as they always did — but it is
+/// absorbed: no rung is tighter than the floor probe in either gap or budget, and the
+/// drawing only grows with each, so a rung that fits at `width` already means `width`
+/// clears the floor. Success collapses to `width >= floor`, which is monotone whatever
+/// the layout does in between. That holds for either [`Fit`], since both floor every
+/// rung at their own floor. That the drawing really is nondecreasing in gap and budget
+/// is an empirical claim about the layout, checked by
+/// `tests/mermaid_layout_monotone.rs`.
 ///
 /// # Errors
 ///
-/// Returns [`MermaidError::TooNarrow`] when even the smallest drawing the engine can
-/// make — the tightest spacing at [`MIN_BUDGET`] — does not fit into `width`. `needed`
-/// is then that drawing's width: a true floor, not merely the narrowest attempt.
+/// Returns [`MermaidError::TooNarrow`] when even the smallest drawing this policy
+/// allows — the tightest spacing at `fit`'s floor — does not fit into `width`. `needed`
+/// is then that drawing's width: a true floor for this policy, not merely the narrowest
+/// attempt, and the exact width at which the diagram starts to draw.
 pub fn draw(
     spec: &GraphSpec,
     art: &dyn NodeArt,
     width: u16,
     theme: &Theme,
+    fit: Fit,
 ) -> Result<Canvas, MermaidError> {
     validate(spec)?;
     let attempt = |gap: usize, budget: u16| {
@@ -135,8 +212,8 @@ pub fn draw(
     };
     let mut narrowest: Option<u16> = None;
 
-    for &(gap, share) in LADDER {
-        let canvas = attempt(gap, (width / share).max(MIN_BUDGET));
+    for &(gap, share) in fit.ladder {
+        let canvas = attempt(gap, (width / share).max(fit.floor));
         if canvas.width() <= width {
             return Ok(centred(canvas, width, theme));
         }
@@ -146,15 +223,15 @@ pub fn draw(
     // The ladder is exhausted, so the tightest rung's budget is known not to fit and
     // bounds the search above. Below it sits the floor, which the last rung has already
     // drawn whenever the two coincide — at those widths there is nothing left to try.
-    let (tightest_gap, tightest_share) = *LADDER.last().expect("the ladder has rungs");
-    let mut hi = (width / tightest_share).max(MIN_BUDGET);
-    if hi == MIN_BUDGET {
+    let (tightest_gap, tightest_share) = *fit.ladder.last().expect("the ladder has rungs");
+    let mut hi = (width / tightest_share).max(fit.floor);
+    if hi == fit.floor {
         return Err(MermaidError::TooNarrow {
             width,
             needed: narrowest,
         });
     }
-    let mut best = attempt(tightest_gap, MIN_BUDGET);
+    let mut best = attempt(tightest_gap, fit.floor);
     narrowest = narrower(narrowest, &best);
     if best.width() > width {
         return Err(MermaidError::TooNarrow {
@@ -165,7 +242,7 @@ pub fn draw(
 
     // A fit exists; spend a handful of layouts finding the most generous one, keeping
     // `MIN_BUDGET..=lo` fitting and `hi` overflowing.
-    let mut lo = MIN_BUDGET;
+    let mut lo = fit.floor;
     while hi - lo > 1 {
         let mid = lo + (hi - lo) / 2;
         let canvas = attempt(tightest_gap, mid);

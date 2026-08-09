@@ -35,7 +35,7 @@ use crate::text::wrap_plain;
 use crate::theme::Theme;
 
 use super::graph::{
-    self, EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke, Terminator,
+    self, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke, Terminator,
 };
 
 /// Widest a transition label is allowed to get before it is wrapped.
@@ -45,10 +45,28 @@ const NOTE_WIDTH: usize = 24;
 
 /// Draws a state diagram into a canvas exactly `width` columns wide.
 ///
+/// The engine may degrade the drawing as far as [`Fit::COMPACT`] allows; use
+/// [`draw_with`] to say otherwise.
+///
 /// # Errors
 ///
 /// Returns [`MermaidError::TooNarrow`] when the diagram cannot be made to fit.
 pub fn draw(diagram: &StateDiagram, width: u16, theme: &Theme) -> Result<Canvas, MermaidError> {
+    draw_with(diagram, width, theme, Fit::COMPACT)
+}
+
+/// Draws a state diagram under the given fit policy.
+///
+/// # Errors
+///
+/// Returns [`MermaidError::TooNarrow`] when the diagram cannot be made to fit within
+/// what `fit` allows.
+pub fn draw_with(
+    diagram: &StateDiagram,
+    width: u16,
+    theme: &Theme,
+    fit: Fit,
+) -> Result<Canvas, MermaidError> {
     let plan = Plan::of(diagram);
     let spec = GraphSpec {
         direction: diagram.direction.unwrap_or(Direction::TopToBottom),
@@ -64,6 +82,7 @@ pub fn draw(diagram: &StateDiagram, width: u16, theme: &Theme) -> Result<Canvas,
         },
         width,
         theme,
+        fit,
     )
 }
 
