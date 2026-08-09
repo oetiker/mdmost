@@ -90,8 +90,17 @@ pub fn render_scrollable(
     let full = width - 2 * margin;
     let measure = Measure::new(full, body_width);
     let mut out = Canvas::empty(full);
-    for node in blocks {
-        let part = render_placed(node, measure, theme, options, &clipped, fill);
+    // The lone-`#` title banner is a whole-document decision, so it is taken by the
+    // renderer and only *placed* here; assembling the top level ourselves means we
+    // would otherwise not have the feature at all in the pager. It is placed at the
+    // body measure like any other block, so a capped body centres it with the prose
+    // rather than letting the art run to the terminal edge on its own.
+    let mut banner = crate::render::title_banner(doc, measure.prose, theme, options);
+    for (index, node) in blocks.iter().enumerate() {
+        let part = match banner.take() {
+            Some(banner) if index == 0 => placed(banner, measure, fill),
+            _ => render_placed(node, measure, theme, options, &clipped, fill),
+        };
         if part.is_empty() {
             continue;
         }
@@ -218,6 +227,17 @@ fn render_placed(
             capped
         }
     };
+    placed(canvas, measure, fill)
+}
+
+/// Places an already-drawn block in the body, centring it under the cap.
+///
+/// Split out of [`render_placed`] so the title banner — which is drawn by the renderer
+/// rather than here — is centred by exactly the same arithmetic as every other block.
+fn placed(mut canvas: Canvas, measure: Measure, fill: crate::theme::Style) -> Canvas {
+    if !measure.is_capped() {
+        return canvas;
+    }
     let extent = canvas
         .rows()
         .iter()

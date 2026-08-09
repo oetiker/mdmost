@@ -21,8 +21,37 @@ use super::{Ctx, MAX_TABLE_DEPTH, RenderOptions, code, inline, table};
 /// The vertical bar drawn to the left of a block quote.
 const QUOTE_BAR: &str = "▌";
 
-/// The rule drawn beneath a heading, by level.
-const HEADING_RULE: [&str; 2] = ["━", "─"];
+/// The rule drawn beneath a heading, by level; `None` where a level draws none.
+///
+/// **Changed on 2026-08-09 at the owner's request** (design spec §9): headings used to
+/// carry a prefix glyph and a rule under levels 1 and 2 only. The prefix is gone —
+/// "the special character before the sectioning lines is a strange habit… nobody does
+/// that" — so the rule is now the whole of the level signal, and there is one for
+/// every level that a reader plausibly nests to.
+///
+/// The ladder steps down in *ink*, which is the only property that survives being
+/// read at a glance: a solid heavy bar, a solid light bar, then the same light bar
+/// broken into two, three and four dashes per cell. Level 6 gets none at all — after
+/// five distinguishable rules the next step down is nothing, and a document that
+/// nests six deep is better served by the blank line than by a sixth near-invisible
+/// dash pattern.
+///
+/// Which levels have a rule is [`Theme::heading_has_rule`](crate::theme::Theme::heading_has_rule)'s
+/// policy; a test in this module asserts this table agrees with it, because two
+/// answers to that question would eventually disagree.
+const HEADING_RULES: [Option<&str>; 6] = [
+    Some("━"), // U+2501 heavy horizontal
+    Some("─"), // U+2500 light horizontal
+    Some("╌"), // U+254C light double dash
+    Some("┄"), // U+2504 light triple dash
+    Some("┈"), // U+2508 light quadruple dash
+    None,
+];
+
+/// The rule glyph for a heading level, or `None` if that level draws none.
+pub(crate) fn heading_rule(level: u8) -> Option<&'static str> {
+    HEADING_RULES[usize::from(level.clamp(1, 6)) - 1]
+}
 
 /// Renders one block at `width` columns.
 ///
@@ -134,18 +163,12 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
     canvas
 }
 
-/// A heading: prefix glyph, coloured text, and a rule under levels 1 and 2.
-fn heading(node: &Node, level: u8, id: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
+/// A heading: coloured text starting at the margin, over a rule that says which level
+/// it is (design spec §9).
+pub(crate) fn heading(node: &Node, level: u8, id: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     let theme = ctx.theme;
     let style = theme.heading(level);
-    let prefix = ctx.glyphs.heading(level);
-    let marker = Line::new(vec![Span::new(
-        format!("{prefix} "),
-        theme.block.heading_prefix,
-    )]);
-    let indent = u16::try_from(marker.width()).unwrap_or(0).min(width);
-    let text = render_inline(&node.children, width - indent, style, ctx);
-    let mut out = hanging(&marker, &text, style);
+    let mut out = render_inline(&node.children, width, style, ctx);
     if out.is_empty() {
         out.push_blank_row(style);
     }
@@ -154,9 +177,10 @@ fn heading(node: &Node, level: u8, id: &str, width: u16, ctx: Ctx<'_>) -> Canvas
         level,
         row: 0,
     });
-    if theme.heading_has_rule(level) {
-        let glyph = HEADING_RULE[usize::from(level.clamp(1, 2)) - 1];
-        out.push_rule(glyph, theme.block.heading_rule);
+    if let Some(glyph) = heading_rule(level) {
+        // The level-aware rule style, not `block.heading_rule`: the rule is now the
+        // hierarchy signal, so it has to be tinted by the level it belongs to.
+        out.push_rule(glyph, theme.heading_rule(level));
     }
     out
 }

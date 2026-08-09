@@ -2,7 +2,7 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- ◆ mdless torture test                  
+ mdless torture test                    
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                         
  A paragraph with emphasis, strong,     
@@ -11,7 +11,7 @@ expression: canvas.plain_text()
  https://example.org/very/long/path/tha 
  t/will/not/fit/in/forty/columns.       
                                         
- ◈ Mixed scripts                        
+ Mixed scripts                          
  ────────────────────────────────────── 
                                         
  日本語のテキストと English             
@@ -28,13 +28,13 @@ expression: canvas.plain_text()
  supercalifragilisticexpialidociousanti 
  disestablishmentarianism               
                                         
- ◈ Lists                                
+ Lists                                  
  ────────────────────────────────────── 
                                         
- • level one                            
-   ◦ level two with a longer line that  
+ · level one                            
+   – level two with a longer line that  
      has to wrap somewhere sensible     
-     ⁃ level three                      
+     ▪ level three                      
        1. ordered inside unordered      
        2. second                        
                                         
@@ -42,7 +42,7 @@ expression: canvas.plain_text()
                                         
  ☐ an unfinished task                   
                                         
- ◈ Table with Markdown inside cells     
+ Table with Markdown inside cells       
  ────────────────────────────────────── 
                                         
  ╭──────────────┬────────┬────────────╮ 
@@ -57,7 +57,8 @@ expression: canvas.plain_text()
  │ 日本語のセル │   👩‍💻   │         -1 │ 
  ╰──────────────┴────────┴────────────╯ 
                                         
- ◇ Nested table                         
+ Nested table                           
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                         
  ╭────────────────────────────────────╮ 
  │ outer                              │ 
@@ -67,7 +68,8 @@ expression: canvas.plain_text()
  │ cells recurse                      │ 
  ╰────────────────────────────────────╯ 
                                         
- ◇ Degenerate tables                    
+ Degenerate tables                      
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                         
  ╭───╮                                  
  │   │                                  
@@ -75,7 +77,8 @@ expression: canvas.plain_text()
  │   │                                  
  ╰───╯                                  
                                         
- ◇ Wider than the page                  
+ Wider than the page                    
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                         
  ╭───────────┬────────────────┬───────╮ 
  │ Component │ Responsibility │ Owners› 
@@ -87,7 +90,7 @@ expression: canvas.plain_text()
  │           │ canvas         │       › 
  ╰───────────┴────────────────┴───────╯ 
                                         
- ◈ Code                                 
+ Code                                   
  ────────────────────────────────────── 
                                         
  ╭ rust ──────────────────────────────╮ 
@@ -101,7 +104,7 @@ expression: canvas.plain_text()
  │ no language tag at all             │ 
  ╰────────────────────────────────────╯ 
                                         
- ◈ Mermaid                              
+ Mermaid                                
  ────────────────────────────────────── 
                                         
                 ┌───────┐               
@@ -125,14 +128,14 @@ expression: canvas.plain_text()
  │ this is not valid mermaid at all   │ 
  ╰ not a diagram type — mdless draws… ╯ 
                                         
- ◈ HTML is not supported                
+ HTML is not supported                  
  ────────────────────────────────────── 
                                         
  ⟨html⟩                                 
                                         
  Inline ⟨html⟩ html is dropped too.     
                                         
- ◈ Quotes and rules                     
+ Quotes and rules                       
  ────────────────────────────────────── 
                                         
  ▌ A block quote spanning two lines.    
@@ -141,7 +144,7 @@ expression: canvas.plain_text()
                                         
        ────────────◈─────────────       
                                         
- ◈ Images and footnotes                 
+ Images and footnotes                   
  ────────────────────────────────────── 
                                         
  ╭ image ─────────────────────────────╮ 
@@ -151,14 +154,14 @@ expression: canvas.plain_text()
                                         
  A statement needing a source[1].       
                                         
- ◈ Duplicate heading                    
+ Duplicate heading                      
  ────────────────────────────────────── 
                                         
- ◈ Duplicate heading                    
+ Duplicate heading                      
  ────────────────────────────────────── 
                                         
- ◈ Every diagram family through the     
-   document path                        
+ Every diagram family through the       
+ document path                          
  ────────────────────────────────────── 
                                         
  Each family is deliberately small:     

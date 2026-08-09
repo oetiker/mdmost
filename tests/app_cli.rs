@@ -18,6 +18,7 @@ Some prose that is long enough to be worth wrapping at a narrow width indeed.
 
 - one
 - two
+- [ ] three
 ";
 
 /// The binary, with anything in the environment that could change its output removed.
@@ -79,7 +80,13 @@ fn render_once_works_headlessly_and_honours_the_width() {
         ]);
         assert!(output.status.success(), "exit status for width {width}");
         let text = String::from_utf8(output.stdout).expect("output should be UTF-8");
-        assert!(text.contains("Title"), "the heading should appear");
+        // The document's lone `#` is set as a FIGlet banner, so the title arrives as
+        // art rather than as the word; the `##` below it is ordinary text either way.
+        assert!(text.contains("Section"), "the heading should appear");
+        assert!(
+            text.lines().next().is_some_and(|line| line.contains('_')),
+            "the title banner should be drawn at width {width}: {text}"
+        );
         for line in text.lines() {
             assert!(
                 mdless::text::display_width(line) <= usize::from(width),
@@ -129,7 +136,7 @@ fn stdin_is_read_when_no_file_is_given() {
     let output = run_with_stdin(&["--render-once", "--width", "60"], SAMPLE);
     assert!(output.status.success());
     let text = String::from_utf8(output.stdout).expect("output should be UTF-8");
-    assert!(text.contains("Title"));
+    assert!(text.contains("Section"));
 }
 
 #[test]

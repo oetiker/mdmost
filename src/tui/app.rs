@@ -121,8 +121,9 @@ pub struct AppOptions {
     /// Whether Nerd Font glyphs may be drawn.
     ///
     /// Applies to the chrome *and* to the document: it is passed to the renderer as
-    /// part of [`RenderOptions`], so `--no-icons` strips heading bullets, list markers
-    /// and code-fence icons too, not merely the status bar.
+    /// part of [`RenderOptions`], so `--no-icons` changes task boxes and code-fence
+    /// icons too, not merely the status bar. List bullets are plain Unicode either
+    /// way (see `render::glyphs`).
     pub icons: bool,
     /// The theme to start in.
     pub theme: String,
@@ -270,6 +271,7 @@ impl App {
     /// cache key, so changing one re-renders.
     pub fn render_options(&self) -> RenderOptions {
         RenderOptions::new(self.options.icons, self.config.line_numbers)
+            .with_title_banner(self.config.title_banner)
     }
 
     /// Turns Nerd Font glyphs on or off, in the chrome and the document alike.

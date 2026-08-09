@@ -1,5 +1,8 @@
-//! The heading system: one hue family that recedes with depth, prefixes that encode
-//! the level they belong to, and rules that are not fainter than the text above them.
+//! The heading system: one hue family that recedes with depth, rules that take the tint
+//! of the level they belong to, and none of them fainter than the page's own chrome.
+//!
+//! Headings carried a prefix glyph until 2026-08-09, and its tint was the third thing
+//! asserted here; the rule under the heading now does that job alone (design spec §9.1).
 //!
 //! These assertions run over *every* built-in theme and over a user-defined palette,
 //! because the whole point of deriving them in `Theme::from_palette` is that a config
@@ -97,38 +100,36 @@ fn every_heading_level_stays_distinct_from_body_and_muted() {
     }
 }
 
-/// The prefix glyph is the one element meant to encode the level. It must therefore
-/// track the heading's own colour, and never be one fixed accent for all six levels.
+/// The rule under a heading is, since the prefix glyph was dropped on 2026-08-09, the
+/// element that encodes the level. It must therefore track the heading's own colour,
+/// and never be one fixed accent for every level.
 #[test]
-fn heading_prefixes_follow_their_own_level() {
+fn heading_rules_follow_their_own_level() {
     for theme in themes() {
         let name = &theme.name;
         for level in 1..=6u8 {
             let heading = fg("heading", theme.heading(level));
-            let prefix = fg("prefix", theme.heading_prefix(level));
+            let rule = fg("rule", theme.heading_rule(level));
             assert!(
-                distance(heading, prefix) < 96,
-                "{name}: the H{level} prefix is a different colour from the H{level} text"
+                distance(heading, rule) < 128,
+                "{name}: the H{level} rule is a different colour from the H{level} text"
             );
             for other in 1..=6u8 {
                 if other == level {
                     continue;
                 }
                 assert_ne!(
-                    theme.heading_prefix(level),
-                    theme.heading_prefix(other),
-                    "{name}: the H{level} and H{other} prefixes are the same style"
+                    theme.heading_rule(level),
+                    theme.heading_rule(other),
+                    "{name}: the H{level} and H{other} rules are the same style"
                 );
             }
         }
         assert_eq!(
-            theme.block.heading_prefix,
-            theme.heading_prefix(1),
+            theme.block.heading_rule,
+            theme.heading_rule(1),
             "{name}: the legacy slot must keep agreeing with the level-aware one"
         );
-        assert_eq!(theme.block.heading_rule, theme.heading_rule(1));
-        assert_eq!(theme.heading_prefix(0), theme.heading_prefix(1));
-        assert_eq!(theme.heading_prefix(9), theme.heading_prefix(6));
         assert_eq!(theme.heading_rule(0), theme.heading_rule(1));
         assert_eq!(theme.heading_rule(9), theme.heading_rule(6));
     }
@@ -136,21 +137,36 @@ fn heading_prefixes_follow_their_own_level() {
 
 /// The signature rule under the signature heading must not be the least visible thing
 /// on the line. Expressed as contrast against the page, so it holds in both polarities.
+///
+/// Two floors, because there are now two kinds of rule (design spec §9.1). The solid
+/// ones under H1 and H2 keep the original bar: no fainter than muted text. The dashed
+/// ones under H3-H5 are *meant* to recede, so theirs is that they must never be fainter
+/// than the border colour the page draws its box frames and thematic breaks with — a
+/// rule that announces a section cannot be quieter than the chrome around it. In the
+/// light theme H4 sits between the two floors, which is why this is stated as two
+/// bounds rather than one: the heading ramp there is nearly flat and that, not the
+/// ladder, is the thing to fix.
 #[test]
-fn heading_rules_are_never_fainter_than_secondary_text() {
+fn heading_rules_are_never_fainter_than_the_chrome() {
     for theme in themes() {
         let name = &theme.name;
         let bg = theme.palette.bg.luminance();
-        let floor = (theme.palette.muted.luminance() - bg).abs();
+        let text_floor = (theme.palette.muted.luminance() - bg).abs();
+        let chrome_floor = (theme.palette.border.luminance() - bg).abs();
         for level in 1..=6u8 {
             if !theme.heading_has_rule(level) {
                 continue;
             }
             let rule = fg("rule", theme.heading_rule(level));
             let contrast = (rule.luminance() - bg).abs();
+            let (floor, against) = if level <= 2 {
+                (text_floor, "muted text")
+            } else {
+                (chrome_floor, "the border colour")
+            };
             assert!(
                 contrast >= floor,
-                "{name}: the H{level} rule ({contrast:.3}) is fainter than muted text ({floor:.3})"
+                "{name}: the H{level} rule ({contrast:.3}) is fainter than {against} ({floor:.3})"
             );
         }
     }

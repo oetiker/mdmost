@@ -8,6 +8,11 @@ and negotiated column widths, fenced code is syntax-highlighted, and Mermaid dia
 are laid out as box art rather than shown as source. Resize the terminal and everything
 reflows, because rendering is a pure function of `(document, width, theme, options)`.
 
+Heading levels are told apart by the rule underneath them — heavy, light, then dashed —
+and a document whose first block is its one and only `#` heading opens with that title
+set in the FIGlet *Small* font, falling back to an ordinary heading whenever the art
+would not fit or the title is not plain ASCII (`title_banner = false` turns it off).
+
 ```
  ╭──────────┬───────────┬─────────────╮
  │ Language │ Extension │ Highlighted │
@@ -84,10 +89,15 @@ flag — the truecolour decision is made from whether stdout is a terminal.
 
 ## Nerd Fonts
 
-Headings, list bullets, code fences and the status bar are drawn with Nerd Font glyphs
-when a Nerd Font is available, and with plain Unicode equivalents **of the same display
-width** when it is not — so the difference is what the markers look like, never where
-anything sits. Nothing shifts, nothing reflows, and no feature is lost either way.
+Task boxes, code fences and the status bar are drawn with Nerd Font glyphs when a Nerd
+Font is available, and with plain Unicode equivalents **of the same display width** when
+it is not — so the difference is what the markers look like, never where anything sits.
+Nothing shifts, nothing reflows, and no feature is lost either way.
+
+List bullets are plain Unicode in both cases (`·`, `–`, `▪`, `▫`, one per nesting
+level), because the fine grades a bullet wants do not exist in an icon font: every
+filled circle it offers is a heavy disc. Headings have no marker at all — the rule
+beneath a heading says which level it is.
 
 **`mdless` works out which to use, and errs towards plain.** No terminal can be asked
 what font it is using, so mdless asks fontconfig whether an installed font covers every
@@ -211,6 +221,7 @@ binding costs you that binding and nothing else.
 theme        = "dark"    # name of a built-in or a [themes.*] table
 icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to detect
 line_numbers = false     # line-number gutter in fenced code blocks
+title_banner = true      # set a document's lone `#` heading as a FIGlet banner
 mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies source
 scroll_step  = 3         # document lines per mouse-wheel notch
 body_width   = 100       # widest the prose body is laid out; 0 for no cap

@@ -211,7 +211,8 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     let stdout_is_terminal = io::stdout().is_terminal();
 
     if cli.render_once || !stdout_is_terminal {
-        let options = RenderOptions::new(icons, config.line_numbers);
+        let options =
+            RenderOptions::new(icons, config.line_numbers).with_title_banner(config.title_banner);
         return render_once(
             &doc,
             &config,
