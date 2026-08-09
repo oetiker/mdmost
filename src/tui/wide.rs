@@ -15,11 +15,14 @@
 //! the canvas contract exactly as a plain [`render_document`] would.
 //!
 //! The common document has nothing clipped, pays for no extra render, and comes out
-//! byte-identical to [`render_document`].
+//! byte-identical to [`render_document`] — including its side margins, which are
+//! applied here for the same reason and in the same place. That claim used to be false
+//! in exactly that one respect, and being false only about the margins is what made it
+//! survive: the pager looked right until you noticed nothing had a gutter.
 
 use crate::canvas::Canvas;
 use crate::doc::{Doc, Node, NodeKind};
-use crate::render::{RenderOptions, render_block, render_document};
+use crate::render::{RenderOptions, margins, render_block, render_document};
 use crate::theme::Theme;
 
 /// The glyph the renderers paint in a row's last column when content is cut off.
@@ -52,9 +55,15 @@ pub fn render_scrollable(doc: &Doc, width: u16, theme: &Theme, options: &RenderO
     }
 
     let fill = theme.base();
-    let mut out = Canvas::empty(width);
+    // The margin is applied here, over the assembled body, exactly as `render_document`
+    // applies it over `render_sequence` — assembling blocks ourselves means inheriting
+    // that job too, and for a long time we did not: every line in the pager sat welded
+    // to the scrollbar while the piped renderer was correctly inset.
+    let margin = margins(width);
+    let body_width = width - 2 * margin;
+    let mut out = Canvas::empty(body_width);
     for node in blocks {
-        let part = render_widened(node, width, theme, options, &clipped);
+        let part = render_widened(node, body_width, theme, options, &clipped);
         if part.is_empty() {
             continue;
         }
@@ -65,6 +74,11 @@ pub fn render_scrollable(doc: &Doc, width: u16, theme: &Theme, options: &RenderO
     }
     // `append` widens `out` to the widest part, but a document of nothing but empty
     // blocks never appends at all.
+    out.resize_width(out.width().max(body_width), fill);
+    // A widened block keeps its surplus past the right margin; that surplus is what the
+    // horizontal scroll reaches, and a gutter drawn at its far edge would be off-screen
+    // anyway.
+    let mut out = out.indent(margin, margin, fill);
     out.resize_width(out.width().max(width), fill);
     out
 }

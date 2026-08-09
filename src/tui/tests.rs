@@ -778,6 +778,47 @@ fn a_document_that_fits_is_not_widened() {
 }
 
 #[test]
+fn the_pager_keeps_the_document_margin_the_renderer_promises() {
+    // `render_document` documents a margin on each side so that "no block — paragraph,
+    // table border or code frame — is ever welded to the viewport edge or to the
+    // scrollbar next to it". The pager does not call it: it assembles blocks itself, so
+    // the promise held only for the piped renderer and `visual-review-3.md` §15 found
+    // every line in the live TUI hard against the scrollbar.
+    let markdown = concat!(
+        "# Heading\n\nA paragraph long enough to reach the right-hand edge of a narrow ",
+        "pane and wrap.\n\n| left | right |\n|---|---|\n| a | b |\n\n",
+        "```rust\nfn main() {}\n```\n"
+    );
+    let doc = Doc::parse(markdown);
+    let width = 60;
+    let canvas = super::wide::render_scrollable(
+        &doc,
+        width,
+        &crate::theme::Theme::default_dark(),
+        &crate::render::RenderOptions::new(false, false),
+    );
+    let margin = usize::from(crate::render::DOCUMENT_MARGIN);
+    assert_eq!(
+        canvas.width(),
+        width,
+        "nothing here is wide enough to widen"
+    );
+    for row in 0..canvas.height() {
+        let text = canvas.row_text(row);
+        let (left, rest) = crate::text::split_at_width(&text, margin);
+        assert!(
+            left.trim().is_empty(),
+            "row {row} has no left margin: {text:?}"
+        );
+        let right = crate::text::split_at_width(rest, usize::from(width) - 2 * margin).1;
+        assert!(
+            right.trim().is_empty(),
+            "row {row} runs into the gutter the scrollbar sits beside: {text:?}"
+        );
+    }
+}
+
+#[test]
 fn the_overflow_marker_matches_the_renderer() {
     // `super::wide` cannot see `render::code`'s private constant, so it keeps its own
     // copy. If the renderer ever changes the glyph, widening silently stops working;
