@@ -251,6 +251,66 @@ fn cell_clusters_never_lose_or_reorder_text() {
     }
 }
 
+/// A `TAB` is priced at one column by every measurement in the program and drawn at
+/// the next tab stop by every terminal, so it may never reach a cell. The machinery
+/// that expands tabs against a real column lives in `highlight`, and runs before
+/// anything measures a code line; inline text has no such column to expand against —
+/// its tab was counted as one — so what a cell may hold is one column of whitespace.
+#[test]
+fn cell_clusters_substitute_a_space_for_a_tab() {
+    let pieces: Vec<&str> = cell_clusters("A\tB").collect();
+    assert_eq!(pieces, vec!["A", " ", "B"]);
+}
+
+/// The class, not the instance: `TAB` was the reported defect, but `ESC` is the
+/// dangerous one — a document carrying it could paint the terminal from inside a
+/// paragraph — and both are Unicode `Cc`.
+#[test]
+fn cell_clusters_never_yield_a_control_character() {
+    let mut buffer = [0u8; 4];
+    for scalar in 0u32..=0x10FFFF {
+        let Some(ch) = char::from_u32(scalar) else {
+            continue;
+        };
+        let text: &str = ch.encode_utf8(&mut buffer);
+        for piece in cell_clusters(text) {
+            assert!(
+                !piece.chars().any(char::is_control),
+                "U+{scalar:04X} reached a cell as {piece:?}"
+            );
+        }
+    }
+}
+
+/// The substitution has to be width-preserving in both directions, or the row it is on
+/// stops being exactly as wide as it was laid out to be.
+#[test]
+fn a_substituted_control_character_costs_exactly_the_column_it_was_measured_at() {
+    for text in ["a\tb", "\u{7}", "\u{1b}[31m", "\0", "\u{9b}", "日\tx"] {
+        let pieces: Vec<&str> = cell_clusters(text).collect();
+        assert_eq!(
+            pieces.iter().map(|p| display_width(p)).sum::<usize>(),
+            display_width(text),
+            "{text:?}: pieces {pieces:?} do not account for its columns"
+        );
+    }
+}
+
+/// A control character carrying a combining mark is one grapheme cluster; the mark is
+/// not a control and must survive to be merged into the substituted cell.
+#[test]
+fn cell_clusters_take_a_control_character_off_its_cluster() {
+    assert_eq!(
+        cell_clusters("\r\n").collect::<Vec<_>>(),
+        vec![" ", " "],
+        "each control in a CRLF cluster owes its own column"
+    );
+    assert_eq!(
+        cell_clusters("\u{7}\u{0301}").collect::<Vec<_>>(),
+        vec![MARKER, "\u{0301}"]
+    );
+}
+
 #[test]
 fn every_cell_piece_fits_in_a_cell() {
     let text = "a日\u{17000}\u{1A57}\u{1F469}\u{200D}\u{1F4BB}e\u{0301}";

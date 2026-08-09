@@ -25,7 +25,7 @@ rendering, inline raster images, remote fetching.
 | Terminal floor | Truecolor + full Unicode; Nerd Font glyphs when detected, plain Unicode otherwise (§2.1) |
 | Keys | less-compatible core, vim extras |
 | Config | TOML at `~/.config/mdless/config.toml`, themeable |
-| Images | Framed placeholder box showing alt text + target |
+| Images | An image that is a paragraph of its own: framed placeholder box showing alt text + target. An image *inside* a sentence: `⟨alt text⟩` inline, because a box drawn mid-sentence cuts the paragraph into three blocks (refined 2026-08-09) |
 | HTML | Not supported. Not rendered, not passed through. |
 
 ### 2.1 Nerd Font glyphs are detected, not assumed

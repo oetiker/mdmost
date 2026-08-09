@@ -84,9 +84,48 @@ pub fn grapheme_width(cluster: &str) -> u8 {
 /// One column wide, which is what makes it usable as the head of a padded run.
 pub const UNPLACEABLE: &str = "\u{FFFD}";
 
+/// The one-column text a control character is drawn as, or `None` for ordinary text.
+///
+/// A control character is not text: it is an instruction to the terminal, and writing
+/// one into a cell hands that instruction straight through to the screen. `unicode-width`
+/// prices every character in Unicode category `Cc` — C0, `DEL`, C1 — at one column, so
+/// the whole program's arithmetic (wrapping, table negotiation,
+/// [`Canvas::check_invariants`](crate::canvas::Canvas::check_invariants)) has already
+/// counted such a character as occupying exactly one column by the time it reaches a
+/// cell. The terminal then disagrees: a `TAB` jumps to the next tab stop, so the row is
+/// drawn some six columns wider than the width it was laid out at; an `ESC` opens an
+/// escape sequence and a document can repaint the screen from inside a paragraph.
+///
+/// Both are the same defect — the canvas measured one thing and the terminal drew
+/// another — and both are answered here, by substituting **one column of real text**.
+/// Same width in, same width out, so nothing measured upstream moves:
+///
+/// * whitespace controls (`\t`, `\n`, `\v`, `\f`, `\r`) become a space, which is what
+///   they mean in prose. A tab is *not* expanded to a tab stop here: its column was
+///   negotiated as one, long before this point, and inside a code block — the one place
+///   a tab's alignment carries information — `highlight::expand_tabs` has already
+///   expanded it against the real column, before anything measured the line.
+/// * every other control character becomes [`UNPLACEABLE`], because it has no textual
+///   meaning at all and silently dropping it would move every column after it.
+///
+/// This is stated as a *category* — `char::is_control` is exactly Unicode `Cc` — rather
+/// than as a list of the characters somebody has complained about, so the class is
+/// closed rather than the instance.
+pub fn control_substitute(ch: char) -> Option<&'static str> {
+    if !ch.is_control() {
+        return None;
+    }
+    Some(if ch.is_whitespace() { " " } else { UNPLACEABLE })
+}
+
 /// Splits `text` into pieces that each occupy exactly one terminal cell.
 ///
-/// This is [`graphemes`] with two extra rules, both stated as measurements:
+/// This is [`graphemes`] with three extra rules, all stated as measurements:
+///
+/// * a control character — Unicode `Cc`, which is `TAB` and `ESC` as much as `NUL` — is
+///   replaced by one column of real text (see [`control_substitute`]), because it is
+///   priced at one column by every measurement in the program and drawn at some other
+///   width, or not drawn at all, by the terminal;
 ///
 /// * a cluster too wide for a single cell is broken at the widest point that *preserves
 ///   its total width* (see `leading_cell`) — in practice a spacing mark (category `Mc`)
@@ -107,8 +146,9 @@ pub const UNPLACEABLE: &str = "\u{FFFD}";
 /// filled from them is therefore as wide as the cells claim, which is what design spec
 /// §4 requires and what [`Cell::new`](crate::canvas::Cell::new) asserts.
 ///
-/// The pieces also concatenate back to `text` exactly — *except* for a replaced cluster,
-/// where the author's character is gone. That is not a lapse: a cluster of three columns
+/// The pieces also concatenate back to `text` exactly — *except* for a replaced cluster
+/// and for a substituted control character, where the author's character is gone. That
+/// is not a lapse: a cluster of three columns
 /// with nothing inside it to divide (U+17D8 KHMER SIGN BEYYAL is the only such scalar
 /// under `unicode-width` 0.2, but composed clusters reach the same state) cannot be put
 /// into cells at all. The alternatives were to let a cell claim two columns and draw
@@ -143,6 +183,19 @@ impl<'a> Iterator for CellClusters<'a> {
             return Some(" ");
         }
         let cluster = graphemes(self.rest).next()?;
+        // A control character is stopped here, at the last point before text becomes
+        // cells, so that no renderer has to remember to do it — see
+        // [`control_substitute`]. It is taken off the *character*, not the cluster: a
+        // `\r\n` is one cluster of two controls and each owes its own column, and a
+        // control carrying a combining mark leaves the mark to be merged into the
+        // preceding cell as usual.
+        if let Some(ch) = self.rest.chars().next()
+            && let Some(substitute) = control_substitute(ch)
+        {
+            debug_assert_eq!(display_width(&ch.to_string()), display_width(substitute));
+            self.rest = &self.rest[ch.len_utf8()..];
+            return Some(substitute);
+        }
         let piece = if display_width(cluster) <= 2 {
             cluster
         } else {

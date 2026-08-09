@@ -122,6 +122,50 @@ fn paragraph_wraps_at_the_width_budget() {
     );
 }
 
+/// A literal tab in prose is one column of whitespace, never a tab character.
+///
+/// `display_width` prices a tab at one column, so every measurement in the program —
+/// wrapping, table negotiation, `check_invariants` — agreed the row was exact while the
+/// terminal jumped to the next tab stop and drew it some six columns wider. That is a
+/// breach of the one guarantee the whole canvas contract exists to make, and it is
+/// invisible to a test that only measures the canvas.
+#[test]
+fn a_tab_in_prose_never_reaches_the_canvas() {
+    let out = lines("A tab\tbetween words.\n", 40);
+    assert_eq!(out, ["A tab between words."]);
+}
+
+/// The class, not the instance. `ESC` is the one that matters most: a document carrying
+/// it could otherwise write an escape sequence straight through to the reader's screen.
+#[test]
+fn no_control_character_reaches_the_canvas() {
+    let markdown = "bell \u{7} esc \u{1b}[31m nul \u{0} vt \u{b} del \u{7f} c1 \u{9b}\n";
+    // `render` already runs `check_invariants`, which rejects a control character in a
+    // cell; this asserts the same thing of the text the pager would print.
+    let canvas = render(markdown, 60);
+    assert!(
+        !canvas.plain_text().chars().any(char::is_control),
+        "{:?}",
+        canvas.plain_text()
+    );
+}
+
+/// A tab in a table cell is negotiated as one column and must draw as one.
+#[test]
+fn a_tab_in_a_table_cell_never_reaches_the_canvas() {
+    let out = lines("| a\tb |\n|---|\n| c\td |\n", 30);
+    assert!(out.iter().any(|row| row.contains("a b")), "{out:?}");
+    assert!(!out.concat().contains('\t'), "{out:?}");
+}
+
+/// Code blocks keep their own, older tab handling: there a tab is expanded against the
+/// real column *before* anything measures the line, so it aligns as the author meant.
+#[test]
+fn a_tab_in_a_code_block_is_still_expanded_to_its_tab_stop() {
+    let out = lines("```\nab\tc\n```\n", 30);
+    assert!(out[1].contains("ab  c"), "{out:?}");
+}
+
 #[test]
 fn soft_breaks_become_spaces_and_hard_breaks_do_not() {
     assert_eq!(lines("one\ntwo", 20), ["one two"]);
@@ -487,6 +531,38 @@ fn task_items_get_a_checkbox() {
     assert_eq!(lines("- [x] done\n- [ ] todo\n", 20), ["☑ done", "☐ todo"]);
 }
 
+/// An ordered task list has *two* things to say and has to say both.
+///
+/// The number is the item's identity — it is how the item is referred to elsewhere —
+/// and the box is its state. The box used to be drawn instead of the number, which
+/// renumbered the author's list to nothing and left a two-column gap where the ordinal
+/// had been.
+#[test]
+fn an_ordered_task_list_keeps_its_numbers() {
+    assert_eq!(
+        lines("1. [x] done\n2. [ ] todo\n", 20),
+        ["1. ☑ done", "2. ☐ todo"]
+    );
+}
+
+/// Ten items wide the ordinals right-align, and the boxes stay in one column with them.
+#[test]
+fn an_ordered_task_list_aligns_its_boxes_under_each_other() {
+    assert_eq!(
+        lines("9. [ ] item\n10. [ ] item\n", 20),
+        [" 9. ☐ item", "10. ☐ item"]
+    );
+}
+
+/// A plain item in a list that has task items keeps its ordinal in the same column.
+#[test]
+fn a_plain_item_in_a_task_list_keeps_the_marker_column() {
+    assert_eq!(
+        lines("1. [x] done\n2. plain\n", 20),
+        ["1. ☑ done", "2.   plain"]
+    );
+}
+
 #[test]
 fn tight_lists_are_dense_and_loose_lists_are_spaced() {
     assert_eq!(rows("- one\n- two\n", 20).len(), 2);
@@ -696,17 +772,37 @@ fn an_image_becomes_a_framed_placeholder_with_alt_text_and_target() {
     );
 }
 
+/// An image inside a sentence stays inside it.
+///
+/// It used to become a framed box, which is a block, so the one paragraph the author
+/// wrote came out as three: the words before, a full-width box, the words after. The
+/// box is for an image that is a paragraph of its own; here the reader gets the alt
+/// text in the brackets that mean "something the terminal cannot show was here".
 #[test]
-fn an_image_splits_the_paragraph_it_sits_in() {
-    let out = lines("before ![a](p.png) after\n", 24);
+fn an_inline_image_stays_in_its_paragraph() {
+    assert_eq!(
+        lines("before ![a](p.png) after\n", 24),
+        ["before ⟨a⟩ after"]
+    );
+}
+
+/// The box survives exactly where it belongs: an image with nothing else around it.
+#[test]
+fn an_image_alone_in_its_paragraph_still_gets_its_box() {
+    let out = lines("before\n\n![a](p.png)\n\nafter\n", 20);
     assert_eq!(out.first().map(String::as_str), Some("before"));
     assert_eq!(out.last().map(String::as_str), Some("after"));
-    assert!(out.iter().any(|row| row.contains("p.png")));
+    assert!(out.iter().any(|row| row.contains("p.png")), "{out:?}");
+}
+
+#[test]
+fn an_inline_image_with_no_alt_text_names_itself() {
+    assert_eq!(lines("see ![](p.png) here\n", 24), ["see ⟨image⟩ here"]);
 }
 
 #[test]
 fn a_nested_image_degrades_to_its_alt_text() {
-    assert_eq!(lines("[![a](p.png)](t.md)\n", 30), ["a (t.md)"]);
+    assert_eq!(lines("[![a](p.png)](t.md)\n", 30), ["⟨a⟩ (t.md)"]);
 }
 
 // ----------------------------------------------------------------------- tables
@@ -1065,6 +1161,20 @@ fn the_gutter_is_as_wide_as_the_largest_line_number() {
     );
 }
 
+/// A fence with a language *and* a gutter joins both edges.
+///
+/// The label and the `┬` want the same columns, and the label used to win outright, so
+/// the gutter came out closed at the bottom and open at the top — chrome that looks
+/// like it failed to draw. The label now starts after the junction.
+#[test]
+fn a_labelled_fence_still_joins_its_gutter_to_the_top_rule() {
+    let markdown = "```rust\nfn main() {}\n```\n";
+    let out = body_rows(&render_body(markdown, 30, &RenderOptions::new(false, true)));
+    assert_eq!(out[0], "╭───┬ rust ──────────────────╮", "{out:?}");
+    assert_eq!(out[2], "╰───┴────────────────────────╯", "{out:?}");
+    assert!(out[1].starts_with("│ 1 │"), "{:?}", out[1]);
+}
+
 #[test]
 fn the_gutter_is_outside_the_clipped_region() {
     let markdown = "```\nabcdefghijklmnopqrstuvwxyz\n```\n";
@@ -1387,10 +1497,15 @@ fn a_table_stops_at_its_natural_width_however_wide_the_terminal() {
     }
 }
 
+/// A header rule separates a header from a body, so a table with no body draws none.
+///
+/// With one, the box ends `├───┤` `╰───╯`: two rules with nothing between them, which
+/// is how box art spells an empty row. Three reviewers read it as a table that failed
+/// to draw.
 #[test]
-fn a_table_with_no_body_rows_keeps_its_header_rule() {
+fn a_table_with_no_body_rows_closes_after_its_header() {
     let out = lines("| A | B |\n|---|---|\n", 40);
-    assert_eq!(out, ["╭───┬───╮", "│ A │ B │", "├───┼───┤", "╰───┴───╯"]);
+    assert_eq!(out, ["╭───┬───╮", "│ A │ B │", "╰───┴───╯"]);
 }
 
 #[test]

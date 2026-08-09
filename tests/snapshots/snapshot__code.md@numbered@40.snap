@@ -14,7 +14,7 @@ expression: canvas.plain_text()
  A fence with a language                
  ────────────────────────────────────── 
                                         
- ╭ rust ──────────────────────────────╮ 
+ ╭───┬ rust ──────────────────────────╮ 
  │ 1 │ /// Doc comment.               │ 
  │ 2 │ fn main() {                    │ 
  │ 3 │     let greeting = "hello";    │ 
@@ -26,7 +26,7 @@ expression: canvas.plain_text()
  highlighter does not know              
  ────────────────────────────────────── 
                                         
- ╭ brainfuck ─────────────────────────╮ 
+ ╭───┬ brainfuck ─────────────────────╮ 
  │ 1 │ ++++++++[>++++[>++>+++>+++>+<› │ 
  ╰───┴────────────────────────────────╯ 
                                         
@@ -48,7 +48,7 @@ expression: canvas.plain_text()
  carrying attributes                    
  ────────────────────────────────────── 
                                         
- ╭ python ────────────────────────────╮ 
+ ╭───┬ python ────────────────────────╮ 
  │ 1 │ def f(x):                      │ 
  │ 2 │     return x * 2               │ 
  ╰───┴────────────────────────────────╯ 
@@ -65,7 +65,7 @@ expression: canvas.plain_text()
  A line far too wide for any pane       
  ────────────────────────────────────── 
                                         
- ╭ rust ──────────────────────────────╮ 
+ ╭───┬ rust ──────────────────────────╮ 
  │ 1 │ fn wide() { let _ = "a single› │ 
  ╰───┴────────────────────────────────╯ 
                                         
@@ -84,7 +84,7 @@ expression: canvas.plain_text()
  Double-width and emoji inside a fence  
  ────────────────────────────────────── 
                                         
- ╭ text ──────────────────────────────╮ 
+ ╭───┬ text ──────────────────────────╮ 
  │ 1 │ 日本語 = "wide"                │ 
  │ 2 │ emoji  = "👩‍💻🇨🇭"                │ 
  │ 3 │ khmer  = "�  "                 │ 
@@ -94,7 +94,7 @@ expression: canvas.plain_text()
  width                                  
  ────────────────────────────────────── 
                                         
- ╭ python ────────────────────────────╮ 
+ ╭────┬ python ───────────────────────╮ 
  │  1 │ a = 1                         │ 
  │  2 │ b = 2                         │ 
  │  3 │ c = 3                         │ 
@@ -111,7 +111,7 @@ expression: canvas.plain_text()
  A fence nested in a quote in a list    
  ────────────────────────────────────── 
                                         
- · ▌ ╭ sh ────────────────────────────╮ 
+ · ▌ ╭───┬ sh ────────────────────────╮ 
    ▌ │ 1 │ echo nested                │ 
    ▌ ╰───┴────────────────────────────╯ 
                                         
@@ -121,6 +121,6 @@ expression: canvas.plain_text()
  A paragraph mentioning cargo test      
  immediately before a fence:            
                                         
- ╭ sh ────────────────────────────────╮ 
+ ╭───┬ sh ────────────────────────────╮ 
  │ 1 │ cargo test                     │ 
  ╰───┴────────────────────────────────╯

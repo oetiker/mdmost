@@ -123,7 +123,7 @@ fn framed_code(
         title.as_ref(),
         theme.code.background,
     );
-    join_gutter(&mut out, gutter, padding, ctx);
+    join_gutter(&mut out, gutter, padding, title.as_ref(), ctx);
     pin_gutter(&mut out, gutter, padding, title.as_ref());
     out
 }
@@ -154,10 +154,19 @@ fn pin_gutter(out: &mut Canvas, gutter: usize, padding: u16, title: Option<&Line
     }
     // The label in the top rule is chrome for the same reason the numbers are, and a
     // prefix stopping short of it leaves a fragment of a word standing in a box rule —
-    // `╭  ru────╮`. `framed` writes it one column in from the corner, with a space on
-    // either side, and clips it to the inner width so the corner always survives.
+    // `╭  ru────╮`. Where it starts depends on whether it collided with the gutter's
+    // junction: `framed` writes it one column in from the corner, but `join_gutter`
+    // moves it to just after the junction when the two want the same column. Both cases
+    // are read back off the drawn row rather than re-derived here, because a second copy
+    // of that arithmetic is exactly what would drift.
     if let Some(title) = title {
-        let label = u16::try_from(2 + title.width() + 1)
+        let text = out.row_text(0);
+        let start = title
+            .spans
+            .first()
+            .and_then(|span| text.find(span.text.as_str()))
+            .map_or(2, |byte| crate::text::display_width(&text[..byte]));
+        let label = u16::try_from(start + title.width() + 1)
             .unwrap_or(u16::MAX)
             .min(out.width());
         out.add_pin(0, label.max(prefix));
@@ -171,20 +180,46 @@ const CODE_PADDING: u16 = 1;
 ///
 /// Without this the gutter is a bar floating between two horizontal edges it does not
 /// meet; with it the block reads as one piece of chrome.
-fn join_gutter(out: &mut Canvas, gutter: usize, padding: u16, ctx: Ctx<'_>) {
+///
+/// The top junction and the language label want the same columns — a four-column gutter
+/// puts the `┬` under the third letter of `rust` — and the rule used to be that the
+/// label won and the junction was simply dropped. That left the gutter closed at the
+/// bottom and open at the top, which reads as a box that failed to draw rather than as
+/// a label that took precedence, so the two are no longer in competition: the label is
+/// moved to the *right* of the junction, and the top edge comes out `╭───┬ rust ───╮`,
+/// the mirror of the `╰───┴─────────╯` beneath it. `title` is therefore re-drawn here
+/// rather than being handed to `Canvas::framed`, which knows only one place to put it.
+fn join_gutter(out: &mut Canvas, gutter: usize, padding: u16, title: Option<&Line>, ctx: Ctx<'_>) {
     if gutter == 0 {
         return;
     }
     // Inside the frame and the padding, the rule sits two columns left of the code.
     let col = 1 + usize::from(padding) + gutter - 2;
     let set = BorderSet::ROUNDED;
+    let frame = ctx.theme.code.frame;
     let last = out.height().saturating_sub(1);
-    // A title occupying the junction column must win: it is content, the junction is
-    // decoration.
-    if out.row_text(0).chars().nth(col) == Some(set.horizontal) {
-        out.write_str(0, col, &set.tee_down.to_string(), ctx.theme.code.frame);
+    let inner = usize::from(out.width()).saturating_sub(2);
+    if col < inner
+        && out.row_text(0).chars().nth(col) != Some(set.horizontal)
+        && let Some(title) = title
+    {
+        // The label is standing on the junction column. Lay the whole top edge again —
+        // the old label has to go completely, not be partly overwritten — and put the
+        // label back down after the junction.
+        out.hline(0, 1, inner, &set.horizontal.to_string(), frame);
+        let mut spaced = Line::empty();
+        spaced.push(Span::new(" ", frame));
+        for span in &title.spans {
+            spaced.push(span.clone());
+        }
+        spaced.push(Span::new(" ", frame));
+        let room = inner.saturating_sub(col);
+        out.write_line(0, col + 1, &spaced.truncated(room), frame);
     }
-    out.write_str(last, col, &set.tee_up.to_string(), ctx.theme.code.frame);
+    if out.row_text(0).chars().nth(col) == Some(set.horizontal) {
+        out.write_str(0, col, &set.tee_down.to_string(), frame);
+    }
+    out.write_str(last, col, &set.tee_up.to_string(), frame);
 }
 
 /// The label drawn into the frame's top edge: the language, with its icon if enabled.
@@ -291,7 +326,7 @@ fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Ca
         theme.code.background,
     );
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
-    join_gutter(&mut out, gutter, padding, ctx);
+    join_gutter(&mut out, gutter, padding, Some(&title), ctx);
     pin_gutter(&mut out, gutter, padding, Some(&title));
     out
 }

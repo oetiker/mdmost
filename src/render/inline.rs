@@ -229,12 +229,7 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
                 out,
             ),
             NodeKind::Link { url, .. } => link(node, url, style, ctx, out),
-            // A nested image (inside a link, a heading, …) degrades to its alt text;
-            // an image that is a direct child of a paragraph becomes a framed
-            // placeholder box instead, which the block renderer handles.
-            NodeKind::Image { .. } => {
-                collect(&node.children, style.patch(theme.text.image_alt), ctx, out)
-            }
+            NodeKind::Image { .. } => image_marker(node, style, ctx, out),
             NodeKind::FootnoteReference { number, .. } => {
                 out.push(Piece::synthetic(
                     format!("[{number}]"),
@@ -259,6 +254,51 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
             _ => collect(&node.children, style, ctx, out),
         }
     }
+}
+
+/// The brackets an image wears when it appears inside a sentence.
+///
+/// The same idiom as [`HTML_MARKER`], and for the same reason: something the terminal
+/// cannot show was here, and the sentence has to say so without pretending the words in
+/// the brackets are its own. What goes between them is the alt text, which is the
+/// author's description of the picture and the only part of an image a reader of a
+/// terminal can use.
+const IMAGE_OPEN: &str = "⟨";
+const IMAGE_CLOSE: &str = "⟩";
+
+/// The word standing in for an image with no alt text at all.
+const IMAGE_UNTITLED: &str = "image";
+
+/// An image in an inline position: its alt text, bracketed.
+///
+/// **Changed 2026-08-09.** Every image used to become a framed placeholder box, which
+/// is right for an image that is a paragraph of its own and wrong for one used inside a
+/// sentence: a box is a block, so the paragraph was cut into three — the words before,
+/// a full-width box, the words after — and a sentence the author wrote as one line was
+/// read as three unrelated ones. The box is kept for the block case, decided in
+/// [`block::paragraph`](super::block); everything else, including an image nested in a
+/// link or a heading and an image in a table cell, arrives here.
+fn image_marker(node: &Node, style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
+    let style = style.patch(ctx.theme.text.image_alt);
+    let before = out.len();
+    collect(&node.children, style, ctx, out);
+    let alt: String = out[before..]
+        .iter()
+        .map(|piece| piece.text.as_str())
+        .collect();
+    if alt.trim().is_empty() {
+        // `⟨⟩` says nothing. An image with no alt text still has to be visible — the
+        // reader is being told a picture is missing from the sentence, which is a fact
+        // about the document — so it is named instead.
+        out.truncate(before);
+        out.push(Piece::synthetic(
+            format!("{IMAGE_OPEN}{IMAGE_UNTITLED}{IMAGE_CLOSE}"),
+            style,
+        ));
+        return;
+    }
+    out.insert(before, Piece::synthetic(IMAGE_OPEN, style));
+    out.push(Piece::synthetic(IMAGE_CLOSE, style));
 }
 
 /// Whether the run so far already ends in whitespace (or is empty).
