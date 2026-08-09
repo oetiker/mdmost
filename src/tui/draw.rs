@@ -134,7 +134,7 @@ pub fn draw_splash(frame: &mut Frame<'_>, app: &App) {
 /// is therefore moved only as far as it has anywhere to go — see
 /// [`super::wide::scroll_reach`] for what "anywhere" means and why it is a property of
 /// a run of rows rather than of one row.
-struct Offsets<'a> {
+pub(super) struct Offsets<'a> {
     /// How far each row may be scrolled; one entry per canvas row.
     reach: &'a [u16],
     /// The offset the reader has scrolled to.
@@ -146,9 +146,19 @@ struct Offsets<'a> {
 impl<'a> Offsets<'a> {
     /// Reads the offsets for the current frame.
     fn new(app: &'a App, viewport: u16) -> Self {
+        Self::scrolled_to(app.reach(), app.hscroll(), viewport)
+    }
+
+    /// The offsets for a reader who has scrolled to `offset` over a canvas whose rows
+    /// may travel as far as `reach`.
+    ///
+    /// Separate from [`Offsets::new`] so a test can paint a frame without an [`App`];
+    /// both go through the same arithmetic, so a test cannot drift from what the pager
+    /// actually does.
+    pub(super) fn scrolled_to(reach: &'a [u16], offset: u16, viewport: u16) -> Self {
         Self {
-            reach: app.reach(),
-            offset: app.hscroll(),
+            reach,
+            offset,
             viewport,
         }
     }

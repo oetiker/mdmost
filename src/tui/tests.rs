@@ -859,13 +859,17 @@ fn edge_column(
     let width = 14u16;
     let height = u16::try_from(canvas.height()).expect("a short document");
     let frames = [theme.code.frame, theme.table.border];
+    // The real per-row reach, so this test cannot disagree with the pager about which
+    // rows move: a row that has nowhere to go is not cut, and must not be marked.
+    let reach = super::wide::scroll_reach(canvas, width);
+    let offsets = super::draw::Offsets::scrolled_to(&reach, left, width);
     let rows = painted(width, height, |buffer, area| {
         super::draw::edge_markers(
             buffer,
             area,
             canvas,
             0,
-            left,
+            &offsets,
             ratatui::style::Style::default(),
             &frames,
         );
