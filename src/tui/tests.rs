@@ -1769,6 +1769,210 @@ fn the_line_number_gutter_stays_put_while_the_code_scrolls_under_it() {
     );
 }
 
+#[test]
+fn stepping_to_a_match_scrolls_sideways_to_reach_it() {
+    // The owner's report — "what is not clear to me how to navigate multiple matches" —
+    // rested on this: `n` moved the counter and nothing else. A match in the over-wide
+    // part of a table is off screen to the *right*, and jumping to it only scrolled
+    // vertically, so a reader who pressed `n` saw an unchanged screen and concluded the
+    // key did nothing. Reaching a match has to mean putting it where it can be read.
+    let mut app = numbered_pager_at(NUMBERED_WIDE, 80, 16);
+    assert!(app.hscroll_max() > 0, "the probe document must scroll");
+    assert_eq!(app.hscroll(), 0, "and starts at the left edge");
+
+    app.run_search("Ocelot");
+    assert_eq!(app.search().len(), 1, "the probe token is found once");
+    assert!(
+        app.hscroll() > 0,
+        "reaching an off-screen match scrolls sideways to it"
+    );
+    let rows = framed(&mut app, 80, 16);
+    assert!(
+        rows.iter().any(|row| row.contains("Ocelot")),
+        "and the match is on screen afterwards: {rows:?}"
+    );
+}
+
+#[test]
+fn a_match_already_on_screen_does_not_move_the_page_sideways() {
+    // The other half of the promise: revealing a match must not drag a page that was
+    // already showing it, or every `n` inside one paragraph would jolt the text.
+    let mut app = numbered_pager_at(NUMBERED_WIDE, 80, 16);
+    app.run_search("Prose");
+    assert_eq!(app.search().len(), 1);
+    assert_eq!(
+        app.hscroll(),
+        0,
+        "a match in the prose is already on screen at the left edge"
+    );
+}
+
+#[test]
+fn the_status_bar_advertises_the_match_keys_while_a_search_is_active() {
+    // The report was a discoverability defect: `n` and `N` have been bound since the
+    // beginning, and the author of the program could not find them. The counter says
+    // matches exist; only the hint says what moves between them.
+    let mut app = pager(SAMPLE);
+    let bare = painted(80, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        !bare[0].contains("next/prev"),
+        "no search, no hint: {:?}",
+        bare[0]
+    );
+
+    app.run_search("needle");
+    assert!(app.search().len() > 1, "the probe has several matches");
+    let rows = painted(80, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        rows[0].contains("n/N next/prev"),
+        "the bound keys are named beside the count: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn the_modified_arrows_step_between_matches_like_the_letters() {
+    // Bound at the owner's request for readers who do not reach for vi keys. They are
+    // aliases of the same actions, so they must behave identically — including the wrap.
+    let mut app = pager(SAMPLE);
+    app.run_search("needle");
+    assert_eq!(app.search().len(), 2);
+    assert_eq!(app.search_index(), Some(0));
+
+    let ctrl = |code| Key {
+        code,
+        mods: crate::config::KeyMods::CTRL,
+    };
+    assert_eq!(
+        app.config().keys.action(&ctrl(KeyCode::Down)),
+        Some(Action::NextMatch)
+    );
+    assert_eq!(
+        app.config().keys.action(&ctrl(KeyCode::Up)),
+        Some(Action::PrevMatch)
+    );
+    app.on_key(ctrl(KeyCode::Down));
+    assert_eq!(app.search_index(), Some(1));
+    app.on_key(ctrl(KeyCode::Up));
+    assert_eq!(app.search_index(), Some(0));
+
+    // And the plain arrows still scroll, or the alias would have stolen them.
+    assert_eq!(
+        app.config().keys.action(&Key::plain(KeyCode::Down)),
+        Some(Action::LineDown)
+    );
+    assert_eq!(
+        app.config().keys.action(&Key::plain(KeyCode::Up)),
+        Some(Action::LineUp)
+    );
+}
+
+#[test]
+fn the_status_bar_offers_the_second_way_of_stepping_and_gives_it_up_first() {
+    // The owner asked for both `n`/`N` and the modified arrows on the footer. Two chips,
+    // not one sentence, precisely so the alias is what a narrow terminal loses: a reader
+    // with `n/N next/prev` can still move, a reader with only `or Ctrl-↓/Ctrl-↑` beside
+    // no words at all cannot tell what it is for.
+    let mut app = pager(SAMPLE);
+    app.run_search("needle");
+    app.resize(100, 12);
+    let wide = painted(100, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        wide[0].contains("n/N next/prev"),
+        "the letters lead: {:?}",
+        wide[0]
+    );
+    assert!(
+        wide[0].contains("or Ctrl-↓/Ctrl-↑"),
+        "and the arrows follow: {:?}",
+        wide[0]
+    );
+
+    app.resize(76, 12);
+    let narrow = painted(76, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        !narrow[0].contains("Ctrl-"),
+        "the alias is the first thing given up: {:?}",
+        narrow[0]
+    );
+    assert!(
+        narrow[0].contains("n/N next/prev"),
+        "the primary hint outlives it: {:?}",
+        narrow[0]
+    );
+}
+
+#[test]
+fn the_help_overlay_lists_every_way_to_step_between_matches() {
+    // The bar names two chords; the overlay is where the rest live, and a binding the
+    // overlay omits is a binding nobody finds.
+    let app = pager(SAMPLE);
+    let sections = help::sections(&app.config().keys);
+    let search = sections
+        .iter()
+        .find(|section| section.title == "Search")
+        .expect("the help overlay has a search heading");
+    let row = |description: &str| {
+        search
+            .rows
+            .iter()
+            .find(|row| row.description == description)
+            .unwrap_or_else(|| panic!("`{description}` is listed: {search:?}"))
+    };
+    let next = &row("Go to the next match").keys;
+    assert!(next.contains('n') && next.contains("Ctrl-↓"), "{next:?}");
+    let prev = &row("Go to the previous match").keys;
+    assert!(prev.contains('N') && prev.contains("Ctrl-↑"), "{prev:?}");
+}
+
+#[test]
+fn the_match_key_hint_names_the_keys_the_reader_actually_bound() {
+    // Every hint on this bar is generated from the live key table (design spec §10). A
+    // reader who moved `next_match` to `>` must be told `>`, not the default nobody
+    // bound.
+    let mut config = Config::default();
+    config.keys.unbind(&Key::char('n'));
+    config.keys.unbind(&Key::char('N'));
+    config.keys.bind(Key::char('>'), Action::NextMatch);
+    config.keys.bind(Key::char('<'), Action::PrevMatch);
+    let mut app = App::new(
+        Doc::parse(SAMPLE),
+        config,
+        AppOptions {
+            config_path: None,
+            title: "sample.md".to_string(),
+            icons: false,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(80, 12);
+    let _ = app.canvas();
+    app.run_search("needle");
+    let rows = painted(80, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        rows[0].contains(">/< next/prev"),
+        "the rebound keys are what the bar names: {:?}",
+        rows[0]
+    );
+    assert!(
+        !rows[0].contains("n/N"),
+        "and the defaults nobody bound are not: {:?}",
+        rows[0]
+    );
+}
+
 /// A numbered fence and an over-wide table inside the *same list item*.
 ///
 /// A container emits its children with no blank row between them, so the two blocks are

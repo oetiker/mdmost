@@ -809,6 +809,60 @@ impl App {
         self.track_toc();
     }
 
+    /// Brings the canvas columns `col..col + cols` of `row` into view sideways.
+    ///
+    /// Vertical reveal alone is not "reaching" a match. A hit in the over-wide part of a
+    /// table or a long code line is off screen to the *right*, and jumping to it moved
+    /// only the scroll — so pressing `n` changed the counter on the status bar and not a
+    /// single character of the page, which is what made match navigation look broken to
+    /// the owner. Nothing is moved when the span is already fully drawn, or the page
+    /// would jolt sideways for every hit inside one paragraph.
+    ///
+    /// The arithmetic is [`super::draw::Offsets`]' own, from the other end: that painter
+    /// draws canvas column `c` of a row at viewport column `c - at(row)`, for `c` at or
+    /// past the row's pinned prefix, and only while that lands inside
+    /// [`App::content_columns`]. So the span is visible exactly when the row's applied
+    /// offset lies in `(end - content, col - pinned]`, and the reveal picks the offset
+    /// that centres the span in that window when it does not.
+    fn reveal_columns(&mut self, row: usize, col: u16, cols: u16) {
+        let content = self.content_columns();
+        let reach = self.reach().get(row).copied().unwrap_or(0);
+        // A row with nowhere to go is pinned at offset zero by `Offsets::at` whatever the
+        // reader has scrolled to, so its content is on screen already or nowhere at all.
+        let Some(furthest) = reach.checked_sub(content).filter(|max| *max > 0) else {
+            return;
+        };
+        let pinned = self.pinned_columns(row);
+        let end = col.saturating_add(cols);
+        let applied = self.hscroll.min(furthest);
+        let visible = col >= applied.saturating_add(pinned) && end <= applied + content;
+        if visible {
+            return;
+        }
+        // Centred in the columns the document is drawn in, then held to the window that
+        // actually shows the span: a match wider than the viewport is put flush against
+        // the pinned prefix rather than centred out of reach on both sides.
+        let centre = i32::from(col) + i32::from(cols) / 2 - i32::from(content) / 2;
+        let latest = i32::from(col).saturating_sub(i32::from(pinned));
+        let earliest = i32::from(end) - i32::from(content);
+        let target = centre.clamp(earliest.min(latest), latest);
+        self.hscroll = u16::try_from(target.max(0))
+            .unwrap_or(u16::MAX)
+            .min(furthest);
+    }
+
+    /// How many leading columns of `row` the horizontal offset leaves alone.
+    ///
+    /// [`super::draw::Offsets::pinned`] in the state layer: a gutter wider than the
+    /// document's own columns is given up entirely, and every row keeps the margin rail
+    /// the edge markers are painted in.
+    fn pinned_columns(&self, row: usize) -> u16 {
+        let content = self.content_columns();
+        let gutter = self.pinned().get(row).copied().unwrap_or(0);
+        let gutter = if gutter >= content { 0 } else { gutter };
+        gutter.max(crate::render::margins(self.viewport_width()).min(content))
+    }
+
     /// Keeps the table-of-contents selection on the section being read.
     ///
     /// Design spec §9 asks for "the current section highlighted"; a map that stops
@@ -1393,8 +1447,11 @@ impl App {
             return;
         };
         self.search_index = Some(index);
-        if let Some(row) = self.search.hits()[index].row() {
-            self.reveal_centered(row);
+        // The first segment is the match's beginning; a hit the renderer wrapped across a
+        // line break is reached by its start, which is where the reader's eye goes.
+        if let Some(segment) = self.search.hits()[index].segments.first().copied() {
+            self.reveal_centered(segment.row);
+            self.reveal_columns(segment.row, segment.col, segment.cols);
         }
         // No notice: the status bar already carries `⌕ query n/m` on its right-hand
         // side, and saying the same thing twice thirty columns apart (usability P7)
