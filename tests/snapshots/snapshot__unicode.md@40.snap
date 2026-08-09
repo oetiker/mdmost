@@ -91,14 +91,14 @@ expression: canvas.plain_text()
  │ Khmer    │ �            │ 3     │    
  ╰──────────┴──────────────┴───────╯    
                                         
- *  日本語のリスト項目で、四十桁のとき  
-    に折り返しが起きるだけの長さがあり  
-    ます。                              
+ *    日本語のリスト項目で、四十桁のと  
+      きに折り返しが起きるだけの長さが  
+      あります。                        
                                         
- ☑  ✅ タスク                           
+ [x]  ✅ タスク                         
                                         
- *  �   a bullet whose first grapheme   
-    is three columns wide               
+ *    �   a bullet whose first grapheme 
+      is three columns wide             
                                         
  ▌ 日本語の引用文で、これも折り返しが必 
  ▌ 要な長さになっています。 �   and a   

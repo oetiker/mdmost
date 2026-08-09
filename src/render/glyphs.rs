@@ -7,19 +7,24 @@
 //!
 //! # The width rule
 //!
-//! **Every glyph in both sets is exactly one display column** by
-//! [`crate::text::display_width`], and the two sets are the same shape. A test in this
-//! module asserts it for every entry, so a badly chosen replacement fails the build
-//! rather than the layout. This is what keeps the canvas's cell arithmetic identical
-//! whichever set is in force.
+//! **Every glyph occupies the same display width in both sets**, and the two sets are
+//! the same shape. Turning icons off therefore changes what a glyph looks like and
+//! nothing about where anything sits; a test in this module asserts it for every entry,
+//! so a badly chosen replacement fails the build rather than the layout.
 //!
-//! Turning icons off therefore changes what a glyph looks like and, with **one
-//! exception**, nothing about where anything sits. The exception is the task box: the
-//! Nerd Font pair is *drawn* across two cells even though `unicode-width` reports one
-//! for their private-use code points, so the marker field reserves two for them and a
-//! task list's text starts a column further right with icons on. [`Glyphs::task_cells`]
-//! carries that reservation and explains why pretending otherwise was a defect rather
-//! than a simplification. Nothing else in either set is drawn wider than it measures.
+//! Single-cell glyphs — the bullets, the language icons — are additionally asserted to
+//! be exactly one column, which is what keeps the canvas's cell arithmetic simple. The
+//! task box is three columns (`[ ]`), the same three in both sets.
+//!
+//! This rule was briefly weakened, on 2026-08-09, to admit a task box that was *drawn*
+//! two cells wide while measuring one — the Nerd Fonts patch draws its icon ranges at
+//! double advance, and `unicode-width` has no data for private-use code points. The
+//! layout had to be told the true width by hand, and two long-standing parity tests
+//! were weakened to accommodate it. Replacing that pictograph with `[ ]` and `[x]`
+//! (see [`TASK_BOXES`]) deleted the discrepancy, the hand-carried reservation and the
+//! exception together, and the two tests are back on the full corpus. **A glyph whose
+//! drawn width and measured width disagree will do this to you again; prefer one where
+//! they cannot.**
 //!
 //! Box-drawing characters — frames, quote bars, heading rules, the overflow marker —
 //! are not icons and are identical in both sets, so they are not listed here.
@@ -29,10 +34,10 @@
 //! The two marker families each own a distinct *shape* vocabulary, and no glyph is
 //! ever shared between them:
 //!
-//! | family      | shape                              | plain        | nerd     |
-//! |-------------|------------------------------------|--------------|----------|
-//! | list bullet | ASCII punctuation, one per depth   | `* > + -`    | the same |
-//! | task box    | a box big enough to hold a tick    | ballot boxes | squares  |
+//! | family      | shape                            | plain       | nerd     |
+//! |-------------|----------------------------------|-------------|----------|
+//! | list bullet | ASCII punctuation, one per depth | `* > + -`   | the same |
+//! | task box    | ASCII brackets around the state  | `[ ]` `[x]` | the same |
 //!
 //! A reader must never see one marker mean two things, so a test in this module
 //! asserts the two families are disjoint in both sets.
@@ -101,6 +106,35 @@
 /// Each is a single code point of display width 1, which a test below enforces.
 const BULLETS: [&str; 4] = ["*", ">", "+", "-"];
 
+/// The task box, ticked and unticked, shared by both glyph sets.
+///
+/// **ASCII, and the literal Markdown source syntax**, at the owner's request on
+/// 2026-08-09: "hmmm it seems that whole business could be quite fragile … so maybe
+/// instead of the fancy checkbox icon we should use `[ ]` and `[x]`?"
+///
+/// The business was fragile, and this is what deletes it. The Nerd Font boxes were
+/// private-use code points that the patch draws at *twice* the advance of an ASCII
+/// character while `unicode-width` — which has no data for that range — reports one.
+/// Every part of the layout had to be told about that discrepancy by hand: a
+/// hand-maintained `task_cells` field carrying the true reservation, a marker field
+/// that budgeted it instead of the measured width, and, worst of all, a documented
+/// exception to the rule that the two glyph sets never differ in layout. Two
+/// long-standing parity tests had to be weakened to accommodate it. All of that existed
+/// to serve one pictograph.
+///
+/// `[ ]` and `[x]` need none of it. They are three ASCII columns that every font on
+/// earth draws identically and `unicode-width` measures correctly, so the reservation
+/// *is* the measurement, both sets are the same text, and the parity rule is an
+/// absolute again — the two tests that guarded it are back on the full corpus. They are
+/// also exactly what the author typed in the source, which is the same argument that
+/// settled [`BULLETS`]: for something as common as a task list, reliability and
+/// familiarity beat decoration.
+///
+/// Both are three columns wide, so ticked and unticked align by construction rather
+/// than by a font's promise — which is the defect that started this whole sequence,
+/// when the two Font Awesome boxes turned out to be the same drawing at two sizes.
+const TASK_BOXES: (&str, &str) = ("[x]", "[ ]");
+
 /// The glyphs used for one rendering pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Glyphs {
@@ -110,19 +144,6 @@ pub(crate) struct Glyphs {
     pub task_checked: &'static str,
     /// The box of an unticked task list item.
     pub task_unchecked: &'static str,
-    /// The cells a task box is *drawn* across, which is not always what
-    /// [`crate::text::display_width`] says.
-    ///
-    /// The Nerd Font boxes are private-use code points. `unicode-width` has no data for
-    /// that range and answers 1 for all of it, but the patched fonts that carry these
-    /// two draw them with exactly twice the advance of an ASCII character. Budgeting
-    /// the 1 is what let the glyph spill over the item's text — the defect the owner
-    /// reported as the box "hugging" the text — so the layout budgets this instead.
-    ///
-    /// This is the *reservation*, not a claim about the cluster: the canvas still
-    /// treats the glyph as the one column `display_width` reports, which is what keeps
-    /// its cell arithmetic consistent. The extra column is simply left blank after it.
-    pub task_cells: usize,
     /// Whether a code fence shows a language icon in front of its name.
     pub code_icons: bool,
 }
@@ -130,71 +151,49 @@ pub(crate) struct Glyphs {
 impl Glyphs {
     /// Plain Unicode, for terminals without a Nerd Font (`--no-icons`).
     ///
-    /// The task boxes stay `☐` U+2610 BALLOT BOX and `☑` U+2611 BALLOT BOX WITH CHECK.
-    /// `☒` U+2612 BALLOT BOX WITH X was weighed against them on 2026-08-09 and
-    /// rejected: it says *rejected*, not *done*, so it is the wrong word for a ticked
-    /// task however it happens to be drawn. `☐` and `☑` are the pair Unicode names for
-    /// the job — the same box, empty and checked — which is the only property that
-    /// survives a change of the reader's font.
+    /// The task boxes are ASCII and identical to [`Self::NERD`]'s — see [`TASK_BOXES`].
+    /// They used to be `☐` U+2610 and `☑` U+2611 here; those were fine characters, but
+    /// they made this set differ from the icon set for no benefit the reader could see,
+    /// and the whole point of the current pair is that there is only one pair.
     pub const PLAIN: Self = Self {
         bullets: BULLETS,
-        task_checked: "☑",
-        task_unchecked: "☐",
-        // Ordinary single-cell characters: what `display_width` says is what is drawn.
-        task_cells: 1,
+        task_checked: TASK_BOXES.0,
+        task_unchecked: TASK_BOXES.1,
         code_icons: false,
     };
 
     /// Nerd Font glyphs, the default look where a Nerd Font is detected.
     ///
     /// The code points are named in the comments so they can be checked against
-    /// <https://www.nerdfonts.com/cheat-sheet>. The bullets are deliberately ASCII
-    /// (see the module docs); what the icons buy here is the ticked task box and the
-    /// code-fence language icons.
+    /// <https://www.nerdfonts.com/cheat-sheet>. Bullets and task boxes are deliberately
+    /// ASCII and identical to [`Self::PLAIN`]'s (see [`BULLETS`] and [`TASK_BOXES`]);
+    /// what the icons buy is the code-fence language icons, and nothing else.
     ///
-    /// # The task boxes are a *pair*, and were not
+    /// # The task boxes used to be here, and were a mistake twice over
     ///
-    /// The owner reported on 2026-08-09 that the unticked box looks larger than the
-    /// ticked one. The two boxes used to be `nf-fa-square_o` U+F096 and
-    /// `nf-fa-check_square_o` U+F046, which are the same drawing at two different
-    /// sizes, sitting one under the other in the marker column where nothing hides the
-    /// mismatch. Font Awesome 4 has no outlined box that pairs with U+F096, so the two
-    /// move to Material Design's `checkbox_blank_outline` / `checkbox_marked_outline`,
-    /// which are *designed* as a pair: one box, with and without a tick. That they are
-    /// a pair by design is the durable reason; how large either one renders depends on
-    /// the reader's patched font and is not something this file can know.
+    /// They were `nf-fa-square_o` U+F096 and `nf-fa-check_square_o` U+F046 — the same
+    /// drawing at two different sizes, which the owner spotted immediately in the
+    /// marker column where nothing hides a mismatch. They were then moved to Material
+    /// Design's `checkbox_blank_outline` / `checkbox_marked_outline`, which *are* drawn
+    /// as a pair, and that fixed the mismatch but bought a worse problem: the Nerd
+    /// Fonts patch draws its icon ranges at twice the advance of an ASCII character,
+    /// while `unicode-width` has no data for private-use code points and reports one.
+    /// The layout had to be told the truth by hand, and the discrepancy leaked into a
+    /// documented exception to the parity rule.
     ///
-    /// # They are two cells wide, and must be given two
+    /// Both problems were properties of using a pictograph for something that has a
+    /// perfectly good ASCII spelling. `[ ]` and `[x]` have neither: see [`TASK_BOXES`].
     ///
-    /// These two are drawn with **twice the advance width of an ASCII character** — the
-    /// "large double char affair" the owner described. That is a property of the Nerd
-    /// Fonts patch, not of one face: the icon ranges are patched in at double advance
-    /// so the pictographs are not squeezed into a single narrow cell, and both the
-    /// proportional and the `Mono` variants of a patched font agree on it.
-    ///
-    /// `unicode-width` cannot know this. The code points are in a private-use area,
-    /// where there is no property to consult and the crate answers 1 for everything.
-    /// Budgeting that 1 is what made the box overlap the text after it, which the owner
-    /// reported as the box hugging its text and which two spaces of gap alone did not
-    /// cure — the box was simply eating one of them. [`Self::task_cells`] carries the
-    /// real reservation, and the layout uses it.
-    ///
-    /// This is the one place where the two glyph sets legitimately differ in *layout*
-    /// rather than only in appearance, and the module's width rule is written to admit
-    /// it: a glyph that is drawn two cells wide has to be given two cells.
-    ///
-    /// The cost is that these are five-digit code points, added to Nerd Fonts in v3
-    /// (2023). A v2 patch does not carry them, so [`Self::nerd_glyphs`] — which is
-    /// what font detection demands coverage of — now answers "no Nerd Font" on a v2
-    /// patch, and that reader gets [`Self::PLAIN`]. That is the safe direction of the
-    /// detection rule (design spec §2.1: yes only on positive evidence) and it is the
-    /// price of the boxes being the same size.
+    /// One consequence worth knowing. [`Self::nerd_glyphs`] is what font detection
+    /// demands coverage of, and the task box used to be the renderer's representative
+    /// in it. The renderer is now represented by the code-fence language icons alone.
+    /// Detection still rejects a Nerd Fonts v2 patch, because the *chrome*'s file
+    /// marker is a five-digit Material code point — but that is now the only thing
+    /// holding that line, which a test in [`crate::nerdfont`] pins deliberately.
     pub const NERD: Self = Self {
         bullets: BULLETS,
-        task_checked: "\u{f0135}",   // nf-md-checkbox_marked_outline
-        task_unchecked: "\u{f0131}", // nf-md-checkbox_blank_outline
-        // Drawn two cells wide; see `task_cells` and the section below.
-        task_cells: 2,
+        task_checked: TASK_BOXES.0,
+        task_unchecked: TASK_BOXES.1,
         code_icons: true,
     };
 
@@ -242,14 +241,15 @@ impl Glyphs {
     /// [`LANGUAGE_ICONS`] is a glyph the probe immediately starts requiring, with no
     /// second list that has to be remembered.
     ///
-    /// The bullets are excluded because they are the same plain Unicode in both sets:
-    /// they are not evidence of anything, and requiring them would make detection ask
-    /// a question whose answer cannot change the render.
+    /// Bullets and task boxes are excluded because they are the same ASCII in both
+    /// sets: they are not evidence of anything, and requiring them would make detection
+    /// ask a question whose answer cannot change the render. That leaves the code-fence
+    /// language icons as the renderer's whole contribution to the probe, which is
+    /// correct — they are now the only thing the renderer draws that icons change.
     pub fn nerd_glyphs() -> impl Iterator<Item = &'static str> {
-        let set = Self::NERD;
-        [set.task_checked, set.task_unchecked]
-            .into_iter()
-            .chain(LANGUAGE_ICONS.iter().map(|(_, icon)| *icon))
+        LANGUAGE_ICONS
+            .iter()
+            .map(|(_, icon)| *icon)
             .chain([GENERIC_LANGUAGE_ICON])
     }
 }
@@ -299,11 +299,19 @@ mod tests {
     use super::*;
     use crate::text::display_width;
 
-    /// Every glyph either set can draw.
-    fn all(set: Glyphs) -> Vec<&'static str> {
+    /// The glyphs that must each be exactly one cell: bullets and language icons.
+    ///
+    /// The task boxes are excluded — they are three columns (`[ ]`) — and have their
+    /// own assertions below.
+    fn single_cell(set: Glyphs) -> Vec<&'static str> {
         let mut out: Vec<&'static str> = set.bullets.to_vec();
-        out.push(set.task_checked);
-        out.push(set.task_unchecked);
+        out.extend(language_icons(set));
+        out
+    }
+
+    /// Every code-fence icon the set can draw, including the generic fallback.
+    fn language_icons(set: Glyphs) -> Vec<&'static str> {
+        let mut out = Vec::new();
         for language in [
             Some("rust"),
             Some("python"),
@@ -331,9 +339,9 @@ mod tests {
     }
 
     #[test]
-    fn every_glyph_is_exactly_one_display_column() {
+    fn single_cell_glyphs_are_exactly_one_display_column() {
         for set in [Glyphs::PLAIN, Glyphs::NERD] {
-            for glyph in all(set) {
+            for glyph in single_cell(set) {
                 // `display_width`, not `grapheme_width`: the latter clamps to the
                 // two columns a cell can hold, so a glyph that genuinely draws three
                 // would pass a clamped assertion and then shift every column after it.
@@ -350,6 +358,59 @@ mod tests {
                     "glyph {glyph:?} must be a single code point"
                 );
             }
+        }
+    }
+
+    /// The two sets must agree on the width of every marker, or `--no-icons` would
+    /// shift the document sideways.
+    ///
+    /// This is the invariant that matters; "everything is one column" was only ever a
+    /// convenient way of guaranteeing it, and it stopped being true when the task box
+    /// became `[ ]`. Asserted slot by slot rather than in aggregate, so a pair of
+    /// compensating errors cannot hide.
+    ///
+    /// The markers are the bullets and the task boxes: the glyphs that sit in the
+    /// document's flow, where a width difference would move text. Code-fence language
+    /// icons are deliberately not here — the plain set draws *no* icon at all rather
+    /// than a substitute, so the two sets do not even have the same number of glyphs
+    /// there. That is safe only because a fence's title sits inside a full-width frame
+    /// that absorbs the difference, which is a property of the frame rather than of
+    /// the glyph, and so is asserted where the frame is.
+    #[test]
+    fn the_two_sets_agree_on_the_width_of_every_marker() {
+        let markers = |set: Glyphs| {
+            let mut out: Vec<&'static str> = set.bullets.to_vec();
+            out.push(set.task_checked);
+            out.push(set.task_unchecked);
+            out
+        };
+        let plain = markers(Glyphs::PLAIN);
+        let nerd = markers(Glyphs::NERD);
+        assert_eq!(plain.len(), nerd.len(), "the sets have different shapes");
+        for (left, right) in plain.iter().zip(&nerd) {
+            assert_eq!(
+                display_width(left),
+                display_width(right),
+                "{left:?} and {right:?} occupy different widths, so turning icons \
+                 off would move the text after them"
+            );
+        }
+    }
+
+    /// The ticked and unticked boxes must be the same width as each other.
+    ///
+    /// This is what keeps a task list's text in one column no matter which items are
+    /// done. It is the defect that started the whole checkbox sequence: the original
+    /// Font Awesome pair was the same drawing at two different sizes. `[ ]` and `[x]`
+    /// satisfy it by construction, which is the point of them.
+    #[test]
+    fn the_task_boxes_are_the_same_width_as_each_other() {
+        for set in [Glyphs::PLAIN, Glyphs::NERD] {
+            assert_eq!(
+                display_width(set.task(true)),
+                display_width(set.task(false)),
+                "the boxes must match, or the text would move when an item is ticked"
+            );
         }
     }
 

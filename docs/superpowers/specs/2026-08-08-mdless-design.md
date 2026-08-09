@@ -64,17 +64,17 @@ exists mainly for the SSH case, where detection is blind by design and the fix b
 the server's shell profile.
 
 *Unchanged:* the two glyph sets remain the same shape and the same display width, so
-which one is in force does not affect layout (§9) — with one admitted exception, the
-task checkbox, which the Nerd Fonts patch draws two cells wide and which is therefore
-reserved two columns. See the marker-spacing amendment below.
+which one is in force never affects layout (§9). This briefly acquired an exception for
+the task checkbox; §2.2 records how it was removed.
 
 *Amended 2026-08-09.* This section used to say the three marker families — heading
 prefixes, list bullets, task boxes — each own a distinct shape vocabulary and never share
-a glyph. Two of those three are gone as icon families. Heading prefixes were removed
-outright (§9.1). List bullets are now the *same text in both sets*, so detection no
-longer demands the four bullet code points. What remains is the rule that bullets and
-task boxes never share a glyph, still tested, and the width rule, which now holds
-trivially for bullets.
+a glyph. **All three are now gone as icon families.** Heading prefixes were removed
+outright (§9.1); list bullets and task boxes are the *same ASCII text in both sets*
+(§2.2), so detection demands none of their code points. What remains is the rule that
+bullets and task boxes never share a glyph, still tested, and the width rule, which now
+holds trivially for the bullets and is asserted as same-width-in-both-sets for the
+three-column task box.
 
 *Amended again 2026-08-09.* The depth-1 bullet was reopened three times in one day —
 `·` U+00B7 was too small, `⦁` U+2981 was picked from a rendered selection but is absent
@@ -93,32 +93,48 @@ em-fractions and named a specific patched font as "the shipping font"; that font
 early session's guess about the owner's setup, never evidence, and was then cited back
 as authority by every session after. Those claims have been deleted, not corrected.
 
-*The task boxes moved in the same pass.* The Nerd Font pair was `nf-fa-square_o` and
-`nf-fa-check_square_o`, which are the same drawing at two different sizes — the
-unticked box looks larger than the ticked one, which is what the owner saw. They are
-now `nf-md-checkbox_blank_outline` / `nf-md-checkbox_marked_outline`, which Material
-Design draws *as a pair*: one box, with and without a tick. These are Nerd Fonts v3
-code points, so a v2 patch now fails detection and gets plain Unicode — the safe
-direction of §2.1's rule. The plain boxes are unchanged at `☐` U+2610 and `☑` U+2611;
+### 2.2 The task box is `[ ]` and `[x]`
+
+**Settled 2026-08-09 after four attempts**, the last three of which were all attempts to
+make a pictograph behave. The record is kept because the sequence is the argument.
+
+1. `nf-fa-square_o` / `nf-fa-check_square_o` — the same drawing at two different sizes.
+   The owner spotted the mismatch immediately: the unticked box looked bigger.
+2. `nf-md-checkbox_blank_outline` / `nf-md-checkbox_marked_outline` — genuinely drawn as
+   a pair, which fixed the mismatch. But the owner then reported the box "hugs the text
+   following it … so I guess two spaces would be in order", and two spaces went in.
+3. That diagnosis was incomplete. The Nerd Fonts patch draws its icon ranges at **twice
+   the advance of an ASCII character** — both the proportional and `Mono` variants — but
+   the code points are private-use, where `unicode-width` has no property to consult and
+   answers 1. The box was *overlapping* the text, not sitting close to it, and it ate one
+   of the two new spaces. Reserving two columns fixed the symptom at the cost of a
+   hand-maintained width, a marker field that ignored its own measurement, and a
+   documented exception to the rule that the glyph sets never differ in layout — an
+   exception that forced two long-standing parity tests to be weakened.
+4. The owner: "hmmm it seems that whole business could be quite fragile … so maybe
+   instead of the fancy checkbox icon we should use `[ ]` and `[x]`?" **That is what
+   ships.** Three ASCII columns that every font draws identically and `unicode-width`
+   measures correctly, so the reservation *is* the measurement. Both sets use the same
+   text, the hand-maintained width is gone, the exception is gone, and both parity tests
+   are back on the full corpus. Ticked and unticked are equal width by construction —
+   the defect from step 1 cannot recur. The gap is back to the single space every other
+   marker gets, since a bracket closes the box more definitely than a pictograph's edge
+   and one space is what the Markdown source itself puts there.
+
+`☐` U+2610 / `☑` U+2611 were the plain-set boxes throughout steps 1–3 and are also gone:
+they made the plain set differ from the icon set for no benefit a reader could see.
 `☒` U+2612 was weighed and rejected because it means *rejected*, not *done*.
 
-*Amended 2026-08-09, marker spacing.* A task checkbox is followed by **two** spaces,
-not one: "the checkbox … hugs the text following it … so I guess two spaces would be in
-order". A checkbox fills its cell edge to edge where a bullet is a small mark floating
-in the middle of one, so the single space that suits a bullet leaves a box welded to
-its word. The gap belongs to the *list*, not the item, so a plain bullet among
-checkboxes pads to the same field and every item's text starts in one column.
+**The lesson, and it is the same one the bullets taught: a glyph whose drawn width and
+measured width disagree will cost you more than it is worth.** Prefer one where they
+cannot disagree.
 
-*Amended once more the same day, after the owner looked at the result:* "if there are
-double wider beautiful checkboxes present we need to indent double". The Nerd Fonts
-patch draws `nf-md-checkbox_blank_outline` and its ticked twin with **twice the advance
-of an ASCII character** — both the proportional and the `Mono` variants agree — but the
-code points are private-use, where `unicode-width` has no property to consult and
-answers 1. Budgeting that 1 is what let the box overlap the following text, and two
-spaces of gap did not cure it because the box was eating one of them. The marker field
-now reserves `Glyphs::task_cells` columns: 2 for the Nerd boxes, 1 for `☐`/`☑`. This is
-the **one** place where the glyph sets differ in layout rather than appearance, and it
-is the right direction — a glyph drawn across two cells genuinely occupies two.
+*Consequence for detection.* The task box used to be the renderer's representative in
+the coverage probe (§2.1). The renderer is now represented by the code-fence language
+icons alone — the only thing it draws that icons still change. A Nerd Fonts v2 patch
+still fails detection, but solely because the *chrome*'s file marker is a five-digit
+Material code point; a test in `nerdfont` pins that deliberately rather than leaving it
+to follow from something that might move again.
 
 ## 3. The central architectural rule
 
@@ -153,8 +169,7 @@ pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOpt
 
 `icons: false` — from `--no-icons`, from `icons = false`, or from detection declining to
 promise a Nerd Font (§2.1) — substitutes plain Unicode for every Nerd Font glyph, at the
-same display width so no layout shifts, the task checkbox excepted (see §9's
-marker-spacing amendment). Note that `RenderOptions::icons` is a plain
+same display width so no layout shifts. Note that `RenderOptions::icons` is a plain
 `bool`: by the time it is built the question has been answered, and no renderer ever has
 to know how. `line_numbers` adds a themed gutter to
 fenced code blocks, outside the horizontally scrollable region. Options are threaded
@@ -425,7 +440,7 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
   than a full fifteen-colour palette. Config themes derive their semantic styles through
   `Theme::from_palette`, the same single implementation the built-ins use, so they
   cannot drift.
-- Nerd Font glyphs for task boxes, code-fence language icons and the status bar, used
+- Nerd Font glyphs for code-fence language icons and the status bar, used
   when a Nerd Font is detected (§2.1). `--no-icons` and `icons = false` substitute plain
   Unicode of the same display width, as does detection failing or being unable to tell.
 - Headings are visually distinct by level (colour, weight, and the rule *under* them),

@@ -130,18 +130,19 @@ Dockerfile emits a whole `RUN` line as one undifferentiated span.
 
 Task boxes, code fences and the status bar are drawn with Nerd Font glyphs when a Nerd
 Font is available, and with plain Unicode equivalents **of the same display width** when
-it is not — so the difference is what the markers look like, not where anything sits.
-Nothing reflows and no feature is lost either way. The single exception is the task
-checkbox: the Nerd Font boxes are drawn two cells wide, so a task list reserves two
-columns for them and its text starts one column further right than with the
-single-cell `☐`/`☑`.
+it is not — so the difference is what the markers look like, never where anything sits.
+Nothing shifts, nothing reflows, and no feature is lost either way.
 
-List bullets are **ASCII** in both cases (`*`, `>`, `+`, `-`, one per nesting level).
-Lists turn up in nearly every document, so the bullet is the thing on the page that can
-least afford to be invisible, and ASCII is the only character class that renders
-everywhere without a font survey — three of the four are the Markdown source bullets
-themselves. Headings have no marker at all — the rule beneath a heading says which
-level it is.
+List bullets and task boxes are **ASCII in both cases** and so are unaffected by any of
+this; the only thing the setting still changes inside the document is the code-fence
+language icon.
+
+List bullets (`*`, `>`, `+`, `-`, one per nesting level) and task boxes (`[ ]`, `[x]`)
+are **ASCII**, whether or not a Nerd Font is present. Lists turn up in nearly every
+document, so their markers are the things on the page that can least afford to be
+invisible, and ASCII is the only character class that renders everywhere without a font
+survey — most of these are also the literal Markdown source the author typed. Headings
+have no marker at all — the rule beneath a heading says which level it is.
 
 **`mdless` works out which to use, and errs towards plain.** No terminal can be asked
 what font it is using, so mdless asks fontconfig whether an installed font covers every

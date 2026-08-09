@@ -19,6 +19,10 @@ Some prose that is long enough to be worth wrapping at a narrow width indeed.
 - one
 - two
 - [ ] three
+
+```rust
+fn main() {}
+```
 ";
 
 /// The binary, with anything in the environment that could change its output removed.
@@ -243,6 +247,10 @@ fn no_icons_reaches_the_renderer_not_just_the_chrome() {
     // detected now, and `--render-once` writes to a pipe, where detection deliberately
     // gives up and picks plain Unicode. Without the flag both sides would be plain and
     // this test would quietly compare nothing with nothing.
+    //
+    // `SAMPLE`'s fenced code block is what carries the difference. Bullets and task
+    // boxes became ASCII in both glyph sets on 2026-08-09, so a code-fence language
+    // icon is now the only thing the *document* renderer draws that this flag changes.
     let with = run_with_stdin(&["--render-once", "--width", "60", "--icons"], SAMPLE);
     let without = run_with_stdin(&["--render-once", "--width", "60", "--no-icons"], SAMPLE);
     assert!(with.status.success() && without.status.success());

@@ -57,9 +57,11 @@ At `06dfc3a`, four owner findings from this session are fixed and merged:
 - **List bullets are ASCII `* > + -`** at depths 1-4, in *both* glyph sets —
   they deliberately no longer vary with Nerd Font detection. This ended three
   rounds of glyph analysis (§4.9).
-- **Two spaces after a task checkbox** (`TASK_GAP`, `src/render/block.rs:439`).
-  The gap belongs to the *list*: any list containing a task widens its marker
-  field so plain items keep the same text column.
+- **The task box is ASCII `[ ]`/`[x]`**, in both glyph sets, followed by two
+  spaces (`TASK_GAP`, `src/render/block.rs`). The gap belongs to the *list*: any
+  list containing a task widens its marker field so plain items keep the same
+  text column. Same argument as the bullets, and it deleted a whole class of
+  font-width fragility with it (§7.1).
 - **The status-bar meter's trough is a space in a flat colour**, not a `░`
   dither, so the part-filled cell matches it by construction (§4.13). The meter
   looks unchanged. The class re-walk also fixed a latent pie-bar background bug
@@ -71,12 +73,15 @@ At `06dfc3a`, four owner findings from this session are fixed and merged:
   `n/N next/prev` and `or Ctrl-↓/Ctrl-↑` chips generated from the live key
   table, and `ctrl-up`/`ctrl-down` are bound as aliases.
 
-A fifth landed after the handoff was first written: **`bd87674` reserves two
-columns for the Nerd Font task boxes** (`Glyphs::task_cells`, 2 with icons / 1
-without), because those boxes are *drawn* at twice an ASCII advance while their
-private-use code points make `unicode-width` answer 1. The earlier two-space gap
-only half-worked — the box was eating one of the spaces. Read §4.10 for what this
-does and does not mean.
+A fifth landed after the handoff was first written, then was **superseded the same
+day**. `bd87674` reserved two columns for the Nerd Font task boxes
+(`Glyphs::task_cells`), because those boxes are *drawn* at twice an ASCII advance
+while their private-use code points make `unicode-width` answer 1. The owner read
+the result and called it: "hmmm it seems that whole business could be quite
+fragile … so maybe instead of the fancy checkbox icon we should use `[ ]` and
+`[x]`?" **The task box is now ASCII `[ ]`/`[x]` in both glyph sets**, and
+`task_cells`, the reservation, and the parity exception it forced are all gone.
+See §7.1 — the open question is closed, not merely answered.
 
 Also: every "the shipping font is X" claim and every rasterised em-fraction
 measurement is **deleted** — they were an early session's guess laundered into a
@@ -179,10 +184,11 @@ has not answered. **Do not delete without asking.**
     font and table is a painting problem, not a counting problem, unless you have
     shown the terminal disagrees too.** The cure for such a problem is still a
     *layout* one — reserve an extra column so the overdraw lands on blank rather
-    than on text (`Glyphs::task_cells`, §7.1) — but understand it as deliberately
-    diverging from the terminal's count to absorb ink, not as correcting a
-    miscount. That distinction decides where the fix belongs and what it may
-    safely assume.
+    than on text — but understand it as deliberately diverging from the
+    terminal's count to absorb ink, not as correcting a miscount. That
+    distinction decides where the fix belongs and what it may safely assume.
+    In this project the cure was applied and then *withdrawn* in favour of a
+    glyph with no such disagreement (§7.1); prefer that when it is available.
 11. **When you enumerate a class, enumerate it exhaustively.** The U+17D8 fix
     checked all 0x110000 scalars and closed the class; the bullet question was
     settled the same way (every code point named BULLET — there are 14).
@@ -262,7 +268,7 @@ has not answered. **Do not delete without asking.**
 - **QA:** `docs/qa/visual-review-3.md` is the best worklist; its "what is
   genuinely good" section is the list of things not to break.
 - Key files: `src/render/glyphs.rs` (bullets + the glyph-choice lesson),
-  `src/render/block.rs:439` (`TASK_GAP`), `src/tui/chrome.rs`
+  `src/render/block.rs` (`TASK_GAP`, `marker_field`), `src/tui/chrome.rs`
   (`track_surface`/`TRACK_INK`, status-bar chips), `src/config/keys.rs`
   (bindings + the chord round-trip test), `src/tui/app.rs` (`reveal_columns`).
 - Review and agent transcripts are subagent task outputs, not tracked files.
@@ -282,24 +288,34 @@ has not answered. **Do not delete without asking.**
    the deciding information lives in the font file, not in Unicode. Nothing is
    visually broken today, so it can wait. Read §4.10 before re-diagnosing.
 
-   **RESOLVED: the owner chose option (a) and it is merged** (`bd87674`).
-   `Glyphs::task_cells` is 2 with icons, 1 without, so text starts at column 4
-   with icons and 3 without. Its live consequence: the task box is now **the one
-   place where the two glyph sets differ in layout, not just appearance** —
-   `--no-icons` shifts a task list by a column. The width rule in
-   `render::glyphs`, `RenderOptions::icons`, the README and the design spec was
-   rewritten rather than left asserting the old absolute, and the two tests that
-   guarded it (`icons_change_the_glyphs_but_never_the_layout` and the
-   `render_property` sweep over widths 4..=120) now filter task items out so they
-   still guard the general rule, with the exception covered by two tests of its
-   own.
+   **CLOSED — the owner took option (b), one better.** Option (a) was built and
+   merged first (`bd87674`, `Glyphs::task_cells`), and it worked, but it cost a
+   hand-maintained width, a marker field that ignored its own measurement, and a
+   documented exception to the parity rule that forced two long-standing tests to
+   be weakened. The owner looked at that and said the business was too fragile,
+   choosing not `☐`/`☑` but **ASCII `[ ]` and `[x]`** — the "why play games at
+   all" answer, applied to checkboxes exactly as it was to bullets.
 
-   **One premise here was never independently verified**, and it is the one the
-   whole reservation rests on: the agent reports **both** the proportional and the
-   `Mono` faces measuring 241 vs 121. That is surprising — the `Mono` variants
-   exist precisely to be single-advance — and if it is wrong, `Mono` readers now
-   get a spurious extra column. Nobody has checked it outside that agent. If a
-   `Mono` user reports a gap that is too wide, start here.
+   Everything option (a) added is gone: no `task_cells`, no reservation, no
+   exception. `task_field` measures the box again, both glyph sets draw the same
+   three ASCII columns, and `icons_change_the_glyphs_but_never_the_layout` and the
+   `render_property` sweep are back on the **unfiltered** corpus asserting the
+   absolute. `TASK_GAP` stays 2 and now yields two *visible* spaces in both modes,
+   which is what the original request asked for and had never actually got.
+
+   The premise this once rested on — both the proportional and `Mono` faces
+   measuring 241 vs 121 advance — no longer matters to anything that ships, since
+   no Nerd Font glyph is involved in a task list at all. It is recorded only
+   because it explains why the pictograph was a losing position: **a glyph whose
+   drawn width and measured width disagree costs more than it is worth.**
+
+   *Detection consequence, and the one thing to check if this area moves again:*
+   the task box used to be the renderer's representative in the coverage probe.
+   The renderer is now represented by the code-fence language icons alone
+   (`0xe7a8` in `nerdfont`'s test), because they are the only thing it draws that
+   icons still change. A Nerd Fonts v2 patch still fails detection, but *solely*
+   because the chrome's file marker is five-digit Material — pinned deliberately
+   by an added assertion rather than left to follow from something that moves.
 2. **`fc-list` as the macOS icon probe** is untested there; detection falls back
    to plain, which is safe but pessimistic.
 3. **Nested diagrams are never widened** (list, blockquote) while nested tables

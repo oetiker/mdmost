@@ -252,23 +252,33 @@ mod tests {
 
         // Both glyph tables must be represented, or half the program could be drawing
         // tofu with detection none the wiser: the status bar's file marker stands for
-        // the chrome, and the renderer's unticked task box for the document. (The
-        // renderer's heading markers used to stand for the second half; they were
-        // removed on 2026-08-09, and the bullets that might have replaced them are
-        // ASCII in both sets now.) Both now live in the Material range that
-        // only Nerd Fonts v3 carries — the task boxes moved there on 2026-08-09 to be
-        // a matched pair — so a v2 patch fails detection and gets plain Unicode,
-        // which is the safe direction of the rule.
+        // the chrome, and a code-fence language icon for the document.
+        //
+        // The renderer's representative has moved twice as glyphs became plain text.
+        // Heading prefixes were removed on 2026-08-09; the task boxes stood in next,
+        // then became ASCII `[ ]`/`[x]` later the same day. The code-fence icons are
+        // now the *only* thing the renderer draws that icons change, which is exactly
+        // why they are the right probe — and if they ever go the same way, detection
+        // has nothing left to ask about the document and this assertion is the thing
+        // that will say so.
         assert!(
             points.contains(&0xf0219),
             "the chrome's glyphs are not probed"
         );
         assert!(
-            points.contains(&0xf0131),
+            points.contains(&0xe7a8),
             "the renderer's glyphs are not probed"
         );
-        // The code-fence icons are still classic Font Awesome, so the probe does
-        // continue to span both blocks.
+        // The chrome's file marker is a five-digit Material code point, which only a
+        // Nerd Fonts v3 patch carries, so a v2 patch still fails detection and gets
+        // plain Unicode — the safe direction of the rule. That used to be guaranteed
+        // by the task boxes as well; the chrome is now the only thing holding the line,
+        // so this is pinned deliberately rather than left to follow from elsewhere.
+        assert!(
+            points.iter().any(|point| *point > 0xffff),
+            "nothing in the probe is v3-only, so a v2 patch would now pass"
+        );
+        // The code-fence icons are classic Font Awesome, so the probe spans both blocks.
         assert!(
             points.iter().any(|point| (0xe000..=0xf8ff).contains(point)),
             "the basic-plane block is not probed"

@@ -420,25 +420,20 @@ fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> (Canvas, bool)
 
 /// The columns of air between a task checkbox and the text of its item.
 ///
-/// **Two, not one**, at the owner's request on 2026-08-09: "the checkbox is a large
-/// double char affair which matches nicely between checked and unchecked, but it hugs
-/// the text following it… so I guess two spaces would be in order". A checkbox is a
-/// *box* — it fills its cell edge to edge, unlike a bullet, which is a small mark
-/// floating in the middle of one — so the single space that suits a bullet leaves a
-/// box looking welded to the word after it.
+/// **Two**, at the owner's request on 2026-08-09: "the checkbox … hugs the text
+/// following it… so I guess two spaces would be in order".
 ///
-/// The *gap* is the same in both glyph sets. What differs is what it is measured from:
-/// the box's reservation is [`Glyphs::task_cells`], which is 2 for the Nerd Font boxes
-/// and 1 for `☐`/`☑`, so a task list's text starts one column further right with icons
-/// on. Two spaces of gap were not on their own enough — the wide box was eating one of
-/// them, which is why the owner asked, in a second pass, to "indent double" wherever
-/// the wide boxes are present.
+/// When that was asked, only one of the two spaces was visible. The box was then a Nerd
+/// Font pictograph, drawn across two cells while `unicode-width` measured it as one, so
+/// it overlapped the column after it and ate a space. Now that the box is `[ ]`/`[x]`
+/// (see [`crate::render::glyphs`]) the drawn width and the measured width agree, and
+/// both spaces are actually on the screen — which is what the request asked for and had
+/// not been getting.
 ///
-/// That makes this the one place where the two glyph sets differ in *layout* and not
-/// merely in appearance, which the width rule in [`crate::render::glyphs`] is written
-/// to admit. The rule's purpose is that nothing shifts *unexpectedly*; a glyph drawn
-/// across two cells genuinely occupies two, and pretending otherwise is what produced
-/// the defect rather than what prevented it.
+/// It is deliberately wider than [`MARKER_GAP`]. A checkbox is a wide, closed shape
+/// carrying a state a reader has to *read*, not a dot marking where a line begins, and
+/// it sits at the head of the one list kind whose markers differ from item to item.
+/// The extra column is what stops a column of boxes reading as a wall.
 const TASK_GAP: usize = 2;
 
 /// The columns a plain bullet or ordinal keeps between itself and its text.
@@ -448,15 +443,15 @@ const MARKER_GAP: usize = 1;
 ///
 /// An *ordered* task list spends both fields: the ordinal is the item's identity — it
 /// is how the item is referred to — and the box is its state, and neither answers for
-/// the other. The two are laid out side by side as `1. ☑  `, so the field is the
+/// the other. The two are laid out side by side as `1. [x]  `, so the field is the
 /// ordinal field plus the box and its gap. Keeping only the box dropped the number the
 /// item is named by and left the ordinal's columns behind as a second space — a list
-/// that rendered `☑  first` where the unordered form rendered `☑ first`.
+/// that rendered `[x]   first` where the unordered form rendered `[x]  first`.
 ///
 /// An *unordered* list widens the same way when it holds tasks. The field is a
 /// property of the list, not of the item, so a plain bullet among checkboxes is padded
 /// to the identical width and every item's text starts in one column — the alternative,
-/// giving the wider gap only to the items that have a box, would set the text edge
+/// giving the box's columns only to the items that have one, would set the text edge
 /// ragged in exactly the list where the boxes make the ragging most visible.
 fn marker_field(items: &[Node], info: ListInfo, ctx: Ctx<'_>) -> usize {
     if !info.ordered {
@@ -475,10 +470,11 @@ fn task_field(items: &[Node], ctx: Ctx<'_>) -> usize {
     if !has_task {
         return 0;
     }
-    // `task_cells`, not `display_width`: the Nerd Font boxes are drawn two cells wide
-    // but live in a private-use area, where `unicode-width` has no data and answers 1.
-    // Budgeting that 1 is what let the box overlap the text after it.
-    ctx.glyphs.task_cells + TASK_GAP
+    // Measured, not assumed. The boxes are `[ ]`/`[x]` in both sets and a glyph set
+    // whose boxes differed would otherwise set the text ragged; measuring also means
+    // this needs no hand-maintained width to drift out of step with the glyphs.
+    let box_width = display_width(ctx.glyphs.task(true)).max(display_width(ctx.glyphs.task(false)));
+    box_width + TASK_GAP
 }
 
 /// The marker of one list item, padded to the marker field width.
@@ -525,7 +521,7 @@ fn marker_line(
         theme.block.list_marker,
     )]);
     if boxes > 0 {
-        // `1. ☑  `. The ordinal is the item's identity and the box is its state; the
+        // `1. [x]  `. The ordinal is the item's identity and the box is its state; the
         // box used to be drawn *instead of* the ordinal, which silently renumbered the
         // author's list to nothing.
         match checked {

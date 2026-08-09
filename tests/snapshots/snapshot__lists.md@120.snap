@@ -110,23 +110,23 @@ expression: canvas.plain_text()
  Task lists                                                                                                             
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
- ☑  a finished task                                                                                                     
+ [x]  a finished task                                                                                                   
                                                                                                                         
- ☐  an unfinished task                                                                                                  
+ [ ]  an unfinished task                                                                                                
                                                                                                                         
- ☑  a finished task with a capital marker                                                                               
+ [x]  a finished task with a capital marker                                                                             
                                                                                                                         
- ☐  a task long enough to wrap so the checkbox column can be checked against the continuation indent                    
+ [ ]  a task long enough to wrap so the checkbox column can be checked against the continuation indent                  
                                                                                                                         
- *  a plain item mixed into a task list                                                                                 
-    ☐  a nested unfinished task                                                                                         
-    ☑  a nested finished task                                                                                           
+ *    a plain item mixed into a task list                                                                               
+      [ ]  a nested unfinished task                                                                                     
+      [x]  a nested finished task                                                                                       
                                                                                                                         
  Ordered task list                                                                                                      
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
- 1. ☑  a finished numbered task                                                                                         
- 2. ☐  an unfinished numbered task                                                                                      
+ 1. [x]  a finished numbered task                                                                                       
+ 2. [ ]  an unfinished numbered task                                                                                    
                                                                                                                         
  Items containing other blocks                                                                                          
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 

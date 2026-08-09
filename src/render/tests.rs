@@ -536,7 +536,7 @@ fn list_item_content_wraps_under_a_hanging_indent() {
 fn task_items_get_a_checkbox() {
     assert_eq!(
         lines("- [x] done\n- [ ] todo\n", 20),
-        ["☑  done", "☐  todo"]
+        ["[x]  done", "[ ]  todo"]
     );
 }
 
@@ -547,7 +547,10 @@ fn task_items_get_a_checkbox() {
 /// the text edge stays straight.
 #[test]
 fn a_plain_item_in_an_unordered_task_list_keeps_the_text_column() {
-    assert_eq!(lines("- [x] done\n- plain\n", 20), ["☑  done", "*  plain"]);
+    assert_eq!(
+        lines("- [x] done\n- plain\n", 20),
+        ["[x]  done", "*    plain"]
+    );
 }
 
 /// Continuation lines in an unordered task list hang under the text, past both spaces.
@@ -555,63 +558,24 @@ fn a_plain_item_in_an_unordered_task_list_keeps_the_text_column() {
 fn an_unordered_task_item_wraps_under_its_text() {
     assert_eq!(
         lines("- [ ] alpha beta gamma\n", 16),
-        ["☐  alpha beta", "   gamma"]
+        ["[ ]  alpha beta", "     gamma"]
     );
 }
 
-/// The Nerd Font boxes are drawn two cells wide, so they are *reserved* two cells.
+/// The task box is the same three ASCII columns whichever glyph set is in force.
 ///
-/// Owner, 2026-08-09: "if there are double wider beautiful checkboxes present we need
-/// to indent double". `nf-md-checkbox_blank_outline` and its ticked twin have exactly
-/// twice the advance width of an ASCII character in the patched faces that carry them,
-/// but they live in the private-use area, where `unicode-width` can only guess and
-/// answers 1. Budgeting that 1 is what let the glyph spill over the text and produced
-/// the hugging the owner reported; the two spaces alone did not fix it, because the
-/// box was eating one of them.
-///
-/// The text therefore starts at column 4 with icons on — two cells of box, two of air
-/// — against column 3 with the single-cell plain boxes.
+/// The boxes went through a Nerd Font pictograph pair and out the other side; what
+/// pins the current answer is that the *marker field is identical in both sets*, so
+/// `--no-icons` cannot move a task list sideways. The plain item in the same list pads
+/// to the same field, so the text edge stays straight whatever an item's state.
 #[test]
-fn the_wide_nerd_boxes_reserve_two_columns() {
-    let nerd = RenderOptions::new(true, false);
-    let rows = body_rows(&render_body("- [x] done\n- [ ] todo\n- plain\n", 20, &nerd));
-    let text: Vec<&String> = rows.iter().filter(|row| !row.is_empty()).collect();
-    for row in &text {
-        assert_eq!(
-            text_column(row),
-            4,
-            "the marker field must be four columns wide, {row:?}"
-        );
-    }
-    // And the plain item's bullet is padded to the same field, so nothing is ragged.
-    assert!(text[2].starts_with("*   plain"), "{:?}", text[2]);
-}
-
-/// The display column an item's text starts in, i.e. the width of its marker field.
-///
-/// Measured in *columns*, not bytes: the Nerd Font boxes are four bytes each, so a
-/// byte offset would answer a different question and quietly pass.
-fn text_column(row: &str) -> usize {
-    let end = row
-        .char_indices()
-        .find(|(_, ch)| ch.is_alphanumeric())
-        .map_or(row.len(), |(index, _)| index);
-    display_width(&row[..end])
-}
-
-/// With icons *off* the boxes are one cell, so the field is one column narrower.
-///
-/// This is a deliberate exception to the parity rule in [`crate::render::glyphs`],
-/// which otherwise holds that turning icons off changes what a glyph looks like and
-/// nothing about where anything sits. A box that is drawn two cells wide has to be
-/// given two cells; pretending otherwise is what caused the defect.
-#[test]
-fn the_task_field_is_narrower_with_icons_off() {
-    let nerd = RenderOptions::new(true, false);
-    let fancy = body_rows(&render_body("- [ ] todo\n", 20, &nerd));
-    let plain = body_rows(&render_body("- [ ] todo\n", 20, &PLAIN));
-    assert_eq!(text_column(&fancy[0]), 4);
-    assert_eq!(text_column(&plain[0]), 3);
+fn the_task_box_lays_out_identically_in_both_glyph_sets() {
+    let document = "- [x] done\n- [ ] todo\n- plain\n";
+    let nerd = body_rows(&render_body(document, 20, &RenderOptions::new(true, false)));
+    let plain = body_rows(&render_body(document, 20, &PLAIN));
+    assert_eq!(nerd, plain, "icons must not move a task list");
+    let text: Vec<&String> = plain.iter().filter(|row| !row.is_empty()).collect();
+    assert_eq!(text, ["[x]  done", "[ ]  todo", "*    plain"]);
 }
 
 /// An ordered task list has *two* things to say and has to say both.
@@ -624,7 +588,7 @@ fn the_task_field_is_narrower_with_icons_off() {
 fn an_ordered_task_list_keeps_its_numbers() {
     assert_eq!(
         lines("1. [x] done\n2. [ ] todo\n", 20),
-        ["1. ☑  done", "2. ☐  todo"]
+        ["1. [x]  done", "2. [ ]  todo"]
     );
 }
 
@@ -633,7 +597,7 @@ fn an_ordered_task_list_keeps_its_numbers() {
 fn an_ordered_task_list_aligns_its_boxes_under_each_other() {
     assert_eq!(
         lines("9. [ ] item\n10. [ ] item\n", 20),
-        [" 9. ☐  item", "10. ☐  item"]
+        [" 9. [ ]  item", "10. [ ]  item"]
     );
 }
 
@@ -642,7 +606,7 @@ fn an_ordered_task_list_aligns_its_boxes_under_each_other() {
 fn a_plain_item_in_a_task_list_keeps_the_marker_column() {
     assert_eq!(
         lines("1. [x] done\n2. plain\n", 20),
-        ["1. ☑  done", "2.    plain"]
+        ["1. [x]  done", "2.      plain"]
     );
 }
 
@@ -651,7 +615,7 @@ fn a_plain_item_in_a_task_list_keeps_the_marker_column() {
 fn an_ordered_task_item_wraps_under_its_text() {
     assert_eq!(
         lines("1. [ ] alpha beta gamma\n", 16),
-        ["1. ☐  alpha beta", "      gamma"]
+        ["1. [ ]  alpha", "        beta", "        gamma"]
     );
 }
 
@@ -716,7 +680,7 @@ fn ordered_and_task_lists_follow_the_same_rule() {
     );
     assert_eq!(
         rows("- [ ] one\n- [x] alpha beta gamma delta\n", 16),
-        ["☐  one", "", "☑  alpha beta", "   gamma delta"]
+        ["[ ]  one", "", "[x]  alpha beta", "     gamma delta"]
     );
 }
 
@@ -1175,31 +1139,20 @@ fn every_width_from_one_upwards_renders_without_panicking() {
 
 // ------------------------------------------------------------- render options
 
-/// Turning icons on changes what the markers look like, not where the document sits.
+/// Turning icons on changes what the markers look like, never where the document sits.
 ///
-/// **One exception, and only one:** a task list's marker field is a column wider with
-/// icons on, because the Nerd Font boxes are drawn across two cells and are given two
-/// (see [`crate::render::glyphs::Glyphs::task_cells`]). The corpus is therefore
-/// rendered here with its task items filtered out, so that this test keeps guarding
-/// the *general* rule at full strength; the exception has tests of its own in
-/// [`the_wide_nerd_boxes_reserve_two_columns`] and
-/// [`the_task_field_is_narrower_with_icons_off`]. If a future change makes some other
-/// glyph shift the layout, this test still catches it.
+/// This briefly had an exception — a task list was a column wider with icons on, when
+/// the box was a Nerd Font pictograph drawn two cells wide while measuring one — and
+/// the corpus had to be rendered here with its task items filtered out. `[ ]`/`[x]`
+/// removed the discrepancy, so the test is back on the whole corpus, task items
+/// included, and the rule is an absolute again.
 #[test]
 fn icons_change_the_glyphs_but_never_the_layout() {
-    let corpus = include_str!("../../tests/corpus/adversarial.md");
-    let markdown: String = corpus
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("- ["))
-        .fold(String::new(), |mut out, line| {
-            out.push_str(line);
-            out.push('\n');
-            out
-        });
+    let markdown = include_str!("../../tests/corpus/adversarial.md");
     let nerd = RenderOptions::new(true, false);
     for width in [17u16, 40, 80] {
-        let plain = render_with(&markdown, width, &PLAIN);
-        let fancy = render_with(&markdown, width, &nerd);
+        let plain = render_with(markdown, width, &PLAIN);
+        let fancy = render_with(markdown, width, &nerd);
         assert_eq!(
             plain.height(),
             fancy.height(),
@@ -1219,18 +1172,28 @@ fn icons_change_the_glyphs_but_never_the_layout() {
         );
         assert_eq!(plain.spans(), fancy.spans(), "spans must agree at {width}");
     }
-    // The glyphs themselves really do differ. Headings and bullets no longer do —
-    // the prefix went and the bullets are ASCII in both sets — so the probe is
-    // a task box, which is the shortest thing that still changes.
+    // The glyphs themselves really do differ, or this test would pass vacuously.
+    // Headings, bullets and task boxes no longer differ — the prefix went, and the
+    // other two are ASCII in both sets — so the last thing that changes in the
+    // document body is a code fence's language icon.
     assert_ne!(
-        render_with("- [ ] todo\n", 20, &PLAIN).row_text(0),
-        render_with("- [ ] todo\n", 20, &nerd).row_text(0)
+        render_with("```rust\ncode\n```\n", 20, &PLAIN).plain_text(),
+        render_with("```rust\ncode\n```\n", 20, &nerd).plain_text()
     );
 }
 
 #[test]
 fn every_icon_the_renderer_draws_has_a_plain_substitute() {
-    let markdown = "# h1\n## h2\n### h3\n#### h4\n##### h5\n###### h6\n\n                    - a\n  - b\n    - c\n      - d\n\n- [x] y\n- [ ] n\n\n                    ```rust\ncode\n```\n";
+    // The fence must be unindented, or it parses as an indented code block and draws
+    // no language icon — which would leave the Nerd render with no private-use code
+    // point at all and make the second assertion below fail for the wrong reason.
+    // It used to be indented, and passed only because the task boxes were pictographs.
+    let markdown = concat!(
+        "# h1\n## h2\n### h3\n#### h4\n##### h5\n###### h6\n\n",
+        "- a\n  - b\n    - c\n      - d\n\n",
+        "- [x] y\n- [ ] n\n\n",
+        "```rust\ncode\n```\n",
+    );
     let plain = render_with(markdown, 40, &PLAIN);
     let fancy = render_with(markdown, 40, &RenderOptions::new(true, false));
     assert_eq!(plain.height(), fancy.height());

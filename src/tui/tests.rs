@@ -170,10 +170,11 @@ fn toggling_icons_invalidates_the_render_cache() {
     // rendered with Nerd Font glyphs is served again after icons are switched off —
     // a stale frame that looks almost right, which is the worst kind.
     //
-    // The document needs something that actually *changes* with the setting. Since the
-    // heading prefixes went and the bullets became ASCII in both sets, a task
-    // box is the cheapest thing that does; `SAMPLE` has none.
-    let mut app = pager("# Title\n\n- [x] done\n- [ ] todo\n");
+    // The document needs something that actually *changes* with the setting. Heading
+    // prefixes are gone, and bullets and task boxes are ASCII in both sets, so the
+    // cheapest thing that still changes is a code fence's language icon; `SAMPLE` has
+    // no fence.
+    let mut app = pager("# Title\n\n```rust\ncode\n```\n");
     app.set_icons(true);
     let with_icons = app.canvas().plain_text();
 

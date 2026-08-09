@@ -140,27 +140,15 @@ fn both_built_in_themes_produce_identically_shaped_output() {
 
 /// Turning icons off must not reflow the document, at any width.
 ///
-/// **One admitted exception:** a task list's marker field is one column narrower with
-/// icons off, because the Nerd Font checkboxes are *drawn* across two cells — twice the
-/// advance of an ASCII character, in both the proportional and `Mono` variants of a
-/// patched font — while `unicode-width` reports one for their private-use code points.
-/// Reserving the one it reports is what let the box overlap the item's text, which the
-/// owner reported as the box hugging its text. The corpus is therefore rendered here
-/// with its task items filtered out, so this sweep keeps guarding the general rule at
-/// full strength across every width; the exception itself is covered by unit tests in
-/// `render::tests`.
+/// This briefly had an exception. The Nerd Font checkboxes were *drawn* across two
+/// cells — twice the advance of an ASCII character — while `unicode-width` reported one
+/// for their private-use code points, so a task list's marker field differed between
+/// the sets and this sweep had to skip task items to stay green. Replacing the boxes
+/// with `[ ]`/`[x]` removed the discrepancy, and the sweep is back on the whole corpus.
 #[test]
 fn turning_icons_off_never_changes_the_layout() {
-    let corpus = include_str!("corpus/adversarial.md");
-    let markdown: String = corpus
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("- ["))
-        .fold(String::new(), |mut out, line| {
-            out.push_str(line);
-            out.push('\n');
-            out
-        });
-    let doc = Doc::parse(&markdown);
+    let markdown = include_str!("corpus/adversarial.md");
+    let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     for width in 4..=120u16 {
         for line_numbers in [false, true] {
