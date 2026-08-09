@@ -116,29 +116,66 @@ impl Glyphs {
         if !self.code_icons {
             return None;
         }
-        Some(match language? {
-            "rust" | "rs" => "\u{e7a8}",                   // nf-dev-rust
-            "python" | "py" => "\u{e73c}",                 // nf-dev-python
-            "javascript" | "js" | "jsx" => "\u{e74e}",     // nf-dev-javascript
-            "typescript" | "ts" | "tsx" => "\u{e628}",     // nf-seti-typescript
-            "go" => "\u{e724}",                            // nf-dev-go
-            "java" => "\u{e738}",                          // nf-dev-java
-            "ruby" | "rb" => "\u{e739}",                   // nf-dev-ruby
-            "php" => "\u{e73d}",                           // nf-dev-php
-            "html" => "\u{e736}",                          // nf-dev-html5
-            "css" | "scss" | "sass" => "\u{e749}",         // nf-dev-css3
-            "markdown" | "md" => "\u{e73e}",               // nf-dev-markdown
-            "json" => "\u{e60b}",                          // nf-seti-json
-            "yaml" | "yml" | "toml" | "ini" => "\u{e615}", // nf-seti-config
-            "sql" | "postgres" | "mysql" => "\u{e706}",    // nf-dev-database
-            "docker" | "dockerfile" => "\u{e7b0}",         // nf-dev-docker
-            "git" | "diff" | "patch" => "\u{e702}",        // nf-dev-git
-            "sh" | "bash" | "zsh" | "fish" | "shell" | "console" => "\u{e795}", // nf-dev-terminal
-            "c" | "h" | "cpp" | "cc" | "hpp" | "cxx" => "\u{e61e}", // nf-custom-c
-            _ => "\u{f121}",                               // nf-fa-code
-        })
+        let language = language?;
+        Some(
+            LANGUAGE_ICONS
+                .iter()
+                .find(|(names, _)| names.contains(&language))
+                .map_or(GENERIC_LANGUAGE_ICON, |(_, icon)| *icon),
+        )
+    }
+
+    /// Every Nerd Font glyph this type can draw.
+    ///
+    /// Whether the terminal has a font that can draw them is detected by asking whether
+    /// an installed font covers all of them (see [`crate::nerdfont`]), so this iterator
+    /// is what keeps detection honest: a glyph added to [`Self::NERD`] or to
+    /// [`LANGUAGE_ICONS`] is a glyph the probe immediately starts requiring, with no
+    /// second list that has to be remembered.
+    pub fn nerd_glyphs() -> impl Iterator<Item = &'static str> {
+        let set = Self::NERD;
+        set.heading
+            .into_iter()
+            .chain(set.bullets)
+            .chain([set.task_checked, set.task_unchecked])
+            .chain(LANGUAGE_ICONS.iter().map(|(_, icon)| *icon))
+            .chain([GENERIC_LANGUAGE_ICON])
     }
 }
+
+/// The code-fence icon for a language matching none of [`LANGUAGE_ICONS`].
+const GENERIC_LANGUAGE_ICON: &str = "\u{f121}"; // nf-fa-code
+
+/// The code-fence icon for each language, by the names a fence may use for it.
+///
+/// A table rather than a `match` so the icons can also be *enumerated*, which is what
+/// [`Glyphs::nerd_glyphs`] needs. A `match` arm cannot be iterated, and the alternative
+/// — a second hand-written list of the same code points — is exactly the kind of
+/// duplicate enumeration this project has repeatedly watched drift out of step with the
+/// copy that actually draws.
+const LANGUAGE_ICONS: &[(&[&str], &str)] = &[
+    (&["rust", "rs"], "\u{e7a8}"),                 // nf-dev-rust
+    (&["python", "py"], "\u{e73c}"),               // nf-dev-python
+    (&["javascript", "js", "jsx"], "\u{e74e}"),    // nf-dev-javascript
+    (&["typescript", "ts", "tsx"], "\u{e628}"),    // nf-seti-typescript
+    (&["go"], "\u{e724}"),                         // nf-dev-go
+    (&["java"], "\u{e738}"),                       // nf-dev-java
+    (&["ruby", "rb"], "\u{e739}"),                 // nf-dev-ruby
+    (&["php"], "\u{e73d}"),                        // nf-dev-php
+    (&["html"], "\u{e736}"),                       // nf-dev-html5
+    (&["css", "scss", "sass"], "\u{e749}"),        // nf-dev-css3
+    (&["markdown", "md"], "\u{e73e}"),             // nf-dev-markdown
+    (&["json"], "\u{e60b}"),                       // nf-seti-json
+    (&["yaml", "yml", "toml", "ini"], "\u{e615}"), // nf-seti-config
+    (&["sql", "postgres", "mysql"], "\u{e706}"),   // nf-dev-database
+    (&["docker", "dockerfile"], "\u{e7b0}"),       // nf-dev-docker
+    (&["git", "diff", "patch"], "\u{e702}"),       // nf-dev-git
+    (
+        &["sh", "bash", "zsh", "fish", "shell", "console"],
+        "\u{e795}", // nf-dev-terminal
+    ),
+    (&["c", "h", "cpp", "cc", "hpp", "cxx"], "\u{e61e}"), // nf-custom-c
+];
 
 impl Default for Glyphs {
     fn default() -> Self {

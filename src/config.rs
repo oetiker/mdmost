@@ -42,15 +42,17 @@ const TOC_WIDTH_RANGE: std::ops::RangeInclusive<u16> = 12..=80;
 pub struct Config {
     /// The name of the theme to start in.
     pub theme: String,
-    /// Whether Nerd Font glyphs may be used.
+    /// Whether Nerd Font glyphs may be used, when the reader has said.
     ///
-    /// On by default: design spec §2 fixes the terminal floor at truecolour, full
-    /// Unicode and a Nerd Font. There is no way to ask a terminal whether it has a
-    /// patched font, so the fallback is a choice the reader makes rather than one
-    /// that can be detected — `--no-icons`, or `icons = false`, substitutes plain
-    /// Unicode of the same display width, and `--icons` overrides a config file that
-    /// turned them off.
-    pub icons: bool,
+    /// `None` — the default — means nobody has said, and the answer is detected instead
+    /// (see [`crate::nerdfont`]), falling back to plain Unicode whenever it cannot be
+    /// established. `icons = true` or `icons = false` in the config file settles it
+    /// without detection, and `--icons` / `--no-icons` override even that.
+    ///
+    /// This is deliberately tri-state: `Some(false)` and "unset" both draw plain
+    /// Unicode today, but only the first must keep doing so on a machine where the
+    /// glyphs would in fact render.
+    pub icons: Option<bool>,
     /// Whether fenced code blocks are drawn with a line-number gutter.
     pub line_numbers: bool,
     /// Whether the table-of-contents pane starts open.
@@ -76,7 +78,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             theme: "dark".to_string(),
-            icons: true,
+            icons: None,
             line_numbers: false,
             toc_open: false,
             toc_width: DEFAULT_TOC_WIDTH,
@@ -269,11 +271,14 @@ struct RawTheme {
 impl RawConfig {
     /// Validates the raw file into a [`Config`], collecting per-entry problems.
     fn into_config(self, text: &str, path: &Path, problems: &mut Vec<ConfigError>) -> Config {
-        let mut config = Config::default();
+        let mut config = Config {
+            // Carried straight across as an `Option`, unlike every setting below it: an
+            // absent `icons` key must stay absent so it reaches detection, rather than
+            // being resolved here to a fixed answer.
+            icons: self.icons,
+            ..Config::default()
+        };
 
-        if let Some(icons) = self.icons {
-            config.icons = icons;
-        }
         if let Some(line_numbers) = self.line_numbers {
             config.line_numbers = line_numbers;
         }

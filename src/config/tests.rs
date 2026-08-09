@@ -33,11 +33,29 @@ width = 40
     );
     assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
     assert_eq!(loaded.config.theme, "light");
-    assert!(!loaded.config.icons);
+    assert_eq!(loaded.config.icons, Some(false));
     assert!(loaded.config.line_numbers);
     assert_eq!(loaded.config.scroll_step, 5);
     assert!(loaded.config.toc_open);
     assert_eq!(loaded.config.toc_width, 40);
+}
+
+#[test]
+fn an_absent_icons_key_stays_undecided() {
+    // The tri-state is the whole point: an absent key must reach detection rather than
+    // being answered here. If this ever became `Some(false)`, autodetection would be
+    // dead code and every terminal would get plain Unicode for ever.
+    let loaded = Config::parse_str("theme = \"dark\"\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.icons, None);
+
+    for (text, expected) in [
+        ("icons = true\n", Some(true)),
+        ("icons = false\n", Some(false)),
+    ] {
+        let loaded = Config::parse_str(text, path());
+        assert_eq!(loaded.config.icons, expected, "for {text:?}");
+    }
 }
 
 #[test]
@@ -66,7 +84,11 @@ fn an_unknown_key_names_itself_and_falls_back() {
 fn a_bad_theme_name_is_reported_but_the_rest_survives() {
     let loaded = Config::parse_str("theme = \"nope\"\nicons = false\n", path());
     assert_eq!(loaded.config.theme, "dark");
-    assert!(!loaded.config.icons, "the good settings must still apply");
+    assert_eq!(
+        loaded.config.icons,
+        Some(false),
+        "the good settings must still apply"
+    );
     assert_eq!(loaded.problems.len(), 1);
     assert!(loaded.problems[0].to_string().contains("nope"));
 }
