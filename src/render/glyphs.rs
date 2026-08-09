@@ -68,8 +68,9 @@
 /// prefer characters that render everywhere.
 ///
 /// `mdless` draws in whatever terminal font the reader has, so ink extents rasterised
-/// from any one face predict nothing about Iosevka, JetBrains Mono, Menlo or Fira
-/// Code; measuring optimises for one machine and silently mis-serves everyone else.
+/// from any one face predict nothing about `Iosevka`, `JetBrains Mono`, `Menlo` or
+/// `Fira Code`; measuring optimises for one machine and silently mis-serves everyone
+/// else.
 /// Earlier revisions of this comment carried em-fractions to two decimal places and
 /// named a specific patched font as "the shipping font". Both were fiction. The font
 /// was a guess by an early session — it happened to be installed on the machine that
