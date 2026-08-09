@@ -559,6 +559,61 @@ fn an_unordered_task_item_wraps_under_its_text() {
     );
 }
 
+/// The Nerd Font boxes are drawn two cells wide, so they are *reserved* two cells.
+///
+/// Owner, 2026-08-09: "if there are double wider beautiful checkboxes present we need
+/// to indent double". `nf-md-checkbox_blank_outline` and its ticked twin have exactly
+/// twice the advance width of an ASCII character in the patched faces that carry them,
+/// but they live in the private-use area, where `unicode-width` can only guess and
+/// answers 1. Budgeting that 1 is what let the glyph spill over the text and produced
+/// the hugging the owner reported; the two spaces alone did not fix it, because the
+/// box was eating one of them.
+///
+/// The text therefore starts at column 4 with icons on — two cells of box, two of air
+/// — against column 3 with the single-cell plain boxes.
+#[test]
+fn the_wide_nerd_boxes_reserve_two_columns() {
+    let nerd = RenderOptions::new(true, false);
+    let rows = body_rows(&render_body("- [x] done\n- [ ] todo\n- plain\n", 20, &nerd));
+    let text: Vec<&String> = rows.iter().filter(|row| !row.is_empty()).collect();
+    for row in &text {
+        assert_eq!(
+            text_column(row),
+            4,
+            "the marker field must be four columns wide, {row:?}"
+        );
+    }
+    // And the plain item's bullet is padded to the same field, so nothing is ragged.
+    assert!(text[2].starts_with("*   plain"), "{:?}", text[2]);
+}
+
+/// The display column an item's text starts in, i.e. the width of its marker field.
+///
+/// Measured in *columns*, not bytes: the Nerd Font boxes are four bytes each, so a
+/// byte offset would answer a different question and quietly pass.
+fn text_column(row: &str) -> usize {
+    let end = row
+        .char_indices()
+        .find(|(_, ch)| ch.is_alphanumeric())
+        .map_or(row.len(), |(index, _)| index);
+    display_width(&row[..end])
+}
+
+/// With icons *off* the boxes are one cell, so the field is one column narrower.
+///
+/// This is a deliberate exception to the parity rule in [`crate::render::glyphs`],
+/// which otherwise holds that turning icons off changes what a glyph looks like and
+/// nothing about where anything sits. A box that is drawn two cells wide has to be
+/// given two cells; pretending otherwise is what caused the defect.
+#[test]
+fn the_task_field_is_narrower_with_icons_off() {
+    let nerd = RenderOptions::new(true, false);
+    let fancy = body_rows(&render_body("- [ ] todo\n", 20, &nerd));
+    let plain = body_rows(&render_body("- [ ] todo\n", 20, &PLAIN));
+    assert_eq!(text_column(&fancy[0]), 4);
+    assert_eq!(text_column(&plain[0]), 3);
+}
+
 /// An ordered task list has *two* things to say and has to say both.
 ///
 /// The number is the item's identity — it is how the item is referred to elsewhere —
@@ -1120,13 +1175,31 @@ fn every_width_from_one_upwards_renders_without_panicking() {
 
 // ------------------------------------------------------------- render options
 
+/// Turning icons on changes what the markers look like, not where the document sits.
+///
+/// **One exception, and only one:** a task list's marker field is a column wider with
+/// icons on, because the Nerd Font boxes are drawn across two cells and are given two
+/// (see [`crate::render::glyphs::Glyphs::task_cells`]). The corpus is therefore
+/// rendered here with its task items filtered out, so that this test keeps guarding
+/// the *general* rule at full strength; the exception has tests of its own in
+/// [`the_wide_nerd_boxes_reserve_two_columns`] and
+/// [`the_task_field_is_narrower_with_icons_off`]. If a future change makes some other
+/// glyph shift the layout, this test still catches it.
 #[test]
 fn icons_change_the_glyphs_but_never_the_layout() {
-    let markdown = include_str!("../../tests/corpus/adversarial.md");
+    let corpus = include_str!("../../tests/corpus/adversarial.md");
+    let markdown: String = corpus
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("- ["))
+        .fold(String::new(), |mut out, line| {
+            out.push_str(line);
+            out.push('\n');
+            out
+        });
     let nerd = RenderOptions::new(true, false);
     for width in [17u16, 40, 80] {
-        let plain = render_with(markdown, width, &PLAIN);
-        let fancy = render_with(markdown, width, &nerd);
+        let plain = render_with(&markdown, width, &PLAIN);
+        let fancy = render_with(&markdown, width, &nerd);
         assert_eq!(
             plain.height(),
             fancy.height(),
@@ -1147,7 +1220,7 @@ fn icons_change_the_glyphs_but_never_the_layout() {
         assert_eq!(plain.spans(), fancy.spans(), "spans must agree at {width}");
     }
     // The glyphs themselves really do differ. Headings and bullets no longer do —
-    // the prefix went and the bullets are plain Unicode in both sets — so the probe is
+    // the prefix went and the bullets are ASCII in both sets — so the probe is
     // a task box, which is the shortest thing that still changes.
     assert_ne!(
         render_with("- [ ] todo\n", 20, &PLAIN).row_text(0),

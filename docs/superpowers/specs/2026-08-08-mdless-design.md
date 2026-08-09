@@ -64,7 +64,9 @@ exists mainly for the SSH case, where detection is blind by design and the fix b
 the server's shell profile.
 
 *Unchanged:* the two glyph sets remain the same shape and the same display width, so
-which one is in force never affects layout (§9).
+which one is in force does not affect layout (§9) — with one admitted exception, the
+task checkbox, which the Nerd Fonts patch draws two cells wide and which is therefore
+reserved two columns. See the marker-spacing amendment below.
 
 *Amended 2026-08-09.* This section used to say the three marker families — heading
 prefixes, list bullets, task boxes — each own a distinct shape vocabulary and never share
@@ -105,8 +107,18 @@ not one: "the checkbox … hugs the text following it … so I guess two spaces 
 order". A checkbox fills its cell edge to edge where a bullet is a small mark floating
 in the middle of one, so the single space that suits a bullet leaves a box welded to
 its word. The gap belongs to the *list*, not the item, so a plain bullet among
-checkboxes pads to the same field and every item's text starts in one column; and it is
-identical in both glyph sets, because `--no-icons` must never move anything sideways.
+checkboxes pads to the same field and every item's text starts in one column.
+
+*Amended once more the same day, after the owner looked at the result:* "if there are
+double wider beautiful checkboxes present we need to indent double". The Nerd Fonts
+patch draws `nf-md-checkbox_blank_outline` and its ticked twin with **twice the advance
+of an ASCII character** — both the proportional and the `Mono` variants agree — but the
+code points are private-use, where `unicode-width` has no property to consult and
+answers 1. Budgeting that 1 is what let the box overlap the following text, and two
+spaces of gap did not cure it because the box was eating one of them. The marker field
+now reserves `Glyphs::task_cells` columns: 2 for the Nerd boxes, 1 for `☐`/`☑`. This is
+the **one** place where the glyph sets differ in layout rather than appearance, and it
+is the right direction — a glyph drawn across two cells genuinely occupies two.
 
 ## 3. The central architectural rule
 
@@ -141,7 +153,8 @@ pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOpt
 
 `icons: false` — from `--no-icons`, from `icons = false`, or from detection declining to
 promise a Nerd Font (§2.1) — substitutes plain Unicode for every Nerd Font glyph, at the
-same display width so no layout shifts. Note that `RenderOptions::icons` is a plain
+same display width so no layout shifts, the task checkbox excepted (see §9's
+marker-spacing amendment). Note that `RenderOptions::icons` is a plain
 `bool`: by the time it is built the question has been answered, and no renderer ever has
 to know how. `line_numbers` adds a themed gutter to
 fenced code blocks, outside the horizontally scrollable region. Options are threaded

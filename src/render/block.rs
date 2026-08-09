@@ -427,15 +427,18 @@ fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> (Canvas, bool)
 /// floating in the middle of one — so the single space that suits a bullet leaves a
 /// box looking welded to the word after it.
 ///
-/// The gap is deliberately **the same in both glyph sets**. It would be tempting to
-/// read the complaint as being about the Nerd Font boxes specifically, and to widen
-/// only those; don't. The module rule in [`crate::render::glyphs`] is that turning
-/// icons off changes what a glyph *looks like* and nothing about *where anything
-/// sits*, so a set-dependent gap would make `--no-icons` shift every task list
-/// sideways — exactly the class of surprise that rule exists to forbid. And how much
-/// of its cell any given box actually fills is a property of the reader's font, which
-/// this program does not know and must not pretend to (see [`crate::render::glyphs`]
-/// for what assuming otherwise has cost). `☐` and `☑` are boxes on their own merits.
+/// The *gap* is the same in both glyph sets. What differs is what it is measured from:
+/// the box's reservation is [`Glyphs::task_cells`], which is 2 for the Nerd Font boxes
+/// and 1 for `☐`/`☑`, so a task list's text starts one column further right with icons
+/// on. Two spaces of gap were not on their own enough — the wide box was eating one of
+/// them, which is why the owner asked, in a second pass, to "indent double" wherever
+/// the wide boxes are present.
+///
+/// That makes this the one place where the two glyph sets differ in *layout* and not
+/// merely in appearance, which the width rule in [`crate::render::glyphs`] is written
+/// to admit. The rule's purpose is that nothing shifts *unexpectedly*; a glyph drawn
+/// across two cells genuinely occupies two, and pretending otherwise is what produced
+/// the defect rather than what prevented it.
 const TASK_GAP: usize = 2;
 
 /// The columns a plain bullet or ordinal keeps between itself and its text.
@@ -472,10 +475,10 @@ fn task_field(items: &[Node], ctx: Ctx<'_>) -> usize {
     if !has_task {
         return 0;
     }
-    // Both boxes are the same width in both glyph sets, but measuring beats assuming:
-    // an icon set whose boxes differed would otherwise set the text ragged.
-    let box_width = display_width(ctx.glyphs.task(true)).max(display_width(ctx.glyphs.task(false)));
-    box_width + TASK_GAP
+    // `task_cells`, not `display_width`: the Nerd Font boxes are drawn two cells wide
+    // but live in a private-use area, where `unicode-width` has no data and answers 1.
+    // Budgeting that 1 is what let the box overlap the text after it.
+    ctx.glyphs.task_cells + TASK_GAP
 }
 
 /// The marker of one list item, padded to the marker field width.

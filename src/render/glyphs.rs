@@ -7,10 +7,19 @@
 //!
 //! # The width rule
 //!
-//! **Every glyph in both sets is exactly one display column**, and the two sets are
-//! the same shape. Turning icons off therefore changes what a glyph looks like and
-//! nothing about where anything sits; a test in this module asserts it for every
-//! entry, so a badly chosen replacement fails the build rather than the layout.
+//! **Every glyph in both sets is exactly one display column** by
+//! [`crate::text::display_width`], and the two sets are the same shape. A test in this
+//! module asserts it for every entry, so a badly chosen replacement fails the build
+//! rather than the layout. This is what keeps the canvas's cell arithmetic identical
+//! whichever set is in force.
+//!
+//! Turning icons off therefore changes what a glyph looks like and, with **one
+//! exception**, nothing about where anything sits. The exception is the task box: the
+//! Nerd Font pair is *drawn* across two cells even though `unicode-width` reports one
+//! for their private-use code points, so the marker field reserves two for them and a
+//! task list's text starts a column further right with icons on. [`Glyphs::task_cells`]
+//! carries that reservation and explains why pretending otherwise was a defect rather
+//! than a simplification. Nothing else in either set is drawn wider than it measures.
 //!
 //! Box-drawing characters — frames, quote bars, heading rules, the overflow marker —
 //! are not icons and are identical in both sets, so they are not listed here.
@@ -100,6 +109,19 @@ pub(crate) struct Glyphs {
     pub task_checked: &'static str,
     /// The box of an unticked task list item.
     pub task_unchecked: &'static str,
+    /// The cells a task box is *drawn* across, which is not always what
+    /// [`crate::text::display_width`] says.
+    ///
+    /// The Nerd Font boxes are private-use code points. `unicode-width` has no data for
+    /// that range and answers 1 for all of it, but the patched fonts that carry these
+    /// two draw them with exactly twice the advance of an ASCII character. Budgeting
+    /// the 1 is what let the glyph spill over the item's text — the defect the owner
+    /// reported as the box "hugging" the text — so the layout budgets this instead.
+    ///
+    /// This is the *reservation*, not a claim about the cluster: the canvas still
+    /// treats the glyph as the one column `display_width` reports, which is what keeps
+    /// its cell arithmetic consistent. The extra column is simply left blank after it.
+    pub task_cells: usize,
     /// Whether a code fence shows a language icon in front of its name.
     pub code_icons: bool,
 }
@@ -117,6 +139,8 @@ impl Glyphs {
         bullets: BULLETS,
         task_checked: "☑",
         task_unchecked: "☐",
+        // Ordinary single-cell characters: what `display_width` says is what is drawn.
+        task_cells: 1,
         code_icons: false,
     };
 
@@ -139,6 +163,25 @@ impl Glyphs {
     /// a pair by design is the durable reason; how large either one renders depends on
     /// the reader's patched font and is not something this file can know.
     ///
+    /// # They are two cells wide, and must be given two
+    ///
+    /// These two are drawn with **twice the advance width of an ASCII character** — the
+    /// "large double char affair" the owner described. That is a property of the Nerd
+    /// Fonts patch, not of one face: the icon ranges are patched in at double advance
+    /// so the pictographs are not squeezed into a single narrow cell, and both the
+    /// proportional and the `Mono` variants of a patched font agree on it.
+    ///
+    /// `unicode-width` cannot know this. The code points are in a private-use area,
+    /// where there is no property to consult and the crate answers 1 for everything.
+    /// Budgeting that 1 is what made the box overlap the text after it, which the owner
+    /// reported as the box hugging its text and which two spaces of gap alone did not
+    /// cure — the box was simply eating one of them. [`Self::task_cells`] carries the
+    /// real reservation, and the layout uses it.
+    ///
+    /// This is the one place where the two glyph sets legitimately differ in *layout*
+    /// rather than only in appearance, and the module's width rule is written to admit
+    /// it: a glyph that is drawn two cells wide has to be given two cells.
+    ///
     /// The cost is that these are five-digit code points, added to Nerd Fonts in v3
     /// (2023). A v2 patch does not carry them, so [`Self::nerd_glyphs`] — which is
     /// what font detection demands coverage of — now answers "no Nerd Font" on a v2
@@ -149,6 +192,8 @@ impl Glyphs {
         bullets: BULLETS,
         task_checked: "\u{f0135}",   // nf-md-checkbox_marked_outline
         task_unchecked: "\u{f0131}", // nf-md-checkbox_blank_outline
+        // Drawn two cells wide; see `task_cells` and the section below.
+        task_cells: 2,
         code_icons: true,
     };
 

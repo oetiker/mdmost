@@ -74,7 +74,9 @@ pub struct RenderOptions {
     /// Whether Nerd Font glyphs may be used.
     ///
     /// `false` (from `--no-icons` or `icons = false`) substitutes plain Unicode of
-    /// the same display width, so the layout is identical either way.
+    /// the same display width, so the layout is identical either way — except in a
+    /// task list, where the Nerd Font boxes are drawn two cells wide and are reserved
+    /// two (see [`crate::render::glyphs::Glyphs::task_cells`]).
     pub icons: bool,
     /// Whether fenced code blocks get a line-number gutter.
     pub line_numbers: bool,
