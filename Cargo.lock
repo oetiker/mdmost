@@ -1037,6 +1037,7 @@ dependencies = [
  "directories",
  "insta",
  "libc",
+ "log",
  "portable-pty",
  "pretty_assertions",
  "proptest",

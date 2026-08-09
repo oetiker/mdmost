@@ -32,6 +32,7 @@ pub mod dump;
 pub mod help;
 pub mod icons;
 pub mod select;
+pub mod stderr;
 mod term;
 pub mod wide;
 

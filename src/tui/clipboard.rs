@@ -27,14 +27,59 @@
 //!
 //! When a local display server is present and the session is not remote, both paths run:
 //! `arboard` then upgrades the report from "sent" to "copied" for free.
+//!
+//! # Why the clipboard is kept alive
+//!
+//! An X11 clipboard is not a place you put bytes. The copying process *owns* the
+//! selection and is expected to answer `SelectionRequest` events for as long as it
+//! holds it; the server stores nothing. Wayland's data-control protocol works the same
+//! way. So a program that sets the clipboard and immediately drops it has, in effect,
+//! copied nothing — the reader pastes and gets whatever was there before. That is
+//! precisely what `mdless` used to do, and `arboard` 3.6.1 says so out loud from its
+//! `Drop` impl ("Clipboard was dropped very quickly after writing"), which is how the
+//! bug was reported: as advice painted over a sequence diagram.
+//!
+//! The fix is the first thing that advice suggests: the [`arboard::Clipboard`] is kept
+//! in [`LOCAL`] for the life of the process. `arboard`'s X11 backend runs a thread that
+//! serves selection requests as long as any handle is alive, so keeping one costs one
+//! idle thread and one X connection, and the pager never blocks — the alternative
+//! `SetExtLinux::wait`, which serves the selection on the calling thread until someone
+//! takes it, cannot run on the thread that has to keep drawing.
+//!
+//! # What that can and cannot promise
+//!
+//! *While `mdless` runs*, a copy is readable by any other process, immediately and for
+//! as long as the reader takes to get round to pasting. Verified from a separate
+//! process on X11.
+//!
+//! *After `mdless` exits*, the local clipboard survives only if something else took
+//! ownership in the meantime — a clipboard manager, which most desktops run and which
+//! grabs a new selection at once. [`release`] gives it the best chance available by
+//! dropping the handle deliberately on the way out, which is where `arboard` asks the
+//! manager to take the data over; without that the process would simply die holding it.
+//! On a desktop with no manager at all, quitting still loses the copy, and no amount of
+//! effort inside `mdless` can change that: X11 ownership dies with the process. This is
+//! the one case the status bar is careful about — see [`Delivery::LocalOnly`].
+//!
+//! OSC 52 has none of this trouble, which is worth remembering before spending more on
+//! the local path: it hands the bytes to the terminal emulator, which owns them
+//! afterwards and outlives the pager. It is written first, it is written on every
+//! platform, and when it lands the local clipboard is a redundant second copy.
 
 use std::io::{self, Write};
 
 /// What became of a copy request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Delivery {
-    /// A clipboard that answers accepted the text.
+    /// A clipboard that answers accepted the text, and the terminal was told as well.
     Confirmed,
+    /// Only the local display server took it: OSC 52 was not written.
+    ///
+    /// Worth its own variant because it is the one case where `mdless` is the sole
+    /// owner of the copy, and an X11 or Wayland selection is owned by a *process*: when
+    /// this one exits, a desktop with no clipboard manager has nothing left. The
+    /// terminal emulator, which does outlive the pager, was not given a copy here.
+    LocalOnly,
     /// OSC 52 was written to the terminal, which does not acknowledge.
     Sent,
     /// Nothing worked; the string says what went wrong.
@@ -53,6 +98,12 @@ impl Delivery {
         };
         match self {
             Delivery::Confirmed => (format!("copied {bytes} bytes of {what}"), false),
+            Delivery::LocalOnly => (
+                format!(
+                    "copied {bytes} bytes of {what} to the desktop clipboard (held while mdless runs)"
+                ),
+                false,
+            ),
             Delivery::Sent => (
                 format!("sent {bytes} bytes of {what} to the terminal clipboard (unconfirmed)"),
                 false,
@@ -72,10 +123,19 @@ const OSC52_LIMIT: usize = 96 * 1024;
 
 /// Puts `text` on the clipboard by the best route available.
 pub fn copy(text: &str) -> Delivery {
-    let osc = write_osc52(text);
-    let local = local_clipboard(text);
+    classify(write_osc52(text), local_clipboard(text))
+}
+
+/// What to claim, given what each route did.
+///
+/// Split out from [`copy`] because [`copy`] has two side effects and this has none:
+/// the decision table is the part worth pinning down in a test, and a test of it must
+/// not write an escape sequence to whatever terminal the suite is running on.
+fn classify(osc: Result<(), String>, local: Option<Result<(), String>>) -> Delivery {
     match (osc, local) {
-        (_, Some(Ok(()))) => Delivery::Confirmed,
+        (Ok(()), Some(Ok(()))) => Delivery::Confirmed,
+        // The bytes never left this process by any route that outlives it.
+        (Err(_), Some(Ok(()))) => Delivery::LocalOnly,
         (Ok(()), _) => Delivery::Sent,
         (Err(osc), Some(Err(local))) => Delivery::Failed(format!("{osc}; {local}")),
         (Err(osc), None) => Delivery::Failed(osc),
@@ -113,18 +173,91 @@ fn local_clipboard(text: &str) -> Option<Result<(), String>> {
     if is_remote_session() {
         return None;
     }
-    Some(
-        arboard::Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(text.to_string()))
-            .map_err(|error| error.to_string()),
-    )
+    let mut held = LOCAL.lock().unwrap_or_else(|error| error.into_inner());
+    if held.is_none() {
+        match arboard::Clipboard::new() {
+            Ok(clipboard) => *held = Some(clipboard),
+            Err(error) => return Some(Err(error.to_string())),
+        }
+    }
+    let result = held
+        .as_mut()
+        .expect("just filled in")
+        .set_text(text.to_string())
+        .map_err(|error| error.to_string());
+    if result.is_ok() {
+        *COPIED_AT.lock().unwrap_or_else(|error| error.into_inner()) =
+            Some(std::time::Instant::now());
+    }
+    if result.is_err() {
+        // A connection that has failed once will keep failing; letting it go means the
+        // next copy opens a fresh one rather than inheriting a dead display server.
+        *held = None;
+    }
+    Some(result)
 }
+
+/// The clipboard handle whose life is what makes a copy readable.
+///
+/// See the module docs: this is not a cache, it is the copy. Dropping it un-copies the
+/// text, which is the whole of the bug this replaced. A [`Mutex`] rather than a thread
+/// local because [`release`] runs from wherever the pager finishes.
+#[cfg(feature = "clipboard")]
+static LOCAL: std::sync::Mutex<Option<arboard::Clipboard>> = std::sync::Mutex::new(None);
+
+/// Hands the local clipboard over on the way out, if anyone will take it.
+///
+/// Called once the pager has stopped. Dropping the handle is what makes `arboard` ask
+/// the desktop's clipboard manager to save the contents, so a copy made just before `q`
+/// has its one chance here; letting the process die still holding the handle would skip
+/// that request entirely. Measured at about 100 ms on a desktop with no manager to
+/// answer, which is the worst case and is spent after the last frame.
+///
+/// It is *only* a chance. With no clipboard manager running, X11 ownership dies with
+/// this process whatever we do.
+#[cfg(feature = "clipboard")]
+pub fn release() {
+    let mut held = LOCAL.lock().unwrap_or_else(|error| error.into_inner());
+    if held.is_none() {
+        return;
+    }
+    // Hold the selection for a moment first, if the copy is very recent. A clipboard
+    // manager grabs a new selection promptly but not instantly, and a reader who
+    // pressed `q` in the same breath as releasing the mouse would otherwise hand it
+    // over before it had looked. `arboard` picks the same 100 ms as the point below
+    // which a hand-over is not worth counting on; this waits past it.
+    let copied_at = *COPIED_AT.lock().unwrap_or_else(|error| error.into_inner());
+    if let Some(elapsed) = copied_at.map(|at| at.elapsed())
+        && let Some(remaining) = HANDOVER_GRACE.checked_sub(elapsed)
+    {
+        std::thread::sleep(remaining);
+    }
+    // Dropping is what asks the manager to take the contents over; dying while still
+    // holding the handle would skip the request altogether.
+    drop(held.take());
+}
+
+/// How long a copy is held before the pager will let go of it.
+///
+/// Wall-clock, and deliberately not a measurement of anything: it is a floor under how
+/// long the selection exists, not a budget. Nothing waits on it but the exit path, and
+/// only when the reader copied within the last fraction of a second.
+#[cfg(feature = "clipboard")]
+const HANDOVER_GRACE: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// When the local clipboard was last written, for [`release`]'s grace period.
+#[cfg(feature = "clipboard")]
+static COPIED_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 /// Built without the `clipboard` feature: OSC 52 is the only route.
 #[cfg(not(feature = "clipboard"))]
 fn local_clipboard(_text: &str) -> Option<Result<(), String>> {
     None
 }
+
+/// Built without the `clipboard` feature: nothing is held, so nothing is handed over.
+#[cfg(not(feature = "clipboard"))]
+pub fn release() {}
 
 /// Whether the pager is being read over SSH.
 #[cfg(feature = "clipboard")]
@@ -163,4 +296,37 @@ fn base64(bytes: &[u8]) -> String {
 #[cfg(test)]
 pub(super) fn encode_for_test(bytes: &[u8]) -> String {
     base64(bytes)
+}
+
+/// The local half of a copy, without the OSC 52 half.
+///
+/// The tests must not call [`copy`]: it writes an OSC 52 sequence to standard output,
+/// which during `cargo test` is either escape soup in the log or — worse, on a terminal
+/// that honours it — the suite quietly putting its fixtures on the reader's clipboard.
+#[cfg(test)]
+pub(super) fn local_for_test(text: &str) -> Option<Result<(), String>> {
+    local_clipboard(text)
+}
+
+/// The decision table of [`copy`], without its two side effects.
+#[cfg(test)]
+pub(super) fn classify_for_test(
+    osc: Result<(), String>,
+    local: Option<Result<(), String>>,
+) -> Delivery {
+    classify(osc, local)
+}
+
+/// Whether a local clipboard is currently held open, which is what "copied" rests on.
+#[cfg(test)]
+pub(super) fn held_for_test() -> bool {
+    #[cfg(feature = "clipboard")]
+    {
+        LOCAL
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .is_some()
+    }
+    #[cfg(not(feature = "clipboard"))]
+    false
 }

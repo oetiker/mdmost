@@ -177,6 +177,10 @@ impl Input {
 /// terminal is hung up under the pager. The terminal is restored either way.
 pub fn run(app: &mut App) -> io::Result<()> {
     install_panic_hook();
+    // Declared before the `Restore` guard so that it is dropped after it: what a
+    // library complained about is printed once the terminal is the reader's again, not
+    // over the frame. See `super::stderr` for what this does and does not catch.
+    let _noise = super::stderr::Capture::start();
     let terminate = Arc::new(AtomicBool::new(false));
     // A failure to register is not worth refusing to start over; the guard and the
     // panic hook still cover every other exit path.
@@ -193,7 +197,9 @@ pub fn run(app: &mut App) -> io::Result<()> {
     if app.config().mouse && execute!(io::stdout(), EnableMouseCapture).is_err() {
         app.notify("this terminal refused mouse capture", true);
     }
-    let _guard = Restore;
+    // Named, not `_guard`, because the order of what follows the loop matters and the
+    // restoration has to be part of that order rather than a scope-end surprise.
+    let guard = Restore;
 
     let result = event_loop(app, &mut terminal, &input, &terminate);
     if result.is_err() {
@@ -207,6 +213,14 @@ pub fn run(app: &mut App) -> io::Result<()> {
         // that is about to exit anyway.
         std::mem::forget(terminal);
     }
+    // The screen goes back to the reader first: releasing the clipboard can take a
+    // couple of hundred milliseconds when it has to wait on a clipboard manager, and
+    // spending that with the alternate screen still up would look like a pager that is
+    // slow to quit.
+    drop(guard);
+    // Then the last thing a copy gets: an X11 or Wayland selection belongs to a
+    // process, and this one is about to stop being one.
+    super::clipboard::release();
     result
 }
 
