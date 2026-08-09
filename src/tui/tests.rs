@@ -1939,3 +1939,217 @@ fn the_help_overlay_paints_its_panel_behind_every_string() {
         }
     }
 }
+
+/// A document long enough that the scrollbar thumb is at its two-half-cell minimum.
+fn long_document(lines: usize) -> String {
+    (0..lines)
+        .map(|n| format!("line {n} of the very long sample document\n\n"))
+        .collect()
+}
+
+/// The pagers the scrollbar tests are exercised against: a short document where the
+/// thumb is fat and one scroll unit is many half-cells, and a long one where the thumb
+/// is at its minimum and one half-cell is many scroll units. The two round in opposite
+/// directions, which is where an inverse that is only approximately an inverse breaks.
+fn scrollbar_pagers() -> Vec<(&'static str, App)> {
+    let mut short = pager(&long_document(9));
+    short.resize(80, 12);
+    let _ = short.canvas();
+    let mut tall = pager(&long_document(400));
+    tall.resize(80, 12);
+    let _ = tall.canvas();
+    let mut narrow = pager(&long_document(400));
+    narrow.resize(80, 5);
+    let _ = narrow.canvas();
+    // A tall terminal holding a document about twice its height: the one shape where
+    // the thumb is fat *and* the document has more lines than the track has half-cells,
+    // so the thumb can be asked to follow the pointer to half-cell precision.
+    let mut medium = pager(&long_document(60));
+    medium.resize(80, 60);
+    let _ = medium.canvas();
+    vec![
+        ("short", short),
+        ("tall", tall),
+        ("narrow", narrow),
+        ("medium", medium),
+    ]
+}
+
+/// The track's height in cells: the body area, status bar excluded, as `draw` lays it.
+fn bar_height(app: &App) -> u16 {
+    u16::try_from(app.viewport_height()).expect("the viewport fits in a u16")
+}
+
+#[test]
+fn a_press_on_the_scrollbar_track_puts_the_thumb_under_the_pointer() {
+    // The real inverse property: whatever row the reader presses, the thumb the
+    // painter then draws covers that row. Asserted against `scrollbar_thumb`, which
+    // `draw::scrollbar` is the only other caller of, so this pins the mapping against
+    // the drawing rather than against a restatement of the mapping.
+    for (name, mut app) in scrollbar_pagers() {
+        let height = bar_height(&app);
+        assert!(
+            app.max_scroll() > 0,
+            "{name}: the sample must be scrollable"
+        );
+        for row in 0..height {
+            app.scrollbar_press(height, row);
+            let (start, length) = app.scrollbar_thumb(height);
+            let top = usize::from(row) * 2;
+            assert!(
+                top < start + length && top + 1 >= start,
+                "{name}: pressing row {row} of {height} left the thumb at \
+                 {start}..{} (scroll {} of {})",
+                start + length,
+                app.scroll(),
+                app.max_scroll(),
+            );
+            app.scrollbar_release();
+        }
+    }
+}
+
+#[test]
+fn the_scrollbar_reaches_both_extremes_exactly() {
+    for (name, mut app) in scrollbar_pagers() {
+        let height = bar_height(&app);
+        let max = app.max_scroll();
+
+        app.scrollbar_press(height, height - 1);
+        assert_eq!(
+            app.scroll(),
+            max,
+            "{name}: a press on the last row is the end"
+        );
+        app.scrollbar_release();
+        app.scrollbar_press(height, 0);
+        assert_eq!(
+            app.scroll(),
+            0,
+            "{name}: a press on the first row is the top"
+        );
+        app.scrollbar_release();
+
+        // And by dragging, from every row the thumb could have been grabbed on.
+        for row in 0..height {
+            app.scroll_to(0);
+            app.scrollbar_press(height, row);
+            app.scrollbar_drag(height, height - 1);
+            assert_eq!(
+                app.scroll(),
+                max,
+                "{name}: dragging from row {row} to the bottom must land on \
+                 max_scroll, not one line short",
+            );
+            app.scrollbar_drag(height, 0);
+            assert_eq!(
+                app.scroll(),
+                0,
+                "{name}: and dragging back to the top must land on 0",
+            );
+            app.scrollbar_release();
+        }
+    }
+}
+
+#[test]
+fn grabbing_the_thumb_does_not_move_it() {
+    for (name, mut app) in scrollbar_pagers() {
+        let height = bar_height(&app);
+        app.scroll_to(app.max_scroll() / 2);
+        let before = app.scroll();
+        let (start, length) = app.scrollbar_thumb(height);
+        for top in start..start + length {
+            let row = u16::try_from(top / 2).expect("the thumb is inside the track");
+            app.scrollbar_press(height, row);
+            assert_eq!(
+                app.scroll(),
+                before,
+                "{name}: pressing row {row}, which the thumb covers, must not snap \
+                 the thumb's top to the pointer",
+            );
+            app.scrollbar_release();
+        }
+    }
+}
+
+#[test]
+fn dragging_the_thumb_tracks_the_pointer_without_drift() {
+    for (name, mut app) in scrollbar_pagers() {
+        let height = bar_height(&app);
+        if height < 4 {
+            continue;
+        }
+        app.scroll_to(app.max_scroll() / 2);
+        let before = app.scroll();
+        let (start, length) = app.scrollbar_thumb(height);
+        let middle = u16::try_from((start + length / 2) / 2).expect("inside the track");
+
+        app.scrollbar_press(height, middle);
+        app.scrollbar_drag(height, middle + 1);
+        let down = app.scroll();
+        assert!(down > before, "{name}: dragging down must scroll down");
+
+        // Back to where the pointer started, and the document must be back exactly —
+        // an anchor rewritten on every drag event accumulates rounding and this is
+        // where it shows.
+        app.scrollbar_drag(height, middle);
+        assert_eq!(app.scroll(), before, "{name}: no drift on the way back");
+
+        // And the thumb goes down with the pointer, three rows for three rows, to
+        // within the half-cell the painter rounds to. This is the gain: a drag that
+        // applied the *track's* rate rather than the thumb's would move the document
+        // and leave the thumb sliding out from under the finger holding it.
+        // Only where the document has more scrollable lines than the thumb has
+        // half-cells of travel. Below that the thumb moves in jumps of several
+        // half-cells per line because there is nothing finer to move it by, and no
+        // mapping can make it track a pointer more smoothly than the document allows.
+        let travel = usize::from(height) * 2 - length;
+        if middle + 3 < height - 1 && app.max_scroll() >= travel {
+            app.scrollbar_drag(height, middle + 3);
+            let (moved_start, _) = app.scrollbar_thumb(height);
+            assert!(
+                moved_start.abs_diff(start + 6) <= 1,
+                "{name}: the pointer moved three rows and the thumb moved {} \
+                 half-cells, not six",
+                moved_start as i64 - start as i64,
+            );
+        }
+        app.scrollbar_release();
+    }
+}
+
+#[test]
+fn the_scrollbar_grab_is_sticky_and_ends_on_release() {
+    let mut app = pager(&long_document(400));
+    app.resize(80, 12);
+    let _ = app.canvas();
+    let height = bar_height(&app);
+
+    assert!(!app.scrollbar_grabbed(), "nothing is grabbed to begin with");
+    app.scrollbar_press(height, 1);
+    assert!(app.scrollbar_grabbed(), "a press on the track grabs");
+    // The drag carries no column at all: there is nothing for the pointer straying
+    // off the one-column bar to be tested against, which is the whole of stickiness.
+    app.scrollbar_drag(height, height - 2);
+    let moved = app.scroll();
+    assert!(moved > 0);
+
+    app.scrollbar_release();
+    assert!(!app.scrollbar_grabbed());
+    app.scrollbar_drag(height, 1);
+    assert_eq!(app.scroll(), moved, "a drag after release must do nothing");
+}
+
+#[test]
+fn a_resize_drops_a_scrollbar_grab() {
+    let mut app = pager(&long_document(400));
+    app.resize(80, 12);
+    let _ = app.canvas();
+    app.scrollbar_press(bar_height(&app), 3);
+    assert!(app.scrollbar_grabbed());
+    // The anchor is a row of a track that no longer exists, and a reflow has moved
+    // every line under it.
+    app.resize(80, 30);
+    assert!(!app.scrollbar_grabbed(), "the anchor died with the layout");
+}

@@ -280,6 +280,7 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
 | `q` | quit, unconditionally |
 | `Esc` | cancel, never quit: unwinds count → search → TOC filter → TOC focus → TOC pane, then says so |
 | mouse wheel | scroll; click in TOC jumps |
+| mouse on the scrollbar | press the track to jump there, drag the thumb to scroll |
 
 `Esc` never exits. It is the key people press when unsure, and losing your place in a
 long document with no undo is a hostile answer to uncertainty; when there is nothing left

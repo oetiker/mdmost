@@ -59,7 +59,7 @@ pub struct Config {
     pub toc_open: bool,
     /// The width of the table-of-contents pane, in columns.
     pub toc_width: u16,
-    /// Whether the mouse wheel scrolls and clicks select in the TOC.
+    /// Whether the mouse wheel scrolls, the scrollbar drags, and clicks select in the TOC.
     ///
     /// Off by default. Capturing the mouse takes the terminal's own drag-select away,
     /// and selecting text is the main thing anyone does with a read-only viewer that
