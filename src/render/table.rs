@@ -12,18 +12,27 @@
 //!    which is what makes emphasis, code, links, lists and nested tables work inside
 //!    cells with no special case at all;
 //! 5. draw rounded borders and honour the GFM per-column alignment;
-//! 6. size each row to its tallest cell, top-aligning the shorter ones.
+//! 6. size each row to its tallest cell, top-aligning the shorter ones;
+//! 7. put a blank row between the body rows when any of them wraps, carrying the zebra
+//!    stripe through it with a half block — see [`gap_row`], which is where that whole
+//!    rule and its trade-offs are written down.
 
-use crate::canvas::{BorderSet, Canvas, Rule, Side};
+use crate::canvas::{BorderSet, Canvas, Cell, CutMark, Rule, Side};
 use crate::doc::{Node, NodeKind, TableInfo};
 use crate::text::{Align, display_width};
-use crate::theme::{Style, Theme};
+use crate::theme::{Color, Style, Theme};
 
 use super::code::OVERFLOW_MARKER;
 use super::{Ctx, RenderOptions, block, inline};
 
 /// Columns consumed by one column's chrome: its left border and the two pad spaces.
 const COLUMN_CHROME: usize = 3;
+
+/// Upper half block: shades the top half of a row gap, joining it to the row above.
+const UPPER_HALF: char = '\u{2580}';
+
+/// Lower half block: shades the bottom half of a row gap, joining it to the row below.
+const LOWER_HALF: char = '\u{2584}';
 
 /// Renders a [`NodeKind::Table`] at `width` columns, clipping if it cannot fit.
 ///
@@ -37,34 +46,48 @@ pub fn render_table(node: &Node, width: u16, theme: &Theme, options: &RenderOpti
 
 /// Renders a table with an explicit context, clipping it to `width`.
 pub(crate) fn render_table_node(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
-    let Layout { mut canvas, rules } = lay_out(node, info, width, ctx);
-    // A rule cut short closes with its own corner or tee; only the *content* rows, which
-    // are what actually gets cut off, carry the "there is more to the right" chevron.
-    // The rules are named from the layout rather than sniffed out of the finished
-    // canvas: the renderer knows exactly which rows it drew, and a canvas full of box
-    // art inside a table cell must not be mistaken for one.
+    let Layout {
+        mut canvas,
+        rules,
+        gaps,
+    } = lay_out(node, info, width, ctx);
+    // A rule cut short closes with its own corner or tee; a row gap, which is shading
+    // and nothing else, is cut in silence; only the *content* rows, which are what
+    // actually gets cut off, carry the "there is more to the right" chevron. Both kinds
+    // of row are named from the layout rather than sniffed out of the finished canvas:
+    // the renderer knows exactly which rows it drew, and a canvas full of box art inside
+    // a table cell must not be mistaken for one.
     let set = BorderSet::ROUNDED;
     canvas.clip_with_edges(
         width,
         OVERFLOW_MARKER,
         ctx.theme.table.overflow_marker,
         |row| {
+            // `gaps` is built in row order and there is one per body row, so a linear
+            // scan would be quadratic in the height of a long table.
+            if gaps.binary_search(&row).is_ok() {
+                return CutMark::Bare;
+            }
             rules
                 .iter()
                 .find(|(at, _)| *at == row)
-                .map(|(_, rule)| set.close(*rule, Side::Right))
+                .map_or(CutMark::Marker, |(_, rule)| {
+                    CutMark::Glyph(set.close(*rule, Side::Right))
+                })
         },
     );
     canvas.resize_width(width, ctx.base);
     canvas
 }
 
-/// A laid-out table and the rows of it that are horizontal rules.
+/// A laid-out table, and the rows of it that carry no content.
 struct Layout {
     /// The table at the width its columns negotiated, which may exceed the budget.
     canvas: Canvas,
     /// Every rule row, by index into `canvas`, and which edge of the box it is.
     rules: Vec<(usize, Rule)>,
+    /// Every row gap, by index into `canvas` (see [`gap_row`]).
+    gaps: Vec<usize>,
 }
 
 /// One source row of a table.
@@ -104,6 +127,7 @@ fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Layout {
         return Layout {
             canvas: Canvas::empty(width),
             rules: Vec::new(),
+            gaps: Vec::new(),
         };
     }
 
@@ -129,21 +153,33 @@ fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Layout {
         ),
         ctx.base,
     );
-    let mut body_index = 0usize;
-    for (index, row) in rows.iter().enumerate() {
-        let banded = !row.header && body_index % 2 == 1;
-        out.append(&render_row(row, &widths, info, banded, inner), ctx.base);
-        if !row.header {
-            body_index += 1;
-        }
+    let drawn = draw_rows(&rows, &widths, info, inner);
+    // Air between the rows only when the rows need it — see [`gap_row`].
+    let spaced = drawn
+        .iter()
+        .any(|row| !row.header && row.canvas.height() > 1);
+    let mut gaps = Vec::new();
+    for (index, row) in drawn.iter().enumerate() {
+        out.append(&row.canvas, ctx.base);
+        let next = drawn.get(index + 1);
         // The rule under the header is drawn even when no body row follows: a header
         // resting straight on the bottom border reads as a broken box, not as an
         // empty table.
-        let last_header = row.header && !rows.get(index + 1).is_some_and(|next| next.header);
+        let last_header = row.header && !next.is_some_and(|next| next.header);
         if last_header {
             rules.push((out.height(), Rule::Middle));
             out.append(
                 &border_row(&widths, set.tee_right, set.cross, set.tee_left, set, border),
+                ctx.base,
+            );
+        } else if spaced
+            && !row.header
+            && let Some(next) = next
+            && !next.header
+        {
+            gaps.push(out.height());
+            out.append(
+                &gap_row(&widths, full, row.banded, next.banded, ctx),
                 ctx.base,
             );
         }
@@ -160,7 +196,181 @@ fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Layout {
         ),
         ctx.base,
     );
-    Layout { canvas: out, rules }
+    Layout {
+        canvas: out,
+        rules,
+        gaps,
+    }
+}
+
+/// One drawn table row: its canvas, and the two facts the spacing rule needs about it.
+struct Drawn {
+    header: bool,
+    /// Whether the zebra put the stripe on this row.
+    banded: bool,
+    canvas: Canvas,
+}
+
+/// Draws every row, deciding as it goes which ones the zebra stripes.
+///
+/// All of them are drawn before any is placed: the spacing rule below needs every body
+/// row's *drawn height*, and a gap needs to know which of the two rows it separates
+/// carries the stripe. No row is drawn twice.
+fn draw_rows(rows: &[Row<'_>], widths: &[usize], info: &TableInfo, ctx: Ctx<'_>) -> Vec<Drawn> {
+    let mut body_index = 0usize;
+    rows.iter()
+        .map(|row| {
+            let banded = !row.header && body_index % 2 == 1;
+            if !row.header {
+                body_index += 1;
+            }
+            Drawn {
+                header: row.header,
+                banded,
+                canvas: render_row(row, widths, info, banded, ctx),
+            }
+        })
+        .collect()
+}
+
+/// Whether a drawn row is a table's row gap (see [`gap_row`]).
+///
+/// `stripe` is `theme.table.row_alt.bg`.
+///
+/// Read off the finished canvas rather than handed down, because by the time the *pager*
+/// has to decide what a viewport edge cuts through, the drawn document is all it has —
+/// the same seam `tui::wide` reads extents and gutters through. The signal is a half
+/// block painted in the stripe colour **as a foreground**, which nothing else in a
+/// document produces: the shading is the only place `table.row_alt`'s colour is ever a
+/// foreground, and matching the glyph alone would catch a document that merely contains
+/// the character.
+pub fn is_row_gap(cells: &[Cell], stripe: Option<Color>) -> bool {
+    let Some(stripe) = stripe else { return false };
+    cells.iter().any(|cell| {
+        cell.style().fg == Some(stripe) && cell.text().starts_with([UPPER_HALF, LOWER_HALF])
+    })
+}
+
+/// One blank row between two body rows, with the zebra stripe carried through it by a
+/// half block (design spec §7.7).
+///
+/// # When there is a gap at all
+///
+/// **A table is spaced exactly when at least one of its body rows is taller than one
+/// line at the current width**, and then *every* pair of adjacent body rows gets a gap.
+/// Rows that each fit on one line already show their own boundaries — the next row
+/// starts where the last one stopped — and air between them would only make the table
+/// taller. As soon as one row wraps, that cue is gone: six content lines packed edge to
+/// edge read as one block of prose, and `pager` beginning directly under `canvas of
+/// styled cells` says nothing about where the row boundary is.
+///
+/// Per *table*, not per row: spacing only the neighbours of a tall row gives ragged gaps
+/// that track row length rather than structure, which is worse than either extreme. The
+/// height that decides it is the drawn one, so a cell containing a list, a code block or
+/// a nested table counts as readily as a wrapped sentence — the criterion is exactly the
+/// crowding the reader sees, and it cannot fall behind as block kinds are added.
+///
+/// Only *body* rows are measured and only body rows are separated. A header is already
+/// fenced off from the body by its own `├───┼───┤` rule, which does this job better than
+/// a gap could, so a header that wraps cannot blur a boundary and does not earn one; and
+/// a gap laid against that rule, or against the top or bottom border, would be padding
+/// rather than structure. Nothing is inserted between two header rows either.
+///
+/// The decision is width-dependent by construction — the same table is dense at 120
+/// columns and spaced at 60 — which is intended, because narrow is precisely when the
+/// rows wrap and look cramped. It is taken here, during layout, at a known width, never
+/// at parse time (design spec §3); the render cache is keyed on width, so a resize
+/// re-renders and re-decides.
+///
+/// # Which half is shaded
+///
+/// The stripe on a body row is a *background*, and a background cannot be applied to
+/// half a row. The half block is a **foreground glyph** instead: `▀`/`▄` painted in the
+/// stripe colour on the page background give a band across the top or the bottom half of
+/// the gap, and the same colour value makes it continuous with the neighbouring row's
+/// background.
+///
+/// The shaded half must be the one *adjacent to the striped row*, or the band detaches
+/// from the rows it is grouping and reads as a rule of its own:
+///
+/// * the row above is striped → `▀`, so the band hangs off the bottom of that row;
+/// * the row below is striped → `▄`, so the band sits on top of that row;
+/// * **neither is striped → the gap stays blank.** There is nothing to carry through it;
+///   shading it in the stripe colour would invent a band for two plain rows.
+/// * both striped → the whole gap takes the stripe as a background, since a band that
+///   has to reach both neighbours is not half a row high.
+///
+/// The last two cases are unreachable today — the zebra stripes every second body row,
+/// so of any two adjacent body rows exactly one is striped — and they are written down
+/// rather than asserted because the answer follows from what the shading is *for*, and a
+/// future banding rule should inherit it rather than rediscover it.
+///
+/// A theme whose `row_alt` sets no background gets a blank gap: there is no stripe to
+/// carry, and the air alone is still the improvement.
+///
+/// # The column separators
+///
+/// They are drawn in the gap as they are on any other row. Left out, every vertical rule
+/// in the table would have a row-high hole in it and the box would stop reading as a
+/// table — a far worse defect than the one this trades against, which is that the
+/// separator's cell is page background and so notches the band by one column at each
+/// rule. The notch is half a row high at most and sits in decoration;
+/// `a_striped_row_is_shaded_from_border_to_border` is about the *content* rows, where
+/// the stripe is a background and the hole was full height, and that property is
+/// untouched.
+fn gap_row(widths: &[usize], full: u16, above: bool, below: bool, ctx: Ctx<'_>) -> Canvas {
+    let shade = match (above, below) {
+        (true, false) => Some(UPPER_HALF),
+        (false, true) => Some(LOWER_HALF),
+        _ => None,
+    };
+    let fill = if above && below {
+        ctx.base.patch(ctx.theme.table.row_alt)
+    } else {
+        ctx.base
+    };
+    let mut out = Canvas::new(full, 1, fill);
+    if let Some(glyph) = shade
+        && let Some(stripe) = ctx.theme.table.row_alt.bg
+    {
+        out.fill(
+            0,
+            0,
+            usize::from(full),
+            &glyph.to_string(),
+            Style {
+                fg: Some(stripe),
+                ..fill
+            },
+        );
+    }
+    // The rules take the gap's own background and keep the border's own attributes,
+    // exactly as in `render_row`. On a gap the background is the page's, because the
+    // shading here is a foreground — see "The column separators" above for what that
+    // costs and why it is still the right trade.
+    let separator = Style {
+        bg: fill.bg,
+        ..ctx.theme.table.border
+    };
+    let mut col = 0usize;
+    for width in widths {
+        out.vline(
+            0,
+            col,
+            1,
+            &BorderSet::ROUNDED.vertical.to_string(),
+            separator,
+        );
+        col += width + COLUMN_CHROME;
+    }
+    out.vline(
+        0,
+        col,
+        1,
+        &BorderSet::ROUNDED.vertical.to_string(),
+        separator,
+    );
+    out
 }
 
 /// Draws one horizontal border row.

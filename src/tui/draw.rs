@@ -40,6 +40,11 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     // on box art says only "there is more to the right", which is exactly true. Checked
     // in tmux at 80 columns on a chart widened to 190.
     let frame_styles = [app.theme().code.frame, app.theme().table.border];
+    let marks = Marks {
+        style: marker_style,
+        frames: &frame_styles,
+        stripe: app.theme().table.row_alt.bg,
+    };
 
     let buffer = frame.buffer_mut();
     buffer.set_style(area, term_style(base));
@@ -73,15 +78,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     // row starts would paint chevrons and highlights on the wrong columns.
     let hscroll = Offsets::new(app, doc_area.width);
     blit(buffer, doc_area, app.rendered(), scroll, &hscroll, base);
-    edge_markers(
-        buffer,
-        doc_area,
-        app.rendered(),
-        scroll,
-        &hscroll,
-        marker_style,
-        &frame_styles,
-    );
+    edge_markers(buffer, doc_area, app.rendered(), scroll, &hscroll, &marks);
     highlight_matches(buffer, doc_area, app, scroll, &hscroll);
     scrollbar(buffer, bar_area, app);
     if app.rendered().is_empty() {
@@ -265,6 +262,21 @@ fn blit(
     }
 }
 
+/// What [`edge_markers`] needs to know about the theme, gathered once per frame.
+///
+/// Together rather than one argument each: they are three answers to the same question —
+/// what a row that runs past the viewport shows at the edge — and the chevron's colour
+/// alone never told the whole story.
+pub(super) struct Marks<'a> {
+    /// The style a chevron is painted in.
+    pub style: TermStyle,
+    /// The styles a box's own glyphs are painted in, so a cut rule can close itself.
+    pub frames: &'a [Style],
+    /// The colour a table's row gap carries the zebra stripe through in, so a cut gap
+    /// can be passed over in silence. See [`crate::render::table::is_row_gap`].
+    pub stripe: Option<Color>,
+}
+
 /// Paints the left and right cut-off markers on rows that reach past the viewport.
 ///
 /// The document canvas is now wider than the viewport wherever a block asked to be
@@ -280,6 +292,14 @@ fn blit(
 /// (`docs/qa/visual-review-3.md` §11). The content rows between the rules still carry
 /// the chevron, because they are what is actually cut off.
 ///
+/// A table's row gap is marked on neither edge. It is shading between two rows and
+/// carries nothing to be cut off, so a chevron there would claim content continues where
+/// none does — and, the gaps being between rows that all earn one, it would weld the
+/// markers into an unbroken rail that says the same thing about every row of the table
+/// whether or not it has anything more to show. The same argument as for the rules, one
+/// step further: `render::table::is_row_gap` recognises the gap off the drawn canvas,
+/// exactly as [`frame_close`] recognises a rule.
+///
 /// On a row with a pinned prefix the left marker moves right by that prefix, so it marks
 /// the left edge of the *scrolling region* rather than of the window.
 pub(super) fn edge_markers(
@@ -288,17 +308,20 @@ pub(super) fn edge_markers(
     canvas: &Canvas,
     top: usize,
     left: &Offsets<'_>,
-    style: TermStyle,
-    frames: &[Style],
+    marks: &Marks<'_>,
 ) {
     if area.width == 0 {
         return;
     }
+    let (style, frames) = (marks.style, marks.frames);
     for y in 0..area.height {
         let row = top + usize::from(y);
         let Some(cells) = canvas.row(row) else {
             break;
         };
+        if crate::render::table::is_row_gap(cells, marks.stripe) {
+            continue;
+        }
         let offset = left.at(row);
         let pinned = left.pinned(row);
         let occupied = |range: std::ops::Range<usize>| {

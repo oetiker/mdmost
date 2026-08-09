@@ -34,6 +34,7 @@ mod tests;
 
 pub use border::{BorderSet, Rule, Side};
 pub use cell::Cell;
+pub use ops::CutMark;
 
 use crate::text::{Align, Line, cell_clusters, display_width, grapheme_width, pad_to_width};
 use crate::theme::Style;

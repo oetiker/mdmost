@@ -9,6 +9,23 @@ use crate::error::CanvasError;
 use crate::text::{Align, Line, display_width};
 use crate::theme::Style;
 
+/// What a row that lost content to [`Canvas::clip_with_edges`] shows in its last column.
+///
+/// Three answers, because a clipped canvas has three kinds of row and they say different
+/// things. Content rows lost something the reader wants and say so; a frame closes
+/// itself, because a box that ends in a chevron reads as a rendering fault rather than
+/// as a box that continues; and a row of pure decoration — a table's row gap — lost
+/// nothing at all, so it says nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CutMark {
+    /// Stamp the caller's "there is more to the right" marker.
+    Marker,
+    /// Draw this frame glyph, in the style the cut cell already had.
+    Glyph(char),
+    /// Draw nothing; the cut took only decoration.
+    Bare,
+}
+
 impl Canvas {
     /// Grows the canvas to `width` columns by padding every row on the right.
     ///
@@ -62,11 +79,11 @@ impl Canvas {
     /// sprout a misleading marker. A `width` of `0`, or a marker too wide for the last
     /// column, clips without stamping. Widening is a no-op, since nothing was lost.
     pub fn clip_with_marker(&mut self, width: u16, marker: &str, style: Style) {
-        self.clip_with_edges(width, marker, style, |_| None);
+        self.clip_with_edges(width, marker, style, |_| CutMark::Marker);
     }
 
-    /// [`clip_with_marker`](Canvas::clip_with_marker), except that rows `edge` names
-    /// end with the frame glyph it returns instead of with the marker.
+    /// [`clip_with_marker`](Canvas::clip_with_marker), except that `edge` decides per
+    /// row what a cut leaves in the last column.
     ///
     /// A box drawn wider than the room it has is cut on a *rule* row as readily as on a
     /// content row, and stamping "there is more to the right" over the rule leaves a
@@ -75,24 +92,29 @@ impl Canvas {
     /// corner or tee says the same thing more honestly — the box is whole, and the
     /// *content* is what continues.
     ///
+    /// A row that lost nothing but decoration wants neither: a table's row gap carries
+    /// no content, so [`CutMark::Bare`] cuts it in silence rather than claiming
+    /// something continues where nothing does.
+    ///
     /// `edge` is asked about every row, by index into the canvas as it was *before*
-    /// clipping, and only consulted for rows that actually lost something. The glyph it
+    /// clipping, and only consulted for rows that actually lost something. A glyph it
     /// returns is drawn in the style the cut cell already had, which is the frame's own
     /// style — a border closing itself in the overflow-marker colour would be a
     /// different kind of wrong.
     ///
     /// **Callers that own a clipped-block detector must keep the marker reachable.**
     /// `tui::wide::ClipTest` decides whether to re-render a block wider by looking for
-    /// the marker, so a caller that named *every* row as an edge would produce a clipped
-    /// canvas carrying no marker at all and silently lose horizontal scrolling. Naming
-    /// only rule rows is safe: a box always has content rows between its rules, and they
-    /// are cut by exactly the same amount.
+    /// the marker, so a caller that answered anything but [`CutMark::Marker`] for
+    /// *every* row would produce a clipped canvas carrying no marker at all and silently
+    /// lose horizontal scrolling. Sparing a table's rules and row gaps is safe: a box
+    /// always has content rows between them, and they are cut by exactly the same
+    /// amount.
     pub fn clip_with_edges(
         &mut self,
         width: u16,
         marker: &str,
         style: Style,
-        edge: impl Fn(usize) -> Option<char>,
+        edge: impl Fn(usize) -> CutMark,
     ) {
         if width >= self.width {
             return;
@@ -109,15 +131,18 @@ impl Canvas {
 
         let marker_width = display_width(marker);
         for (row, _) in clipped.iter().enumerate().filter(|(_, cut)| **cut) {
-            // A frame glyph is one column, so it fits wherever a row survives at all,
-            // even where the marker would not.
-            if let Some(glyph) = edge(row)
-                && keep > 0
-                && let Some(cut) = self.rows[row].get(keep - 1)
-            {
-                let style = cut.style();
-                self.write_str(row, keep - 1, &glyph.to_string(), style);
-                continue;
+            match edge(row) {
+                CutMark::Bare => continue,
+                // A frame glyph is one column, so it fits wherever a row survives at
+                // all, even where the marker would not.
+                CutMark::Glyph(glyph) if keep > 0 => {
+                    if let Some(cut) = self.rows[row].get(keep - 1) {
+                        let style = cut.style();
+                        self.write_str(row, keep - 1, &glyph.to_string(), style);
+                        continue;
+                    }
+                }
+                _ => {}
             }
             if keep == 0 || marker_width == 0 || marker_width > keep {
                 continue;

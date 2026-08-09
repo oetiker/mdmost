@@ -1392,3 +1392,191 @@ fn a_striped_row_is_shaded_from_border_to_border() {
         );
     }
 }
+
+/// A three-column table whose prose column wraps at any width a terminal has.
+const WRAPPING: &str = "\
+| part | does | note |
+| --- | --- | --- |
+| renderer | turns the parsed document into a canvas of styled cells | pure function of width |
+| pager | owns the viewport, scrolling and the key bindings | never lays anything out |
+| theme | every colour and attribute the renderer may reach for | two built-ins |
+";
+
+/// The upper and lower half-block glyphs a table's row gap is shaded with.
+const UPPER_HALF: char = '\u{2580}';
+const LOWER_HALF: char = '\u{2584}';
+
+/// The rows of `canvas` that are a table's row gap: nothing but column separators and
+/// half-block shading.
+///
+/// The shading is what identifies them, which is sound because a gap always has exactly
+/// one striped neighbour: the zebra alternates, so no two adjacent body rows are both
+/// plain.
+fn gap_rows(canvas: &Canvas) -> Vec<usize> {
+    (0..canvas.height())
+        .filter(|&row| {
+            let text = canvas.row_text(row);
+            text.contains([UPPER_HALF, LOWER_HALF])
+                && text
+                    .chars()
+                    .all(|ch| matches!(ch, UPPER_HALF | LOWER_HALF | '\u{2502}' | ' '))
+        })
+        .collect()
+}
+
+#[test]
+fn a_table_whose_rows_wrap_gets_air_between_them() {
+    // Six content lines with nothing between them read as one block of prose: the row
+    // boundaries are invisible, because the only cue left is where a cell happens to
+    // stop. The gap is what puts them back.
+    let canvas = render(WRAPPING, 70);
+    let out = body_rows(&canvas);
+    assert!(
+        out.iter().any(|row| row.contains("canvas of styled")),
+        "the fixture must actually wrap at this width: {out:#?}"
+    );
+    assert_eq!(
+        gap_rows(&canvas).len(),
+        2,
+        "three body rows want two gaps: {out:#?}"
+    );
+}
+
+#[test]
+fn a_table_of_one_line_rows_stays_compact() {
+    // Air between rows that need none is just a taller table.
+    let canvas = render(STRIPED, 40);
+    assert_eq!(
+        gap_rows(&canvas),
+        Vec::<usize>::new(),
+        "{:#?}",
+        body_rows(&canvas)
+    );
+}
+
+#[test]
+fn the_gap_shades_the_half_that_touches_the_striped_row() {
+    // The half block is a foreground glyph on the page background, so it shades half of
+    // the row's height. It has to be the half adjacent to the striped row, or the band
+    // detaches from the rows it is grouping.
+    let theme = Theme::default_dark();
+    let stripe = theme
+        .table
+        .row_alt
+        .bg
+        .expect("the stripe is defined as a background");
+    let canvas = render(WRAPPING, 70);
+    let striped = |row: usize| {
+        canvas
+            .row(row)
+            .is_some_and(|cells| cells.iter().any(|cell| cell.style().bg == Some(stripe)))
+    };
+    let gaps = gap_rows(&canvas);
+    assert!(!gaps.is_empty(), "no gap to inspect");
+    for gap in gaps {
+        let text = canvas.row_text(gap);
+        let want = if striped(gap - 1) {
+            assert!(!striped(gap + 1), "both neighbours striped at row {gap}");
+            UPPER_HALF
+        } else {
+            assert!(striped(gap + 1), "neither neighbour striped at row {gap}");
+            LOWER_HALF
+        };
+        let other = if want == UPPER_HALF {
+            LOWER_HALF
+        } else {
+            UPPER_HALF
+        };
+        assert!(
+            text.contains(want),
+            "row {gap} shades the wrong half: {text:?}"
+        );
+        assert!(
+            !text.contains(other),
+            "row {gap} shades both halves: {text:?}"
+        );
+        for cell in canvas.row(gap).expect("a gap row") {
+            if cell.text() == want.to_string() {
+                assert_eq!(
+                    cell.style().fg,
+                    Some(stripe),
+                    "the shading must be the stripe colour, painted as foreground"
+                );
+            }
+        }
+    }
+    for glyph in [UPPER_HALF, LOWER_HALF] {
+        assert_eq!(
+            display_width(&glyph.to_string()),
+            1,
+            "{glyph:?} must occupy exactly one column"
+        );
+    }
+}
+
+#[test]
+fn the_gap_keeps_the_column_separators() {
+    // A gap that dropped the vertical rules would punch a row-high hole in every one of
+    // them, and the box would stop reading as a table.
+    let canvas = render(WRAPPING, 70);
+    let gaps = gap_rows(&canvas);
+    assert!(!gaps.is_empty(), "no gap to inspect");
+    let separators = |row: usize| -> Vec<usize> {
+        canvas
+            .row(row)
+            .expect("a row")
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| cell.text() == "\u{2502}")
+            .map(|(index, _)| index)
+            .collect()
+    };
+    for gap in gaps {
+        assert_eq!(
+            separators(gap),
+            separators(gap - 1),
+            "gap row {gap} does not carry the same rules as the row above it"
+        );
+    }
+}
+
+#[test]
+fn the_gap_never_lands_against_a_rule() {
+    // The rule under the header already separates it from the body, and the top and
+    // bottom borders close the box; a gap next to any of them is padding, not structure.
+    let canvas = render(WRAPPING, 70);
+    let out = body_rows(&canvas);
+    let gaps = gap_rows(&canvas);
+    assert!(!gaps.is_empty(), "no gap to inspect");
+    for gap in gaps {
+        for neighbour in [gap - 1, gap + 1] {
+            let text = out[neighbour].trim().to_string();
+            assert!(
+                !text.starts_with(['\u{256d}', '\u{251c}', '\u{2570}']),
+                "gap row {gap} sits against the rule {text:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_cut_gap_row_is_not_marked_as_having_more_to_the_right() {
+    // A gap carries no content, so nothing is lost when it is cut: a chevron there would
+    // claim something continues where nothing does, and would stack into a column of
+    // markers beside the ones the content rows honestly earn.
+    let canvas = render(WRAPPING, 34);
+    let out = body_rows(&canvas);
+    assert!(
+        out.iter().any(|row| row.contains(code::OVERFLOW_MARKER)),
+        "the table must actually be clipped at this width: {out:#?}"
+    );
+    let gaps = gap_rows(&canvas);
+    assert!(!gaps.is_empty(), "no gap to inspect");
+    for gap in gaps {
+        assert!(
+            !out[gap].contains(code::OVERFLOW_MARKER),
+            "cut gap row {gap} claims content continues: {:?}",
+            out[gap]
+        );
+    }
+}

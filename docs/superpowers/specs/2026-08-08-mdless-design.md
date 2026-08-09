@@ -224,6 +224,29 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
    Cells therefore support emphasis, code, links, lists, and even nested tables.
 5. Draw borders with rounded box-drawing glyphs; honour GFM per-column alignment.
 6. Row height is the tallest rendered cell; shorter cells are vertically top-aligned.
+7. **Row spacing.** A table whose body rows each fit on one line is drawn dense. As soon
+   as any one body row is taller than one line at the current width, a blank row goes
+   between *every* pair of body rows in that table — multi-line rows packed edge to edge
+   read as one block of prose, because the next row begins directly under the last line
+   of the one before and nothing marks the seam. Per table, not per row, so the spacing
+   is uniform: spacing only the neighbours of a tall row would give ragged gaps that
+   track row length rather than structure. The gap carries the zebra
+   stripe through it with a half block (`▀`/`▄`) painted in the stripe colour as a
+   *foreground* on the page background: a background cannot shade half a row, and the
+   shaded half must be the one adjacent to the striped row, or the band detaches from the
+   rows it groups. A gap between two rows that are both plain stays blank — the zebra
+   alternates, so this cannot arise today, but it is what "carry the stripe through"
+   means when there is no stripe. The column separators are drawn in the gap as on any
+   other row, or every vertical rule would have a hole in it.
+   Only body rows count and only body rows are separated: the header is already fenced
+   off by its own `├───┼───┤` rule, so a wrapping header neither earns a gap nor blurs a
+   boundary, and a gap laid against that rule or against the top or bottom border would
+   be padding rather than structure. A gap is not content, so a viewport edge that cuts
+   one marks nothing — neither `›` nor a closing corner.
+   The decision is width-dependent by construction (dense at 120 columns, spaced at 60,
+   which is exactly when the rows look cramped) and is taken during layout at a known
+   width, never at parse time (§3); the render cache is keyed on width, so a resize
+   re-decides.
 
 ## 8. Syntax highlighting
 
