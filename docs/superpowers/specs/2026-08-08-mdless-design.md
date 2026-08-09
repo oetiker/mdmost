@@ -251,6 +251,20 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
   failing or being unable to tell.
 - Headings are visually distinct by level (colour, weight, prefix glyph, rules under
   H1/H2), not merely by size-that-doesn't-exist.
+- **List spacing.** A list whose items each occupy a single row is drawn dense. As soon
+  as any one item is taller than one row at the current width, a blank row is placed
+  between *every* pair of items in that list — multi-line items packed edge to edge read
+  as one grey mass, and spacing only the tall ones would give ragged gaps that track item
+  length rather than structure. This composes with CommonMark looseness by disjunction:
+  it can turn a tight list loose, never double-space a list the source already made
+  loose, and it never changes the spacing *within* an item. "Taller than one row" is
+  measured on the rendered item, so a nested list, a code block or a table counts as
+  readily as a wrapped paragraph; one consequence is that a list carrying a sublist is
+  spaced at the nesting level, at every width. Each list level decides for itself — a
+  wrapping outer item does not force its children apart. The decision is therefore
+  width-dependent (dense at 120 columns, spaced at 60, which is exactly when the items
+  look cramped) and is taken during layout at a known width, never at parse time (§3);
+  the render cache is keyed on width, so a resize re-decides.
 - Status bar: file name, position percentage with a fine-grained scrollbar, current
   heading, search state, key hint.
 - TOC pane toggled with `Tab`, docked left, showing the heading tree with the current
