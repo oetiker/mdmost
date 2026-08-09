@@ -181,10 +181,12 @@ binding costs you that binding and nothing else.
 theme        = "dark"    # name of a built-in or a [themes.*] table
 icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to detect
 line_numbers = false     # line-number gutter in fenced code blocks
-toc_open     = false     # start with the contents pane open
-toc_width    = 32        # width of the contents pane, in columns
 mouse        = false     # wheel scrolls, clicks select in the contents pane
 scroll_step  = 3         # document lines per mouse-wheel notch
+
+[toc]
+open  = false            # start with the contents pane open
+width = 32               # width of the contents pane, in columns
 
 [keys]
 "ctrl-n" = "line_down"   # bind a chord to an action

@@ -4,6 +4,9 @@ use std::path::Path;
 
 use super::*;
 
+/// The README, so its documented configuration can be checked against the parser.
+const README: &str = include_str!("../../README.md");
+
 /// A throwaway path, used only in error messages.
 fn path() -> &'static Path {
     Path::new("/tmp/mdless/config.toml")
@@ -70,14 +73,85 @@ fn malformed_toml_falls_back_to_defaults_with_a_located_error() {
 }
 
 #[test]
-fn an_unknown_key_names_itself_and_falls_back() {
+fn an_unknown_key_names_itself_and_costs_only_itself() {
+    // It used to cost the whole file: `deny_unknown_fields` failed the entire parse, so
+    // one typo silently took the reader's theme, icons and every key binding with it —
+    // while the README promised the opposite, and while an unknown *action* and an
+    // unknown *theme* both already degraded gracefully.
     let loaded = Config::parse_str("icons = true\nthemee = \"dark\"\n", path());
-    assert_eq!(loaded.config, Config::default());
     let ConfigError::Parse { key, line, .. } = &loaded.problems[0] else {
         panic!("expected a parse problem");
     };
     assert_eq!(key.as_deref(), Some("themee"));
     assert_eq!(*line, 2);
+    assert_eq!(
+        loaded.config.icons,
+        Some(true),
+        "the settings around the bad key must survive it"
+    );
+}
+
+#[test]
+fn an_unknown_key_inside_toc_costs_only_itself_too() {
+    let loaded = Config::parse_str("icons = false\n[toc]\nopen = true\nwidht = 40\n", path());
+    assert_eq!(loaded.problems.len(), 1, "{:?}", loaded.problems);
+    assert!(loaded.problems[0].to_string().contains("widht"));
+    assert!(loaded.config.toc_open, "the good [toc] key must survive");
+    assert_eq!(loaded.config.icons, Some(false));
+    assert_eq!(loaded.config.toc_width, DEFAULT_TOC_WIDTH);
+}
+
+#[test]
+fn the_configuration_example_in_the_readme_is_valid() {
+    // The README's example used `toc_open` and `toc_width`, which have never been keys —
+    // the real ones live in `[toc]`. Copying the documented starting configuration
+    // therefore produced a file that was rejected in full, so the reader got none of the
+    // settings they had just been shown and, in the TUI, never saw the warning either:
+    // it went to stderr before the alternate screen opened and the restore wiped it.
+    //
+    // Prose about configuration cannot be checked by reading it, so it is checked here.
+    let example = README
+        .split("```toml")
+        .nth(1)
+        .and_then(|rest| rest.split("```").next())
+        .expect("the README must contain a toml example");
+
+    let loaded = Config::parse_str(example, path());
+    assert!(
+        loaded.problems.is_empty(),
+        "the README's example configuration does not load cleanly: {:?}",
+        loaded.problems
+    );
+
+    // And it must be the settings it claims to be, not merely parseable.
+    assert_eq!(loaded.config.theme, "dark");
+    assert_eq!(loaded.config.icons, Some(true));
+    assert!(!loaded.config.toc_open);
+    assert_eq!(loaded.config.toc_width, 32);
+    assert_eq!(loaded.config.scroll_step, 3);
+
+    // The example also defines a theme; it must really resolve, since a `[themes.*]`
+    // table that silently does nothing would be the same class of lie.
+    assert!(
+        loaded.config.resolve_theme("midnight").is_ok(),
+        "the example's [themes.midnight] must resolve"
+    );
+}
+
+#[test]
+fn several_unknown_keys_are_all_reported() {
+    let loaded = Config::parse_str("nope = 1\ntheme = \"light\"\nalso_nope = 2\n", path());
+    assert_eq!(loaded.problems.len(), 2, "{:?}", loaded.problems);
+    assert_eq!(loaded.config.theme, "light");
+}
+
+#[test]
+fn a_known_key_with_the_wrong_type_is_still_fatal() {
+    // Distinct from an unknown key: the reader meant *this* setting and got it wrong, so
+    // there is no value to carry on with and guessing one would be worse than saying so.
+    let loaded = Config::parse_str("scroll_step = \"fast\"\n", path());
+    assert_eq!(loaded.config, Config::default());
+    assert_eq!(loaded.problems.len(), 1);
 }
 
 #[test]
