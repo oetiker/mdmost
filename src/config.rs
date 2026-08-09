@@ -17,6 +17,7 @@
 //! ```
 
 mod keys;
+mod write;
 
 #[cfg(test)]
 mod tests;
@@ -36,6 +37,22 @@ pub const DEFAULT_TOC_WIDTH: u16 = 30;
 
 /// The narrowest and widest the table-of-contents pane may be configured.
 const TOC_WIDTH_RANGE: std::ops::RangeInclusive<u16> = 12..=80;
+
+/// The default cap on the width of the document body, in columns.
+///
+/// A hundred columns is the top of the band typography calls readable (a measure of
+/// roughly 45–90 characters), chosen there rather than lower on purpose: at 100 the
+/// cap changes nothing at all for anyone whose terminal is 102 columns or narrower —
+/// which is 80- and 100-column terminals, the overwhelming majority — and only takes
+/// effect on the wide terminals whose full-width prose is the complaint it answers.
+pub const DEFAULT_BODY_WIDTH: u16 = 100;
+
+/// The narrowest and widest the body may be capped at.
+///
+/// Below twenty columns there is no prose left to read, and above a thousand the cap
+/// is not capping anything. `0` is not in the range because it is the spelling of
+/// "no cap at all", handled before the range is consulted.
+pub const BODY_WIDTH_RANGE: std::ops::RangeInclusive<u16> = 20..=1000;
 
 /// The effective configuration.
 #[derive(Debug, Clone, PartialEq)]
@@ -68,6 +85,16 @@ pub struct Config {
     pub mouse: bool,
     /// How many document lines one mouse-wheel notch scrolls.
     pub scroll_step: u16,
+    /// The widest the document body is laid out, however wide the terminal is.
+    ///
+    /// `None` means no cap: the body uses the whole terminal, as it always did.
+    /// Otherwise prose is laid out at this many columns and centred, while blocks that
+    /// cannot be reflowed take the full width — see [`crate::tui::wide`], which owns
+    /// the rule and is the only place it is applied.
+    ///
+    /// Not to be confused with `--width`, which changes the width the document is
+    /// rendered at altogether. This is a cap on the body within that width.
+    pub body_width: Option<u16>,
     /// The key table.
     pub keys: KeyBindings,
     /// Themes defined in the configuration file, by name.
@@ -84,6 +111,7 @@ impl Default for Config {
             toc_width: DEFAULT_TOC_WIDTH,
             mouse: false,
             scroll_step: 3,
+            body_width: Some(DEFAULT_BODY_WIDTH),
             keys: KeyBindings::defaults(),
             themes: BTreeMap::new(),
         }
@@ -252,6 +280,7 @@ struct RawConfig {
     line_numbers: Option<bool>,
     mouse: Option<bool>,
     scroll_step: Option<u16>,
+    body_width: Option<u16>,
     #[serde(default)]
     toc: RawToc,
     #[serde(default)]
@@ -316,6 +345,26 @@ impl RawConfig {
                 problems.push(problem(text, path, "scroll_step", "must be at least 1"));
             } else {
                 config.scroll_step = step;
+            }
+        }
+        if let Some(cap) = self.body_width {
+            // Zero is the spelling of "no cap", so that turning the cap off in a file
+            // is a value like any other rather than a key you have to know to delete.
+            if cap == 0 {
+                config.body_width = None;
+            } else if BODY_WIDTH_RANGE.contains(&cap) {
+                config.body_width = Some(cap);
+            } else {
+                problems.push(problem(
+                    text,
+                    path,
+                    "body_width",
+                    &format!(
+                        "body width must be 0 (no cap) or between {} and {}",
+                        BODY_WIDTH_RANGE.start(),
+                        BODY_WIDTH_RANGE.end()
+                    ),
+                ));
             }
         }
         if let Some(open) = self.toc.open {
@@ -488,6 +537,7 @@ const KNOWN_KEYS: &[&str] = &[
     "line_numbers",
     "mouse",
     "scroll_step",
+    "body_width",
     "toc",
     "keys",
     "themes",

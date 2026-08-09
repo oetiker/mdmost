@@ -64,7 +64,13 @@ const MAX_BLOCK_WIDTH: u16 = 2048;
 /// The returned canvas is at least `width` columns wide and may be wider; the surplus
 /// is what the horizontal scroll keys reach, as far as it is drawn in — see
 /// [`scroll_reach`], which measures that and is what moves each row.
-pub fn render_scrollable(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
+pub fn render_scrollable(
+    doc: &Doc,
+    width: u16,
+    body_width: Option<u16>,
+    theme: &Theme,
+    options: &RenderOptions,
+) -> Canvas {
     let clipped = ClipTest::new(theme);
     let blocks = &doc.root().children;
     // The top level of a document is a sequence of blocks. Should a parser change ever
@@ -81,10 +87,11 @@ pub fn render_scrollable(doc: &Doc, width: u16, theme: &Theme, options: &RenderO
     // that job too, and for a long time we did not: every line in the pager sat welded
     // to the scrollbar while the piped renderer was correctly inset.
     let margin = margins(width);
-    let body_width = width - 2 * margin;
-    let mut out = Canvas::empty(body_width);
+    let full = width - 2 * margin;
+    let measure = Measure::new(full, body_width);
+    let mut out = Canvas::empty(full);
     for node in blocks {
-        let part = render_widened(node, body_width, theme, options, &clipped);
+        let part = render_placed(node, measure, theme, options, &clipped, fill);
         if part.is_empty() {
             continue;
         }
@@ -95,13 +102,148 @@ pub fn render_scrollable(doc: &Doc, width: u16, theme: &Theme, options: &RenderO
     }
     // `append` widens `out` to the widest part, but a document of nothing but empty
     // blocks never appends at all.
-    out.resize_width(out.width().max(body_width), fill);
+    out.resize_width(out.width().max(full), fill);
     // A widened block keeps its surplus past the right margin; that surplus is what the
     // horizontal scroll reaches, and a gutter drawn at its far edge would be off-screen
     // anyway.
     let mut out = out.indent(margin, margin, fill);
     out.resize_width(out.width().max(width), fill);
     out
+}
+
+/// The two widths a block may be laid out at, and where a capped block is placed.
+///
+/// Prose past roughly a hundred columns is hard to read: the eye loses the start of the
+/// next line on the way back from the end of this one. So the body has a configurable
+/// cap ([`crate::config::Config::body_width`]) and, on a terminal wider than the cap,
+/// the prose is centred within the body rather than run edge to edge.
+///
+/// # Which blocks are exempt, and why
+///
+/// The cap is about *reflowable* content. Content that cannot be reflowed is not made
+/// more readable by being given less room — it is made narrower and then cut. So:
+///
+/// * **Tables and Mermaid diagrams are exempt outright**: they are laid out at the full
+///   body width, whatever the cap says. Both renderers stop at their natural width —
+///   `render::table::distribute` returns the natural widths when they fit rather than
+///   padding the columns out, and `render::diagram` answers with the *narrowest* width
+///   that draws — so "the full width" costs nothing when they do not need it, and a
+///   table squeezed into a cap would wrap every cell instead.
+/// * **Everything else is laid out at the cap and escalates to the full body width the
+///   moment the cap would clip it.** That is what a fenced code block gets: its frame
+///   fills whatever budget it is handed, so exempting it outright would blow every
+///   three-line snippet out to the terminal edge while the prose beside it stayed at
+///   the measure. A code block is only *mangled* when a line is cut, and being cut is
+///   exactly the escalation trigger. The same rule covers a wide table or fence nested
+///   inside a block quote or a list item: the quote is prose and is capped, but the
+///   wide thing inside it still reaches the full width.
+/// * Image and HTML placeholders are prose furniture and are capped with the prose.
+///   (HTML is not rendered at all — design spec §2.)
+///
+/// Past the full body width nothing changes: the block is widened and reached with the
+/// horizontal scroll keys exactly as it was before the cap existed.
+///
+/// # Placement
+///
+/// Everything shares one centre line. A block laid out at the cap takes the cap's own
+/// indent whatever it happens to draw — centring a two-word paragraph or a short heading
+/// on *itself* would set the document ragged — and a block that took the full width is
+/// centred on what it actually drew. The two are the same arithmetic and agree exactly
+/// at an extent of one cap, so a table slightly wider than the measure sits slightly
+/// wider than the prose rather than jumping to the left margin. A block that fills the
+/// body, or overflows it, is left where it is, at the margin.
+///
+/// This is also what keeps [`scroll_reach`] and [`pinned_prefix`] seeing what they
+/// expect: rows that fit stay well inside the render width and get an offset of zero,
+/// and the pinned prefix is measured from the row as drawn, indent included.
+#[derive(Debug, Clone, Copy)]
+struct Measure {
+    /// The whole body between the margins.
+    full: u16,
+    /// The width prose is laid out at; equal to `full` when there is no cap.
+    prose: u16,
+}
+
+impl Measure {
+    /// The measure for a body of `full` columns under `cap`.
+    fn new(full: u16, cap: Option<u16>) -> Self {
+        Self {
+            full,
+            prose: cap.map_or(full, |cap| cap.min(full)).max(1),
+        }
+    }
+
+    /// Whether the cap is doing anything at this width.
+    const fn is_capped(&self) -> bool {
+        self.prose < self.full
+    }
+}
+
+/// Whether a block is laid out at the full body width however narrow the cap is.
+///
+/// See [`Measure`] for the reasoning. The test is the *top-level* block's own kind: a
+/// table nested in a quote is not exempt, it escalates instead.
+fn is_exempt(node: &Node) -> bool {
+    match &node.kind {
+        NodeKind::Table(_) => true,
+        NodeKind::CodeBlock { language, .. } => {
+            crate::render::code::is_mermaid(language.as_deref())
+        }
+        _ => false,
+    }
+}
+
+/// Renders one block at the width its kind earns, and places it in the body.
+fn render_placed(
+    node: &Node,
+    measure: Measure,
+    theme: &Theme,
+    options: &RenderOptions,
+    clip: &ClipTest,
+    fill: crate::theme::Style,
+) -> Canvas {
+    if !measure.is_capped() {
+        return render_widened(node, measure.full, theme, options, clip);
+    }
+    let exempt = is_exempt(node);
+    let mut canvas = if exempt {
+        render_widened(node, measure.full, theme, options, clip)
+    } else {
+        let capped = render_block(node, measure.prose, theme, options);
+        if clip.is_clipped(&capped) {
+            // The cap would cut this block short, so it takes the whole body — and
+            // beyond it, if the whole body is not enough either.
+            render_widened(node, measure.full, theme, options, clip)
+        } else {
+            capped
+        }
+    };
+    let extent = canvas
+        .rows()
+        .iter()
+        .map(|row| row_extent(row))
+        .max()
+        .unwrap_or(0);
+    // A block laid out at the cap keeps the cap's own indent, whatever it happens to
+    // draw: centring a short heading or a two-word paragraph on itself would set the
+    // document ragged. A block that took the full width is centred on what it actually
+    // drew instead, which is the same arithmetic — at an extent of exactly the cap the
+    // two agree — and which keeps a table that is wider than the measure but narrower
+    // than the terminal on the same centre line as the prose above it.
+    let occupied = if extent > measure.prose {
+        extent
+    } else {
+        measure.prose
+    };
+    if occupied >= measure.full {
+        return canvas;
+    }
+    // Cropping before the indent keeps the block from carrying the columns of padding
+    // it was laid out with past the right margin, which would put every row's extent
+    // past the render width and hand the whole document to `scroll_reach` as one
+    // over-wide run.
+    canvas.truncate_width(occupied, fill);
+    canvas.indent((measure.full - occupied) / 2, 0, fill)
 }
 
 /// How much wider than the viewport a diagram must want before it is granted the width.

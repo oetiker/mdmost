@@ -112,6 +112,12 @@ pub struct AppOptions {
     pub theme: String,
     /// Whether the table-of-contents pane starts open.
     pub toc_open: bool,
+    /// The configuration file the settings are saved to, when the reader asks.
+    ///
+    /// `--config PATH` when one was named, otherwise the platform's default location,
+    /// which is created on demand. `None` only on a platform with no home directory to
+    /// speak of, where saving reports that instead of guessing at a path.
+    pub config_path: Option<std::path::PathBuf>,
     /// A forced render width (`--width`), independent of the terminal size.
     ///
     /// It sets the width blocks are *laid out* at; a block that still does not fit is
@@ -489,11 +495,22 @@ impl App {
     fn ensure_rendered(&mut self) {
         let width = self.content_width();
         let options = self.render_options();
-        let stale = self
-            .cache
-            .refresh(self.doc.version(), width, &self.theme, options, || {
-                super::wide::render_scrollable(&self.doc, width, &self.theme, &options)
-            });
+        let stale = self.cache.refresh(
+            self.doc.version(),
+            width,
+            self.config.body_width,
+            &self.theme,
+            options,
+            || {
+                super::wide::render_scrollable(
+                    &self.doc,
+                    width,
+                    self.config.body_width,
+                    &self.theme,
+                    &options,
+                )
+            },
+        );
         if stale {
             self.toc.attach_anchors(self.cache.canvas().anchors());
             self.search
@@ -682,6 +699,7 @@ impl App {
             Action::ToggleToc => self.toggle_toc(),
             Action::CycleTheme => self.cycle_theme(),
             Action::ToggleLineNumbers => self.toggle_line_numbers(),
+            Action::SaveConfig => self.save_config(),
             Action::ReportPosition => self.report_position(),
             // Design spec §9: `/` inside the table of contents filters it fuzzily
             // rather than searching the document.
@@ -885,6 +903,27 @@ impl App {
             },
             false,
         );
+    }
+
+    /// Writes the settings the reader can change back to the configuration file.
+    ///
+    /// The theme and the state of the contents pane are taken from the live pager
+    /// rather than from `self.config`, which still holds the values it started with;
+    /// everything else is settled in `self.config` as it is changed. The outcome —
+    /// including the path — always reaches the status bar, because a save that says
+    /// nothing is indistinguishable from a save that did nothing.
+    fn save_config(&mut self) {
+        let Some(path) = self.options.config_path.clone() else {
+            self.notify("no configuration directory to save to", true);
+            return;
+        };
+        let mut settings = self.config.clone();
+        settings.theme = self.theme.name.clone();
+        settings.toc_open = self.toc_open;
+        match settings.save_to(&path) {
+            Ok(()) => self.notify(format!("settings saved to {}", path.display()), false),
+            Err(error) => self.notify(error.to_string(), true),
+        }
     }
 
     /// Moves the selection inside the table-of-contents pane.

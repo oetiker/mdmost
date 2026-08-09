@@ -34,7 +34,13 @@ fn document(source: &str) -> Doc {
 
 /// The document rendered the way the pager renders it.
 fn paged(source: &str, width: u16) -> Canvas {
-    render_scrollable(&document(source), width, &Theme::default_dark(), &PLAIN)
+    render_scrollable(
+        &document(source),
+        width,
+        None,
+        &Theme::default_dark(),
+        &PLAIN,
+    )
 }
 
 #[test]

@@ -106,6 +106,70 @@ fenced code blocks, outside the horizontally scrollable region. Options are thre
 through every recursive render call, table cells included, and form part of the render
 cache key alongside document version, width and theme.
 
+### 3.2 The body width cap
+
+**Added 2026-08-09 at the owner's request:** *"max body width should be configurable
+independent of terminal width. Indenting left and right if the terminal is wider, with
+special dispensation for tables and (pre)formatted content which would get full terminal
+width."*
+
+Prose past roughly a hundred columns is hard to read — the eye loses the start of the
+next line on its way back from the end of this one — so the body has a cap, `body_width`
+in the configuration file and `--body-width` on the command line, defaulting to **100
+columns**. A hundred rather than eighty: the cost of a default is what it changes for
+people who did not ask for it, and at 100 the cap does nothing whatsoever on a terminal
+of 102 columns or fewer, which is the 80- and 100-column terminals almost everyone
+reads in. It only bites on the wide terminals whose full-width prose is the complaint.
+`0` (or `--no-body-width`) switches it off.
+
+`--width` is a *different* setting and the two must not be confused: `--width` changes
+the width the whole document is rendered at, tables and code included, and its surplus is
+reached by scrolling. `--body-width` caps only the prose *within* whatever that width is.
+
+**Where it lives.** The rule is applied in `tui::wide::render_scrollable` and nowhere
+else, because that is the only renderer that assembles the document block by block and so
+the only one that can give one block a different width than its neighbour. It is
+therefore a property of the pager, not of `render_document`: `--render-once` produces a
+full-width dump, on the grounds that its width was already chosen explicitly by the
+caller (a `--width`, a terminal, or the 80-column fallback) and that its output is data
+for a pipe or a snapshot rather than something anybody reads at 200 columns. It is
+deliberately *not* a field of `RenderOptions`, which would put a setting `render_document`
+ignores into the type every renderer is handed.
+
+**Which blocks are exempt.** The dispensation is for content that cannot be reflowed;
+content that cannot be reflowed is not made readable by being given less room, only
+narrower and then cut.
+
+| Block | Laid out at | Why |
+|---|---|---|
+| Table | the full body width, always | Squeezing a table wraps every cell. It costs nothing to exempt it: `distribute` returns the natural widths when they fit rather than padding columns out to the budget. |
+| Mermaid fence | the full body width, always | A diagram is a figure, not prose, and `render::diagram` already answers with the *narrowest* width that draws, so it takes only what it needs. |
+| Fenced/indented code | the cap, escalating to the full body width the moment a line would be cut | Its frame fills whatever budget it is given, so an outright exemption would blow every three-line snippet out to the terminal edge. Code is only *mangled* when it is cut, and being cut is exactly the escalation trigger. |
+| Block quote, list, paragraph, heading, image placeholder | the cap, with the same escalation | Prose. A wide table or fence *nested* inside one still reaches the full width through the escalation, so nothing nested becomes less reachable than it was. |
+
+HTML is not rendered at all (§2), so it has no width to speak of.
+
+**Placement.** "Indenting left and right" is read as centring, and everything shares one
+centre line. A block laid out at the cap takes the cap's own indent whatever it happens
+to draw — centring a two-word paragraph or a short heading on *itself* would set the
+document ragged — and a block that took the full width is centred on what it actually
+drew. The two are the same arithmetic and agree exactly at an extent of one cap, so a
+table slightly wider than the measure sits slightly wider than the prose rather than
+jumping to the left margin. A block that fills the body, or overflows it, stays at the
+margin. Left-aligning the exempt blocks at the margin instead was built first and looked
+at in tmux at 200 columns: a 125-column table pinned to the left rail under centred prose
+reads as a layout mistake, and the common centre line reads as a decision.
+
+**Interaction with horizontal scrolling.** Nothing past the full body width changes: a
+block that still does not fit is widened and reached with `←`/`→` exactly as before.
+`scroll_reach` and `pinned_prefix` both measure the canvas *as drawn*, so a centred block
+simply has a larger left extent; capped rows stay well inside the render width and
+therefore keep an offset of zero, which is what stops one wide table dragging the prose
+sideways. One thing this depends on: a block placed with the prose is **cropped to the
+cap before it is indented**, because a canvas padded out to the full width and then
+indented would push every row's extent past the render width and hand the whole document
+to `scroll_reach` as a single over-wide run.
+
 ## 4. The `Canvas` contract
 
 `Canvas` is the single currency between renderers and the viewport.
@@ -288,6 +352,7 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
 | `%` | jump to a percentage of the document |
 | `=` `Ctrl-G` | report where you are |
 | `-` | toggle code line numbers |
+| `S` | save the current settings to the configuration file (§12.1) |
 | `Ctrl-R` | switch literal / regex search |
 | `Ctrl-D` `Ctrl-U` `Ctrl-F` `Ctrl-B` | movement variants of `d` `u` `Space` `b` |
 | `h` `F1` | help overlay |
@@ -316,6 +381,9 @@ mdless [FILE]              # file, or stdin when FILE is absent or "-"
   --render-once            # render one frame to stdout and exit (no TTY needed)
   --width N                # force render width in BOTH modes; in the TUI the surplus
                            # is reachable by horizontal scrolling
+  --body-width N           # cap the prose body at N columns and centre it (§3.2);
+                           # 0 means no cap. Distinct from --width, and TUI-only
+  --no-body-width          # the same as --body-width 0
   --theme NAME
   --icons / --no-icons     # Nerd Font glyphs on or off; detected when unset, per §2.1
   --mouse / --no-mouse     # mouse capture; off leaves native drag-select working
@@ -341,6 +409,44 @@ mdless [FILE]              # file, or stdin when FILE is absent or "-"
   terminal is treated as a release blocker.
 - Config errors report file, line, and the offending key, then fall back to defaults
   rather than refusing to start.
+
+### 12.1 Saving settings
+
+**Added 2026-08-09 at the owner's request:** *"settings should be storeable in a config
+file on request so that the next session comes up with the settings."*
+
+`S` (action `save_config`) writes the settings the reader can change — theme, icons when
+they were stated rather than detected, line numbers, mouse, scroll step, body width, and
+the contents pane's state and width — back to the configuration file: `--config PATH`
+when one was named, otherwise `Config::default_path()`, created along with its
+directories. The key table and `[themes.*]` are never written; nothing in the pager
+changes them. The outcome always reaches the status bar, naming the file.
+
+It is a binding rather than a CLI flag because the settings worth saving are the ones
+that were changed at run time, and because a binding is picked up by the help overlay and
+the README key map automatically (§10). Being data-driven, it is rebindable like any
+other.
+
+**Not autosave, and not destructive.** The pager cannot ask "overwrite?" — there is no
+such level of interaction — so the protection has to be structural rather than a prompt:
+
+1. The file is **edited, not regenerated**. Lines the writer has no opinion about are
+   copied through byte for byte, trailing comments on the lines it does have an opinion
+   about included; a setting with no line yet is inserted after its section's last real
+   content, so a comment block introducing the *next* section keeps introducing it.
+   Comments, ordering, `[keys]`, `[themes.*]` and keys from a newer version — which the
+   loader keeps with a warning rather than discarding the file — all survive.
+2. The writer **checks its own work before touching the disk**: it parses the text it is
+   about to write with the ordinary loader and compares it, setting by setting, with what
+   it meant to save. A mismatch means the edit would have changed the file's meaning, and
+   the answer is to write nothing and say so (`ConfigError::RoundTrip`). This has already
+   earned its keep: it refuses a save whose in-memory settings did not come from the file
+   on disk, which would otherwise have silently dropped the reader's key bindings.
+3. The previous file is kept as `config.toml.bak` and the new one arrives by **rename**,
+   so an interrupted save cannot leave half a configuration behind.
+
+`tests/config_save.rs` asserts the round trip from the outside as well: write, re-read,
+compare.
 
 ## 13. Testing
 

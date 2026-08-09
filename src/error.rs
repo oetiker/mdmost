@@ -59,6 +59,30 @@ pub enum ConfigError {
         source: std::io::Error,
     },
 
+    /// The configuration file could not be written.
+    #[error("cannot write config {path}: {source}")]
+    Write {
+        /// The configuration file path.
+        path: PathBuf,
+        /// The underlying I/O failure.
+        source: std::io::Error,
+    },
+
+    /// The configuration this version would have written does not read back the same.
+    ///
+    /// The writer edits the file the reader wrote, and it checks its own work before
+    /// touching the disk: it parses the text it is about to write and compares the
+    /// settings that come back with the ones it meant to save. A mismatch means the
+    /// edit would have changed the file's meaning in some way nobody predicted, and
+    /// the only safe answer is to leave the reader's file alone and say so.
+    #[error("refusing to write {path}: `{key}` would not read back the same")]
+    RoundTrip {
+        /// The configuration file path, left untouched.
+        path: PathBuf,
+        /// The setting that did not survive the round trip.
+        key: String,
+    },
+
     /// The configuration file could not be parsed.
     #[error("{path}:{line}: invalid config{}: {message}", .key.as_ref().map(|k| format!(" key `{k}`")).unwrap_or_default())]
     Parse {
