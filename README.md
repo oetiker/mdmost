@@ -277,7 +277,7 @@ title_banner = true      # set a document's lone `#` heading as a FIGlet banner
 section_numbers = true   # number headings when a document nests three levels or more
 mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies source
 scroll_step  = 3         # document lines per mouse-wheel notch
-body_width   = 100       # widest the prose body is laid out; 0 for no cap
+body_width   = 72        # widest the prose body is laid out; 0 for no cap
 
 [toc]
 open  = false            # start with the contents pane open
@@ -301,11 +301,12 @@ leans. `t` cycles through the built-ins and anything you have defined.
 
 ## Line length
 
-Prose is capped at 100 columns by default and centred when the terminal is wider,
+Prose is capped at 72 columns by default and centred when the terminal is wider,
 because a line that runs the full width of a wide terminal is hard to come back from —
 the eye loses the start of the next one. Set `body_width` (or `--body-width`) to taste,
-or `0` / `--no-body-width` to switch the cap off. On a terminal of 102 columns or fewer
-the default cap does nothing at all.
+or `0` / `--no-body-width` to switch the cap off. Seventy-two is inside the readable
+band rather than at the top of it, so the cap bites on an 80-column terminal too — but
+only on prose.
 
 The cap is about text that can be reflowed, so it does not apply to everything:
 

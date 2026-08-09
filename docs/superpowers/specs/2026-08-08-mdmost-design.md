@@ -185,11 +185,11 @@ width."*
 
 Prose past roughly a hundred columns is hard to read — the eye loses the start of the
 next line on its way back from the end of this one — so the body has a cap, `body_width`
-in the configuration file and `--body-width` on the command line, defaulting to **100
-columns**. A hundred rather than eighty: the cost of a default is what it changes for
-people who did not ask for it, and at 100 the cap does nothing whatsoever on a terminal
-of 102 columns or fewer, which is the 80- and 100-column terminals almost everyone
-reads in. It only bites on the wide terminals whose full-width prose is the complaint.
+in the configuration file and `--body-width` on the command line, defaulting to **72
+columns**. Seventy-two sits inside the readable band rather than at the top of it, so
+unlike a cap of 100 it also shortens the measure on an 80-column terminal. The cap
+applies to prose alone: tables, Mermaid diagrams and long code lines are exempt (see
+below), so what it changes is the thing it is aimed at.
 `0` (or `--no-body-width`) switches it off.
 
 `--width` is a *different* setting and the two must not be confused: `--width` changes

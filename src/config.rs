@@ -40,12 +40,13 @@ const TOC_WIDTH_RANGE: std::ops::RangeInclusive<u16> = 12..=80;
 
 /// The default cap on the width of the document body, in columns.
 ///
-/// A hundred columns is the top of the band typography calls readable (a measure of
-/// roughly 45–90 characters), chosen there rather than lower on purpose: at 100 the
-/// cap changes nothing at all for anyone whose terminal is 102 columns or narrower —
-/// which is 80- and 100-column terminals, the overwhelming majority — and only takes
-/// effect on the wide terminals whose full-width prose is the complaint it answers.
-pub const DEFAULT_BODY_WIDTH: u16 = 100;
+/// Seventy-two columns sits inside the band typography calls readable — a measure of
+/// roughly 45–90 characters — rather than at the top of it. The eye finds the start of
+/// the next line by how far it has to travel back, and on a wide terminal that journey
+/// is the whole complaint. This caps prose on an 80-column terminal too, not only on
+/// the wide ones; tables, diagrams and long code lines are exempt from the cap and are
+/// unaffected.
+pub const DEFAULT_BODY_WIDTH: u16 = 72;
 
 /// The narrowest and widest the body may be capped at.
 ///
