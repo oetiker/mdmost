@@ -141,7 +141,10 @@ fn negotiate(chart: &PieChart, width: u16, values: &[String]) -> Result<Columns,
             }
         }
     }
-    Err(MermaidError::TooNarrow { width })
+    Err(MermaidError::TooNarrow {
+        width,
+        needed: None,
+    })
 }
 
 /// Draws the slice rows, the summary rule and the total row.

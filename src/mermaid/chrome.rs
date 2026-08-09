@@ -37,7 +37,10 @@ pub fn compose(
     theme: &Theme,
 ) -> Result<Canvas, MermaidError> {
     if body.width() > width {
-        return Err(MermaidError::TooNarrow { width });
+        return Err(MermaidError::TooNarrow {
+            width,
+            needed: Some(body.width()),
+        });
     }
     let base = theme.base();
     let mut out = Canvas::empty(width);

@@ -136,7 +136,10 @@ fn negotiate(chart: &GanttChart, width: u16) -> Result<Columns, MermaidError> {
             return Ok(Columns { gutter, plot });
         }
     }
-    Err(MermaidError::TooNarrow { width })
+    Err(MermaidError::TooNarrow {
+        width,
+        needed: u16::try_from(MIN_GUTTER + 1 + MIN_PLOT).ok(),
+    })
 }
 
 /// Draws the axis, the section headings and the task bars.

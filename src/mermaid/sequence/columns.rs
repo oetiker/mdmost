@@ -140,13 +140,19 @@ impl Columns {
 ///
 /// Returns [`MermaidError::TooNarrow`] when even the tightest profile overflows.
 pub(super) fn solve(diagram: &SequenceDiagram, budget: u16) -> Result<Columns, MermaidError> {
+    let mut narrowest = None;
     for profile in PROFILES {
         let columns = attempt(diagram, profile);
         if columns.width <= usize::from(budget) {
             return Ok(columns);
         }
+        let width = u16::try_from(columns.width).unwrap_or(u16::MAX);
+        narrowest = Some(narrowest.map_or(width, |at: u16| at.min(width)));
     }
-    Err(MermaidError::TooNarrow { width: budget })
+    Err(MermaidError::TooNarrow {
+        width: budget,
+        needed: narrowest,
+    })
 }
 
 /// Builds a layout under one profile, without checking it against the budget.

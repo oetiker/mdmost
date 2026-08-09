@@ -141,10 +141,15 @@ fn an_impossible_width_is_reported_rather_than_overflowing() {
     let theme = Theme::default_dark();
     let spec = spec(Direction::TopToBottom, 8, &[]);
     let error = draw(&spec, &art, 6, &theme).expect_err("cannot fit eight boxes in six columns");
-    assert!(matches!(
-        error,
-        crate::error::MermaidError::TooNarrow { width: 6 }
-    ));
+    let crate::error::MermaidError::TooNarrow { width: 6, needed } = error else {
+        panic!("expected TooNarrow at the given width, got {error:?}");
+    };
+    // The floor the reader is told to widen to must be wider than what they have, or it
+    // is not advice — and it must be a width the engine actually drew at.
+    assert!(
+        needed.is_some_and(|needed| needed > 6),
+        "a reported floor names a width worth widening to, got {needed:?}"
+    );
 }
 
 #[test]

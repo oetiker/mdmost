@@ -96,6 +96,7 @@ pub fn draw(
     theme: &Theme,
 ) -> Result<Canvas, MermaidError> {
     validate(spec)?;
+    let mut narrowest = None;
     for &(gap, share) in LADDER {
         let budget = (width / share).max(6);
         let ctx = Ctx {
@@ -109,8 +110,13 @@ pub fn draw(
         if drawn.canvas.width() <= width {
             return Ok(centred(drawn.canvas, width, theme));
         }
+        narrowest =
+            Some(narrowest.map_or(drawn.canvas.width(), |at: u16| at.min(drawn.canvas.width())));
     }
-    Err(MermaidError::TooNarrow { width })
+    Err(MermaidError::TooNarrow {
+        width,
+        needed: narrowest,
+    })
 }
 
 /// Rejects a specification the engine cannot draw.

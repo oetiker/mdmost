@@ -140,6 +140,15 @@ pub enum MermaidError {
     TooNarrow {
         /// The width budget the diagram was given.
         width: u16,
+        /// The narrowest drawing the renderer managed, when it knows one.
+        ///
+        /// A **lower bound**, never a promise: it is the smallest canvas any
+        /// degradation step produced at `width`, and every step draws at least as wide
+        /// when given more room, so no width below this can ever fit. Telling the
+        /// reader "at least N" turns widening the terminal from a guessing game into
+        /// one move. Renderers that cannot name such a bound leave it `None` rather
+        /// than invent one.
+        needed: Option<u16>,
     },
 }
 

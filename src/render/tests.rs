@@ -1200,6 +1200,39 @@ fn the_advertised_families_are_the_ones_that_actually_parse() {
 }
 
 #[test]
+fn a_too_narrow_caption_names_a_width_worth_widening_to() {
+    // The old wording restated the width the reader already had, so it was a tautology
+    // and widening the terminal was a guessing game. The number must be a width they do
+    // not have, and widening to it must actually work — a floor that lies is worse than
+    // no floor, because it is acted on.
+    let markdown = "```mermaid\nflowchart LR\n  A[Start here] --> B{Is the label long?}\n  B --> C[Report the outcome]\n  C --> D[Finish up here]\n```\n";
+    let width = 30;
+    let out = lines(markdown, width);
+    let last = out.last().cloned().unwrap_or_default();
+    let needed: u16 = last
+        .split_whitespace()
+        .skip_while(|word| *word != "least")
+        .nth(1)
+        .and_then(|word| word.parse().ok())
+        .unwrap_or_else(|| panic!("caption names a floor: {last:?}"));
+    assert!(
+        needed > width - 2,
+        "the floor is a width we do not have: {last:?}"
+    );
+    // The block spends two columns on its frame, so the reader widens the pane to
+    // `needed + 2`. Every width from there up must draw, or the advice sends them to a
+    // place that fails.
+    for pane in needed + 2..needed + 8 {
+        let out = lines(markdown, pane);
+        let last = out.last().cloned().unwrap_or_default();
+        assert!(
+            !last.contains("needs at least"),
+            "widening to {pane} was supposed to be enough: {last:?}"
+        );
+    }
+}
+
+#[test]
 fn a_caption_never_reports_line_zero() {
     // Lines are 1-based to a reader; "line 0" sends them hunting somewhere that cannot
     // exist. An internal error with no line simply omits the location.

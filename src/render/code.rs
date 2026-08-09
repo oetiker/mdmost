@@ -247,7 +247,17 @@ fn caption(error: &MermaidError) -> String {
         MermaidError::UnsupportedFamily(_) => {
             format!("not a diagram type — mdless draws {}", FAMILIES.join(", "))
         }
-        MermaidError::TooNarrow { width } => {
+        // The old wording — "needs more than {width}" — restated the width the reader
+        // already had, so widening the terminal was a guessing game with no way to know
+        // when to stop. Name the target instead, and say "at least", because the
+        // renderer's figure is a floor rather than a promise.
+        MermaidError::TooNarrow {
+            width,
+            needed: Some(needed),
+        } if *needed > *width => {
+            format!("needs at least {needed} columns to draw — this block has {width}")
+        }
+        MermaidError::TooNarrow { width, .. } => {
             format!("needs more than {width} columns to draw")
         }
         // Our bug, not the author's. Naming it as ours is the whole point of the
