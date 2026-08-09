@@ -251,18 +251,27 @@ mod tests {
         );
 
         // Both glyph tables must be represented, or half the program could be drawing
-        // tofu with detection none the wiser. The status bar's file marker lives in the
-        // Material range that only Nerd Fonts v3 carries, and the renderer's unticked
-        // task box in the classic Font Awesome block. (The renderer's heading markers
-        // used to stand for the second half; they were removed on 2026-08-09, and the
-        // bullets that might have replaced them are plain Unicode in both sets now.)
+        // tofu with detection none the wiser: the status bar's file marker stands for
+        // the chrome, and the renderer's unticked task box for the document. (The
+        // renderer's heading markers used to stand for the second half; they were
+        // removed on 2026-08-09, and the bullets that might have replaced them are
+        // plain Unicode in both sets now.) Both now live in the Material range that
+        // only Nerd Fonts v3 carries — the task boxes moved there on 2026-08-09 to be
+        // a matched pair — so a v2 patch fails detection and gets plain Unicode,
+        // which is the safe direction of the rule.
         assert!(
             points.contains(&0xf0219),
             "the chrome's glyphs are not probed"
         );
         assert!(
-            points.contains(&0xf096),
+            points.contains(&0xf0131),
             "the renderer's glyphs are not probed"
+        );
+        // The code-fence icons are still classic Font Awesome, so the probe does
+        // continue to span both blocks.
+        assert!(
+            points.iter().any(|point| (0xe000..=0xf8ff).contains(point)),
+            "the basic-plane block is not probed"
         );
 
         // Everything probed must really need a patched font: probing an ordinary

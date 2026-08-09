@@ -9,6 +9,7 @@ use crate::canvas::Canvas;
 use crate::doc::Doc;
 use crate::text::display_width;
 use crate::theme::{Attributes, Theme};
+use crate::tui::icons::is_private_use;
 
 /// Options the readable assertions below are written against.
 ///
@@ -324,7 +325,7 @@ fn the_title_banner_can_be_switched_off() {
 fn nested_lists_indent_and_change_their_bullet() {
     assert_eq!(
         lines("- one\n  - two\n    - three\n", 30),
-        ["· one", "  – two", "    ▪ three"]
+        ["● one", "  – two", "    ▪ three"]
     );
 }
 
@@ -341,7 +342,7 @@ fn ordered_lists_respect_the_start_ordinal_and_align_the_numbers() {
 fn list_item_content_wraps_under_a_hanging_indent() {
     assert_eq!(
         lines("- alpha beta gamma delta\n", 12),
-        ["· alpha beta", "  gamma", "  delta"]
+        ["● alpha beta", "  gamma", "  delta"]
     );
 }
 
@@ -350,10 +351,34 @@ fn task_items_get_a_checkbox() {
     assert_eq!(lines("- [x] done\n- [ ] todo\n", 20), ["☑ done", "☐ todo"]);
 }
 
+/// An ordered task list is *both* numbered and ticked.
+///
+/// Regression: the task box replaced the whole marker field, so an ordered task list
+/// lost its ordinal and drew `☑  first` — the number gone, and the field's leftover
+/// columns showing up as a second space that the unordered case does not have.
+#[test]
+fn an_ordered_task_list_keeps_its_number_and_its_box() {
+    assert_eq!(
+        lines("1. [x] first\n2. [ ] second\n", 30),
+        ["1. ☑ first", "2. ☐ second"]
+    );
+    // The ordinal field still grows with the widest ordinal, and the checkbox still
+    // sits one space after it.
+    assert_eq!(
+        lines("9. [x] nine\n10. [ ] ten\n", 30),
+        [" 9. ☑ nine", "10. ☐ ten"]
+    );
+    // Continuation lines hang under the text, clear of both ordinal and box.
+    assert_eq!(
+        lines("1. [ ] alpha beta gamma\n", 16),
+        ["1. ☐ alpha beta", "     gamma"]
+    );
+}
+
 #[test]
 fn tight_lists_are_dense_and_loose_lists_are_spaced() {
     assert_eq!(rows("- one\n- two\n", 20).len(), 2);
-    assert_eq!(rows("- one\n\n- two\n", 20), ["· one", "", "· two"]);
+    assert_eq!(rows("- one\n\n- two\n", 20), ["● one", "", "● two"]);
 }
 
 /// The document the wrapping-spaces-the-list rule is asserted against.
@@ -366,7 +391,7 @@ const THREE_BULLETS: &str = "- one\n- alpha beta gamma delta epsilon\n- three\n"
 fn a_list_stays_tight_while_every_item_fits_on_one_line() {
     assert_eq!(
         rows(THREE_BULLETS, 40),
-        ["· one", "· alpha beta gamma delta epsilon", "· three"]
+        ["● one", "● alpha beta gamma delta epsilon", "● three"]
     );
 }
 
@@ -377,12 +402,12 @@ fn a_list_is_spaced_throughout_as_soon_as_one_item_wraps() {
     assert_eq!(
         rows(THREE_BULLETS, 20),
         [
-            "· one",
+            "● one",
             "",
-            "· alpha beta gamma",
+            "● alpha beta gamma",
             "  delta epsilon",
             "",
-            "· three"
+            "● three"
         ]
     );
 }
@@ -393,12 +418,12 @@ fn a_list_already_loose_by_commonmark_does_not_gain_a_second_blank_row() {
     assert_eq!(
         rows(loose, 20),
         [
-            "· one",
+            "● one",
             "",
-            "· alpha beta gamma",
+            "● alpha beta gamma",
             "  delta epsilon",
             "",
-            "· three"
+            "● three"
         ]
     );
 }
@@ -422,7 +447,43 @@ fn each_list_level_decides_its_own_spacing() {
     // tight. Spacing appears exactly where the crowding is.
     assert_eq!(
         rows("- outer one\n  - in a\n  - in b\n- outer two\n", 30),
-        ["· outer one", "  – in a", "  – in b", "", "· outer two"]
+        ["● outer one", "  – in a", "  – in b", "", "● outer two"]
+    );
+}
+
+/// A spaced list is set off from the item that introduces it, not only from its own
+/// siblings.
+///
+/// Regression: the blank rows were placed *between* items only, so a chain of nested
+/// lists drew every parent welded to its child while every sibling below breathed —
+/// the deepest descent read as one solid block and everything after it was spaced.
+#[test]
+fn a_spaced_sublist_is_set_off_from_the_item_that_introduces_it() {
+    // The sublist wraps at this width, so it is spaced; the seam between "outer" and
+    // the sublist is a seam of that spaced list and gets the same blank row.
+    assert_eq!(
+        rows("- outer\n  - alpha beta gamma delta\n  - short\n", 16),
+        [
+            "● outer",
+            "",
+            "  – alpha beta",
+            "    gamma delta",
+            "",
+            "  – short",
+        ]
+    );
+    // A chain of nested lists breathes at every level it descends through, rather
+    // than packing the descent solid and spacing only what comes after it.
+    assert_eq!(
+        rows("- one\n  - two\n    - alpha beta gamma\n", 16),
+        [
+            "● one",
+            "",
+            "  – two",
+            "",
+            "    ▪ alpha beta",
+            "      gamma",
+        ]
     );
 }
 
@@ -440,7 +501,7 @@ fn the_spacing_decision_is_re_taken_at_every_width() {
 fn a_list_inside_a_quote_inside_a_list_still_composes() {
     assert_eq!(
         lines("- outer\n  > quoted\n  > - inner\n", 30),
-        ["· outer", "  ▌ quoted", "  ▌", "  ▌ – inner"]
+        ["● outer", "  ▌ quoted", "  ▌", "  ▌ – inner"]
     );
 }
 
@@ -644,8 +705,8 @@ fn a_list_inside_a_cell_keeps_its_markers() {
     let canvas = render_block(&table, 30, &Theme::default_dark(), &PLAIN);
     canvas.check_invariants().expect("contract holds");
     let text = canvas.plain_text();
-    assert!(text.contains("· one"), "{text}");
-    assert!(text.contains("· two"), "{text}");
+    assert!(text.contains("● one"), "{text}");
+    assert!(text.contains("● two"), "{text}");
 }
 
 #[test]
@@ -855,19 +916,16 @@ fn every_icon_the_renderer_draws_has_a_plain_substitute() {
     let plain = render_with(markdown, 40, &PLAIN);
     let fancy = render_with(markdown, 40, &RenderOptions::new(true, false));
     assert_eq!(plain.height(), fancy.height());
-    // No private-use code point may survive with icons off.
+    // No private-use code point may survive with icons off. The predicate is the
+    // shared one rather than a range written out here: Nerd Fonts use plane 15 as
+    // well as the basic-plane area, and a hand-written `\u{e000}..=\u{f8ff}` silently
+    // stopped seeing the task boxes the day they moved.
     assert!(
-        !plain
-            .plain_text()
-            .chars()
-            .any(|ch| ('\u{e000}'..='\u{f8ff}').contains(&ch)),
+        !plain.plain_text().chars().any(is_private_use),
         "the plain set must contain no Nerd Font code points"
     );
     assert!(
-        fancy
-            .plain_text()
-            .chars()
-            .any(|ch| ('\u{e000}'..='\u{f8ff}').contains(&ch)),
+        fancy.plain_text().chars().any(is_private_use),
         "the Nerd set must actually use them"
     );
 }
@@ -973,9 +1031,9 @@ fn options_reach_into_table_cells() {
     // The bullet is the same plain Unicode either way (`render::glyphs`); what the
     // options must still reach into the cell with is the *rest* of the glyph set, so
     // the check is that they agree here and differ where they should.
-    assert!(plain.plain_text().contains('·'));
+    assert!(plain.plain_text().contains('●'));
     assert!(
-        fancy.plain_text().contains('·'),
+        fancy.plain_text().contains('●'),
         "the cell must use the same bullet:\n{}",
         fancy.plain_text()
     );

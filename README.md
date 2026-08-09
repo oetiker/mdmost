@@ -94,10 +94,11 @@ Font is available, and with plain Unicode equivalents **of the same display widt
 it is not — so the difference is what the markers look like, never where anything sits.
 Nothing shifts, nothing reflows, and no feature is lost either way.
 
-List bullets are plain Unicode in both cases (`·`, `–`, `▪`, `▫`, one per nesting
-level), because the fine grades a bullet wants do not exist in an icon font: every
-filled circle it offers is a heavy disc. Headings have no marker at all — the rule
-beneath a heading says which level it is.
+List bullets are plain Unicode in both cases (`●`, `–`, `▪`, `▫`, one per nesting
+level), because the grades a bullet wants do not exist in an icon font: `·`, `•` and
+`●` are three sizes of the same mark, where every filled circle an icon font offers is
+one heavy disc. Headings have no marker at all — the rule beneath a heading says which
+level it is.
 
 **`mdless` works out which to use, and errs towards plain.** No terminal can be asked
 what font it is using, so mdless asks fontconfig whether an installed font covers every

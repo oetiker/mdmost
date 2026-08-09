@@ -71,17 +71,25 @@ pub fn render_blocks(nodes: &[Node], width: u16, theme: &Theme, options: &Render
 /// `spaced` inserts one blank row between blocks, which is what separates paragraphs
 /// in a document and what a *tight* list suppresses inside one of its items. The
 /// spacing *between* list items is not decided here — see [`list`].
+///
+/// A block may also ask to be set off from its neighbours even where `spaced` is
+/// false: a spaced list does, so that the item introducing it is not welded to it.
+/// See [`list`]'s docs for why that belongs to the list rather than to the sequence.
 pub(crate) fn render_sequence(nodes: &[Node], width: u16, ctx: Ctx<'_>, spaced: bool) -> Canvas {
     let fill = ctx.base;
     let mut out = Canvas::empty(width);
-    let push = |part: &Canvas, out: &mut Canvas| {
+    // Whether the block last appended asked to be set off, so the *next* seam gets a
+    // blank row as well as the one before it.
+    let mut previous_set_off = false;
+    let mut push = |part: &Canvas, set_off: bool, out: &mut Canvas| {
         if part.is_empty() {
             return;
         }
-        if spaced && !out.is_empty() {
+        if !out.is_empty() && (spaced || set_off || previous_set_off) {
             out.push_blank_row(fill);
         }
         out.append(part, fill);
+        previous_set_off = set_off;
     };
     let mut index = 0usize;
     while index < nodes.len() {
@@ -94,14 +102,31 @@ pub(crate) fn render_sequence(nodes: &[Node], width: u16, ctx: Ctx<'_>, spaced: 
             }
             push(
                 &render_inline(&nodes[start..index], width, ctx.base, ctx),
+                false,
                 &mut out,
             );
         } else {
-            push(&render_block_ctx(&nodes[index], width, ctx), &mut out);
+            let (part, set_off) = render_block_set_off(&nodes[index], width, ctx);
+            push(&part, set_off, &mut out);
             index += 1;
         }
     }
     out
+}
+
+/// Renders one block, and says whether it asks to be set off from its neighbours.
+///
+/// Only a list answers `true`, and only when it is spaced; everything else is placed
+/// by its sequence's own rule. Keeping the question here rather than inspecting the
+/// node means the answer is a *measurement of the drawn block* — the same thing
+/// [`list`] measured to reach it — and not a second guess at it.
+fn render_block_set_off(node: &Node, width: u16, ctx: Ctx<'_>) -> (Canvas, bool) {
+    let NodeKind::List(info) = &node.kind else {
+        return (render_block_ctx(node, width, ctx), false);
+    };
+    let (mut canvas, spaced) = list(node, *info, width, ctx);
+    canvas.resize_width(width, ctx.base);
+    (canvas, spaced)
 }
 
 /// Whether a node belongs to an inline run rather than being a block of its own.
@@ -132,7 +157,7 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         NodeKind::Heading { level, id } => heading(node, *level, id, width, ctx),
         NodeKind::Paragraph => paragraph(node, width, ctx),
         NodeKind::BlockQuote => quote(node, width, ctx),
-        NodeKind::List(info) => list(node, *info, width, ctx),
+        NodeKind::List(info) => list(node, *info, width, ctx).0,
         // A bare item outside a list (which comrak does not produce, but a table cell
         // fragment might) renders as its content.
         NodeKind::Item | NodeKind::TaskItem { .. } | NodeKind::TableCell => {
@@ -258,16 +283,34 @@ const QUOTE_GUTTER: u16 = 2;
 ///   are short. Cascading would make one long outer item blow up an entire subtree, and
 ///   since "wraps" is width-dependent that subtree would inflate and collapse on
 ///   resize. Deciding locally means the spacing appears exactly where the crowding is.
+/// * **A spaced list is separated from everything it touches, not only from itself.**
+///   The blank row belongs to the *seams of the list*, and a list has one more seam
+///   than it has gaps between items: the one against the item that introduces it.
+///   Placing the row only between items left that seam bare, which is a defect the
+///   owner reported on 2026-08-09 from a five-deep nest — every level below the
+///   wrapping item breathed, while the descent to it was packed solid, so the block
+///   that most needed structure was the one that read as a grey mass. Since a spaced
+///   list is returned to its parent's sequence *marked as set off*
+///   ([`render_block_set_off`]), the row also appears on the far side, against any
+///   content following the sublist inside the same item. The alternative considered
+///   and rejected was to cascade *upwards* — let a wrapping item space the list that
+///   contains it — which is a no-op on exactly this document: an item carrying a
+///   sublist is already taller than one row, so every ancestor list was spaced
+///   already. The missing rows were never the ancestors'; they were the parent-child
+///   seam, and only this rule places them.
 ///
 /// The decision is width-dependent by construction — the same list is dense at 120
 /// columns and spaced at 60 — which is intended, because narrow is precisely when the
 /// items wrap and look cramped. It is taken here, during layout, at a known width, and
 /// never at parse time (design spec §3); the render cache is keyed on width, so a
 /// resize re-renders and re-decides rather than serving a stale choice.
-fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
+///
+/// Returns the drawn list and whether it came out spaced, which is the answer
+/// [`render_block_set_off`] passes to the sequence that owns it.
+fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> (Canvas, bool) {
     let inner = ctx.in_list();
     let field = marker_field(&node.children, info);
-    let indent = u16::try_from(field).unwrap_or(u16::MAX).min(width);
+    let indent = u16::try_from(field.total).unwrap_or(u16::MAX).min(width);
     // Rendered up front because the spacing decision needs every item's drawn height
     // before the first item can be placed. No item is rendered twice.
     let items: Vec<Canvas> = node
@@ -285,20 +328,59 @@ fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
         }
         out.append(&part, ctx.base);
     }
-    out
+    (out, spaced)
+}
+
+/// Columns a task checkbox and the space after it occupy when it accompanies an
+/// ordinal rather than replacing a bullet.
+const TASK_BOX_FIELD: usize = 2;
+
+/// The shape of a list's marker column.
+///
+/// One measurement for the whole list, because every item's content has to start in
+/// the same column: the field is sized by the widest marker any item will draw, and
+/// every other marker is padded into it.
+#[derive(Clone, Copy)]
+struct MarkerField {
+    /// Total columns the marker column occupies, its trailing space included.
+    total: usize,
+    /// Columns the ordinal or bullet is set in, before any checkbox.
+    ///
+    /// Equal to `total` unless the list is *ordered and has task items*, which is the
+    /// one case where a marker has to say two things at once. It stays equal for an
+    /// unordered task list, where the box replaces the bullet rather than joining it.
+    lead: usize,
 }
 
 /// How many columns the marker column of a list occupies, including its trailing space.
-fn marker_field(items: &[Node], info: ListInfo) -> usize {
+///
+/// An ordered task list keeps **both** its ordinal and its box (`1. ☑ first`). It used
+/// to keep only the box, which dropped the number the item is named by and left the
+/// ordinal's columns behind as a second space — a list that rendered `☑  first` where
+/// the unordered form rendered `☑ first`.
+fn marker_field(items: &[Node], info: ListInfo) -> MarkerField {
     if !info.ordered {
-        return 2;
+        return MarkerField { total: 2, lead: 2 };
     }
     let last = info.start + items.len().saturating_sub(1);
-    display_width(&format!("{last}.")) + 1
+    let lead = display_width(&format!("{last}.")) + 1;
+    let boxed = items
+        .iter()
+        .any(|item| matches!(item.kind, NodeKind::TaskItem { .. }));
+    MarkerField {
+        total: lead + if boxed { TASK_BOX_FIELD } else { 0 },
+        lead,
+    }
 }
 
 /// The marker of one list item, padded to the marker field width.
-fn marker_line(item: &Node, info: ListInfo, index: usize, field: usize, ctx: Ctx<'_>) -> Line {
+fn marker_line(
+    item: &Node,
+    info: ListInfo,
+    index: usize,
+    field: MarkerField,
+    ctx: Ctx<'_>,
+) -> Line {
     let theme = ctx.theme;
     if let NodeKind::TaskItem { checked } = item.kind {
         let glyph = ctx.glyphs.task(checked);
@@ -307,25 +389,47 @@ fn marker_line(item: &Node, info: ListInfo, index: usize, field: usize, ctx: Ctx
         } else {
             theme.block.task_unchecked
         };
-        return Line::new(vec![Span::new(
-            pad_to_width(glyph, field, Align::Left),
-            style,
-        )]);
+        // In an unordered list the box *is* the bullet and takes the whole field. In
+        // an ordered one it follows the ordinal, in the room `marker_field` reserved
+        // for it, so the item keeps the number it is referred to by.
+        if !info.ordered {
+            return Line::new(vec![Span::new(
+                pad_to_width(glyph, field.total, Align::Left),
+                style,
+            )]);
+        }
+        return Line::new(vec![
+            Span::new(ordinal(info, index, field.lead), theme.block.list_marker),
+            Span::new(format!("{glyph} "), style),
+        ]);
     }
     let text = if info.ordered {
-        // The ordinal is right-aligned in the field, but the separating space always
-        // stays on the right, or the marker would touch the text.
-        let ordinal = format!("{}.", info.start + index);
+        // A plain item in a list that also has task items is numbered in the same
+        // `lead` columns, so every ordinal stays in one column no matter what follows
+        // it; the checkbox's columns are simply blank here.
         format!(
-            "{} ",
-            pad_to_width(&ordinal, field.saturating_sub(1), Align::Right)
+            "{}{}",
+            ordinal(info, index, field.lead),
+            " ".repeat(field.total - field.lead)
         )
     } else {
         // The bullet glyph rotates with nesting depth, so a nested list reads as
         // nested even where the indentation alone would be ambiguous.
-        pad_to_width(ctx.glyphs.bullet(ctx.list_depth), field, Align::Left)
+        pad_to_width(ctx.glyphs.bullet(ctx.list_depth), field.total, Align::Left)
     };
     Line::new(vec![Span::new(text, theme.block.list_marker)])
+}
+
+/// One item's ordinal, right-aligned in `field` columns.
+///
+/// The separating space always stays on the right, or the marker would touch whatever
+/// comes after it.
+fn ordinal(info: ListInfo, index: usize, field: usize) -> String {
+    let text = format!("{}.", info.start + index);
+    format!(
+        "{} ",
+        pad_to_width(&text, field.saturating_sub(1), Align::Right)
+    )
 }
 
 /// A thematic break.

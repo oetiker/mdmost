@@ -22,7 +22,7 @@
 //!
 //! | family      | shape                              | plain             | nerd            |
 //! |-------------|------------------------------------|-------------------|-----------------|
-//! | list bullet | dot, dash, square — one per depth  | `· – ▪ ▫`         | the same        |
+//! | list bullet | disc, dash, square — one per depth | `● – ▪ ▫`         | the same        |
 //! | task box    | a box big enough to hold a tick    | ballot boxes      | squares         |
 //!
 //! A reader must never see one marker mean two things, so a test in this module
@@ -36,11 +36,12 @@
 //! # Why bullets are not icons any more
 //!
 //! The bullet ladder is the same text in both sets, and that is deliberate rather than
-//! an oversight. The owner asked for a *less prominent* level-one bullet, and every
-//! filled circle a Nerd Font offers — `nf-fa-circle`, `nf-md-circle`,
-//! `nf-md-circle_medium` — is a heavy disc drawn at icon size, which is the complaint
-//! itself. Plain Unicode has the finer grades (`·` against `•`), so it wins on the
-//! only axis that was in question. This also keeps the two sets *identical* here,
+//! an oversight. The size of the level-one bullet has been in question twice now, in
+//! both directions, and plain Unicode is the set that has the grades to answer it:
+//! `·`, `•` and `●` are three distinct sizes of the same mark, whereas every filled
+//! circle a Nerd Font offers — `nf-fa-circle`, `nf-md-circle`, `nf-md-circle_medium` —
+//! is a heavy disc drawn at icon size, one answer rather than a ladder. This also
+//! keeps the two sets *identical* here,
 //! which is the strongest possible form of the parity rule above, and it removes four
 //! private-use code points from what [`Glyphs::nerd_glyphs`] makes font detection
 //! demand. The theme already treats bullets this way: "bullets are punctuation, not
@@ -52,9 +53,18 @@
 /// owner's request: "the bullet character chosen is too prominent… then for the second
 /// level maybe a heavy `-` and for the third a small square".
 ///
-/// * `·` U+00B7 — the small filled dot, the *smaller* filled circle that was asked
-///   for. `•` U+2022 (the bullet being replaced) and `∙` U+2219 draw the same heavy
-///   disc in a patched monospace font, so neither is an improvement.
+/// * `●` U+25CF — a filled disc. **Changed on 2026-08-09 at the owner's request**: the
+///   previous `·` U+00B7 was too small to read as a marker. The owner picked `⦁`
+///   U+2981 Z NOTATION SPOT from a rendered selection — bigger than `·`, smaller than
+///   `●` — and it cannot ship: U+2981 is **absent from `CommitMono` Nerd Font** (and
+///   from `DejaVu`; only `FreeSans`, STIX, Asana Math and `Noto`'s maths faces carry it), so
+///   in the terminal this is written for it draws as a blank. Rasterised at a 200-unit
+///   em, the four candidates measure `·` 32, `•` 48, `●` 108 in `CommitMono`, against
+///   `·` 22, `•` 72, `⦁` 88, `●` 146 in `FreeSans` — so the owner's pick is 0.44 em and
+///   `●` at 0.54 em is the closest thing the shipping font has to it (`•` is 0.24 em,
+///   twice as far the other way, and was rejected once already as too prominent
+///   before this ladder existed). This is the same defect that removed `◦` U+25E6:
+///   **rasterise a candidate in the font before believing it exists.**
 /// * `–` U+2013 — a dash with body. `‒` U+2012 and `−` U+2212 are indistinguishable
 ///   from it at terminal sizes, and `━` U+2501 is a full-cell bar that reads as a
 ///   rule rather than as a marker.
@@ -64,7 +74,7 @@
 ///   popular patched font and draws as a blank there.
 ///
 /// Each is a single code point of display width 1, which a test below enforces.
-const BULLETS: [&str; 4] = ["·", "–", "▪", "▫"];
+const BULLETS: [&str; 4] = ["●", "–", "▪", "▫"];
 
 /// The glyphs used for one rendering pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,6 +91,15 @@ pub(crate) struct Glyphs {
 
 impl Glyphs {
     /// Plain Unicode, for terminals without a Nerd Font (`--no-icons`).
+    ///
+    /// The task boxes stay `☐` U+2610 and `☑` U+2611. `☒` U+2612 was weighed against
+    /// them on 2026-08-09 — it is the box designed as `☐`'s pair, so it was the
+    /// natural suspect for the size complaint — and the rasterisation says no: in
+    /// `DejaVu` Sans, the fallback a terminal reaches for here (`CommitMono` Nerd Font
+    /// carries *none* of the three), all three glyphs are the same 145×146 box at the
+    /// same stroke weight, and by ink they run `☐` 27%, `☑` 34%, `☒` 42%. `☑` is
+    /// already the closer partner; swapping in `☒` would make the ticked box heavier,
+    /// not better matched. The mismatch the owner saw is in [`Self::NERD`].
     pub const PLAIN: Self = Self {
         bullets: BULLETS,
         task_checked: "☑",
@@ -90,15 +109,33 @@ impl Glyphs {
 
     /// Nerd Font glyphs, the default look where a Nerd Font is detected.
     ///
-    /// The code points are the classic Font Awesome 4 block that every Nerd Font
-    /// patch carries, named in the comments so they can be checked against
+    /// The code points are named in the comments so they can be checked against
     /// <https://www.nerdfonts.com/cheat-sheet>. The bullets are deliberately the
     /// plain ones (see the module docs); what the icons buy here is the ticked task
     /// box and the code-fence language icons.
+    ///
+    /// # The task boxes are a *pair*, and were not
+    ///
+    /// The owner reported on 2026-08-09 that the unticked box looks larger than the
+    /// ticked one, and it does. The two boxes used to be `nf-fa-square_o` U+F096 and
+    /// `nf-fa-check_square_o` U+F046; rasterised in `CommitMono` Nerd Font at a 200-unit
+    /// em they measure **120×121 and 97×97** — the same drawing at two different
+    /// sizes, 24% apart in every dimension, sitting one under the other in the marker
+    /// column where nothing hides it. Font Awesome 4 has no box that is both outlined
+    /// and metrically equal to U+F096, so the pair moves to Material Design's
+    /// `checkbox_blank_outline` / `checkbox_marked_outline`, which are drawn as a pair
+    /// and measure **72×73 and 72×73**: one box, with and without a tick.
+    ///
+    /// The cost is that these are five-digit code points, added to Nerd Fonts in v3
+    /// (2023). A v2 patch does not carry them, so [`Self::nerd_glyphs`] — which is
+    /// what font detection demands coverage of — now answers "no Nerd Font" on a v2
+    /// patch, and that reader gets [`Self::PLAIN`]. That is the safe direction of the
+    /// detection rule (design spec §2.1: yes only on positive evidence) and it is the
+    /// price of the boxes being the same size.
     pub const NERD: Self = Self {
         bullets: BULLETS,
-        task_checked: "\u{f046}",   // nf-fa-check_square_o
-        task_unchecked: "\u{f096}", // nf-fa-square_o
+        task_checked: "\u{f0135}",   // nf-md-checkbox_marked_outline
+        task_unchecked: "\u{f0131}", // nf-md-checkbox_blank_outline
         code_icons: true,
     };
 
