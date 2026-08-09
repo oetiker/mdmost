@@ -283,6 +283,12 @@ Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
 - **Everything is width-driven.** No layout decision is taken at parse time, so a resize
   re-renders rather than patching. Table columns are negotiated against the available
   width; a cell is itself a nested document, so Markdown inside a table cell works.
+- **A table whose rows wrap gets air between them.** While every row fits on one line the
+  table is drawn dense. As soon as one row wraps, a blank line goes between every pair of
+  rows, because multi-line rows packed edge to edge read as one block of prose. The zebra
+  stripe is carried through the gap by a half block, so the shading still groups each
+  row's lines. Decided at the width you are reading at, so the same table is dense in a
+  wide terminal and spaced in a narrow one.
 - **Grapheme-safe throughout.** Widths are display columns, never bytes or `char`s.
   Combining marks, ZWJ emoji sequences and regional-indicator flags are never split, and
   every rendered row is exactly the requested width.

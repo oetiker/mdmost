@@ -1095,8 +1095,11 @@ fn edge_column(
             canvas,
             0,
             &offsets,
-            ratatui::style::Style::default(),
-            &frames,
+            &super::draw::Marks {
+                style: ratatui::style::Style::default(),
+                frames: &frames,
+                stripe: theme.table.row_alt.bg,
+            },
         );
     });
     let at = if left > 0 { 0 } else { usize::from(width) - 1 };
@@ -1141,6 +1144,43 @@ fn a_viewport_edge_closes_the_frame_it_cuts() {
         vec!['╭', '‹', '├', '‹', '╰'],
         "and so does the left edge, once the reader has scrolled"
     );
+}
+
+/// A table wide enough to be side-scrolled whose rows are two lines tall, so the
+/// renderer puts a gap between them.
+const WIDE_SPACED_TABLE: &str = concat!(
+    "| aaaaaaaaaa | bbbbbbbbbb |\n|---|---|\n",
+    "| cccccccccc cccccccccc | dddddddddd |\n",
+    "| eeeeeeeeee eeeeeeeeee | ffffffffff |\n",
+);
+
+#[test]
+fn a_viewport_edge_passes_over_a_row_gap_in_silence() {
+    // The same argument as the rules, one step further: a row gap is shading between two
+    // rows and carries nothing that can be cut off. Marked, it would put a chevron where
+    // nothing continues — and the rail down the edge would read as a column of markers
+    // with holes in it wherever a row happens to end.
+    let (canvas, theme) = scrollable(WIDE_SPACED_TABLE, 14);
+    let stripe = theme.table.row_alt.bg;
+    let gaps: Vec<usize> = canvas
+        .rows()
+        .iter()
+        .enumerate()
+        .filter(|(_, cells)| crate::render::table::is_row_gap(cells, stripe))
+        .map(|(row, _)| row)
+        .collect();
+    assert_eq!(gaps.len(), 1, "one gap between two body rows");
+    for left in [0, 5] {
+        let column = edge_column(&canvas, &theme, left);
+        assert_eq!(
+            column[gaps[0]], ' ',
+            "the gap is marked at offset {left}: {column:?}"
+        );
+        assert!(
+            column.iter().any(|glyph| *glyph == '›' || *glyph == '‹'),
+            "the content rows must still be marked: {column:?}"
+        );
+    }
 }
 
 #[test]
