@@ -14,6 +14,8 @@ use crate::theme::Theme;
 use crate::toc::{FilterHit, Toc};
 
 use super::cache::RenderCache;
+use super::draw::Offsets;
+use super::select::{Extract, Pos, Selection};
 
 /// The narrowest terminal the table-of-contents pane is offered in.
 const MIN_TOC_TERMINAL_WIDTH: u16 = 40;
@@ -147,6 +149,15 @@ pub struct App {
     search_index: Option<usize>,
     search_backward: bool,
     search_mode: SearchMode,
+    /// The mouse selection, in canvas coordinates. See [`super::select`].
+    selection: Option<Selection>,
+    /// Text a finished drag produced, waiting for the event loop to put it on the
+    /// clipboard.
+    ///
+    /// The state machine touches no terminal and no display server (design spec §13),
+    /// so it cannot copy; it hands the text over and is told the outcome through
+    /// [`App::report_copy`].
+    pending_copy: Option<Extract>,
     quit: bool,
 }
 
@@ -196,6 +207,8 @@ impl App {
             search_index: None,
             search_backward: false,
             search_mode: SearchMode::Literal,
+            selection: None,
+            pending_copy: None,
             quit: false,
         };
         app.refilter_toc();
@@ -482,6 +495,16 @@ impl App {
             self.toc.attach_anchors(self.cache.canvas().anchors());
             self.search
                 .locate(self.doc.source(), self.cache.canvas().spans());
+            // A mouse selection is a rectangle of *cells*, and a new render is a new
+            // set of cells: rendering is a pure function of width (design spec §3), so
+            // a reflow moves every row and the cells the reader picked out now hold
+            // different text. Search survives because it is anchored in the source and
+            // re-projected above; a selection cannot be, because re-projecting it would
+            // silently change what is highlighted — the source hull behind a screenful
+            // at 100 columns is not the hull behind a screenful at 40. Dropping it is
+            // the honest answer, and the reader has already had the release event that
+            // put their text on the clipboard.
+            self.selection = None;
             self.clamp();
         }
     }
@@ -799,6 +822,12 @@ impl App {
     /// on purpose. `Esc` therefore peels state off one layer at a time and, when
     /// there is nothing left to peel, says so.
     fn cancel(&mut self) {
+        // Outermost layer, and the newest: a highlight the reader just made is the most
+        // recent thing they did, so it is the first thing `Esc` should undo.
+        if self.selection.take().is_some() {
+            self.notify("selection cleared", false);
+            return;
+        }
         if !self.pending_count.is_empty() {
             self.pending_count.clear();
             return;
@@ -1176,5 +1205,101 @@ impl App {
     /// Starts the table-of-contents filter prompt.
     pub fn start_toc_filter(&mut self) {
         self.open_prompt(PromptKind::TocFilter);
+    }
+}
+
+/// Mouse text selection. See [`super::select`] for what it maps onto and why.
+impl App {
+    /// The selection currently up, if any.
+    pub fn selection(&self) -> Option<Selection> {
+        self.selection
+    }
+
+    /// The canvas position drawn at document-area column `x`, row `y`.
+    ///
+    /// Goes through the same [`Offsets`] the painter uses, so a selection can never
+    /// disagree with the pixels about which source a cell came from — including a row
+    /// with a pinned line-number gutter, where the arithmetic is not a single offset.
+    fn canvas_pos(&self, x: u16, y: u16) -> Pos {
+        let offsets = Offsets::scrolled_to(
+            self.reach(),
+            self.pinned(),
+            self.hscroll,
+            self.viewport_width(),
+        );
+        let last = self.cache.canvas().height().saturating_sub(1);
+        let row = self.scroll.saturating_add(usize::from(y)).min(last);
+        let width = self.cache.canvas().width().saturating_sub(1);
+        let col = u16::try_from(offsets.column(row, x))
+            .unwrap_or(u16::MAX)
+            .min(width);
+        Pos::new(row, col)
+    }
+
+    /// Begins a drag at document-area column `x`, row `y`.
+    pub fn begin_selection(&mut self, x: u16, y: u16) {
+        self.ensure_rendered();
+        self.clear_notice();
+        self.selection = Some(Selection::started(self.canvas_pos(x, y)));
+    }
+
+    /// Extends the drag to document-area column `x`, row `y`.
+    ///
+    /// A drag that leaves the top or bottom of the viewport scrolls it by a row, which
+    /// is the only way to select more than a screenful. The selection itself is stored
+    /// in canvas coordinates, so the scroll moves the window and not the highlight.
+    pub fn drag_selection(&mut self, x: u16, y: u16) {
+        let Some(mut selection) = self.selection.filter(|s| s.is_dragging()) else {
+            return;
+        };
+        let height = self.viewport_height();
+        if y == 0 {
+            self.scroll_by(-1);
+        } else if usize::from(y) + 1 >= height {
+            self.scroll_by(1);
+        }
+        selection.drag_to(self.canvas_pos(x, y));
+        self.selection = Some(selection);
+    }
+
+    /// Ends the drag and queues what it selected for the clipboard.
+    ///
+    /// A drag that never left the cell it started on is a click, not a selection, and
+    /// leaves nothing behind: copying one character is not what anybody meant by it.
+    pub fn end_selection(&mut self) {
+        let Some(mut selection) = self.selection else {
+            return;
+        };
+        selection.finish();
+        if selection.is_click() {
+            self.selection = None;
+            return;
+        }
+        self.selection = Some(selection);
+        self.ensure_rendered();
+        self.pending_copy =
+            super::select::extract(self.cache.canvas(), self.doc.source(), selection);
+        if self.pending_copy.is_none() {
+            self.notify("nothing to copy there", false);
+        }
+    }
+
+    /// Takes the text a finished drag produced, for the event loop to copy.
+    pub fn take_pending_copy(&mut self) -> Option<Extract> {
+        self.pending_copy.take()
+    }
+
+    /// Reports the outcome of a copy in the status bar.
+    ///
+    /// The wording comes from the [`Delivery`](super::clipboard::Delivery) itself,
+    /// because how much a given route lets the pager claim is a property of the route.
+    pub fn report_copy(
+        &mut self,
+        bytes: usize,
+        from_source: bool,
+        delivery: &crate::tui::clipboard::Delivery,
+    ) {
+        let (text, is_error) = delivery.message(bytes, from_source);
+        self.notify(text, is_error);
     }
 }

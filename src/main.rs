@@ -62,9 +62,12 @@ struct Cli {
     #[arg(long, conflicts_with = "no_icons")]
     icons: bool,
 
-    /// Capture the mouse: wheel scrolls, clicks select in the contents pane.
+    /// Capture the mouse: wheel scrolls, clicks jump in the contents pane, drag copies.
     ///
     /// Off by default because capturing takes the terminal's own drag-select away.
+    /// `mdless` replaces it with a selection of its own that copies the *Markdown
+    /// source* behind the cells, but the terminal's is the one the reader already knows
+    /// and it outlives the pager.
     #[arg(long)]
     mouse: bool,
 

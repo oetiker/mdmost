@@ -59,12 +59,21 @@ pub struct Config {
     pub toc_open: bool,
     /// The width of the table-of-contents pane, in columns.
     pub toc_width: u16,
-    /// Whether the mouse wheel scrolls and clicks select in the TOC.
+    /// Whether the mouse wheel scrolls, clicks select in the TOC, and drags select text.
     ///
-    /// Off by default. Capturing the mouse takes the terminal's own drag-select away,
-    /// and selecting text is the main thing anyone does with a read-only viewer that
-    /// is not scrolling it; `less` does not capture either. Turn it on with `--mouse`
-    /// or `mouse = true`.
+    /// Off by default, but no longer for the reason it originally was. Capturing the
+    /// mouse does take the terminal's own drag-select away, and selecting text is the
+    /// main thing anyone does with a read-only viewer that is not scrolling it — so the
+    /// pager now does the selecting itself, and gives back more than it took: a drag
+    /// copies the **Markdown source** behind the cells rather than the rendered glyphs
+    /// (see [`tui::select`](crate::tui::select)). Dragging over `◆ Wide diagram` yields
+    /// `# Wide diagram`.
+    ///
+    /// What is left of the original reason, and why this stays off by default: the
+    /// terminal's own selection is the one the reader already knows, it survives the
+    /// pager exiting, and it is the one their muscle memory and their window manager
+    /// agree about. `less` does not capture either. Turn it on with `--mouse` or
+    /// `mouse = true`.
     pub mouse: bool,
     /// How many document lines one mouse-wheel notch scrolls.
     pub scroll_step: u16,

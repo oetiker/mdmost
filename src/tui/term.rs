@@ -255,7 +255,10 @@ fn event_loop(
         }
         match event {
             Some(Event::Key(key)) => on_key(app, key),
-            Some(Event::Mouse(mouse)) => on_mouse(app, mouse, terminal.size()?.height),
+            Some(Event::Mouse(mouse)) => {
+                let size = terminal.size()?;
+                on_mouse(app, mouse, size.width, size.height);
+            }
             _ => {}
         }
     }
@@ -279,21 +282,65 @@ fn on_key(app: &mut App, event: KeyEvent) {
 }
 
 /// Dispatches a mouse event.
-fn on_mouse(app: &mut App, event: MouseEvent, height: u16) {
+///
+/// A left drag inside the document area is a text selection (see [`super::select`]).
+/// The table-of-contents pane keeps its click-to-jump and is never a selection source:
+/// its entries are a generated map, not document text, so there is no source behind
+/// them to copy.
+fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16) {
     let in_toc = chrome::in_toc(app, event.column);
+    let body_height = height.saturating_sub(1);
+    // The document area: the pane on its left, the scrollbar's gutter on its right.
+    let doc_x = app.toc_width();
+    let doc_width = width.saturating_sub(doc_x).saturating_sub(1);
+    let in_doc = event.column >= doc_x
+        && event.column < doc_x.saturating_add(doc_width)
+        && event.row < body_height;
+    let local = || {
+        (
+            event.column.saturating_sub(doc_x),
+            event.row.min(body_height.saturating_sub(1)),
+        )
+    };
     match event.kind {
         MouseEventKind::ScrollDown => app.on_scroll(1, in_toc),
         MouseEventKind::ScrollUp => app.on_scroll(-1, in_toc),
         MouseEventKind::Down(MouseButton::Left) if in_toc => {
-            let body_height = height.saturating_sub(1);
             if let Some(row) = chrome::toc_row_at(app, body_height, event.row) {
                 let first = app.toc_first_visible(usize::from(body_height.saturating_sub(2)));
                 app.on_toc_click(first, row);
             }
         }
-        MouseEventKind::Down(MouseButton::Left) if app.focus() == Focus::Toc => {}
+        MouseEventKind::Down(MouseButton::Left) if app.focus() == Focus::Toc && !in_doc => {}
+        MouseEventKind::Down(MouseButton::Left) if in_doc => {
+            let (x, y) = local();
+            app.begin_selection(x, y);
+        }
+        // A drag is reported even when the pointer has left the window, with the
+        // coordinates clamped to it — which is exactly what makes the edge auto-scroll
+        // in `App::drag_selection` fire.
+        MouseEventKind::Drag(MouseButton::Left) if app.selection().is_some() => {
+            let (x, y) = local();
+            app.drag_selection(x, y);
+        }
+        MouseEventKind::Up(MouseButton::Left) if app.selection().is_some() => {
+            app.end_selection();
+            copy_selection(app);
+        }
         _ => {}
     }
+}
+
+/// Puts a finished selection on the clipboard and says what happened.
+///
+/// The I/O lives here rather than in [`App`] because the state machine touches no
+/// terminal (design spec §13); the app produces the text and is handed the outcome.
+fn copy_selection(app: &mut App) {
+    let Some(extract) = app.take_pending_copy() else {
+        return;
+    };
+    let delivery = super::clipboard::copy(&extract.text);
+    app.report_copy(extract.text.len(), extract.from_source, &delivery);
 }
 
 /// Converts a `crossterm` key event into the terminal-independent [`Key`].

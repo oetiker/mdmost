@@ -83,6 +83,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         &frame_styles,
     );
     highlight_matches(buffer, doc_area, app, scroll, &hscroll);
+    // Over the search wash, not under it: the selection is the thing the reader's hand
+    // is on right now, and a match underneath it is still legible as an orange cell one
+    // column past the drag.
+    highlight_selection(buffer, doc_area, app, scroll, &hscroll);
     scrollbar(buffer, bar_area, app);
     if app.rendered().is_empty() {
         empty_notice(buffer, doc_area, dim_style);
@@ -428,6 +432,39 @@ fn highlight_matches(buffer: &mut Buffer, area: Rect, app: &App, top: usize, lef
                 if let Some(cell) = buffer.cell_mut((area.x + x, area.y + y)) {
                     cell.set_style(patch_term(cell.style(), style));
                 }
+            }
+        }
+    }
+}
+
+/// Repaints the mouse selection on top of the document.
+///
+/// Painted from canvas columns through the same [`Offsets`] as everything else, so a
+/// selection made before the reader scrolled sideways stays on the text it was made on
+/// rather than on the columns it happened to occupy at the time.
+fn highlight_selection(buffer: &mut Buffer, area: Rect, app: &App, top: usize, left: &Offsets<'_>) {
+    let Some(selection) = app.selection() else {
+        return;
+    };
+    let style = app.theme().ui.selection;
+    let width = app.rendered().width();
+    for y in 0..area.height {
+        let row = top + usize::from(y);
+        if app.rendered().row(row).is_none() {
+            break;
+        }
+        let Some(columns) = selection.columns_on(row, width) else {
+            continue;
+        };
+        for col in columns {
+            let Some(x) = left.x_of(row, col) else {
+                continue;
+            };
+            if x >= area.width {
+                continue;
+            }
+            if let Some(cell) = buffer.cell_mut((area.x + x, area.y + y)) {
+                cell.set_style(patch_term(cell.style(), style));
             }
         }
     }

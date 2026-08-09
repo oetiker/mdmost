@@ -73,7 +73,7 @@ mdless --render-once --width 80 --no-icons doc.md > snapshot.txt
 | `--theme NAME` | The theme to start in. |
 | `--no-icons` | Use plain Unicode instead of Nerd Font glyphs, at the same display width. |
 | `--icons` | Use Nerd Font glyphs even if none appears to be installed. |
-| `--mouse` | Capture the mouse: wheel scrolls, clicks select in the contents pane. |
+| `--mouse` | Capture the mouse: wheel scrolls, clicks jump in the contents pane, drag selects and copies the Markdown behind it. |
 | `--toc` | Start with the table-of-contents pane open. |
 | `--config PATH` | Read configuration from this file instead of the default. |
 
@@ -170,6 +170,27 @@ Notes on a few of these:
 - `←` / `→` scroll content that is wider than the terminal, such as a wide table or a
   long code line. Neither is ever reflowed or mangled to fit.
 
+## Selecting and copying
+
+With `--mouse` (or `mouse = true`) a left drag over the document selects, and releasing
+puts the **Markdown source** behind the selection on the clipboard — not the glyphs on
+screen. Dragging over a rendered heading `◆ Wide diagram` copies `# Wide diagram`; over
+a bold word, `**bold**`; over a link, `[text](url)`; across a code fence, the fence and
+its content verbatim. A drag that reflows across several rows copies the source's own
+line breaks, not the renderer's. `Esc` clears the highlight.
+
+Two things are worth knowing. A selection over a fenced code block or a Mermaid diagram
+has no source map to invert — the renderer records one only for inline text — so it
+copies what is drawn instead, and the status bar says `rendered text` rather than
+`Markdown source`. And the copy goes out as OSC 52 first, which works over SSH but which
+the terminal never acknowledges: if that is the only route that ran, the status bar says
+`sent … (unconfirmed)` rather than `copied`. `tmux` needs `set -g set-clipboard on` to
+pass it along, and `xterm` needs `allowWindowOps`. On a local display server the
+`arboard` fallback runs too and the report becomes `copied`.
+
+Turning the mouse on is a trade: capturing it takes away the terminal's own
+drag-select, which outlives the pager and which your fingers already know.
+
 ## Configuration
 
 TOML, at `~/.config/mdless/config.toml` (or the platform's configuration directory —
@@ -181,7 +202,7 @@ binding costs you that binding and nothing else.
 theme        = "dark"    # name of a built-in or a [themes.*] table
 icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to detect
 line_numbers = false     # line-number gutter in fenced code blocks
-mouse        = false     # wheel scrolls, clicks select in the contents pane
+mouse        = false     # wheel scrolls, clicks jump in the TOC, drag copies source
 scroll_step  = 3         # document lines per mouse-wheel notch
 
 [toc]

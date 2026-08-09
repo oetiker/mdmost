@@ -12,6 +12,8 @@
 //! | [`cache`] | The `(document, width, theme)` render cache |
 //! | [`draw`] | Painting the document, the scrollbar and the search highlights |
 //! | [`chrome`] | Table-of-contents pane, status bar, help overlay |
+//! | [`select`] | Mouse selection, mapped back onto the document source |
+//! | [`clipboard`] | OSC 52 and the local clipboard, and what may be claimed of each |
 //! | [`help`] | Help content generated from the live key table |
 //! | [`icons`] | Nerd Font glyphs and their plain-Unicode fallbacks |
 //! | [`dump`] | `--render-once` output, ANSI or plain |
@@ -24,10 +26,12 @@
 pub mod app;
 pub mod cache;
 pub mod chrome;
+pub mod clipboard;
 pub mod draw;
 pub mod dump;
 pub mod help;
 pub mod icons;
+pub mod select;
 mod term;
 pub mod wide;
 

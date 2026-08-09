@@ -261,6 +261,12 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             help_title: base.fg(p.accent).bold(),
             search_match: Style::new().fg(p.bg).bg(p.yellow),
             search_current: Style::new().fg(p.bg).bg(p.orange).bold(),
+            // Blue, because the two warm washes on the page are already spoken for by
+            // search — yellow for a match, orange for the current one — and a reader
+            // dragging over a searched document must be able to tell at a glance which
+            // highlight is which. Same fg/bg shape as those two so the contrast floor
+            // `tests/theme_contrast.rs` pins applies to it identically.
+            selection: Style::new().fg(p.bg).bg(p.blue),
             prompt: Style::new().fg(p.fg).bg(p.overlay),
             error: base.fg(p.red).bold(),
             warning: base.fg(p.yellow),
