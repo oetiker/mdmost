@@ -3,12 +3,12 @@
 //! Every case is a hand-built [`ClassDiagram`], so a change in `mermaid::parse` can
 //! never silently rewrite what these snapshots check.
 
-use mdless::mermaid::ast::{
+use mdmost::mermaid::ast::{
     Class, ClassAnnotation, ClassArrow, ClassDiagram, ClassId, ClassRelation, Classifier,
     Direction, Field, Label, LineStyle, Member, Method, Param, Visibility,
 };
-use mdless::mermaid::layout::class;
-use mdless::theme::Theme;
+use mdmost::mermaid::layout::class;
+use mdmost::theme::Theme;
 
 /// A class with a name and members.
 fn class(name: &str, members: Vec<Member>) -> Class {

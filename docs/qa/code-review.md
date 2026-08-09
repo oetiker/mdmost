@@ -1,4 +1,4 @@
-# mdless code review
+# mdmost code review
 
 Reviewer: QA code agent
 Date: 2026-08-08
@@ -59,7 +59,7 @@ Reproducer, verified against the built binary:
 
 ```
 $ printf '\xf0\x97\x80\x80\xe1\xa9\x97\n' > /tmp/t.md   # U+17000 (Tangut, EAW=W) + U+1A57 (Tai Tham, EAW=N)
-$ mdless --render-once --width 2 /tmp/t.md              # emits 3 display columns
+$ mdmost --render-once --width 2 /tmp/t.md              # emits 3 display columns
 ```
 
 `unicode-segmentation` joins the two code points into one grapheme cluster; `str::width()` reports 3;
@@ -116,7 +116,7 @@ where `budget = usize::from(width)` (`code.rs:97`).
 Verified:
 ```
 $ printf '> ```\n> xxxxxxxxxx\n> ```\n' > /tmp/c.md
-$ mdless --render-once --width 2 /tmp/c.md
+$ mdmost --render-once --width 2 /tmp/c.md
 thread 'main' panicked at src/render/code.rs:126:28: attempt to subtract with overflow
 ```
 

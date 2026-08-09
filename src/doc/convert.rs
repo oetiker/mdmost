@@ -11,7 +11,7 @@ use super::slug::Slugger;
 use super::{Heading, ListInfo, Node, NodeKind, SourceSpan, TableInfo};
 use crate::text::Align;
 
-/// The comrak options `mdless` parses with.
+/// The comrak options `mdmost` parses with.
 pub(super) fn options<'a>() -> Options<'a> {
     let mut options = Options::default();
     options.extension.table = true;

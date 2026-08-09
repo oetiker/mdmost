@@ -2,11 +2,11 @@
 //!
 //! Snapshots are named `<fixture>@<width>` and are reviewed with `cargo insta review`.
 
-use mdless::canvas::Canvas;
-use mdless::mermaid::ast::{GanttChart, GanttSection, GanttTask, TaskProgress};
-use mdless::mermaid::gantt;
-use mdless::mermaid::gantt::time::{DAY, days_from_civil};
-use mdless::theme::Theme;
+use mdmost::canvas::Canvas;
+use mdmost::mermaid::ast::{GanttChart, GanttSection, GanttTask, TaskProgress};
+use mdmost::mermaid::gantt;
+use mdmost::mermaid::gantt::time::{DAY, days_from_civil};
+use mdmost::theme::Theme;
 use proptest::prelude::*;
 
 /// The widths every fixture is rendered at.
@@ -46,7 +46,7 @@ fn assert_contract(canvas: &Canvas, width: u16) {
     assert_eq!(canvas.check_invariants(), Ok(()));
     for row in 0..canvas.height() {
         assert_eq!(
-            mdless::text::display_width(&canvas.row_text(row)),
+            mdmost::text::display_width(&canvas.row_text(row)),
             usize::from(width),
             "row {row} is not {width} columns wide"
         );

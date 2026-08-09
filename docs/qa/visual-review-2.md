@@ -1,7 +1,7 @@
 # Visual review 2 — independent eyes
 
 Reviewed tree: `2aa5d8a` ("test: the canvas contract is checked on assembled rows, not just cells"),
-clean working tree, primary checkout `/home/oetiker/checkouts/mdless`.
+clean working tree, primary checkout `/home/oetiker/checkouts/mdmost`.
 Built with a private target dir; driven live in tmux at 40 / 57 / 80 / 100 / 120 columns,
 both built-in themes, `--icons` (default) and `--no-icons`.
 Colours read from `tmux capture-pane -pe` with a state-carrying SGR parser.
@@ -292,7 +292,7 @@ It reads as a rendering failure rather than as "this block is empty".
 ```
  ╭ mermaid ───────────────────────────────────────────────────────────────────╮
  │ this is not valid mermaid at all                                           │
- ╰ not a diagram type — mdless draws flowchart, sequenceDiagram, classDiagra… ╯
+ ╰ not a diagram type — mdmost draws flowchart, sequenceDiagram, classDiagra… ╯
 ```
 
 The caption exists precisely to tell the author which types are supported, and it is cut
@@ -309,7 +309,7 @@ body `(43,47,56)` on `(253,252,249)` is ~15:1, H6 `(91,113,145)` is ~4.9:1, the 
 
 ```
 ╭  Contents ────────────────╮
-│▸ mdless                    │
+│▸ mdmost                    │
 │    What it is not          │
 │    Install                 │
 ```

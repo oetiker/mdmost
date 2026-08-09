@@ -1,11 +1,11 @@
-//! The contract [`highlight`](mdless::highlight::highlight) owes its callers: line
+//! The contract [`highlight`](mdmost::highlight::highlight) owes its callers: line
 //! semantics, text preservation, no wrapping, no panics, and a bounded cost.
 
 use std::time::Instant;
 
-use mdless::highlight::highlight;
-use mdless::text::display_width;
-use mdless::theme::Theme;
+use mdmost::highlight::highlight;
+use mdmost::text::display_width;
+use mdmost::theme::Theme;
 
 /// Concatenating the returned lines must reproduce the input, minus line endings and
 /// with tabs expanded — the highlighter colours text, it never rewrites it.

@@ -1,9 +1,9 @@
 # Usability review 2 — driving the real binary
 
-**Verdict: yes — I would reach for `mdless` instead of `less` tomorrow for reading Markdown.**
+**Verdict: yes — I would reach for `mdmost` instead of `less` tomorrow for reading Markdown.**
 
 Method: release build from a private target dir
-(`/scratch/oetiker/cargo-target-mdless-qa-use2`), driven for real in a detached tmux
+(`/scratch/oetiker/cargo-target-mdmost-qa-use2`), driven for real in a detached tmux
 session at 120x32 (and 200x45, 70x24, 60x20, 40x12, 20x6, 10x3), with `send-keys` /
 `capture-pane`. Every quoted block below is captured pane text. Corpus: a 60-section
 generated document, a 14-column/335-column-wide document, a 1.7 MB / 4000-heading
@@ -35,8 +35,8 @@ bogus = 1
 ```
 
 ```
-$ mdless --config c.toml --render-once --width 30 h.md | cat -v
-mdless: …/c.toml:2: invalid config key `bogus`: unknown field `bogus`, expected one of
+$ mdmost --config c.toml --render-once --width 30 h.md | cat -v
+mdmost: …/c.toml:2: invalid config key `bogus`: unknown field `bogus`, expected one of
   `theme`, `icons`, `line_numbers`, `mouse`, `scroll_step`, `toc`, `keys`, `themes`
  M-oM-^HM-^Y H
 ```
@@ -49,8 +49,8 @@ This is not academic, because **the README's own configuration example triggers 
 Copying the block from the README verbatim:
 
 ```
-$ mdless --config readme.toml --render-once --width 40 noheadings.md
-mdless: …/readme.toml:4: invalid config key `toc_open`: unknown field `toc_open`,
+$ mdmost --config readme.toml --render-once --width 40 noheadings.md
+mdmost: …/readme.toml:4: invalid config key `toc_open`: unknown field `toc_open`,
   expected one of `theme`, `icons`, `line_numbers`, `mouse`, `scroll_step`, `toc`, …
 ```
 
@@ -59,7 +59,7 @@ is `toc`, and there is no `toc_width` at all. So the *documented* starting confi
 costs the user their theme, their icons setting, their key bindings and their custom
 `[themes.*]` table, all at once.
 
-And interactively you never see why. Running `mdless --config b.toml h.md` in tmux, the
+And interactively you never see why. Running `mdmost --config b.toml h.md` in tmux, the
 document renders with Nerd icons (config dropped) and after quitting the warning is gone
 — it went to stderr before the alternate screen was entered, and the restore wipes it:
 
@@ -78,9 +78,9 @@ the other two error classes. An unknown *action* costs only that binding, and an
 *theme* falls back with a message — both leave the rest of the file applied:
 
 ```
-mdless: …/d.toml:3: invalid config key `ctrl-n`: unknown action `no_such_action`
+mdmost: …/d.toml:3: invalid config key `ctrl-n`: unknown action `no_such_action`
  M-bM-^WM-^F H          ← icons = false still applied
-mdless: …/e.toml:2: invalid config key `theme`: unknown theme `nope`, using `dark`
+mdmost: …/e.toml:2: invalid config key `theme`: unknown theme `nope`, using `dark`
  M-bM-^WM-^F H          ← icons = false still applied
 ```
 
@@ -341,7 +341,7 @@ direction-relative repeat, and a clear `no match for \`zzzznotfound\``.
 with a config containing only `[themes.midnight] base = "dark"`, `t` gave
 `theme: light` → `theme: midnight` → `theme: dark`. `--theme light` and
 `--theme midnight` both start in that theme; `--theme nosuch` prints
-`mdless: unknown theme \`nosuch\`, using the dark theme` and carries on, exit 0.
+`mdmost: unknown theme \`nosuch\`, using the dark theme` and carries on, exit 0.
 
 **Every key the overlay advertises was pressed and does what it says**, including the ones
 easy to leave untested: `F1` (opens the overlay identically to `h`), `Ctrl-f` (0% → 8%),
@@ -372,7 +372,7 @@ auto-closes when the terminal gets too narrow and the status bar degrades gracef
 (`   89%      h help`). Even 10x3 renders a sensible frame and recovers on the way back up:
 
 ```
-◆ mdless ▄
+◆ mdmost ▄
 ──────────
  │  h help
 ```
@@ -381,9 +381,9 @@ auto-closes when the terminal gets too narrow and the status bar degrades gracef
 a second, `G`, `/Chapter 3999` and `Tab` all with no perceptible delay.
 
 **Command-line hygiene.** `nonexistent.md` → clear message, exit 1. A directory → `Is a
-directory`, exit 1. Bad flag → clap error, exit 2. `mdless long.md | head -2` → two lines,
-no SIGPIPE panic. `mdless wide.md | cat` → plain text (`--render-once` implied).
-`cat long.md | mdless` → fully interactive with `(standard input)` in the status bar, `G`
+directory`, exit 1. Bad flag → clap error, exit 2. `mdmost long.md | head -2` → two lines,
+no SIGPIPE panic. `mdmost wide.md | cat` → plain text (`--render-once` implied).
+`cat long.md | mdmost` → fully interactive with `(standard input)` in the status bar, `G`
 and `Tab` both working from `/dev/tty`. `Ctrl-c` exits 0 with the terminal left sane.
 
 **Degenerate documents.** An empty file shows `(empty document)` with `no headings` in the

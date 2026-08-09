@@ -11,10 +11,10 @@
 //! Every case runs under both [`RenderOptions`] settings, because the glyph set and
 //! the code gutter both change what is drawn and neither may break the width rule.
 
-use mdless::doc::Doc;
-use mdless::render::{RenderOptions, render_document};
-use mdless::text::display_width;
-use mdless::theme::Theme;
+use mdmost::doc::Doc;
+use mdmost::render::{RenderOptions, render_document};
+use mdmost::text::display_width;
+use mdmost::theme::Theme;
 
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;

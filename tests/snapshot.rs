@@ -15,10 +15,10 @@
 
 use std::path::Path;
 
-use mdless::canvas::Canvas;
-use mdless::doc::{Doc, NodeKind};
-use mdless::render::{RenderOptions, render_document};
-use mdless::theme::Theme;
+use mdmost::canvas::Canvas;
+use mdmost::doc::{Doc, NodeKind};
+use mdmost::render::{RenderOptions, render_document};
+use mdmost::theme::Theme;
 
 /// The options the snapshots are taken under.
 ///
@@ -38,7 +38,7 @@ const WIDTHS: [u16; 3] = [40, 80, 120];
 /// the subsystem before anyone opens the file, and an unrelated change touches one
 /// snapshot rather than a six-hundred-line one.
 ///
-/// They are also meant to be paged through by a human — `mdless tests/corpus/lists.md` —
+/// They are also meant to be paged through by a human — `mdmost tests/corpus/lists.md` —
 /// which is the other reason they are separate: one screenful per concern.
 const EXERCISER: [&str; 8] = [
     "headings_text.md",
@@ -72,7 +72,7 @@ fn fixture(name: &str) -> String {
 /// This snapshots the parse stage independently of any rendering, so a change in
 /// layout cannot mask a change in parsing.
 fn outline(doc: &Doc) -> String {
-    fn walk(node: &mdless::doc::Node, depth: usize, out: &mut String) {
+    fn walk(node: &mdmost::doc::Node, depth: usize, out: &mut String) {
         let label = match &node.kind {
             NodeKind::Heading { level, id } => format!("Heading(h{level}, #{id})"),
             NodeKind::CodeBlock { language, .. } => {
@@ -106,7 +106,7 @@ fn outline(doc: &Doc) -> String {
 
 /// Shortens long literals so the snapshot stays readable.
 fn elide(text: &str) -> String {
-    let trimmed = mdless::text::truncate_to_width(text, 40);
+    let trimmed = mdmost::text::truncate_to_width(text, 40);
     if trimmed.len() == text.len() {
         text.to_string()
     } else {
@@ -193,7 +193,7 @@ fn rendering_is_idempotent_and_width_exact() {
             pretty_assertions::assert_eq!(first.plain_text(), second.plain_text());
             for row in 0..first.height() {
                 assert_eq!(
-                    mdless::text::display_width(&first.row_text(row)),
+                    mdmost::text::display_width(&first.row_text(row)),
                     usize::from(width),
                     "{name}: row {row} at width {width} is not exactly {width} columns"
                 );

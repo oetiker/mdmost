@@ -9,7 +9,7 @@ const README: &str = include_str!("../../README.md");
 
 /// A throwaway path, used only in error messages.
 fn path() -> &'static Path {
-    Path::new("/tmp/mdless/config.toml")
+    Path::new("/tmp/mdmost/config.toml")
 }
 
 #[test]
@@ -282,7 +282,7 @@ fn a_bad_colour_costs_that_slot_and_not_the_theme() {
 #[test]
 fn a_named_config_file_that_is_missing_is_reported() {
     // The default config being absent is silent; a file the user named is a typo.
-    let loaded = Config::load_from(Path::new("/nonexistent/mdless/config.toml"));
+    let loaded = Config::load_from(Path::new("/nonexistent/mdmost/config.toml"));
     assert_eq!(loaded.problems.len(), 1);
     assert_eq!(loaded.config, Config::default());
 }

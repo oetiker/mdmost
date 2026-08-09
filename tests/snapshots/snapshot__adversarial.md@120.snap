@@ -2,10 +2,10 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
-           _ _             _           _                  _          _                                                  
-  _ __  __| | |___ ______ | |_ ___ _ _| |_ _  _ _ _ ___  | |_ ___ __| |_                                                
- | '  \/ _` | / -_|_-<_-< |  _/ _ \ '_|  _| || | '_/ -_) |  _/ -_|_-<  _|                                               
- |_|_|_\__,_|_\___/__/__/  \__\___/_|  \__|\_,_|_| \___|  \__\___/__/\__|                                               
+           _              _     _           _                  _          _                                             
+  _ __  __| |_ __  ___ __| |_  | |_ ___ _ _| |_ _  _ _ _ ___  | |_ ___ __| |_                                           
+ | '  \/ _` | '  \/ _ (_-<  _| |  _/ _ \ '_|  _| || | '_/ -_) |  _/ -_|_-<  _|                                          
+ |_|_|_\__,_|_|_|_\___/__/\__|  \__\___/_|  \__|\_,_|_| \___|  \__\___/__/\__|                                          
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                                                                                                         
  A paragraph with emphasis, strong, strikethrough, inline code, a link (https://example.com) and an autolink            
@@ -113,7 +113,7 @@ expression: canvas.plain_text()
                                                                                                                         
  ╭ mermaid ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
  │ this is not valid mermaid at all                                                                                   │ 
- ╰ not a diagram type — mdless draws flowchart, sequenceDiagram, classDiagram, erDiagram, stateDiagram-v2, pie, gantt ╯ 
+ ╰ not a diagram type — mdmost draws flowchart, sequenceDiagram, classDiagram, erDiagram, stateDiagram-v2, pie, gantt ╯ 
                                                                                                                         
  HTML is not supported                                                                                                  
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 

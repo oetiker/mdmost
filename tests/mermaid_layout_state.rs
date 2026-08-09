@@ -3,12 +3,12 @@
 //! Every case is a hand-built [`StateDiagram`], so a change in `mermaid::parse` can
 //! never silently rewrite what these snapshots check.
 
-use mdless::mermaid::ast::{
+use mdmost::mermaid::ast::{
     Direction, Label, NotePlacement, StateDiagram, StateEndpoint, StateId, StateKind, StateNode,
     StateNote, StateScope, Transition,
 };
-use mdless::mermaid::layout::state;
-use mdless::theme::Theme;
+use mdmost::mermaid::layout::state;
+use mdmost::theme::Theme;
 
 /// A state with a key and a kind.
 fn state(key: &str, kind: StateKind) -> StateNode {

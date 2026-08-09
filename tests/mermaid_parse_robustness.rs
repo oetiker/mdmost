@@ -4,8 +4,8 @@
 //! reason and must never panic — the block renderer turns the reason into an
 //! "unsupported mermaid syntax: …" caption.
 
-use mdless::error::MermaidError;
-use mdless::mermaid::parse::parse;
+use mdmost::error::MermaidError;
+use mdmost::mermaid::parse::parse;
 use proptest::prelude::*;
 
 /// The reason string of the error `src` produces, failing the test when it parses.
@@ -190,10 +190,10 @@ fn extreme_unix_timestamps_are_clamped_rather_than_overflowing() {
         "  a : -9223372036854775000, 1d\n",
         "  b : 9223372036854775000, 1d\n",
     );
-    let diagram = mdless::mermaid::parse::parse(src).expect("the chart parses");
-    let theme = mdless::theme::Theme::default_dark();
+    let diagram = mdmost::mermaid::parse::parse(src).expect("the chart parses");
+    let theme = mdmost::theme::Theme::default_dark();
     for width in [1u16, 20, 80, 200] {
-        let canvas = mdless::mermaid::render_diagram(&diagram, width, &theme);
+        let canvas = mdmost::mermaid::render_diagram(&diagram, width, &theme);
         if let Ok(canvas) = canvas {
             assert_eq!(canvas.width(), width);
         }
@@ -209,8 +209,8 @@ fn an_absurd_duration_is_clamped() {
         "section s\n",
         "  a : 0, 99999999999999d\n",
     );
-    let diagram = mdless::mermaid::parse::parse(src).expect("the chart parses");
-    let theme = mdless::theme::Theme::default_dark();
-    let canvas = mdless::mermaid::render_diagram(&diagram, 80, &theme).expect("it draws");
+    let diagram = mdmost::mermaid::parse::parse(src).expect("the chart parses");
+    let theme = mdmost::theme::Theme::default_dark();
+    let canvas = mdmost::mermaid::render_diagram(&diagram, 80, &theme).expect("it draws");
     assert_eq!(canvas.width(), 80);
 }

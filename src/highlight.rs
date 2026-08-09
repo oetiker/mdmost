@@ -4,7 +4,7 @@
 //! of a fenced code block into styled [`Line`]s:
 //!
 //! ```
-//! use mdless::{highlight::highlight, theme::Theme};
+//! use mdmost::{highlight::highlight, theme::Theme};
 //!
 //! let theme = Theme::default_dark();
 //! let lines = highlight(Some("rust"), "let x = 1;\n", &theme);
@@ -12,7 +12,7 @@
 //! assert_eq!(lines[0].text(), "let x = 1;");
 //! ```
 //!
-//! Three properties are load-bearing for the rest of `mdless` (design spec §8):
+//! Three properties are load-bearing for the rest of `mdmost` (design spec §8):
 //!
 //! * **Colours come from the active [`Theme`], never from a `syntect` theme.** The
 //!   scope → semantic-slot table lives in [`scopes`]; see its documentation for the
@@ -49,13 +49,13 @@ pub const TAB_WIDTH: usize = 4;
 /// Blocks larger than this (in bytes) are rendered as plain themed text.
 ///
 /// Highlighting cost grows with the input, and a code block this large is being
-/// skimmed, not read. The guard keeps `mdless` responsive on generated files.
+/// skimmed, not read. The guard keeps `mdmost` responsive on generated files.
 pub const MAX_HIGHLIGHT_BYTES: usize = 256 * 1024;
 
 /// Blocks with more lines than this are rendered as plain themed text.
 pub const MAX_HIGHLIGHT_LINES: usize = 10_000;
 
-/// Syntax definitions written for `mdless`, compiled into the binary.
+/// Syntax definitions written for `mdmost`, compiled into the binary.
 ///
 /// Each is written under the project's own licence rather than vendored, and each
 /// declares its `file_extensions`, so the ordinary token lookup finds it with no alias
@@ -195,7 +195,7 @@ pub fn syntax_name(lang: Option<&str>) -> Option<&'static str> {
 /// [`ALIASES`]; the result (or the token itself) is then handed to
 /// [`SyntaxSet::find_syntax_by_token`], which matches syntax names and file extensions
 /// case-insensitively. [`EXTRA_SYNTAX_SET`] is consulted first, so a definition written
-/// for `mdless` always wins over a same-named one in [`BUNDLED_SYNTAXES`].
+/// for `mdmost` always wins over a same-named one in [`BUNDLED_SYNTAXES`].
 /// `None` means "render as plain text".
 ///
 /// The set is returned alongside the syntax because a [`ParseState`] must be driven by

@@ -4,7 +4,7 @@ Design doc. Revision 2, 2026-08-09, after two independent hostile reviews (one
 auditing mechanics against the code, one driving the binary in tmux as a
 reader). Revision 1 is in git; every change below is traceable to a finding.
 
-Supplements `2026-08-08-mdless-design.md` §7.3 and §8, which promise horizontal
+Supplements `2026-08-08-mdmost-design.md` §7.3 and §8, which promise horizontal
 scrolling for over-wide blocks. This extends that promise to diagrams — and
 first repairs the scroll model it would extend.
 

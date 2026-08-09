@@ -2,7 +2,7 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- mdless torture test                    
+ mdmost torture test                    
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                         
  A paragraph with emphasis, strong,     
@@ -129,7 +129,7 @@ expression: canvas.plain_text()
                                         
  ╭ mermaid ───────────────────────────╮ 
  │ this is not valid mermaid at all   │ 
- ╰ not a diagram type — mdless draws… ╯ 
+ ╰ not a diagram type — mdmost draws… ╯ 
                                         
  HTML is not supported                  
  ────────────────────────────────────── 

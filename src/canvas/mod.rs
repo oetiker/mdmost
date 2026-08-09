@@ -21,8 +21,8 @@
 //! they modify.
 //!
 //! ```
-//! use mdless::canvas::Canvas;
-//! use mdless::theme::Theme;
+//! use mdmost::canvas::Canvas;
+//! use mdmost::theme::Theme;
 //!
 //! let theme = Theme::default_dark();
 //! let mut canvas = Canvas::new(10, 1, theme.base());

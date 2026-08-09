@@ -5,7 +5,7 @@
 //! never pick colours themselves — they ask the theme for the semantic slot they need.
 //!
 //! ```
-//! use mdless::theme::Theme;
+//! use mdmost::theme::Theme;
 //!
 //! let theme = Theme::default_dark();
 //! let h1 = theme.heading(1);

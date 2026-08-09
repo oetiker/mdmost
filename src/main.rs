@@ -1,14 +1,14 @@
-//! The `mdless` binary.
+//! The `mdmost` binary.
 //!
 //! This is the CLI edge of the program: argument parsing, stdin handling and the
 //! `--render-once` dump mode live here, and this is the only place `anyhow` is used.
 //!
 //! Design spec §11 in one paragraph: the document comes from a file or from standard
 //! input; keyboard input is read from `/dev/tty` when standard input is a pipe, so
-//! `cat x.md | mdless` and `PAGER=mdless` both work; when standard output is not a
-//! terminal, `--render-once` is implied so `mdless x.md | cat` produces text rather
+//! `cat x.md | mdmost` and `PAGER=mdmost` both work; when standard output is not a
+//! terminal, `--render-once` is implied so `mdmost x.md | cat` produces text rather
 //! than escape soup. Exit codes are 0 for success, 1 for unreadable input and 2 for
-//! bad arguments; the reader of a pipe closing it early (`mdless x.md | head`) is not
+//! bad arguments; the reader of a pipe closing it early (`mdmost x.md | head`) is not
 //! a failure and also exits 0, silently.
 
 use std::io::{self, IsTerminal, Read, Write};
@@ -17,11 +17,11 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
-use mdless::config::Config;
-use mdless::doc::Doc;
-use mdless::render::RenderOptions;
-use mdless::theme::Theme;
-use mdless::tui::{self, App, AppOptions, dump};
+use mdmost::config::Config;
+use mdmost::doc::Doc;
+use mdmost::render::RenderOptions;
+use mdmost::theme::Theme;
+use mdmost::tui::{self, App, AppOptions, dump};
 
 /// Exit code for an input that could not be read.
 const EXIT_INPUT: u8 = 1;
@@ -32,7 +32,7 @@ const FALLBACK_WIDTH: u16 = 80;
 
 /// A full-screen terminal pager for a single Markdown document.
 #[derive(Debug, Parser)]
-#[command(name = "mdless", version, about, long_about = None)]
+#[command(name = "mdmost", version, about, long_about = None)]
 struct Cli {
     /// The document to show. Omit it, or pass `-`, to read standard input.
     file: Option<PathBuf>,
@@ -68,9 +68,9 @@ struct Cli {
 
     /// Use plain Unicode instead of Nerd Font glyphs, at the same display width.
     ///
-    /// By default mdless checks whether an installed font has the glyphs and uses plain
+    /// By default mdmost checks whether an installed font has the glyphs and uses plain
     /// Unicode whenever it cannot tell — over SSH, for instance, where the fonts on this
-    /// machine say nothing about the terminal at the other end. Set MDLESS_ICONS=1 or
+    /// machine say nothing about the terminal at the other end. Set MDMOST_ICONS=1 or
     /// `icons = true` to override the check for good.
     #[arg(long)]
     no_icons: bool,
@@ -83,7 +83,7 @@ struct Cli {
     /// pane, and dragging over the document copies the Markdown source behind it.
     ///
     /// Off by default because capturing takes the terminal's own drag-select away.
-    /// `mdless` replaces it with a selection of its own that copies the *Markdown
+    /// `mdmost` replaces it with a selection of its own that copies the *Markdown
     /// source* behind the cells, but the terminal's is the one the reader already knows
     /// and it outlives the pager.
     #[arg(long)]
@@ -102,7 +102,7 @@ struct Cli {
     /// The syntax definitions compiled into this binary are other people's work, and the
     /// MIT, BSD and Apache ones among them require their notices to be reproduced in a
     /// binary distribution. This is where they are. The output is Markdown, so
-    /// `mdless --licenses | mdless -` reads it.
+    /// `mdmost --licenses | mdmost -` reads it.
     #[arg(long)]
     licenses: bool,
 }
@@ -119,14 +119,14 @@ fn main() -> ExitCode {
     };
     match run(cli) {
         Ok(code) => code,
-        // `mdless x.md | head` is the ordinary `$PAGER` idiom, and the reader closing
+        // `mdmost x.md | head` is the ordinary `$PAGER` idiom, and the reader closing
         // the pipe is not a failure: pagers exit quietly (usability P12, visual P17).
         Err(error) if is_broken_pipe(&error) => ExitCode::SUCCESS,
         Err(error) => {
             // The terminal may or may not have been taken over; restoring twice is
             // harmless and restoring not at all is not.
             tui::restore_terminal();
-            let _ = writeln!(io::stderr(), "mdless: {error:#}");
+            let _ = writeln!(io::stderr(), "mdmost: {error:#}");
             ExitCode::from(EXIT_INPUT)
         }
     }
@@ -134,9 +134,9 @@ fn main() -> ExitCode {
 
 /// Whether to draw Nerd Font glyphs, from the four places that may have an opinion.
 ///
-/// In order of authority: the command line, then `MDLESS_ICONS`, then the config file,
+/// In order of authority: the command line, then `MDMOST_ICONS`, then the config file,
 /// then — only if nobody has said — detection, which falls back to plain Unicode
-/// whenever it cannot establish that the glyphs will render (see [`mdless::nerdfont`]).
+/// whenever it cannot establish that the glyphs will render (see [`mdmost::nerdfont`]).
 ///
 /// The nearer answer wins outright rather than combining with the others, so
 /// `--no-icons` turns glyphs off for one run of a config that enables them, and
@@ -151,15 +151,15 @@ fn resolve_icons(cli: &Cli, configured: Option<bool>) -> bool {
     if let Some(from_env) = env_icons() {
         return from_env;
     }
-    configured.unwrap_or_else(mdless::nerdfont::detect)
+    configured.unwrap_or_else(mdmost::nerdfont::detect)
 }
 
-/// `MDLESS_ICONS` as a yes or a no, or `None` if it is unset or not either.
+/// `MDMOST_ICONS` as a yes or a no, or `None` if it is unset or not either.
 ///
 /// An unrecognised value is ignored rather than rejected: this is a convenience meant
 /// for a shell profile, and refusing to start over it would be a poor trade.
 fn env_icons() -> Option<bool> {
-    let raw = std::env::var("MDLESS_ICONS").ok()?;
+    let raw = std::env::var("MDMOST_ICONS").ok()?;
     match raw.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
         "0" | "false" | "no" | "off" => Some(false),
@@ -183,13 +183,13 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     if cli.licenses {
         let stdout = io::stdout();
         let mut out = stdout.lock();
-        out.write_all(mdless::highlight::syntax_acknowledgements().as_bytes())?;
+        out.write_all(mdmost::highlight::syntax_acknowledgements().as_bytes())?;
         out.flush()?;
         return Ok(ExitCode::SUCCESS);
     }
 
     if cli.width == Some(0) {
-        let _ = writeln!(io::stderr(), "mdless: --width must be at least 1");
+        let _ = writeln!(io::stderr(), "mdmost: --width must be at least 1");
         return Ok(ExitCode::from(EXIT_USAGE));
     }
 
@@ -198,18 +198,18 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         None => Config::load(),
     };
     for problem in &loaded.problems {
-        let _ = writeln!(io::stderr(), "mdless: {problem}");
+        let _ = writeln!(io::stderr(), "mdmost: {problem}");
     }
     let mut config = loaded.config;
     if let Some(problem) = apply_body_width(&cli, &mut config) {
-        let _ = writeln!(io::stderr(), "mdless: {problem}");
+        let _ = writeln!(io::stderr(), "mdmost: {problem}");
         return Ok(ExitCode::from(EXIT_USAGE));
     }
 
     let (source, title) = match read_input(cli.file.as_deref()) {
         Ok(pair) => pair,
         Err(error) => {
-            let _ = writeln!(io::stderr(), "mdless: {error}");
+            let _ = writeln!(io::stderr(), "mdmost: {error}");
             return Ok(ExitCode::from(EXIT_INPUT));
         }
     };
@@ -255,7 +255,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             config_path: cli
                 .config
                 .clone()
-                .or_else(mdless::config::Config::default_path),
+                .or_else(mdmost::config::Config::default_path),
             width: cli.width,
         },
     );
@@ -278,11 +278,11 @@ fn apply_body_width(cli: &Cli, config: &mut Config) -> Option<String> {
         config.body_width = None;
         return None;
     }
-    if !mdless::config::BODY_WIDTH_RANGE.contains(&width) {
+    if !mdmost::config::BODY_WIDTH_RANGE.contains(&width) {
         return Some(format!(
             "--body-width must be 0 (no cap) or between {} and {}",
-            mdless::config::BODY_WIDTH_RANGE.start(),
-            mdless::config::BODY_WIDTH_RANGE.end()
+            mdmost::config::BODY_WIDTH_RANGE.start(),
+            mdmost::config::BODY_WIDTH_RANGE.end()
         ));
     }
     config.body_width = Some(width);
@@ -305,7 +305,7 @@ fn render_once(
     let theme = match config.resolve_theme(theme_name) {
         Ok(theme) => theme,
         Err(error) => {
-            let _ = writeln!(io::stderr(), "mdless: {error}, using the dark theme");
+            let _ = writeln!(io::stderr(), "mdmost: {error}, using the dark theme");
             Theme::default_dark()
         }
     };
@@ -316,7 +316,7 @@ fn render_once(
             FALLBACK_WIDTH
         }
     });
-    let canvas = mdless::render::render_document(doc, width.max(1), &theme, options);
+    let canvas = mdmost::render::render_document(doc, width.max(1), &theme, options);
 
     let stdout = io::stdout();
     let mut out = stdout.lock();
@@ -330,7 +330,7 @@ fn render_once(
 }
 
 /// Reads the document and works out what to call it in the status bar.
-fn read_input(file: Option<&Path>) -> Result<(String, String), mdless::Error> {
+fn read_input(file: Option<&Path>) -> Result<(String, String), mdmost::Error> {
     let from_stdin = match file {
         None => true,
         Some(path) => path.as_os_str() == "-",
@@ -339,14 +339,14 @@ fn read_input(file: Option<&Path>) -> Result<(String, String), mdless::Error> {
         let mut source = String::new();
         io::stdin()
             .read_to_string(&mut source)
-            .map_err(|source_error| mdless::Error::Input {
+            .map_err(|source_error| mdmost::Error::Input {
                 path: PathBuf::from("-"),
                 source: source_error,
             })?;
         return Ok((source, "(standard input)".to_string()));
     }
     let path = file.unwrap_or(Path::new("-"));
-    let source = std::fs::read_to_string(path).map_err(|source| mdless::Error::Input {
+    let source = std::fs::read_to_string(path).map_err(|source| mdmost::Error::Input {
         path: path.to_path_buf(),
         source,
     })?;

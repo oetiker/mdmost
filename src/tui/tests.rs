@@ -3398,7 +3398,7 @@ fn the_copy_report_claims_only_what_the_route_can_prove() {
 }
 
 /// An X11 or Wayland selection belongs to a process, so a copy that only the local
-/// display server holds is a copy that ends when `mdless` does — unless a clipboard
+/// display server holds is a copy that ends when `mdmost` does — unless a clipboard
 /// manager takes it over, which is exactly the thing we cannot check. The bar therefore
 /// says what it knows: this one is held while the pager runs.
 #[test]
@@ -3411,7 +3411,7 @@ fn the_copy_report_marks_a_copy_only_this_process_holds() {
         "{text:?}"
     );
     assert!(
-        text.contains("while mdless runs"),
+        text.contains("while mdmost runs"),
         "the one thing this route cannot promise is surviving the exit: {text:?}"
     );
     // And the route that did reach the terminal emulator must not carry the caveat:
@@ -3420,7 +3420,7 @@ fn the_copy_report_marks_a_copy_only_this_process_holds() {
         !Delivery::Confirmed
             .message(47, false)
             .0
-            .contains("while mdless runs")
+            .contains("while mdmost runs")
     );
 }
 
@@ -3452,7 +3452,7 @@ fn a_local_copy_stays_owned_until_it_is_released() {
         eprintln!("skipped: no display server to own a selection");
         return;
     }
-    let Some(first) = super::clipboard::local_for_test("mdless clipboard test one") else {
+    let Some(first) = super::clipboard::local_for_test("mdmost clipboard test one") else {
         eprintln!(
             "skipped: no local clipboard was attempted — either a remote session, where \
              writing to this end's clipboard would be a mistake, or a build without the \
@@ -3470,7 +3470,7 @@ fn a_local_copy_stays_owned_until_it_is_released() {
     );
     // The second copy is the case a naive background-thread design gets wrong: the
     // first owner has to yield. Re-using one handle makes it a non-event.
-    let second = super::clipboard::local_for_test("mdless clipboard test two");
+    let second = super::clipboard::local_for_test("mdmost clipboard test two");
     assert_eq!(
         second,
         Some(Ok(())),

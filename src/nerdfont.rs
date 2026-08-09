@@ -15,12 +15,12 @@
 //! symmetric, so the tie does not go to the prettier answer.
 //!
 //! Anyone who knows better can say so, and their answer is taken without argument:
-//! `--icons` / `--no-icons`, `MDLESS_ICONS=1` / `MDLESS_ICONS=0`, or `icons` in the
+//! `--icons` / `--no-icons`, `MDMOST_ICONS=1` / `MDMOST_ICONS=0`, or `icons` in the
 //! config file. Detection only decides when nobody has.
 //!
 //! # What counts as evidence
 //!
-//! One thing: does an installed font cover *every* private-use code point mdless can
+//! One thing: does an installed font cover *every* private-use code point mdmost can
 //! draw? That question is put to fontconfig, and the code points are enumerated from the
 //! glyph tables themselves rather than written out again here, so adding a glyph
 //! automatically makes the probe stricter instead of quietly escaping it.
@@ -35,7 +35,7 @@
 //!   terminal drawing the pixels, which is somewhere else entirely.
 //!
 //! The SSH case is the one where a wrong guess is most annoying and the reason
-//! `MDLESS_ICONS=1` exists: it is the natural thing to export in the shell profile on a
+//! `MDMOST_ICONS=1` exists: it is the natural thing to export in the shell profile on a
 //! server you always reach from the same well-equipped terminal.
 
 use std::process::{Command, Stdio};
@@ -55,7 +55,7 @@ pub struct Signals {
     pub stdout_is_terminal: bool,
     /// Whether this looks like an SSH session.
     pub remote: bool,
-    /// Whether an installed font covers every glyph mdless draws — `None` when the
+    /// Whether an installed font covers every glyph mdmost draws — `None` when the
     /// question could not be put, which is not the same as `Some(false)` but leads to
     /// the same answer.
     pub fonts_cover_our_glyphs: Option<bool>,
@@ -107,7 +107,7 @@ fn term_is_hopeless(term: &Option<String>) -> bool {
     }
 }
 
-/// Every private-use code point mdless can draw, gathered from the glyph tables.
+/// Every private-use code point mdmost can draw, gathered from the glyph tables.
 ///
 /// Duplicates are left in; the query is built from a small set and fontconfig does not
 /// care. What matters is that nothing is *missing*, which is guaranteed by reading the

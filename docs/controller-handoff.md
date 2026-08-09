@@ -1,4 +1,4 @@
-# Controller Handoff — mdless
+# Controller Handoff — mdmost
 
 > Starter pack for the next controller session. This handoff lives in ONE
 > worktree — run `git worktree list` first and confirm this is the workstream
@@ -12,7 +12,7 @@
 
 Handoff commit: the last commit touching this file — `git log -1 -- docs/controller-handoff.md`
 Date: 2026-08-09   Reason: context budget
-Worktree / branch: main checkout (`/home/oetiker/checkouts/mdless`) @ `main`
+Worktree / branch: main checkout (`/home/oetiker/checkouts/mdmost`) @ `main`
 Trunk at time of writing: `main` @ `bd87674` — **reader: if trunk has moved, §2
 is provisionally stale; if trunk now contains this branch's HEAD, this file is a
 tombstone** (`git merge-base --is-ancestor HEAD main`). At that commit: 924
@@ -23,14 +23,14 @@ Sibling worktrees: 33 entries under `/scratch/oetiker/claude-worktrees/`, one pe
 `icons-autodetect` (tombstone only) showed as unmerged;
 `checkbox-double-indent` was merged into `main` as `bd87674` after this file was
 first written, and its worktree still holds seven untracked scratch scripts. `git worktree list` + `git branch -a --no-merged main` is the only
-authority. Four dead scratch worktrees from the original build (`mdless-gate`,
+authority. Four dead scratch worktrees from the original build (`mdmost-gate`,
 `-layout`, `-qa`, `-rendercheck`) the owner chose to leave alone. **A second
 controller session was live in this repo during this one** — check `pgrep -af
-mdless` and for other sessions' target dirs before assuming a surprise is yours.
+mdmost` and for other sessions' target dirs before assuming a surprise is yours.
 
 ## 1. Mission
 
-`mdless` is a full-screen terminal pager for a single Markdown document — "as
+`mdmost` is a full-screen terminal pager for a single Markdown document — "as
 pleasant to look at as btop, as pleasant to use as less". Rust + ratatui.
 GFM including tables with Markdown inside cells, syntax-highlighted code, and
 seven Mermaid families drawn as Unicode box art. Reflows on resize, TOC pane,
@@ -179,7 +179,7 @@ has not answered. **Do not delete without asking.**
     and drag-copy. Wrong. `unicode-width` reports 1 because PUA is
     East_Asian_Width **Ambiguous** — Unicode declines to define private-use code
     points at all — and *terminals compute from the same UAX #11 tables*, so
-    mdless agrees with the terminal exactly. The real effect is narrow: the
+    mdmost agrees with the terminal exactly. The real effect is narrow: the
     font's ink overflows a correctly-sized cell. **A width disagreement between
     font and table is a painting problem, not a counting problem, unless you have
     shown the terminal disagrees too.** The cure for such a problem is still a
@@ -253,13 +253,13 @@ has not answered. **Do not delete without asking.**
 - 4-core cap: `CARGO_BUILD_JOBS=2` on every cargo invocation.
 - **tmux: kill only your own session, never `kill-server`** — an agent did once
   and may have destroyed a colleague's work mid-run.
-- **Leave no stray `mdless` processes.** Check `pgrep -f mdless` and kill only
+- **Leave no stray `mdmost` processes.** Check `pgrep -f mdmost` and kill only
   your own; other agents and other sessions run theirs concurrently.
 - **Nothing has ever been pushed to any remote.** Do not push without asking.
 
 ## 6. Where the detail lives
 
-- **Design spec (the authority):** `docs/superpowers/specs/2026-08-08-mdless-design.md`.
+- **Design spec (the authority):** `docs/superpowers/specs/2026-08-08-mdmost-design.md`.
 - **Feature spec:** `docs/superpowers/specs/2026-08-09-wide-diagram-scrolling-design.md`
   (revision 2 — revision 1 is in git and is wrong in four ways).
 - **Maintainer notes:** `docs/maintainer-notes.md` — carries the
@@ -343,7 +343,7 @@ has not answered. **Do not delete without asking.**
 - Re-run the gates. Clippy MUST be run as `-- -D warnings` (§4.3); a bare
   `cargo clippy` exit code is blind to the warnings that have twice slipped
   through here:
-  `export CARGO_TARGET_DIR=/scratch/oetiker/cargo-target-mdless-lead && touch src/lib.rs && CARGO_BUILD_JOBS=2 cargo test && CARGO_BUILD_JOBS=2 cargo clippy --all-targets -- -D warnings && cargo fmt --check`
+  `export CARGO_TARGET_DIR=/scratch/oetiker/cargo-target-mdmost-lead && touch src/lib.rs && CARGO_BUILD_JOBS=2 cargo test && CARGO_BUILD_JOBS=2 cargo clippy --all-targets -- -D warnings && cargo fmt --check`
   — and read the exit code, not the tail of a pipe (§4.2). Expect 924 tests and
   913 `#[test]` attributes at the handoff commit.
 - Every width, ratio and contrast measurement in this file and in the QA reviews

@@ -2,7 +2,7 @@
 //!
 //! `syntect` describes every token by a *scope stack* such as
 //! `source.rust meta.function.rust entity.name.function.rust`. Its own themes attach
-//! colours to those scopes; `mdless` deliberately does not use them, because a
+//! colours to those scopes; `mdmost` deliberately does not use them, because a
 //! foreign theme inside a framed code block clashes with the surrounding palette
 //! (design spec §8).
 //!

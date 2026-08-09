@@ -5,13 +5,13 @@
 //! These tests pin which diagrams get that answer, which ones deliberately do not, and
 //! that the numbers everybody is told are true.
 
-use mdless::canvas::Canvas;
-use mdless::doc::Doc;
-use mdless::error::MermaidError;
-use mdless::mermaid::{Fit, render_mermaid, render_mermaid_with};
-use mdless::render::{RenderOptions, render_document};
-use mdless::theme::Theme;
-use mdless::tui::wide::{render_scrollable, scroll_reach};
+use mdmost::canvas::Canvas;
+use mdmost::doc::Doc;
+use mdmost::error::MermaidError;
+use mdmost::mermaid::{Fit, render_mermaid, render_mermaid_with};
+use mdmost::render::{RenderOptions, render_document};
+use mdmost::theme::Theme;
+use mdmost::tui::wide::{render_scrollable, scroll_reach};
 
 /// A chart that exhausts the fit ladder at every terminal width a reader has.
 ///

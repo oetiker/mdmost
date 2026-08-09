@@ -1,12 +1,12 @@
-# mdless — visual design review (harsh)
+# mdmost — visual design review (harsh)
 
-Binary: /home/oetiker/scratch/cargo-target/debug/mdless
+Binary: /home/oetiker/scratch/cargo-target/debug/mdmost
 Reviewed at 3e17fdc, then re-verified at 6546f81 after sequence/pie/gantt mermaid landed.
 B1, B2, B4, B5, B6, B7, B8 were all re-checked against the 6546f81 build and still reproduce.
 Method: `--render-once` matrix at widths 40/60/80/100/120/200 × {icons,--no-icons} × {dark,light},
 plus a real tmux session (`vis`) resized through 100×{10,24,30,50} and 60×30, captured with
 `capture-pane -p` and `capture-pane -pe`.
-Test material: docs/superpowers/specs/2026-08-08-mdless-design.md, tests/corpus/adversarial.md,
+Test material: docs/superpowers/specs/2026-08-08-mdmost-design.md, tests/corpus/adversarial.md,
 and adversarial docs written for this review: headings.md, tables.md, blocks.md, code.md.
 
 Caveat stated up front: this terminal has no Nerd Font. Every claim below about Nerd Font
@@ -32,7 +32,7 @@ their own bg (headings, code blocks, status bar) paint the theme's.
 
     tmux new-session -d -s vis -x 100 -y 30 ; tmux set-option -t vis window-size manual
     tmux resize-window -t vis -x 100 -y 30
-    mdless --no-icons --theme light headings.md
+    mdmost --no-icons --theme light headings.md
     tmux capture-pane -t vis -pe
 
     ^[[1m^[[38;2;26;111;212m^[[48;2;253;252;249m◆ H1 Alpha …          <- H1 row: bg #FDFCF9 (light)
@@ -49,7 +49,7 @@ every frame. A theme that only paints half its elements is not a theme.
 ### B2. Every heading prefix glyph is painted in one fixed accent, not the heading's colour.
 src/render/block.rs:141 uses `theme.block.heading_prefix` — a single Style for all six levels.
 
-    mdless --no-icons h3.md ; tmux capture-pane -t vis -pe
+    mdmost --no-icons h3.md ; tmux capture-pane -t vis -pe
 
     ^[[1m^[[38;2;100;181;255m^[[48;2;17;20;27m▸ ^[[38;2;118;215;160mH3 first
     ^[[1m▹ ^[[38;2;242;208;107mH4                      <- ▹ inherits #64B5FF
@@ -71,8 +71,8 @@ src/render/glyphs.rs:36 / :50.
 set it is worse: `f096` is *both* the H2 prefix and the unchecked-task box, and `f0da`/`f105`
 are H5/H6 *and* list depths 3/4. Verified side by side:
 
-    mdless --render-once --width 80 --no-icons headings.md  ->  "• H5 Echo — deeper still"
-    mdless --render-once --width 80 --no-icons blocks.md    ->  "• level 1"
+    mdmost --render-once --width 80 --no-icons headings.md  ->  "• H5 Echo — deeper still"
+    mdmost --render-once --width 80 --no-icons blocks.md    ->  "• level 1"
 
 Identical marker, opposite meaning. **Should be:** two disjoint families — filled/geometric
 for headings, small/round for bullets — and *nothing* shared with task boxes.
@@ -81,7 +81,7 @@ for headings, small/round for bullets — and *nothing* shared with task boxes.
 `hscroll_max()` (src/tui/app.rs:309) = `canvas.width() - viewport_width()`, and the canvas is
 rendered *at* viewport width. So it is always 0 unless `--width N` exceeds the terminal.
 
-    mdless --no-icons tables.md      # 100×30 tmux
+    mdmost --no-icons tables.md      # 100×30 tmux
     /Column number <Enter>           # jumps to the over-wide table
     <Right> ×10                      # nothing moves
 
@@ -96,7 +96,7 @@ requires the table to become horizontally scrollable instead of being mangled; i
 Even in the one case where hscroll *does* move (`--width 200` on a 100-col terminal), the
 status bar shows nothing, contradicting spec §10 and src/tui/chrome.rs:190.
 
-    mdless --no-icons --width 200 tables.md ; /Column number <Enter> ; <Right>×12
+    mdmost --no-icons --width 200 tables.md ; /Column number <Enter> ; <Right>×12
     (content visibly shifts from "Column number one" to "number two with a long")
      ▤ tables.md │  25% ██       │ § Empty-ish table                       ⌕ Column number 1/5 │ h help
                                    ^ no  → 40/100  chip anywhere
@@ -105,13 +105,13 @@ There is also no `‹` marker on the left edge once scrolled, so both the fact a
 of the offset are invisible.
 
 ### B6. The help overlay silently truncates. At 100×30 you cannot see `q`.
-    mdless --no-icons docs/superpowers/specs/2026-08-08-mdless-design.md   # 100×30
+    mdmost --no-icons docs/superpowers/specs/2026-08-08-mdmost-design.md   # 100×30
     h
 
     │  View                                                    │
     │                  t  Switch to the next theme             │
     │               h F1  Show or hide this help               │
-     ▤ 2026-08-08-mdless╰──────────────────────────────────────╯    h help
+     ▤ 2026-08-08-mdmost╰──────────────────────────────────────╯    h help
 
 The box is cut at the screen edge. `Esc` and `q` — the two keys a stuck user needs — are below
 the fold, with no scroll indicator, no paging, no "more" hint. At 100×10 it shows 8 of ~32 rows.
@@ -133,7 +133,7 @@ The overlay reads as a hole punched in a broken frame, not as a floating panel.
 panel a 1-cell shadow or margin.
 
 ### B8. Footnote references are all rendered `[1]`.
-    mdless --render-once --width 80 --no-icons blocks.md
+    mdmost --render-once --width 80 --no-icons blocks.md
 
     Here is a footnote reference[1] and another[1].      <- source was [^1] and [^long]
     …
@@ -157,7 +157,7 @@ scrollbar occupies column `width`. There is no left margin either — text start
 btop breathes. This does not. One column of gutter on each side would do most of the work.
 
 ### P2. Code-block content has no left padding; tables have it on both sides.
-    mdless --render-once --width 80 --no-icons code.md
+    mdmost --render-once --width 80 --no-icons code.md
 
     │use std::collections::HashMap;                                                │
     │    let mut m: HashMap<&str, i32> = HashMap::new();                           │
@@ -165,14 +165,14 @@ btop breathes. This does not. One column of gutter on each side would do most of
 vs a table row `│ Left       │`. The right side *is* padded (content stops one cell short of the
 border), so the asymmetry is visible as a lean. Turning line numbers on accidentally fixes it:
 
-    mdless --render-once --width 80 --no-icons --config ln.toml code.md   # line_numbers = true
+    mdmost --render-once --width 80 --no-icons --config ln.toml code.md   # line_numbers = true
     │ 1 │ use std::collections::HashMap;                                           │
 
 so the intended look already exists — it is just not applied in the default case. Also the
 line-number gutter `│` does not join the frame (`┬`/`┴` missing at top and bottom).
 
 ### P3. Tables always expand to the full width, however little they contain.
-    mdless --render-once --width 80 --no-icons tables.md
+    mdmost --render-once --width 80 --no-icons tables.md
 
     ╭──────────────────────────────────────────────────────────────────────────────╮
     │ Only                                                                         │
@@ -220,14 +220,14 @@ One link eats an entire table row. Elide the middle, or suppress the URL in narr
 
 ### P8. TOC entries are hard-cut mid-word with no ellipsis, and have no right padding.
     ╭ ≡ Contents ────────────────╮
-    │▸ mdless — design spec      │
+    │▸ mdmost — design spec      │
     │    3. The central architect│
     │      6.2 sequenceDiagram — │
 
 The document area uses `›` for truncation; the TOC uses nothing. Text touches the border.
 Indent step is 4 for level 2 then 2 for level 3 — inconsistent. The pane is a fixed ~30
 columns (30 % of a 100-col terminal) and there is no gap between its border and the document:
-`╮◆ mdless — design spec`.
+`╮◆ mdmost — design spec`.
 
 ### P9. The status-bar meter has no trough and punches a different background into the bar.
     2%    ▤ file.md │   2% ▏        │ § …
@@ -252,7 +252,7 @@ it is `#8A6D00` on the terminal's own background.
 `match 1/13` and `⌕ c.l 1/13` say the same thing twice, 30 columns apart, with a `re` chip and a
 double space between. At width 60 the whole tail is chopped without an ellipsis:
 
-    ▤ 2026-08-08-mdless-design.md │  11% ▉        │ § 3. The ce
+    ▤ 2026-08-08-mdmost-design.md │  11% ▉        │ § 3. The ce
 
 ### P12. The mermaid fallback caption is a stray log line, not a caption.
     ╰──────────────────────────────────────────────────────────╯
@@ -298,7 +298,7 @@ second `Enter` is needed. Without a filter, `j`/`k` + `Enter` jump correctly, an
 matches correctly.
 
 ### P15c. Status-bar segments collide with no separator.
-    ▤ 2026-08-08-mdless-design.md │  46% ███▊     │ § 6. Mermaid subset — acceptance criteria⌕ Canvas 3
+    ▤ 2026-08-08-mdmost-design.md │  46% ███▊     │ § 6. Mermaid subset — acceptance criteria⌕ Canvas 3
 
 The heading segment runs straight into the search chip — no space, no `│` — and `h help` is
 pushed off the end entirely.
@@ -308,16 +308,16 @@ pushed off the end entirely.
 Pressing `Esc` afterwards exited the program rather than dismissing the search state.
 
 ### P17. `--render-once` prints errno spam and exits 1 on SIGPIPE.
-    mdless --render-once --width 80 tests/corpus/adversarial.md | head -3
+    mdmost --render-once --width 80 tests/corpus/adversarial.md | head -3
     …
-    mdless: Broken pipe (os error 32)      # exit 1
+    mdmost: Broken pipe (os error 32)      # exit 1
 
-`mdless x.md | head` is the normal `$PAGER` idiom. Exit 0 quietly.
+`mdmost x.md | head` is the normal `$PAGER` idiom. Exit 0 quietly.
 
 ### P18. Icons are on by default with no capability detection.
 The default look on a terminal without a Nerd Font (i.e. most terminals):
 
-    mdless blocks.md
+    mdmost blocks.md
 
      Blocks
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -340,7 +340,7 @@ following column; the code assumes width 1.
 
 ## MERMAID (re-reviewed at 6546f81, after sequence/pie/gantt landed)
 
-Repro for all of this: `mdless --render-once --width 80 --no-icons mermaid.md`, and the same
+Repro for all of this: `mdmost --render-once --width 80 --no-icons mermaid.md`, and the same
 file in tmux at 100×40 with `capture-pane -pe`.
 
 ### Pie — the best-looking thing in the program. Two nits.

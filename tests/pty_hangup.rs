@@ -181,7 +181,7 @@ fn cpu_jiffies(pid: u32) -> Option<u64> {
 /// A private temporary directory for one test.
 fn temp_dir(ctty: Ctty) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "mdless-pty-hangup-{}-{}",
+        "mdmost-pty-hangup-{}-{}",
         std::process::id(),
         ctty.label()
     ));
@@ -242,11 +242,11 @@ impl Pty {
         let stdout = slave.try_clone().expect("dup should succeed");
         let stderr = slave.try_clone().expect("dup should succeed");
         let slave_fd = slave.as_raw_fd();
-        let mut command = Command::new(env!("CARGO_BIN_EXE_mdless"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mdmost"));
         command
             .arg(doc)
             .env("TERM", "xterm-256color")
-            .env_remove("MDLESS_ICONS")
+            .env_remove("MDMOST_ICONS")
             .stdin(Stdio::from(stdin))
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));

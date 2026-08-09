@@ -3,12 +3,12 @@
 //! Every case is a hand-built [`ErDiagram`], so a change in `mermaid::parse` can never
 //! silently rewrite what these snapshots check.
 
-use mdless::mermaid::ast::{
+use mdmost::mermaid::ast::{
     Entity, EntityId, ErAttribute, ErCardinality, ErDiagram, ErKey, ErRelationship, Label,
     LineStyle,
 };
-use mdless::mermaid::layout::er;
-use mdless::theme::Theme;
+use mdmost::mermaid::layout::er;
+use mdmost::theme::Theme;
 
 /// An entity with a name and attributes.
 fn entity(name: &str, attributes: Vec<ErAttribute>) -> Entity {

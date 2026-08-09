@@ -4,10 +4,10 @@
 //! pieces are wired together and that a realistic document survives the whole pipeline,
 //! so that a module passing its own tests in isolation cannot hide a broken seam.
 
-use mdless::mermaid::ast::Diagram;
-use mdless::mermaid::parse::parse;
-use mdless::mermaid::{render_diagram, render_mermaid};
-use mdless::theme::Theme;
+use mdmost::mermaid::ast::Diagram;
+use mdmost::mermaid::parse::parse;
+use mdmost::mermaid::{render_diagram, render_mermaid};
+use mdmost::theme::Theme;
 
 /// A Mermaid sample paired with a predicate identifying the variant it must parse into.
 type FamilyCase = (&'static str, fn(&Diagram) -> bool);

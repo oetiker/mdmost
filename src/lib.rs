@@ -1,4 +1,4 @@
-//! `mdless` — a full-screen terminal pager for a single Markdown document.
+//! `mdmost` — a full-screen terminal pager for a single Markdown document.
 //!
 //! # Architecture
 //!

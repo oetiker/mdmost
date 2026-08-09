@@ -273,11 +273,11 @@ expression: canvas.plain_text()
  │   title My working day                                                     │ 
  │   section Go to work                                                       │ 
  │     Make tea: 5: Me                                                        │ 
- ╰ not a diagram type — mdless draws flowchart, sequenceDiagram, classDiagra… ╯ 
+ ╰ not a diagram type — mdmost draws flowchart, sequenceDiagram, classDiagra… ╯ 
                                                                                 
  Not valid mermaid at all                                                       
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  ╭ mermaid ───────────────────────────────────────────────────────────────────╮ 
  │ this is not valid mermaid at all                                           │ 
- ╰ not a diagram type — mdless draws flowchart, sequenceDiagram, classDiagra… ╯
+ ╰ not a diagram type — mdmost draws flowchart, sequenceDiagram, classDiagra… ╯

@@ -20,9 +20,9 @@
 //! same width produces byte-identical canvases.
 //!
 //! ```
-//! use mdless::doc::Doc;
-//! use mdless::render::{RenderOptions, render_document};
-//! use mdless::theme::Theme;
+//! use mdmost::doc::Doc;
+//! use mdmost::render::{RenderOptions, render_document};
+//! use mdmost::theme::Theme;
 //!
 //! let doc = Doc::parse("# Title\n\nHello.\n");
 //! let options = RenderOptions::default();

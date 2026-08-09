@@ -1,12 +1,12 @@
 //! Library error types.
 //!
-//! Every fallible operation in the `mdless` library reports failures through one of
+//! Every fallible operation in the `mdmost` library reports failures through one of
 //! the types in this module. The binary edge (`main.rs`) converts them to
 //! [`anyhow::Error`]; the library itself never uses `anyhow`.
 
 use std::path::PathBuf;
 
-/// The catch-all error type of the `mdless` library.
+/// The catch-all error type of the `mdmost` library.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
@@ -136,7 +136,7 @@ pub enum MermaidError {
         message: String,
     },
 
-    /// `mdless` built an inconsistent drawing request for its own layout engine.
+    /// `mdmost` built an inconsistent drawing request for its own layout engine.
     ///
     /// Nothing the author wrote can cause this — it means a renderer handed the graph
     /// engine a specification that violates the engine's contract, for instance a node
@@ -144,7 +144,7 @@ pub enum MermaidError {
     /// because a wrecked diagram must never take down a document the reader is trying
     /// to read (design spec §12). There is deliberately no line number: attaching one
     /// would be inventing a location in source that is not at fault.
-    #[error("mdless could not draw this diagram: {message}")]
+    #[error("mdmost could not draw this diagram: {message}")]
     Internal {
         /// What was inconsistent, for a bug report rather than for the author.
         message: String,

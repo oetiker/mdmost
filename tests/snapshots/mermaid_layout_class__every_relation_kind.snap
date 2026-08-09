@@ -1,6 +1,5 @@
 ---
 source: tests/mermaid_layout_class.rs
-assertion_line: 177
 expression: "render(&diagram(classes, relations), 90)"
 ---
                                         ┌──────┐                                          

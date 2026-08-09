@@ -1,6 +1,6 @@
 //! Grapheme-cluster-safe, display-width-aware text primitives.
 //!
-//! This module is the *single* home of width and grapheme logic in `mdless`. The
+//! This module is the *single* home of width and grapheme logic in `mdmost`. The
 //! inline renderer, the table column negotiator, the code highlighter and every
 //! Mermaid engine reuse these functions; duplicating any of this logic elsewhere is a
 //! defect.

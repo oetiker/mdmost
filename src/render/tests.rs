@@ -824,7 +824,7 @@ fn a_mermaid_fence_degrades_to_a_captioned_code_block() {
     // top edge, rather than as a stray log line under the box.
     let last = out.last().unwrap_or_else(|| panic!("no rows in {out:?}"));
     assert!(
-        last.starts_with("╰ not a diagram type — mdless draws ") && last.ends_with('╯'),
+        last.starts_with("╰ not a diagram type — mdmost draws ") && last.ends_with('╯'),
         "{last:?}"
     );
     // The old caption said "unsupported" twice and quoted the reader's own typo back

@@ -1,11 +1,11 @@
-# mdless — independent visual review
+# mdmost — independent visual review
 
 > **Verdict: no — I would not be happy to look at this tool every day.**
 
 > **Filing note.** I was briefed to write `docs/qa/visual-review-2.md` on the understanding that the previous attempt never produced a report. That turned out to be stale: `docs/qa/visual-review-2.md` already existed (24 649 bytes, written 04:29, ~12 minutes before I was dispatched) and `qa-visual2` was still listed as an active teammate. I did not read it — the hard rule against reading `docs/qa/` stood — and I did not overwrite it. This file is therefore filed as `visual-review-3.md`, a genuinely independent second pair of eyes on the same build. Nothing here is informed by any earlier round.
 
 **Built commit:** `2aa5d8ad7f1030ac4fdec3650049bf217f3a2c21` — *"test: the canvas contract is checked on assembled rows, not just cells"* (2 ahead of the `588f7ea` named in my briefing).
-**Binary:** `/scratch/oetiker/cargo-target-mdless-qa-visual3/release/mdless`, `--release`.
+**Binary:** `/scratch/oetiker/cargo-target-mdmost-qa-visual3/release/mdmost`, `--release`.
 **Reviewer:** independent; did not read any prior file under `docs/qa/`.
 
 ## Verdict
@@ -70,7 +70,7 @@ My briefing said glyph use is auto-detected and that a piped `--render-once` sho
 let icons = (config.icons || cli.icons) && !cli.no_icons;
 ```
 
-There is no terminal probe in the decision; `io::stdout().is_terminal()` (line 139) only chooses width and whether colour is emitted. Consequence: a piped `--render-once` with no flags emits Nerd Font private-use glyphs (U+F111 as the bullet, U+E695 in code-fence headers), which render as tofu for anyone without a Nerd Font. The autodetect work is unmerged, on branch `icons-autodetect` in the `mdless-icons` worktree. Every capture below therefore passes `--icons` or `--no-icons` explicitly.
+There is no terminal probe in the decision; `io::stdout().is_terminal()` (line 139) only chooses width and whether colour is emitted. Consequence: a piped `--render-once` with no flags emits Nerd Font private-use glyphs (U+F111 as the bullet, U+E695 in code-fence headers), which render as tofu for anyone without a Nerd Font. The autodetect work is unmerged, on branch `icons-autodetect` in the `mdmost-icons` worktree. Every capture below therefore passes `--icons` or `--no-icons` explicitly.
 
 Also note: piped `--render-once` goes through `dump::write_plain`, so **piped output carries no colour at all**. All colour/contrast judgements below come from live tmux captures, not from pipes.
 
@@ -668,7 +668,7 @@ For inline HTML specifically, the placeholder is worse than the silent skip the 
 
 ```
  │ this is not valid mermaid at all                                           │
- ╰ not a diagram type — mdless draws flowchart, sequenceDiagram, classDiagra… ╯
+ ╰ not a diagram type — mdmost draws flowchart, sequenceDiagram, classDiagra… ╯
 ```
 
 This message is *far* better than the one in finding 12 — it says what went wrong and starts listing what is supported. But it is cut at `classDiagra…`, so five of the seven supported types are never named. The whole value of the message is the list, and the list does not fit.
@@ -705,7 +705,7 @@ row25 chars= 40 eawidth= 40   '│              │  li'
 row26 chars= 35 eawidth= 42   '│ 日本語のセル │   👩‍💻    '
 ```
 
-My `wcheck.py` scored that row 42 and flagged it as overflowing, because it sums East-Asian widths per codepoint and therefore counts `👩‍💻` (U+1F469 ZWJ U+1F4BB) as two wide emoji = 4 cells. tmux renders the ZWJ sequence as **one** 2-cell grapheme, and mdless agrees with tmux: 26 narrow + 6 CJK×2 + 1 cluster×2 = 40. **mdless is right and my script was wrong**; the single "OVER" it reported across the whole adversarial corpus is an artefact of my measurement, not a defect.
+My `wcheck.py` scored that row 42 and flagged it as overflowing, because it sums East-Asian widths per codepoint and therefore counts `👩‍💻` (U+1F469 ZWJ U+1F4BB) as two wide emoji = 4 cells. tmux renders the ZWJ sequence as **one** 2-cell grapheme, and mdmost agrees with tmux: 26 narrow + 6 CJK×2 + 1 cluster×2 = 40. **mdmost is right and my script was wrong**; the single "OVER" it reported across the whole adversarial corpus is an artefact of my measurement, not a defect.
 
 That means grapheme clustering is being done properly, not codepoint counting — which also holds for the Tangut-plus-Tai-Tham three-column cluster, the combining-accent `café` (decomposed) versus precomposed `café`, the ZWSP, the flag `🇨🇭` and the skin-tone `👍🏽`, all of which render inside the 40-column budget with no overflow:
 

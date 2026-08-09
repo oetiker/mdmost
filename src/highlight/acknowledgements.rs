@@ -4,18 +4,18 @@
 //! definitions written by other people. Most are under Sublime's permissive notice or the
 //! Unlicense, which ask for nothing; a substantial minority are MIT, BSD-2, BSD-3 or
 //! Apache-2.0, and every one of those requires the copyright notice and permission text
-//! to be reproduced **in binary distributions** — which is exactly what `mdless` is. A
+//! to be reproduced **in binary distributions** — which is exactly what `mdmost` is. A
 //! `LICENSE` file in the source tree does not discharge that: the binary is what people
 //! are given, so the notices have to travel inside it.
 //!
-//! Hence [`syntax_acknowledgements`], surfaced as `mdless --licenses`. `two-face` keeps
+//! Hence [`syntax_acknowledgements`], surfaced as `mdmost --licenses`. `two-face` keeps
 //! the notice set in step with the definitions it ships, so this cannot drift out of date
 //! the way a hand-maintained `THIRD-PARTY` file would; the cost is about 11 KiB of
 //! embedded text, and only in a binary that keeps the function.
 //!
 //! The output is deliberately plain Markdown, with no HTML in it. `two-face`'s own
-//! `to_md` wraps each licence in a `<details>` element, and `mdless` does not render HTML
-//! (design spec §1) — so `mdless --licenses | mdless -` would have swallowed the very
+//! `to_md` wraps each licence in a `<details>` element, and `mdmost` does not render HTML
+//! (design spec §1) — so `mdmost --licenses | mdmost -` would have swallowed the very
 //! text this exists to display.
 
 use two_face::acknowledgement::License;
@@ -27,7 +27,7 @@ use two_face::acknowledgement::License;
 /// those, is linked at the end.
 ///
 /// ```
-/// let text = mdless::highlight::syntax_acknowledgements();
+/// let text = mdmost::highlight::syntax_acknowledgements();
 /// assert!(text.contains("Permission is hereby granted"));
 /// assert!(!text.contains("<details>"));
 /// ```
@@ -37,13 +37,13 @@ pub fn syntax_acknowledgements() -> String {
     out.push_str(
         "# Third-party syntax definitions\n\
          \n\
-         `mdless` highlights fenced code with syntax definitions curated by the\n\
+         `mdmost` highlights fenced code with syntax definitions curated by the\n\
          [`bat` project](https://github.com/sharkdp/bat) and packaged by\n\
          [`two-face`](https://codeberg.org/CosmicHarper/two-face). They are compiled into\n\
          this binary, and the licences below are reproduced as those licences require.\n\
          \n\
-         `mdless` itself is MIT-licensed. The TOML and Dockerfile definitions in\n\
-         `assets/syntaxes/` are part of `mdless` and covered by that licence.\n\n",
+         `mdmost` itself is MIT-licensed. The TOML and Dockerfile definitions in\n\
+         `assets/syntaxes/` are part of `mdmost` and covered by that licence.\n\n",
     );
 
     let mut notices: Vec<&License> = listing
@@ -87,7 +87,7 @@ mod tests {
         assert!(text.contains("Copyright"));
     }
 
-    /// No HTML, because `mdless` renders none and this is meant to be read in `mdless`.
+    /// No HTML, because `mdmost` renders none and this is meant to be read in `mdmost`.
     #[test]
     fn the_listing_is_plain_markdown() {
         let text = syntax_acknowledgements();

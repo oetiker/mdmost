@@ -1,6 +1,6 @@
 //! Greedy, grapheme-safe, width-aware line wrapping.
 //!
-//! [`wrap_spans`] is the single wrapping implementation in `mdless`.
+//! [`wrap_spans`] is the single wrapping implementation in `mdmost`.
 //! `render::inline::wrap` and the Mermaid label layouters delegate to it.
 
 use crate::text::{Line, Span, display_width, graphemes};

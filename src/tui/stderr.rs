@@ -1,6 +1,6 @@
 //! Keeping other people's diagnostics off the alternate screen.
 //!
-//! While the pager runs, the screen is a canvas `mdless` owns outright: every cell on
+//! While the pager runs, the screen is a canvas `mdmost` owns outright: every cell on
 //! it was put there by [`draw`](super::draw), and anything else that reaches the
 //! terminal corrupts the frame until the next full repaint. A dependency does not know
 //! that. `arboard` 3.6.1, for one, prints a paragraph of advice straight to standard
@@ -182,14 +182,14 @@ impl Drop for Capture {
         let mut err = std::io::stderr().lock();
         let _ = writeln!(
             err,
-            "mdless: output from a library, held back while the pager had the screen:"
+            "mdmost: output from a library, held back while the pager had the screen:"
         );
         let _ = err.write_all(&collected);
         if !collected.ends_with(b"\n") {
             let _ = writeln!(err);
         }
         if collected.len() >= LIMIT {
-            let _ = writeln!(err, "mdless: ...and more, which was not kept");
+            let _ = writeln!(err, "mdmost: ...and more, which was not kept");
         }
         let _ = err.flush();
     }
@@ -233,7 +233,7 @@ impl Redirect {
 
 /// Creates the scratch file and unlinks it at once.
 ///
-/// Unlinked immediately so that no run of `mdless` can leave litter in the temporary
+/// Unlinked immediately so that no run of `mdmost` can leave litter in the temporary
 /// directory however it exits — the descriptor keeps the file alive, and the space is
 /// returned by the kernel when the process ends. Nothing but this process ever has a
 /// name for it.
@@ -245,7 +245,7 @@ fn scratch_file() -> std::io::Result<std::fs::File> {
         .duration_since(UNIX_EPOCH)
         .map(|since| since.as_nanos())
         .unwrap_or_default();
-    let path = std::env::temp_dir().join(format!("mdless-stderr-{}-{stamp}", std::process::id()));
+    let path = std::env::temp_dir().join(format!("mdmost-stderr-{}-{stamp}", std::process::id()));
     let file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)

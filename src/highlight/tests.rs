@@ -83,7 +83,7 @@ fn absent_or_unknown_tags_resolve_to_nothing() {
 ///
 /// `two-face` ships two builds of the same curation, one per `syntect` regex engine, and
 /// excludes the definitions whose regexes the pure-Rust `fancy-regex` engine cannot
-/// compile. `mdless` picks the pure-Rust engine on purpose (no C toolchain, see
+/// compile. `mdmost` picks the pure-Rust engine on purpose (no C toolchain, see
 /// `Cargo.toml`), so PowerShell and ARM assembly are the price. They fall back to plain
 /// text like any unknown tag — the point of this test is that the *README* says so, and
 /// this fails the day that stops being true, which is the day the README needs editing.

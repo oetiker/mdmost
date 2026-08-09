@@ -58,7 +58,7 @@ pub struct BorderSet {
 }
 
 impl BorderSet {
-    /// Rounded corners — the default look of `mdless`, per design spec §7.5.
+    /// Rounded corners — the default look of `mdmost`, per design spec §7.5.
     pub const ROUNDED: Self = Self {
         horizontal: '─',
         vertical: '│',

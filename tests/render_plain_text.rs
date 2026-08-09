@@ -1,12 +1,12 @@
 //! `$PAGER` behaviour: a stream that is not Markdown must survive being paged.
 //!
-//! `export PAGER=mdless` points `git log`, `--help` output and man pages at this
+//! `export PAGER=mdmost` points `git log`, `--help` output and man pages at this
 //! program. Usability review P17 found all three mangled — line breaks reflowed away,
 //! e-mail addresses turned into `(mailto:…)` links, indented bodies framed as code.
 
-use mdless::doc::Doc;
-use mdless::render::{RenderOptions, render_document};
-use mdless::theme::Theme;
+use mdmost::doc::Doc;
+use mdmost::render::{RenderOptions, render_document};
+use mdmost::theme::Theme;
 
 /// The output of a `git log`-shaped stream, one string per non-blank row.
 fn lines(source: &str, width: u16) -> Vec<String> {

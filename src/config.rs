@@ -1,6 +1,6 @@
 //! Configuration: TOML loading and merging, themes, key bindings.
 //!
-//! The file lives at `~/.config/mdless/config.toml` (or wherever the platform's
+//! The file lives at `~/.config/mdmost/config.toml` (or wherever the platform's
 //! configuration directory is; see [`Config::default_path`]).
 //!
 //! Per design spec §12 a configuration problem **never** prevents startup. Loading
@@ -9,7 +9,7 @@
 //! single unusable key binding costs you that binding, not the whole file.
 //!
 //! ```
-//! use mdless::config::Config;
+//! use mdmost::config::Config;
 //!
 //! let loaded = Config::parse_str("theme = \"light\"\n", std::path::Path::new("x.toml"));
 //! assert!(loaded.problems.is_empty());
@@ -172,7 +172,7 @@ impl Config {
     ///
     /// Returns `None` when the platform has no home directory to speak of.
     pub fn default_path() -> Option<PathBuf> {
-        directories::ProjectDirs::from("", "", "mdless")
+        directories::ProjectDirs::from("", "", "mdmost")
             .map(|dirs| dirs.config_dir().join("config.toml"))
     }
 

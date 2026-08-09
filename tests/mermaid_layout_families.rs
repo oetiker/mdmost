@@ -9,20 +9,20 @@
 //! 2. every row of the returned canvas is exactly `width` display columns;
 //! 3. rendering is deterministic.
 
-use mdless::error::MermaidError;
-use mdless::mermaid::ast::{
+use mdmost::error::MermaidError;
+use mdmost::mermaid::ast::{
     Class, ClassArrow, ClassDiagram, ClassId, ClassRelation, Entity, EntityId, ErAttribute,
     ErCardinality, ErDiagram, ErKey, ErRelationship, Field, LineStyle, Member, StateDiagram,
     StateEndpoint, StateId, StateKind, StateNode, StateScope, Transition, Visibility,
 };
-use mdless::mermaid::layout::{class, er, state};
-use mdless::text::display_width;
-use mdless::theme::Theme;
+use mdmost::mermaid::layout::{class, er, state};
+use mdmost::text::display_width;
+use mdmost::theme::Theme;
 use proptest::prelude::*;
 
 /// Asserts the canvas contract on a rendered diagram, tolerating a width refusal.
 fn check(
-    drawn: Result<mdless::canvas::Canvas, MermaidError>,
+    drawn: Result<mdmost::canvas::Canvas, MermaidError>,
     width: u16,
 ) -> Result<(), TestCaseError> {
     let canvas = match drawn {

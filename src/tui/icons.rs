@@ -5,7 +5,7 @@
 //! for plain Unicode of the same display width.
 //!
 //! Which set is in force is settled before drawing starts — by `--no-icons`, by
-//! `MDLESS_ICONS`, by `icons` in the config file, or, if nobody has said, by
+//! `MDMOST_ICONS`, by `icons` in the config file, or, if nobody has said, by
 //! [`crate::nerdfont`] detecting whether a font that can draw them is installed.
 
 /// The glyphs the status bar, table of contents and help overlay draw with.

@@ -1,12 +1,12 @@
 %YAML 1.2
 ---
-# TOML syntax definition for mdless.
+# TOML syntax definition for mdmost.
 #
-# Licence: MIT — the same licence as the rest of mdless. This file was written for
+# Licence: MIT — the same licence as the rest of mdmost. This file was written for
 # this project rather than vendored from Sublime Text's package repository or any
 # other source, so no third-party licence or attribution applies to it.
 #
-# syntect's default syntax set has no TOML definition, and TOML is both mdless's own
+# syntect's default syntax set has no TOML definition, and TOML is both mdmost's own
 # configuration format and one of the most common fence languages in the kind of
 # document this pager exists to read. Scopes follow the conventional TextMate naming
 # so that the scope table in `src/highlight/scopes.rs` maps them without special cases.

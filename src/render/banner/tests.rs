@@ -32,19 +32,19 @@ fn assert_art(banner: &Banner, reference: &str) {
     assert_eq!(banner.width(), width);
 }
 
-/// `figlet -f Small mdless`.
+/// `figlet -f Small mdmost`.
 #[test]
 fn matches_figlet_on_the_project_name() {
-    let banner = layout("mdless", 80).expect("mdless fits in 80 columns");
+    let banner = layout("mdmost", 80).expect("mdmost fits in 80 columns");
     assert_art(
         &banner,
         concat!(
-            "          _ _           \n",
-            r" _ __  __| | |___ ______",
+            "          _              _   \n",
+            r" _ __  __| |_ __  ___ __| |_",
             "\n",
-            r"| '  \/ _` | / -_|_-<_-<",
+            r"| '  \/ _` | '  \/ _ (_-<  _|",
             "\n",
-            r"|_|_|_\__,_|_\___/__/__/",
+            r"|_|_|_\__,_|_|_|_\___/__/\__|",
             "\n",
         ),
     );
@@ -109,16 +109,16 @@ fn declines_a_title_it_cannot_draw() {
 fn declines_a_banner_wider_than_the_budget() {
     let wide = "A Title Too Long For A Narrow Pane";
     assert!(layout(wide, 40).is_none());
-    assert!(layout("mdless", 24).is_some(), "exactly 24 columns fits");
-    assert!(layout("mdless", 23).is_none(), "one column short declines");
-    assert!(layout("mdless", 0).is_none());
+    assert!(layout("mdmost", 29).is_some(), "exactly 29 columns fits");
+    assert!(layout("mdmost", 28).is_none(), "one column short declines");
+    assert!(layout("mdmost", 0).is_none());
 }
 
 /// The rows carry no blank line at either edge, so the banner occupies exactly the
 /// space its art needs.
 #[test]
 fn the_edges_of_the_art_are_never_blank() {
-    for title in ["mdless", "Design", "Q", "!", "___", "no descenders"] {
+    for title in ["mdmost", "Design", "Q", "!", "___", "no descenders"] {
         let banner = layout(title, 200).unwrap_or_else(|| panic!("{title} must lay out"));
         assert!(!banner.rows.is_empty());
         assert!(
@@ -140,7 +140,7 @@ fn the_edges_of_the_art_are_never_blank() {
 /// would light up the wrong part of the banner.
 #[test]
 fn every_letter_claims_columns_inside_the_art() {
-    let banner = layout("mdless", 80).expect("lays out");
+    let banner = layout("mdmost", 80).expect("lays out");
     let width = banner.width();
     assert_eq!(banner.letters.len(), 6);
     for (index, letter) in banner.letters.iter().enumerate() {

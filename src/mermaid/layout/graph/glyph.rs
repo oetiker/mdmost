@@ -162,7 +162,7 @@ pub fn glyph(mask: Mask, stroke: Stroke) -> char {
 
 /// The mask a box-drawing glyph already on the canvas stands for.
 ///
-/// This is the inverse of [`glyph`] over every glyph `mdless` draws — the light,
+/// This is the inverse of [`glyph`] over every glyph `mdmost` draws — the light,
 /// heavy, dashed and rounded sets used by [`BorderSet`](crate::canvas::BorderSet) and
 /// by this module. Cells holding anything else (text, shape glyphs such as `◇`) return
 /// `None`, and the router then leaves them alone.

@@ -13,12 +13,12 @@
 //! the number of matches they can actually reach.
 //!
 //! ```
-//! use mdless::search::{Search, SearchMode};
+//! use mdmost::search::{Search, SearchMode};
 //!
 //! let search = Search::new("Hello World", "world", SearchMode::Literal)?;
 //! assert_eq!(search.source_hits().len(), 1);
 //! assert!(!search.is_case_sensitive()); // smart case: the query is all lower case
-//! # Ok::<(), mdless::search::SearchError>(())
+//! # Ok::<(), mdmost::search::SearchError>(())
 //! ```
 
 #[cfg(test)]

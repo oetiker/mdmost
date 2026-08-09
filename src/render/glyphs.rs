@@ -81,7 +81,7 @@
 /// to contain — you do not control the reader's font.** For anything load-bearing,
 /// prefer characters that render everywhere.
 ///
-/// `mdless` draws in whatever terminal font the reader has, so ink extents rasterised
+/// `mdmost` draws in whatever terminal font the reader has, so ink extents rasterised
 /// from any one face predict nothing about `Iosevka`, `JetBrains Mono`, `Menlo` or
 /// `Fira Code`; measuring optimises for one machine and silently mis-serves everyone
 /// else.

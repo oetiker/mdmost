@@ -1,7 +1,7 @@
 //! Inline spans to styled, wrapped lines.
 //!
 //! Inline content is flattened into [`Span`]s carrying semantic styles, wrapped by
-//! [`crate::text::wrap_spans`] — the single wrapping implementation in `mdless` — and
+//! [`crate::text::wrap_spans`] — the single wrapping implementation in `mdmost` — and
 //! written onto a [`Canvas`] that is exactly the requested width.
 //!
 //! While flattening, every run remembers the byte range of the source it came from.
@@ -17,7 +17,7 @@ use crate::theme::Style;
 
 use super::Ctx;
 
-/// The marker shown in place of raw HTML, which `mdless` never renders (spec §2).
+/// The marker shown in place of raw HTML, which `mdmost` never renders (spec §2).
 pub(crate) const HTML_MARKER: &str = "⟨html⟩";
 
 /// Wraps styled runs into lines of at most `width` display columns.

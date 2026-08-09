@@ -8,10 +8,10 @@
 //! glyphs, container frames and the fit-to-width degradation ladder.
 //!
 //! ```no_run
-//! use mdless::mermaid::ast::Direction;
-//! use mdless::mermaid::layout::graph::{self, EdgeSpec, Fit, GraphSpec, NodeIdx};
-//! use mdless::theme::Theme;
-//! use mdless::canvas::Canvas;
+//! use mdmost::mermaid::ast::Direction;
+//! use mdmost::mermaid::layout::graph::{self, EdgeSpec, Fit, GraphSpec, NodeIdx};
+//! use mdmost::theme::Theme;
+//! use mdmost::canvas::Canvas;
 //!
 //! let theme = Theme::default_dark();
 //! let mut spec = GraphSpec::new(Direction::TopToBottom);

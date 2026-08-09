@@ -331,7 +331,7 @@ fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Ca
     out
 }
 
-/// The diagram families `mdless` draws, spelled as a reader would write them.
+/// The diagram families `mdmost` draws, spelled as a reader would write them.
 ///
 /// Named in the caption when the first word of a block is not a family at all, because
 /// "unknown diagram type" alone leaves the reader no way to discover what *would* have
@@ -351,7 +351,7 @@ pub(crate) const FAMILIES: [&str; 7] = [
 
 /// What the bottom edge of an undrawable Mermaid block says.
 ///
-/// Two things a reader needs kept apart: *mdless cannot draw this* and *this diagram is
+/// Two things a reader needs kept apart: *mdmost cannot draw this* and *this diagram is
 /// wrong*. The first is our failure and must never be phrased as a syntax complaint —
 /// that sends the reader hunting for a typo in a correct diagram. The second names the
 /// line and quotes the offending text, which is what a compiler would do.
@@ -360,7 +360,7 @@ fn caption(error: &MermaidError) -> String {
         // Every family in `FAMILIES` parses, so an unknown keyword is not a diagram we
         // have yet to implement — it is not a diagram. Say what *is* one.
         MermaidError::UnsupportedFamily(_) => {
-            format!("not a diagram type — mdless draws {}", FAMILIES.join(", "))
+            format!("not a diagram type — mdmost draws {}", FAMILIES.join(", "))
         }
         // The old wording — "needs more than {width}" — restated the width the reader
         // already had, so widening the terminal was a guessing game with no way to know
@@ -384,7 +384,7 @@ fn caption(error: &MermaidError) -> String {
         // variant: the same failure used to arrive as `Unsupported { line: 0 }` and
         // read as a complaint about a diagram that was perfectly correct.
         MermaidError::Internal { message } => {
-            format!("mdless could not draw this diagram — please report: {message}")
+            format!("mdmost could not draw this diagram — please report: {message}")
         }
         MermaidError::Unsupported { line, message } => located(*line, message),
         MermaidError::Syntax { line, message } => located(*line, message),

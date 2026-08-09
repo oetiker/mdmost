@@ -1,6 +1,6 @@
 //! Truecolor colours, attributes and styles.
 //!
-//! `mdless` deliberately defines its own [`Style`] type instead of using
+//! `mdmost` deliberately defines its own [`Style`] type instead of using
 //! `ratatui::style::Style`. Renderers must not depend on the TUI crate; the
 //! conversion happens once, at the viewport edge.
 

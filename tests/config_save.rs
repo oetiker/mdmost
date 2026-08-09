@@ -2,17 +2,17 @@
 //!
 //! Design spec §12.1. The reader presses `S` and the settings they are looking at are
 //! there next time. The file they get back is the file they wrote — their comments,
-//! their ordering, their keys from a newer version of mdless — with the values this
+//! their ordering, their keys from a newer version of mdmost — with the values this
 //! version knows about brought up to date and nothing else touched.
 //!
 //! Every test here writes inside a temporary directory of its own. Nothing in this
-//! file may ever go near the real `~/.config/mdless/config.toml`.
+//! file may ever go near the real `~/.config/mdmost/config.toml`.
 
 use std::path::{Path, PathBuf};
 
-use mdless::config::{Action, Config};
-use mdless::doc::Doc;
-use mdless::tui::{App, AppOptions};
+use mdmost::config::{Action, Config};
+use mdmost::doc::Doc;
+use mdmost::tui::{App, AppOptions};
 
 /// A directory that removes itself, so a test cannot leak into the developer's home.
 struct TempDir(PathBuf);
@@ -20,7 +20,7 @@ struct TempDir(PathBuf);
 impl TempDir {
     fn new(name: &str) -> Self {
         let base = std::env::temp_dir().join(format!(
-            "mdless-config-save-{}-{}-{name}",
+            "mdmost-config-save-{}-{}-{name}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -118,13 +118,13 @@ fn a_missing_file_and_its_directory_are_created() {
 }
 
 /// A file a reader wrote by hand: comments, ordering, sections, a key from the future.
-const HAND_WRITTEN: &str = r##"# My mdless configuration.
+const HAND_WRITTEN: &str = r##"# My mdmost configuration.
 # Please do not eat.
 
 theme = "dark"          # I like the dark one
 scroll_step = 5
 
-# A setting a newer mdless understands and this one does not.
+# A setting a newer mdmost understands and this one does not.
 telepathy = true
 
 [keys]
@@ -153,10 +153,10 @@ fn a_hand_written_file_keeps_its_comments_its_order_and_its_unknown_keys() {
 
     let text = std::fs::read_to_string(&path).expect("read");
     for kept in [
-        "# My mdless configuration.",
+        "# My mdmost configuration.",
         "# Please do not eat.",
         "# I like the dark one",
-        "# A setting a newer mdless understands and this one does not.",
+        "# A setting a newer mdmost understands and this one does not.",
         "telepathy = true",
         "[keys]",
         "\"ctrl-s\" = \"search_forward\"",
@@ -176,7 +176,7 @@ fn a_hand_written_file_keeps_its_comments_its_order_and_its_unknown_keys() {
     );
     // The reader's own ordering survives: their comment block is still first.
     assert!(
-        text.starts_with("# My mdless configuration."),
+        text.starts_with("# My mdmost configuration."),
         "the file was reordered:\n{text}"
     );
     // And the settings they did not touch keep the values they gave them.

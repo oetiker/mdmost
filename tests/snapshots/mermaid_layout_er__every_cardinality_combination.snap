@@ -1,6 +1,5 @@
 ---
 source: tests/mermaid_layout_er.rs
-assertion_line: 149
 expression: "render(&diagram(entities, relationships), 100)"
 ---
                                                         ┌─────┐                                     

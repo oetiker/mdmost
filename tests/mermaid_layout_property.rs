@@ -3,15 +3,15 @@
 //! The engine is exercised directly rather than through the flowchart parser, so the
 //! invariants hold for every family that will build on it.
 
-use mdless::canvas::{BorderSet, Canvas};
-use mdless::error::MermaidError;
-use mdless::mermaid::Fit;
-use mdless::mermaid::ast::Direction;
-use mdless::mermaid::layout::graph::{
+use mdmost::canvas::{BorderSet, Canvas};
+use mdmost::error::MermaidError;
+use mdmost::mermaid::Fit;
+use mdmost::mermaid::ast::Direction;
+use mdmost::mermaid::layout::graph::{
     self, EdgeSpec, GraphSpec, GroupSpec, NodeIdx, Stroke, Terminator,
 };
-use mdless::text::display_width;
-use mdless::theme::Theme;
+use mdmost::text::display_width;
+use mdmost::theme::Theme;
 use proptest::prelude::*;
 
 /// A one-letter box, small enough that the width ladder never has to wrap it.

@@ -1,8 +1,8 @@
 %YAML 1.2
 ---
-# Dockerfile syntax definition for mdless.
+# Dockerfile syntax definition for mdmost.
 #
-# Licence: MIT — the same licence as the rest of mdless. Written for this project
+# Licence: MIT — the same licence as the rest of mdmost. Written for this project
 # rather than vendored from any other source, so no third-party licence applies.
 #
 # syntect's default set has no Dockerfile definition. Aliasing `dockerfile` to the

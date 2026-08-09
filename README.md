@@ -1,4 +1,4 @@
-# mdless
+# mdmost
 
 A full-screen terminal pager for a single Markdown document — `less`, but it knows what
 Markdown means.
@@ -15,7 +15,7 @@ would not fit or the title is not plain ASCII (`title_banner = false` turns it o
 
 A document that nests three or more section levels also gets **section numbers** — `1`,
 `1.1`, `1.1.1` — in front of its headings and in the contents pane, drawn in a quiet
-grey of their own so it is obvious they are `mdless`'s and not the author's. A lone `#`
+grey of their own so it is obvious they are `mdmost`'s and not the author's. A lone `#`
 title is not a section: it stays unnumbered and its `##`s are numbered `1`, `2`, `3`. A
 flat document gets nothing, because it needs nothing. `section_numbers = false` turns
 them off.
@@ -51,7 +51,7 @@ The scope is deliberately narrow, and these are decisions rather than gaps:
 
 ```sh
 cargo build --release
-install -m755 target/release/mdless ~/.local/bin/
+install -m755 target/release/mdmost ~/.local/bin/
 ```
 
 Rust 2024 edition; no system dependencies beyond a terminal that speaks ANSI truecolour.
@@ -61,21 +61,21 @@ behind the highlighter is `fancy-regex` rather than oniguruma.
 ## Quick start
 
 ```sh
-mdless README.md              # open a document
-mdless                        # read standard input
-cat notes.md | mdless         # same, keyboard still works (see below)
-export PAGER=mdless           # use it as your pager
-mdless --render-once notes.md # print one frame and exit
+mdmost README.md              # open a document
+mdmost                        # read standard input
+cat notes.md | mdmost         # same, keyboard still works (see below)
+export PAGER=mdmost           # use it as your pager
+mdmost --render-once notes.md # print one frame and exit
 ```
 
 Two things make the pipe cases work. When the input is a pipe, the keyboard is read from
-`/dev/tty`, so `cat x.md | mdless` is still interactive. When *stdout* is not a terminal,
-`--render-once` is implied, so `mdless x.md | cat` produces plain text instead of escape
+`/dev/tty`, so `cat x.md | mdmost` is still interactive. When *stdout* is not a terminal,
+`--render-once` is implied, so `mdmost x.md | cat` produces plain text instead of escape
 soup — and `--render-once` emits truecolour to a terminal and plain text otherwise, which
 is what makes it usable for scripting and snapshotting.
 
 ```sh
-mdless --render-once --width 80 --no-icons doc.md > snapshot.txt
+mdmost --render-once --width 80 --no-icons doc.md > snapshot.txt
 ```
 
 ### Options
@@ -108,7 +108,7 @@ Sass and SCSS, F#, CMake, Solidity, Nim, x86-64 assembly, `.env` files, `go.mod`
 `nginx.conf` and `.gitignore`.
 
 Two definitions are missing on purpose: **PowerShell** and **ARM assembly** need regex
-features the pure-Rust engine cannot compile, and `mdless` uses that engine so the build
+features the pure-Rust engine cannot compile, and `mdmost` uses that engine so the build
 needs no C toolchain. They render as plain text, like any tag we do not know.
 
 The fence tag is matched against every syntax name and every file extension, so `rs`,
@@ -120,9 +120,9 @@ an error** — the block is drawn as plain themed text, still framed, still with
 
 Colours never come from the syntax definitions. Each scope is mapped to a semantic slot
 — keyword, string, number, comment, type, namespace, escape — and the slot is filled from
-the active `mdless` theme, so code sits inside the palette instead of fighting it.
+the active `mdmost` theme, so code sits inside the palette instead of fighting it.
 
-TOML and Dockerfile use definitions written for `mdless` rather than the bundled ones,
+TOML and Dockerfile use definitions written for `mdmost` rather than the bundled ones,
 because the bundled TOML gives a `[table.header]` no scope at all and the bundled
 Dockerfile emits a whole `RUN` line as one undifferentiated span.
 
@@ -144,12 +144,12 @@ invisible, and ASCII is the only character class that renders everywhere without
 survey — most of these are also the literal Markdown source the author typed. Headings
 have no marker at all — the rule beneath a heading says which level it is.
 
-**`mdless` works out which to use, and errs towards plain.** No terminal can be asked
-what font it is using, so mdless asks fontconfig whether an installed font covers every
+**`mdmost` works out which to use, and errs towards plain.** No terminal can be asked
+what font it is using, so mdmost asks fontconfig whether an installed font covers every
 glyph it would draw, and uses glyphs only if one does. It picks plain whenever it cannot
 establish that — in particular when `fc-list` is unavailable, when output is not going to
 a terminal, on `TERM=dumb` or the Linux console, and **over SSH**, where the fonts on the
-machine running mdless say nothing about the terminal drawing the pixels. Guessing wrong
+machine running mdmost say nothing about the terminal drawing the pixels. Guessing wrong
 towards plain costs a little elegance; guessing wrong towards glyphs fills the screen
 with replacement boxes, so the tie does not go to the prettier answer.
 
@@ -158,7 +158,7 @@ To decide for yourself, in increasing order of authority:
 | | |
 |---|---|
 | `icons = true` / `false` in the configuration | settles it for this machine |
-| `MDLESS_ICONS=1` / `0` in the environment | settles it for this shell — the natural thing to export in the profile on a server you always reach from the same well-equipped terminal |
+| `MDMOST_ICONS=1` / `0` in the environment | settles it for this shell — the natural thing to export in the profile on a server you always reach from the same well-equipped terminal |
 | `--icons` / `--no-icons` | settles it for this run |
 
 ## Keys
@@ -237,7 +237,7 @@ Notes on a few of these:
 - `S` writes the settings you can change — theme, line numbers, contents pane, body
   width — back to the configuration file, and tells you which file it wrote. It edits
   that file rather than regenerating it: your comments, your ordering and any key a
-  newer mdless understands are all still there afterwards, the previous version is kept
+  newer mdmost understands are all still there afterwards, the previous version is kept
   as `config.toml.bak`, and a save whose result would not read back identically is
   refused rather than guessed at.
 
@@ -264,7 +264,7 @@ drag-select, which outlives the pager and which your fingers already know.
 
 ## Configuration
 
-TOML, at `~/.config/mdless/config.toml` (or the platform's configuration directory —
+TOML, at `~/.config/mdmost/config.toml` (or the platform's configuration directory —
 `--config PATH` overrides it). A broken configuration never stops the program from
 starting: the problem is reported and the rest of the file still applies, so one bad key
 binding costs you that binding and nothing else.
@@ -401,6 +401,6 @@ The syntax definitions compiled into the binary are third-party work, curated by
 [`bat` project](https://github.com/sharkdp/bat) and packaged by
 [`two-face`](https://codeberg.org/CosmicHarper/two-face). Most are under Sublime's
 permissive notice or the Unlicense; the MIT, BSD and Apache-2.0 ones among them require
-their notices to be reproduced in binary distributions, and `mdless --licenses` is where
+their notices to be reproduced in binary distributions, and `mdmost --licenses` is where
 they are — inside the binary, which is the artefact people actually receive. The TOML and
-Dockerfile definitions in `assets/syntaxes/` are `mdless`'s own and MIT like the rest.
+Dockerfile definitions in `assets/syntaxes/` are `mdmost`'s own and MIT like the rest.

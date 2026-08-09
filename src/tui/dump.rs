@@ -2,7 +2,7 @@
 //!
 //! Two flavours, chosen by the caller from whether the destination is a terminal
 //! (design spec §11): ANSI truecolour when it is, plain text when it is not, so
-//! `mdless x.md | cat` yields text rather than escape soup. Both are deterministic
+//! `mdmost x.md | cat` yields text rather than escape soup. Both are deterministic
 //! functions of the canvas, which is what lets the snapshot tests drive the real
 //! binary headlessly.
 

@@ -3,7 +3,7 @@
 //! Design spec §12.1. The reader presses `S` and next time the pager comes up the way
 //! they left it. The hard part is not writing TOML — it is writing TOML *into a file
 //! somebody else wrote*, which may carry comments, an ordering they chose, and keys a
-//! newer version of mdless understands and this one does not (the loader keeps such a
+//! newer version of mdmost understands and this one does not (the loader keeps such a
 //! key with a warning rather than discarding the file, and the writer must not undo
 //! that).
 //!
@@ -102,7 +102,7 @@ impl Config {
                 // An unset `icons` is the answer "nobody has said, ask detection"
                 // (design spec §2.1), and writing detection's answer down would freeze
                 // it on a machine that later grows a Nerd Font. The command line and
-                // `MDLESS_ICONS` *are* statements, and `main` records them here before
+                // `MDMOST_ICONS` *are* statements, and `main` records them here before
                 // the pager starts, so saving keeps them.
                 key: "icons",
                 value: self.icons.map(|icons| icons.to_string()),

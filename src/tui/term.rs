@@ -54,7 +54,7 @@ enum Wait {
 /// The error a vanished terminal produces.
 ///
 /// Deliberately not `BrokenPipe`, which the binary treats as the ordinary
-/// `mdless x.md | head` case and exits 0 for: losing the terminal mid-document is
+/// `mdmost x.md | head` case and exits 0 for: losing the terminal mid-document is
 /// nobody's fault but it did not finish, so it exits non-zero and says so — best
 /// effort, because by definition there may be no terminal left to say it to.
 fn terminal_gone() -> io::Error {
@@ -79,7 +79,7 @@ fn terminal_gone() -> io::Error {
 /// amount of latency on a live terminal — a laggy link, a reader who leaves the pager
 /// open for an hour — can make it fire.
 ///
-/// Linux only. `poll` is documented not to work on `/dev/tty` on macOS, and `mdless`
+/// Linux only. `poll` is documented not to work on `/dev/tty` on macOS, and `mdmost`
 /// reads keys from `/dev/tty` whenever the document came in on standard input; a
 /// wrong "your terminal is gone" would throw a reader out of their document, which is
 /// worse than the spin. Elsewhere the loop waits the way it always did.
@@ -99,7 +99,7 @@ enum TtyFd {
 impl Input {
     /// Opens the descriptor `crossterm` will read from, by the same rule it uses:
     /// standard input when that is a terminal, `/dev/tty` otherwise — which is the
-    /// `cat x.md | mdless` case, where standard input is the document.
+    /// `cat x.md | mdmost` case, where standard input is the document.
     fn open() -> io::Result<Self> {
         use std::io::IsTerminal;
 

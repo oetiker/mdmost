@@ -98,7 +98,7 @@ own clustering (kitty, foot, WezTerm) draw both at two columns, which is what we
 and what UTS #51 says.
 
 **Deliberately not fixed.** An override table pinning a flag at one column and a family
-at four would make `mdless` correct on tmux 3.4 and wrong everywhere else, and wrong in
+at four would make `mdmost` correct on tmux 3.4 and wrong everywhere else, and wrong in
 the direction that cannot be recovered — the canvas would then be lying about its own
 width. The honest position is that the canvas is right and the terminal is behind. If it
 has to be worked around one day, the workaround belongs behind a terminal capability

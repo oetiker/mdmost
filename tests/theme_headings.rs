@@ -8,7 +8,7 @@
 //! because the whole point of deriving them in `Theme::from_palette` is that a config
 //! theme inherits the same discipline.
 
-use mdless::theme::{Color, Style, Theme};
+use mdmost::theme::{Color, Style, Theme};
 
 /// Perceptual distance between two colours, as RGB Manhattan distance.
 ///

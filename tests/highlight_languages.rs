@@ -1,9 +1,9 @@
 //! Per-language colouring: does a token that *is* a keyword get the theme's keyword
 //! style, in both built-in themes?
 
-use mdless::highlight::{highlight, syntax_name};
-use mdless::text::Line;
-use mdless::theme::{Style, Theme};
+use mdmost::highlight::{highlight, syntax_name};
+use mdmost::text::Line;
+use mdmost::theme::{Style, Theme};
 
 /// The style of the first span whose text equals `token`.
 ///

@@ -661,7 +661,7 @@ fn scrollbar(buffer: &mut Buffer, area: Rect, app: &App) {
     }
 }
 
-/// Converts an `mdless` style into a `ratatui` style.
+/// Converts an `mdmost` style into a `ratatui` style.
 pub fn term_style(style: Style) -> TermStyle {
     let mut out = TermStyle::default();
     if let Some(fg) = style.fg {
@@ -686,7 +686,7 @@ pub fn term_style(style: Style) -> TermStyle {
     out.add_modifier(modifiers)
 }
 
-/// Lays an `mdless` style over an existing `ratatui` style, keeping what it leaves unset.
+/// Lays an `mdmost` style over an existing `ratatui` style, keeping what it leaves unset.
 fn patch_term(under: TermStyle, over: Style) -> TermStyle {
     let mut out = under;
     if let Some(fg) = over.fg {

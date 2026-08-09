@@ -33,7 +33,7 @@
 //! Glenn Chappell (figlet release 2.1, 1994; "Permission is hereby given to modify
 //! this font, as long as the modifier's name is placed on a comment line" — the
 //! modification here is the restriction to `0x20..=0x7E` and the transcription into
-//! Rust, by the mdless authors, 2026-08-09). Embedding one font as a table is the
+//! Rust, by the mdmost authors, 2026-08-09). Embedding one font as a table is the
 //! whole dependency: no crate, no font files to find at runtime, nothing to load.
 //!
 //! [`layout`] implements `FIGlet`'s controlled horizontal smushing with the rules this

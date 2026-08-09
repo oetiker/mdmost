@@ -2,14 +2,14 @@
 //!
 //! Snapshots are named `<fixture>@<width>` and are reviewed with `cargo insta review`.
 
-use mdless::canvas::Canvas;
-use mdless::mermaid::ast::BlockKind;
-use mdless::mermaid::ast::{
+use mdmost::canvas::Canvas;
+use mdmost::mermaid::ast::BlockKind;
+use mdmost::mermaid::ast::{
     Branch, Label, Message, MessageHead, MessageLine, Note, NotePlacement, Participant,
     ParticipantId, ParticipantKind, SequenceBlock, SequenceDiagram, SequenceItem,
 };
-use mdless::mermaid::sequence;
-use mdless::theme::Theme;
+use mdmost::mermaid::sequence;
+use mdmost::theme::Theme;
 use proptest::prelude::*;
 
 /// The widths every fixture is rendered at.
@@ -74,7 +74,7 @@ fn assert_contract(canvas: &Canvas, width: u16) {
     assert_eq!(canvas.check_invariants(), Ok(()));
     for row in 0..canvas.height() {
         assert_eq!(
-            mdless::text::display_width(&canvas.row_text(row)),
+            mdmost::text::display_width(&canvas.row_text(row)),
             usize::from(width),
             "row {row} is not {width} columns wide"
         );

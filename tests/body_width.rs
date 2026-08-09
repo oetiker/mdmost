@@ -6,11 +6,11 @@
 //! the moment the cap would cut it short. These tests pin the rule, both halves of it,
 //! and pin that the horizontal-scroll machinery still sees what it expects.
 
-use mdless::canvas::Canvas;
-use mdless::doc::Doc;
-use mdless::render::{RenderOptions, render_document};
-use mdless::theme::Theme;
-use mdless::tui::wide::{render_scrollable, scroll_reach};
+use mdmost::canvas::Canvas;
+use mdmost::doc::Doc;
+use mdmost::render::{RenderOptions, render_document};
+use mdmost::theme::Theme;
+use mdmost::tui::wide::{render_scrollable, scroll_reach};
 
 /// No Nerd Font glyphs, no line numbers: the layout is the subject here.
 const PLAIN: RenderOptions = RenderOptions::new(false, false);

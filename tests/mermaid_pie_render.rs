@@ -3,10 +3,10 @@
 //! Snapshots are named `<fixture>@<width>` and are reviewed with `cargo insta review`.
 //! Every case is rendered at widths 40, 80 and 120 per design spec §13.2.
 
-use mdless::canvas::Canvas;
-use mdless::mermaid::ast::{PieChart, PieSlice};
-use mdless::mermaid::pie;
-use mdless::theme::Theme;
+use mdmost::canvas::Canvas;
+use mdmost::mermaid::ast::{PieChart, PieSlice};
+use mdmost::mermaid::pie;
+use mdmost::theme::Theme;
 use proptest::prelude::*;
 
 /// The widths every fixture is rendered at.
@@ -43,7 +43,7 @@ fn assert_contract(canvas: &Canvas, width: u16) {
     assert_eq!(canvas.check_invariants(), Ok(()));
     for row in 0..canvas.height() {
         assert_eq!(
-            mdless::text::display_width(&canvas.row_text(row)),
+            mdmost::text::display_width(&canvas.row_text(row)),
             usize::from(width),
             "row {row} is not {width} columns wide"
         );

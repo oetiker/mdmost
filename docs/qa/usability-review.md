@@ -1,12 +1,12 @@
-# mdless — usability review (harsh)
+# mdmost — usability review (harsh)
 
-Binary: /home/oetiker/scratch/cargo-target/{debug,release}/mdless @ 3e17fdc
+Binary: /home/oetiker/scratch/cargo-target/{debug,release}/mdmost @ 3e17fdc
 Driven in tmux at 100x30, 100x24, 90x20, 60x16, 40x10, 10x20, 80x5, 80x2.
 
 ## BLOCKING
 
 ### B1. Horizontal scrolling does not work at all in normal use
-Repro: `tmux new-session -d -s w -x 60 -y 16; mdless wide.md`, press `→` five times.
+Repro: `tmux new-session -d -s w -x 60 -y 16; mdmost wide.md`, press `→` five times.
 Content is clipped with `›` markers and nothing moves:
 
 ```
@@ -31,10 +31,10 @@ Should be: clipped rows must set the scrollable extent from the widest *unclippe
 not from the already-clipped canvas.
 
 ### B2. The TOC does not track the current section while you scroll
-Repro: `mdless --toc normal.md`, `Esc` (release TOC focus), then `d` ×8 to the bottom.
+Repro: `mdmost --toc normal.md`, `Esc` (release TOC focus), then `d` ×8 to the bottom.
 ```
 ╭  Contents ────────────────╮text
-│▸ mdless Test Document      │
+│▸ mdmost Test Document      │
 │    Section One             │ Deep 5.2
 ...
 │      Deep 5.1              │text
@@ -48,8 +48,8 @@ wrong position is worse than no pane: with `--toc` (a shipped startup flag) the 
 permanently. Should be: the highlight follows the viewport on every scroll.
 
 ### B3. `Esc` quits the pager, and it does so with the TOC pane still open
-Repro A: `mdless normal.md`, `/needle`, `Enter`, `Esc` → **application exits**.
-Repro B: `mdless normal.md`, `Tab`, `Esc` (releases TOC focus, pane stays visible), `Esc`
+Repro A: `mdmost normal.md`, `/needle`, `Enter`, `Esc` → **application exits**.
+Repro B: `mdmost normal.md`, `Tab`, `Esc` (releases TOC focus, pane stays visible), `Esc`
 → **application exits while the TOC is still on screen**.
 
 Spec §10 says Esc "closes an overlay or TOC focus first, quits from a bare document". A
@@ -115,13 +115,13 @@ progress line and stay interruptible), and debounce resize re-layout.
 ### P1. Status bar collides with the key hint
 At 60 columns:
 ```
- 󰈙 normal.md    0%           mdless Test Documenth help
+ 󰈙 normal.md    0%           mdmost Test Documenth help
 ```
 The heading is truncated with no separator and butts into `h help`, producing the nonsense word
 `Documenth`. Needs a reserved gap and an ellipsis.
 
 ### P2. Status bar loses the help hint exactly when it is most needed
-At 40 columns the bar reads ` 󰈙 normal.md    0%          mdless` — `h help` is dropped. The
+At 40 columns the bar reads ` 󰈙 normal.md    0%          mdmost` — `h help` is dropped. The
 narrower the terminal, the less likely the user knows how to get help or quit. The hint should
 be the last thing dropped, not the first.
 
@@ -164,7 +164,7 @@ neither `--help` nor the help overlay.
 unsupported mermaid syntax: unsupported diagram type `flowchart`
 ```
 Three problems: (a) `flowchart` *is* a spec'd family (§2), so the message tells the user
-mdless can't do flowcharts rather than "not implemented yet"; (b) the wording is redundant
+mdmost can't do flowcharts rather than "not implemented yet"; (b) the wording is redundant
 ("unsupported … unsupported"); (c) for genuinely broken input it echoes a random word from the
 user's typo as a diagram type — `unsupported diagram type \`this\`` for the line
 `this is not valid mermaid at all !!!`. The caption is also unstyled body text sitting outside
@@ -172,20 +172,20 @@ the frame, so it reads as document content. Should be framed as a caption and sa
 "mermaid flowchart rendering is not available yet — showing the source".
 
 ### P10. `--config PATH` pointing at a missing file is silently ignored
-`mdless --config /nonexistent/cfg.toml normal.md` → exit 0, no message, defaults used.
+`mdmost --config /nonexistent/cfg.toml normal.md` → exit 0, no message, defaults used.
 An explicitly-named config that does not exist is a typo, not an optional file. (The *default*
 config being absent is correctly silent.)
 
 ### P11. One bad colour discards the whole custom theme, with a misleading second message
 ```
-mdless: th2.toml:3: invalid config key `accent`: in theme `mine`: invalid colour `not-a-color`
-mdless: unknown theme `mine`, using the dark theme
+mdmost: th2.toml:3: invalid config key `accent`: in theme `mine`: invalid colour `not-a-color`
+mdmost: unknown theme `mine`, using the dark theme
 ```
 The theme *is* defined; only one slot is bad. Spec §9's whole selling point is "a custom theme
 can be a two-line tweak". Should keep the theme and fall back on the single bad slot; and the
 second line should not claim the theme is unknown.
 
-### P12. `mdless x.md | head` prints `mdless: Broken pipe (os error 32)`
+### P12. `mdmost x.md | head` prints `mdmost: Broken pipe (os error 32)`
 Pagers and CLI tools exit silently on EPIPE. Cosmetic but it looks broken.
 
 ### P13. Position readout is confusing when the document fits on screen
@@ -195,7 +195,7 @@ A document shorter than the viewport shows `100% ████████` while
 the bottom of the document it reads as simply wrong.
 
 ### P14. Empty document shows a bare blank alternate screen
-`mdless empty.md` → 23 blank rows, a scrollbar, `empty.md 100%`. No "(empty document)".
+`mdmost empty.md` → 23 blank rows, a scrollbar, `empty.md 100%`. No "(empty document)".
 
 ### P15. TOC entries truncate mid-word with no ellipsis, producing duplicates
 At 40 cols: `│      Subsection 1│` appears twice — 1.1 and 1.2 are indistinguishable. Needs an
@@ -205,7 +205,7 @@ ellipsis and/or a smarter narrow-pane layout.
 At 10 columns the TOC never appears and nothing is said. Fine to suppress; not fine to be silent.
 
 ### P17. `$PAGER` on non-Markdown is a mess
-`git log | mdless` — commit headers get reflowed into paragraphs (line breaks lost), emails
+`git log | mdmost` — commit headers get reflowed into paragraphs (line breaks lost), emails
 become `(mailto:…)` links, indented commit bodies become framed code blocks:
 ```
 commit 2041ef3b… Author: Tobias Oetiker tobi@oetiker.ch
@@ -213,7 +213,7 @@ commit 2041ef3b… Author: Tobias Oetiker tobi@oetiker.ch
 ╭──────────────────────────────────────────────────╮
 │feat: sequence, pie and gantt renderers wired…    │
 ```
-§2/§11 sell "usable as `$PAGER`", which users read as `export PAGER=mdless`. That setting
+§2/§11 sell "usable as `$PAGER`", which users read as `export PAGER=mdmost`. That setting
 makes `git log`, `--help` output and man pages unreadable. Either narrow the claim in the docs
 to Markdown-specific pager slots, or add a plain-text passthrough mode.
 
@@ -229,7 +229,7 @@ to Markdown-specific pager slots, or add a plain-text passthrough mode.
   (`--width 0` → 2 with a clear message). Error text names the file and the OS reason.
 - Config diagnostics are excellent: `file:line: invalid config key \`x\`: <reason>` with the
   list of accepted fields, and it still starts.
-- The stdin/`$PAGER` keyboard path works — `cat x.md | mdless` and `mdless -` both accept keys.
+- The stdin/`$PAGER` keyboard path works — `cat x.md | mdmost` and `mdmost -` both accept keys.
 - Smart case search, regex mode via `Ctrl-r` with a `re/` prompt, match counts, `n`/`N` with
   silent wrap-around, `?` backward — all correct.
 - Search-during-resize and 80×2 terminals survive without artifacts.
@@ -246,9 +246,9 @@ to Markdown-specific pager slots, or add a plain-text passthrough mode.
 The rendering is the strong part and it is already better than anything `less` can do. The
 *pager* is the weak part. Three things a `less` user does constantly are broken or missing:
 
-1. **Reaching content that is off-screen to the right.** `less` has `→`/`ESC-)`; mdless shows
+1. **Reaching content that is off-screen to the right.** `less` has `→`/`ESC-)`; mdmost shows
    you the truncation marker and then refuses to move (B1).
-2. **Knowing where you are.** `less` has `Ctrl-G`. mdless has a TOC that stops updating the
+2. **Knowing where you are.** `less` has `Ctrl-G`. mdmost has a TOC that stops updating the
    moment you scroll (B2), a status heading that disagrees with it, and no `Ctrl-G`, no `=`,
    no `50%`, no repeat counts (P3, P4).
 3. **Getting out safely.** `Esc` — the universal "undo whatever I just did" key — kills the

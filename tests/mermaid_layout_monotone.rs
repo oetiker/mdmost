@@ -11,13 +11,13 @@
 //! greater width. The pinned 63/64/65 case was scaffolding and is deliberately gone; a
 //! list of widths goes stale the moment the layout changes, the sweep does not.
 
-use mdless::error::MermaidError;
-use mdless::mermaid::ast::{
+use mdmost::error::MermaidError;
+use mdmost::mermaid::ast::{
     ArrowHead, Direction, EdgeStroke, FlowEdge, FlowNode, Flowchart, Group, Label, NodeId,
     NodeShape,
 };
-use mdless::mermaid::layout::flowchart;
-use mdless::theme::Theme;
+use mdmost::mermaid::layout::flowchart;
+use mdmost::theme::Theme;
 
 /// The widest width any test sweeps to — comfortably past every chart's natural width.
 const WIDEST: u16 = 200;

@@ -1,17 +1,17 @@
 [package]
-name = "mdless"
+name = "mdmost"
 version = "0.1.0"
 edition = "2024"
 description = "A full-screen terminal pager for a single Markdown document"
 license = "MIT"
-repository = "https://github.com/oetiker/mdless"
+repository = "https://github.com/oetiker/mdmost"
 
 [lib]
-name = "mdless"
+name = "mdmost"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mdless"
+name = "mdmost"
 path = "src/main.rs"
 
 [features]
@@ -38,7 +38,7 @@ comrak = { version = "0.54.0", default-features = false }
 # Kept in lock step with the crossterm version ratatui 0.30 depends on.
 crossterm = "0.29.0"
 directories = "6.0.0"
-# Not for logging anything of our own — `mdless` has a status bar. This is the receiving
+# Not for logging anything of our own — `mdmost` has a status bar. This is the receiving
 # end: `src/tui/stderr.rs` installs a logger so that a dependency's `warn!` is held back
 # instead of being painted over the alternate screen. Already in the tree under
 # `arboard`, which picks between `eprintln!` and `log::warn!` at run time and so has to

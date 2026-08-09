@@ -1,6 +1,6 @@
 //! Plain-text input: the `$PAGER` path for streams that are not Markdown.
 //!
-//! `export PAGER=mdless` points `git log`, `--help` output and man pages at this
+//! `export PAGER=mdmost` points `git log`, `--help` output and man pages at this
 //! program, and none of them are Markdown. Parsing them as Markdown actively damages
 //! them: line breaks are reflowed away, `Author: a@b.c` becomes a mailto link, and an
 //! indented commit body becomes a framed code block (usability review P17).

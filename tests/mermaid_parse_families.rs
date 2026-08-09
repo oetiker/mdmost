@@ -3,8 +3,8 @@
 //! The sources are taken from Mermaid's own documentation examples, so a passing test
 //! means real-world diagrams parse, not just hand-tailored ones.
 
-use mdless::mermaid::ast::*;
-use mdless::mermaid::parse::parse;
+use mdmost::mermaid::ast::*;
+use mdmost::mermaid::parse::parse;
 
 /// Parses `src`, failing the test with the parser's reason when it does not.
 #[track_caller]

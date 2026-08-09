@@ -3,8 +3,8 @@ source: tests/snapshot.rs
 expression: outline(&doc)
 ---
 Document
-  Heading(h1, #mdless-torture-test)
-    Text("mdless torture test")
+  Heading(h1, #mdmost-torture-test)
+    Text("mdmost torture test")
   Paragraph
     Text("A paragraph with ")
     Emph

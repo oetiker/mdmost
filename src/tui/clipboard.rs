@@ -2,7 +2,7 @@
 //!
 //! # Why OSC 52 first
 //!
-//! `mdless` is a terminal pager, and a terminal pager is very often read over SSH.
+//! `mdmost` is a terminal pager, and a terminal pager is very often read over SSH.
 //! OSC 52 is a message *to the terminal emulator*, so it crosses the connection with
 //! the rest of the session and lands on the clipboard of the machine the reader is
 //! sitting at. [`arboard`] talks to a local display server (X11 via `x11rb`, Wayland
@@ -35,7 +35,7 @@
 //! holds it; the server stores nothing. Wayland's data-control protocol works the same
 //! way. So a program that sets the clipboard and immediately drops it has, in effect,
 //! copied nothing — the reader pastes and gets whatever was there before. That is
-//! precisely what `mdless` used to do, and `arboard` 3.6.1 says so out loud from its
+//! precisely what `mdmost` used to do, and `arboard` 3.6.1 says so out loud from its
 //! `Drop` impl ("Clipboard was dropped very quickly after writing"), which is how the
 //! bug was reported: as advice painted over a sequence diagram.
 //!
@@ -48,17 +48,17 @@
 //!
 //! # What that can and cannot promise
 //!
-//! *While `mdless` runs*, a copy is readable by any other process, immediately and for
+//! *While `mdmost` runs*, a copy is readable by any other process, immediately and for
 //! as long as the reader takes to get round to pasting. Verified from a separate
 //! process on X11.
 //!
-//! *After `mdless` exits*, the local clipboard survives only if something else took
+//! *After `mdmost` exits*, the local clipboard survives only if something else took
 //! ownership in the meantime — a clipboard manager, which most desktops run and which
 //! grabs a new selection at once. [`release`] gives it the best chance available by
 //! dropping the handle deliberately on the way out, which is where `arboard` asks the
 //! manager to take the data over; without that the process would simply die holding it.
 //! On a desktop with no manager at all, quitting still loses the copy, and no amount of
-//! effort inside `mdless` can change that: X11 ownership dies with the process. This is
+//! effort inside `mdmost` can change that: X11 ownership dies with the process. This is
 //! the one case the status bar is careful about — see [`Delivery::LocalOnly`].
 //!
 //! OSC 52 has none of this trouble, which is worth remembering before spending more on
@@ -75,7 +75,7 @@ pub enum Delivery {
     Confirmed,
     /// Only the local display server took it: OSC 52 was not written.
     ///
-    /// Worth its own variant because it is the one case where `mdless` is the sole
+    /// Worth its own variant because it is the one case where `mdmost` is the sole
     /// owner of the copy, and an X11 or Wayland selection is owned by a *process*: when
     /// this one exits, a desktop with no clipboard manager has nothing left. The
     /// terminal emulator, which does outlive the pager, was not given a copy here.
@@ -100,7 +100,7 @@ impl Delivery {
             Delivery::Confirmed => (format!("copied {bytes} bytes of {what}"), false),
             Delivery::LocalOnly => (
                 format!(
-                    "copied {bytes} bytes of {what} to the desktop clipboard (held while mdless runs)"
+                    "copied {bytes} bytes of {what} to the desktop clipboard (held while mdmost runs)"
                 ),
                 false,
             ),

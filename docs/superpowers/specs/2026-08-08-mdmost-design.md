@@ -1,11 +1,11 @@
-# mdless — design spec
+# mdmost — design spec
 
 Date: 2026-08-08
 Status: approved
 
 ## 1. What it is
 
-`mdless` is a full-screen terminal pager for a single Markdown document. It aims to be
+`mdmost` is a full-screen terminal pager for a single Markdown document. It aims to be
 as pleasant to look at as `btop` and as pleasant to use as `less`. It renders GitHub
 Flavored Markdown including tables (with Markdown inside cells), syntax-highlighted
 fenced code, and a useful subset of Mermaid diagrams drawn as Unicode art. It reflows
@@ -19,12 +19,12 @@ rendering, inline raster images, remote fetching.
 | Decision | Choice |
 |---|---|
 | Language / TUI | Rust + `ratatui` + `crossterm` |
-| Scope | Single-document pager; `mdless FILE` and stdin; usable as `$PAGER` |
+| Scope | Single-document pager; `mdmost FILE` and stdin; usable as `$PAGER` |
 | Mermaid | Unicode/box-art only, never raster |
 | Mermaid families | flowchart, sequence, class, er, pie, gantt, state |
 | Terminal floor | Truecolor + full Unicode; Nerd Font glyphs when detected, plain Unicode otherwise (§2.1) |
 | Keys | less-compatible core, vim extras |
-| Config | TOML at `~/.config/mdless/config.toml`, themeable |
+| Config | TOML at `~/.config/mdmost/config.toml`, themeable |
 | Images | An image that is a paragraph of its own: framed placeholder box showing alt text + target. An image *inside* a sentence: `⟨alt text⟩` inline, because a box drawn mid-sentence cuts the paragraph into three blocks (refined 2026-08-09) |
 | HTML | Not supported. Not rendered, not passed through. |
 
@@ -43,7 +43,7 @@ raised this against the previous default; a third flipped it unilaterally and wa
 overruled on the grounds that the decision was already settled. That was the right call
 procedurally and the wrong outcome, which is why this section exists.
 
-*What replaces it.* When nobody has said, mdless asks whether an installed font covers
+*What replaces it.* When nobody has said, mdmost asks whether an installed font covers
 **every** private-use code point it can draw, and uses glyphs only if one does. The
 question goes to fontconfig, and the code points are enumerated from the glyph tables
 themselves, so a glyph added later is automatically a glyph the probe requires — the
@@ -57,7 +57,7 @@ that are all supposed to be one column wide — possibly a misaligned status bar
 no fontconfig, no terminal on stdout, `TERM=dumb` or `linux`, or an SSH session, where
 the fonts on this machine describe the wrong computer entirely.
 
-*Precedence*, lowest to highest: detection, `icons` in the config file, `MDLESS_ICONS`,
+*Precedence*, lowest to highest: detection, `icons` in the config file, `MDMOST_ICONS`,
 then `--icons` / `--no-icons`. The nearer answer wins outright rather than combining, so
 `--no-icons` turns glyphs off for one run of a config that enables them. The env var
 exists mainly for the SSH case, where detection is blind by design and the fix belongs in
@@ -398,13 +398,13 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
 
 - Fenced code blocks are highlighted by language tag. Unknown or absent tag → plain,
   themed, still framed.
-- Implementation uses `syntect` for parsing, with themes mapped from the active `mdless`
+- Implementation uses `syntect` for parsing, with themes mapped from the active `mdmost`
   theme rather than syntect's own, so code sits inside the palette instead of clashing
   with it.
 - **The syntax set is `bat`'s, not `syntect`'s.** `syntect::SyntaxSet::load_defaults` is
   the Sublime Text bundle as it stood in 2016: 75 syntaxes, with no TypeScript, Kotlin,
   Swift, Zig, Nix, Terraform, Elixir, Dart, Julia, Protobuf, GraphQL, Vue, Svelte or
-  SCSS — and no TOML, which is `mdless`'s own configuration format. The set comes from
+  SCSS — and no TOML, which is `mdmost`'s own configuration format. The set comes from
   `two-face` instead (`syntax::extra_newlines`, 213 syntaxes, ~0.6 MiB embedded), which
   re-packages `bat`'s curation behind the same API and is versioned against a `bat`
   release.
@@ -418,14 +418,14 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
   misresolves. The alias table is a last resort: an entry that the bundled set has since
   learned to resolve on its own is a defect, and `aliases_only_cover_tags_syntect_misses_or_misresolves`
   fails on it.
-- `mdless` ships two syntax definitions of its own, for TOML and Dockerfile, in a second
+- `mdmost` ships two syntax definitions of its own, for TOML and Dockerfile, in a second
   `SyntaxSet` consulted first. They are kept because they measurably beat the bundled
   ones against the scope table, not because the bundled ones are absent — see the tests
   named in `src/highlight.rs`. The two sets are never merged: merging re-links every
   bundled syntax on first use.
 - **Attribution is part of the feature.** The bundled definitions include MIT, BSD and
   Apache-2.0 licensed work, whose notices must be reproduced in binary distributions.
-  `mdless --licenses` prints them, as plain Markdown (no HTML — see §1), generated from
+  `mdmost --licenses` prints them, as plain Markdown (no HTML — see §1), generated from
   `two_face::acknowledgement` so it cannot drift from the definitions actually embedded.
 - Code blocks are framed with the language name in the frame's top edge, line numbers
   optional via config, and never wrap: long lines scroll horizontally with the table
@@ -644,7 +644,7 @@ table so it can never drift.
 ## 11. CLI and I/O
 
 ```
-mdless [FILE]              # file, or stdin when FILE is absent or "-"
+mdmost [FILE]              # file, or stdin when FILE is absent or "-"
   --render-once            # render one frame to stdout and exit (no TTY needed)
   --width N                # force render width in BOTH modes; in the TUI the surplus
                            # is reachable by horizontal scrolling
@@ -660,8 +660,8 @@ mdless [FILE]              # file, or stdin when FILE is absent or "-"
 ```
 
 - When input is stdin, the process reopens `/dev/tty` for keyboard input so
-  `cat x.md | mdless` and `export PAGER=mdless` both work.
-- When stdout is not a TTY, `--render-once` behaviour is implied so `mdless x.md | cat`
+  `cat x.md | mdmost` and `export PAGER=mdmost` both work.
+- When stdout is not a TTY, `--render-once` behaviour is implied so `mdmost x.md | cat`
   produces sensible output instead of escape soup. `--render-once` emits ANSI truecolour
   to a TTY and plain text otherwise, which is also what makes headless snapshotting
   trivial. There is no `--color` flag.

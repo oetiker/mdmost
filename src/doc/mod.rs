@@ -10,7 +10,7 @@
 //! it nor passing it through (design spec §2 and §12).
 //!
 //! ```
-//! use mdless::doc::{Doc, NodeKind};
+//! use mdmost::doc::{Doc, NodeKind};
 //!
 //! let doc = Doc::parse("# Title\n\nSome *text*.\n");
 //! assert_eq!(doc.headings().len(), 1);
@@ -183,7 +183,7 @@ pub enum NodeKind {
         /// The optional title.
         title: String,
     },
-    /// Raw HTML that `mdless` deliberately does not support.
+    /// Raw HTML that `mdmost` deliberately does not support.
     ///
     /// **Renderers must skip these nodes entirely.** The literal is retained only so
     /// that diagnostics can mention what was dropped; it must never reach the canvas.
@@ -294,7 +294,7 @@ impl Doc {
 
     /// Parses `source` as Markdown, or as plain text when it contains no Markdown.
     ///
-    /// This is the `$PAGER` entry point: `git log | mdless` must not have its line
+    /// This is the `$PAGER` entry point: `git log | mdmost` must not have its line
     /// breaks reflowed away, its e-mail addresses turned into links or its indented
     /// bodies framed as code (usability review P17). A stream carrying any Markdown
     /// markup at all still takes the full Markdown path.
@@ -357,7 +357,7 @@ impl Doc {
     /// character is still the title, and still goes unnumbered.
     ///
     /// ```
-    /// use mdless::doc::Doc;
+    /// use mdmost::doc::Doc;
     ///
     /// assert_eq!(Doc::parse("# T\n\n## A\n").lone_title().map(|h| h.level), Some(1));
     /// assert!(Doc::parse("# A\n\n# B\n").lone_title().is_none());

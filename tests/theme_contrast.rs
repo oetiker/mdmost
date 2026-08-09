@@ -10,7 +10,7 @@
 //! derived from a raw palette, so a `[themes.<name>]` block in `config.toml` inherits
 //! the same discipline rather than quietly opting out of it.
 
-use mdless::theme::{Color, Style, Theme};
+use mdmost::theme::{Color, Style, Theme};
 
 /// WCAG's floor for text: 4.5:1 against its own background.
 const TEXT_FLOOR: f32 = 4.5;
@@ -238,7 +238,7 @@ fn borders_stay_quieter_than_the_text_they_frame() {
 
 /// Section numbers are ours, and have to look it — without becoming unreadable.
 ///
-/// The numbers `mdless` puts in front of a deeply nested document's headings (design
+/// The numbers `mdmost` puts in front of a deeply nested document's headings (design
 /// spec §9.3) are not in the author's text, so the owner asked for them "in a light
 /// colour, to make clear the numbering is ours". That is two requirements pulling
 /// against each other and both are asserted here: the digits clear the 4.5:1 text

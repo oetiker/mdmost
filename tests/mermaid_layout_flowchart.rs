@@ -4,12 +4,12 @@
 //! [`Flowchart`], so a change in `mermaid::parse` can never silently rewrite what these
 //! snapshots are checking.
 
-use mdless::mermaid::ast::{
+use mdmost::mermaid::ast::{
     ArrowHead, Direction, EdgeStroke, FlowEdge, FlowNode, Flowchart, Group, Label, NodeId,
     NodeShape,
 };
-use mdless::mermaid::layout::flowchart;
-use mdless::theme::Theme;
+use mdmost::mermaid::layout::flowchart;
+use mdmost::theme::Theme;
 
 /// A node with the given key, label and shape.
 fn node(key: &str, label: &str, shape: NodeShape) -> FlowNode {

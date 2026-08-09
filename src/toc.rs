@@ -10,9 +10,9 @@
 //! build time, the same `Toc` survives a resize: re-render, re-attach, done.
 //!
 //! ```
-//! use mdless::doc::Doc;
-//! use mdless::numbering::Numbering;
-//! use mdless::toc::Toc;
+//! use mdmost::doc::Doc;
+//! use mdmost::numbering::Numbering;
+//! use mdmost::toc::Toc;
 //!
 //! let doc = Doc::parse("# One\n\n## Two\n\n# Three\n");
 //! let toc = Toc::from_doc(&doc, &Numbering::for_doc(&doc));

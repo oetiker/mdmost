@@ -27,12 +27,12 @@ fn main() {}
 
 /// The binary, with anything in the environment that could change its output removed.
 ///
-/// `MDLESS_ICONS` outranks the config file, so a developer who exports it in their shell
+/// `MDMOST_ICONS` outranks the config file, so a developer who exports it in their shell
 /// profile would otherwise be running a different program from everyone else — and the
 /// failure would look like a real regression rather than a local setting.
 fn command() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_mdless"));
-    command.env_remove("MDLESS_ICONS");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mdmost"));
+    command.env_remove("MDMOST_ICONS");
     command
 }
 
@@ -67,7 +67,7 @@ fn run_with_stdin(args: &[&str], input: &str) -> Output {
 
 /// Writes `SAMPLE` to a temporary file and returns its path.
 fn sample_file(name: &str) -> std::path::PathBuf {
-    let path = std::env::temp_dir().join(format!("mdless-{name}-{}.md", std::process::id()));
+    let path = std::env::temp_dir().join(format!("mdmost-{name}-{}.md", std::process::id()));
     std::fs::write(&path, SAMPLE).expect("the temporary file should be writable");
     path
 }
@@ -93,7 +93,7 @@ fn render_once_works_headlessly_and_honours_the_width() {
         );
         for line in text.lines() {
             assert!(
-                mdless::text::display_width(line) <= usize::from(width),
+                mdmost::text::display_width(line) <= usize::from(width),
                 "line wider than {width}: {line:?}"
             );
         }
@@ -174,7 +174,7 @@ fn bad_arguments_exit_with_two() {
 
 /// `--licenses` is how the third-party syntax notices reach whoever has the binary, so
 /// it has to work with no document, no config and no terminal — the state an auditor is
-/// in — and it has to come out as something `mdless` itself can read back.
+/// in — and it has to come out as something `mdmost` itself can read back.
 #[test]
 fn licenses_prints_the_bundled_notices_and_exits_cleanly() {
     let output = run(&["--licenses"]);
@@ -187,7 +187,7 @@ fn licenses_prints_the_bundled_notices_and_exits_cleanly() {
     assert!(text.contains("Copyright"), "no copyright notice");
     assert!(!text.contains("<details>"), "the listing must be HTML-free");
 
-    // …and it really is Markdown mdless can render.
+    // …and it really is Markdown mdmost can render.
     let rendered = run_with_stdin(&["--render-once", "--width", "80"], &text);
     assert_eq!(rendered.status.code(), Some(0));
     assert!(
@@ -219,7 +219,7 @@ fn an_unknown_theme_falls_back_instead_of_refusing_to_start() {
 
 #[test]
 fn a_broken_config_is_reported_and_defaults_are_used() {
-    let config = std::env::temp_dir().join(format!("mdless-bad-{}.toml", std::process::id()));
+    let config = std::env::temp_dir().join(format!("mdmost-bad-{}.toml", std::process::id()));
     std::fs::write(&config, "theme = \n").expect("the temporary file should be writable");
     let output = run_with_stdin(
         &[
@@ -272,7 +272,7 @@ fn no_icons_reaches_the_renderer_not_just_the_chrome() {
 #[test]
 fn line_numbers_from_config_reach_the_renderer() {
     let source = "# Code\n\n```rust\nfn main() {}\nlet x = 1;\n```\n";
-    let config = std::env::temp_dir().join(format!("mdless-ln-{}.toml", std::process::id()));
+    let config = std::env::temp_dir().join(format!("mdmost-ln-{}.toml", std::process::id()));
 
     std::fs::write(&config, "line_numbers = false\n").expect("writable");
     let off = run_with_stdin(
