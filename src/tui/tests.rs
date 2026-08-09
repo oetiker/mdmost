@@ -2951,3 +2951,117 @@ fn the_copy_report_claims_only_what_the_route_can_prove() {
     let (text, is_error) = Delivery::Failed("no clipboard".to_string()).message(47, true);
     assert!(is_error && text.contains("no clipboard"));
 }
+
+/// An X11 or Wayland selection belongs to a process, so a copy that only the local
+/// display server holds is a copy that ends when `mdless` does — unless a clipboard
+/// manager takes it over, which is exactly the thing we cannot check. The bar therefore
+/// says what it knows: this one is held while the pager runs.
+#[test]
+fn the_copy_report_marks_a_copy_only_this_process_holds() {
+    use super::clipboard::Delivery;
+    let (text, is_error) = Delivery::LocalOnly.message(47, false);
+    assert!(!is_error);
+    assert!(
+        text.starts_with("copied 47 bytes of rendered text"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("while mdless runs"),
+        "the one thing this route cannot promise is surviving the exit: {text:?}"
+    );
+    // And the route that did reach the terminal emulator must not carry the caveat:
+    // OSC 52 hands the bytes to a process that outlives us.
+    assert!(
+        !Delivery::Confirmed
+            .message(47, false)
+            .0
+            .contains("while mdless runs")
+    );
+}
+
+/// Which claim each combination of routes earns. The distinction that matters is the
+/// second row: with OSC 52 gone, the terminal emulator — the one holder that outlives
+/// the pager — never got a copy, so the caveat is the whole difference.
+#[test]
+fn the_delivery_is_decided_by_which_routes_worked() {
+    use super::clipboard::{Delivery, classify_for_test as classify};
+    let bad = || Err("nope".to_string());
+    assert_eq!(classify(Ok(()), Some(Ok(()))), Delivery::Confirmed);
+    assert_eq!(classify(bad(), Some(Ok(()))), Delivery::LocalOnly);
+    assert_eq!(classify(Ok(()), Some(bad())), Delivery::Sent);
+    assert_eq!(classify(Ok(()), None), Delivery::Sent);
+    assert!(matches!(classify(bad(), Some(bad())), Delivery::Failed(_)));
+    assert!(matches!(classify(bad(), None), Delivery::Failed(_)));
+}
+
+/// The bug this covers: `set_text` used to be called on a `Clipboard` that was dropped
+/// on the next line, which on X11 un-copies the text before anyone can ask for it.
+/// Holding the handle open is not an optimisation, it *is* the copy.
+///
+/// Needs a display server, and clobbers the desktop clipboard when it has one — there
+/// is no way to test ownership without taking it. It reports why it skipped rather than
+/// passing silently.
+#[test]
+fn a_local_copy_stays_owned_until_it_is_released() {
+    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        eprintln!("skipped: no display server to own a selection");
+        return;
+    }
+    let Some(first) = super::clipboard::local_for_test("mdless clipboard test one") else {
+        eprintln!(
+            "skipped: no local clipboard was attempted — either a remote session, where \
+             writing to this end's clipboard would be a mistake, or a build without the \
+             `clipboard` feature"
+        );
+        return;
+    };
+    if let Err(why) = first {
+        eprintln!("skipped: this display server would not take a clipboard: {why}");
+        return;
+    }
+    assert!(
+        super::clipboard::held_for_test(),
+        "the copy is gone the moment the handle is dropped; it must still be held here"
+    );
+    // The second copy is the case a naive background-thread design gets wrong: the
+    // first owner has to yield. Re-using one handle makes it a non-event.
+    let second = super::clipboard::local_for_test("mdless clipboard test two");
+    assert_eq!(
+        second,
+        Some(Ok(())),
+        "a second copy must not need a new handle"
+    );
+    assert!(super::clipboard::held_for_test());
+    // Releasing is deliberate and is where a clipboard manager gets its chance.
+    super::clipboard::release();
+    assert!(!super::clipboard::held_for_test());
+}
+
+/// A library writing to standard error must not reach the alternate screen, and must
+/// not be discarded either. Both halves are asserted: `arboard` picks between
+/// `eprintln!` and `log::warn!` depending on whether standard error is a terminal, so
+/// defending one layer alone would have missed one of its two branches.
+#[test]
+fn a_librarys_complaints_are_held_back_and_then_reported() {
+    use std::io::Write;
+
+    let mut capture = super::stderr::Capture::start();
+    // Written through the handle rather than with `eprintln!` on purpose: the test
+    // harness redirects the *macro* to a per-thread sink, so `eprintln!` here would
+    // never reach descriptor 2 and the test would be measuring `libtest`. A library
+    // linked into the real binary has no such sink; `io::stderr()` is what it gets.
+    let _ = writeln!(std::io::stderr(), "SCRIBBLE-ON-THE-FRAME");
+    log::warn!("A-LIBRARY-WARNING");
+    let collected = String::from_utf8_lossy(&capture.finish()).into_owned();
+    assert!(
+        collected.contains("SCRIBBLE-ON-THE-FRAME"),
+        "a direct write to standard error escaped onto the screen: {collected:?}"
+    );
+    assert!(
+        collected.contains("A-LIBRARY-WARNING"),
+        "a `log` record was not collected — with standard error redirected this is the \
+         branch `arboard` takes: {collected:?}"
+    );
+    // Nothing is swallowed once there is no screen to protect.
+    assert!(super::stderr::Capture::start().finish().is_empty());
+}
