@@ -1809,3 +1809,133 @@ fn a_renderer_that_reports_no_floor_stays_inside_the_probe_cap() {
         "doubling should have found this pie on the second layout"
     );
 }
+
+/// Builds an app over `source` at an explicit size in a named theme.
+fn themed_pager(source: &str, theme: &str, width: u16, height: u16) -> App {
+    let mut app = App::new(
+        Doc::parse(source),
+        Config::default(),
+        AppOptions {
+            title: "sample.md".to_string(),
+            icons: false,
+            theme: theme.to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(width, height);
+    let _ = app.canvas();
+    app
+}
+
+/// A document with one of everything the painters treat differently.
+const PAINTED: &str = "\
+# Heading One
+
+Plain prose with a **bold** word in it and more text after.
+
+## Heading Two
+
+| a | b |
+| - | - |
+| 1 | 2 |
+| 3 | 4 |
+
+```rust
+fn main() { let x: Vec<i32> = vec![1]; }
+```
+
+---
+
+Final paragraph.
+";
+
+#[test]
+fn every_cell_of_every_frame_carries_the_theme_background() {
+    // A pager that leaves cells on the terminal's own background is only readable by
+    // luck: the reader's terminal may be the opposite polarity, in which case body
+    // prose measures 1.4:1, and it is *irregularly* readable when the two backgrounds
+    // merely differ, because the painted cells then show up as slabs.
+    //
+    // Written as a whole-frame sweep rather than as a check on one painter, because
+    // every painter has to hold it and the ways to break it are not enumerable: a
+    // widget rendered without a background, a blit that stops at the end of a canvas
+    // row, an overlay that only paints where its text is. A frame is the object the
+    // reader looks at, so a frame is what gets measured (lesson §4.5).
+    //
+    // This invariant is also the premise under which OSC 11 terminal-background
+    // detection was *declined*: because every cell is opaque, a dark theme on a light
+    // terminal is a mismatch of taste, not of legibility — the page is the theme's own
+    // 13.3:1, not the 1.4:1 it would be if the cells were transparent. Detection would
+    // buy politeness at the price of a probe that some terminals never answer. If this
+    // test is ever relaxed, that trade-off has to be reopened with it.
+    for theme in ["dark", "light"] {
+        for (width, height) in [(40u16, 10u16), (80, 30), (140, 24)] {
+            for overlay in [false, true] {
+                let mut app = themed_pager(PAINTED, theme, width, height);
+                if overlay {
+                    app.act(Action::Help);
+                }
+                let buffer = framed_buffer(&mut app, width, height);
+                for y in 0..height {
+                    for x in 0..width {
+                        let cell = &buffer[(x, y)];
+                        assert!(
+                            !matches!(cell.style().bg, None | Some(ratatui::style::Color::Reset)),
+                            "{theme} {width}x{height} overlay={overlay}: cell ({x},{y}) \
+                             {:?} has no background of its own",
+                            cell.symbol()
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_help_overlay_paints_its_panel_behind_every_string() {
+    // The panel is washed with `ui.status_bar`, but the styles it then draws in —
+    // body text, section titles, the border — all carry the *page* background, which
+    // is right everywhere else they are used and wrong here. The result was a run of
+    // page background exactly as wide as each string: the overlay read as if its text
+    // had been gone over with a marker pen.
+    //
+    // Located by colour rather than by geometry: the panel's own background marks
+    // where the panel is, and nothing between its first and last column on a row may
+    // be painted in anything else.
+    for theme in ["dark", "light"] {
+        for (width, height) in [(60u16, 20u16), (80, 30), (140, 24)] {
+            let mut app = themed_pager(PAINTED, theme, width, height);
+            app.act(Action::Help);
+            let panel = super::draw::term_style(app.theme().ui.status_bar).bg;
+            let buffer = framed_buffer(&mut app, width, height);
+            let mut seen = 0usize;
+            for y in 0..height.saturating_sub(1) {
+                let row: Vec<_> = (0..width).map(|x| &buffer[(x, y)]).collect();
+                let Some(first) = row.iter().position(|c| c.style().bg == panel) else {
+                    continue;
+                };
+                let last = row
+                    .iter()
+                    .rposition(|c| c.style().bg == panel)
+                    .unwrap_or(first);
+                for (x, cell) in row.iter().enumerate().take(last + 1).skip(first) {
+                    seen += 1;
+                    assert_eq!(
+                        cell.style().bg,
+                        panel,
+                        "{theme} {width}x{height}: ({x},{y}) {:?} sits inside the help \
+                         panel on a foreign background",
+                        cell.symbol()
+                    );
+                }
+            }
+            assert!(
+                seen > 100,
+                "{theme} {width}x{height}: the overlay must actually be on screen, \
+                 only {seen} panel cells found"
+            );
+        }
+    }
+}

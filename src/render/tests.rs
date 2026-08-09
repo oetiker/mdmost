@@ -1329,3 +1329,66 @@ fn a_bare_email_address_does_not_grow_a_mailto_tail() {
     let out = lines("Author: tobi@oetiker.ch\n", 60);
     assert_eq!(out, ["Author: tobi@oetiker.ch"]);
 }
+
+/// A table with enough body rows that the second one is striped.
+const STRIPED: &str = "\
+| a | b |
+| - | - |
+| 1 | 2 |
+| 3 | 4 |
+| 5 | 6 |
+";
+
+#[test]
+fn a_striped_row_is_shaded_from_border_to_border() {
+    // The stripe told the reader "these two rows go together" and the vertical rules
+    // punched a hole in it at every column boundary, because `table.border` carries
+    // the *page* background. A banded row rendered as two separate shaded boxes with
+    // an unshaded gap between them — in the light theme, as two selected cells.
+    let theme = Theme::default_dark();
+    let stripe = theme
+        .table
+        .row_alt
+        .bg
+        .expect("the stripe is defined as a background");
+    let page = theme.palette.bg;
+    assert_ne!(stripe, page, "the stripe must differ from the page");
+
+    let canvas = render(STRIPED, 40);
+    let banded: Vec<usize> = (0..canvas.height())
+        .filter(|&row| {
+            canvas
+                .row(row)
+                .is_some_and(|cells| cells.iter().any(|cell| cell.style().bg == Some(stripe)))
+        })
+        .collect();
+    assert_eq!(
+        banded.len(),
+        1,
+        "exactly one body row of three is striped: {banded:?}"
+    );
+
+    let cells = canvas.row(banded[0]).expect("the striped row");
+    let first = cells
+        .iter()
+        .position(|cell| cell.style().bg == Some(stripe))
+        .expect("a striped cell");
+    let last = cells
+        .iter()
+        .rposition(|cell| cell.style().bg == Some(stripe))
+        .expect("a striped cell");
+    let text: String = cells[first..=last].iter().map(|cell| cell.text()).collect();
+    assert!(
+        text.contains('\u{2502}'),
+        "the span under test must actually contain a column separator: {text:?}"
+    );
+    for (offset, cell) in cells[first..=last].iter().enumerate() {
+        assert_eq!(
+            cell.style().bg,
+            Some(stripe),
+            "column {} ({:?}) breaks the stripe in {text:?}",
+            first + offset,
+            cell.text()
+        );
+    }
+}

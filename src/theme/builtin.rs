@@ -20,7 +20,10 @@ pub(super) fn dark() -> Theme {
             overlay: Color::hex(0x222836),
             fg: Color::hex(0xd6dbe5),
             muted: Color::hex(0x7c869b),
-            border: Color::hex(0x39414f),
+            // Structure, not content — but structure that can actually be seen. See
+            // the note on `Palette::border`: the previous `#39414f` measured 1.79:1
+            // against the page and 1.66:1 against a code surface.
+            border: Color::hex(0x5b687e),
             accent: Color::hex(0x64b5ff),
             red: Color::hex(0xff6b7f),
             orange: Color::hex(0xffa657),
@@ -45,7 +48,10 @@ pub(super) fn light() -> Theme {
             overlay: Color::hex(0xe3e0d7),
             fg: Color::hex(0x2b2f38),
             muted: Color::hex(0x6b7280),
-            border: Color::hex(0xc3c0b6),
+            // Same hue as the old `#c3c0b6`, taken far enough down the lightness axis
+            // to clear 3:1 against both the page and the code surface. Warm, because
+            // the light palette's paper is warm; just no longer invisible.
+            border: Color::hex(0x8e8876),
             accent: Color::hex(0x1a6fd4),
             red: Color::hex(0xc0392b),
             orange: Color::hex(0xb35c00),
@@ -183,9 +189,15 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             attribute: on_surface.fg(p.yellow),
             invalid: on_surface.fg(p.red).underline(),
             macro_name: on_surface.fg(p.magenta.blend(p.blue, 0.3)),
-            // Quieter than `operator`: blended towards the border colour, which is the
-            // palette's "structure, not content" hue.
-            punctuation: on_surface.fg(p.muted.blend(p.border, 0.45)),
+            // Leans towards the border colour, which is the palette's "structure, not
+            // content" hue — but from the *text* end of the axis, not from `muted`.
+            // `; : :: ( ) { } < >` are, in Rust, exactly the characters a reader
+            // squints at, and deriving them from `muted` (itself only 4.7:1 / 4.2:1 on
+            // the code surface) put them below every other token class at 3.00:1 and
+            // 2.61:1. Blending `fg` most of the way to `border` keeps the structural
+            // tint and the recessive feel while clearing the 4.5:1 text floor in both
+            // polarities; `tests/theme_contrast.rs` pins it.
+            punctuation: on_surface.fg(p.fg.blend(p.border, 0.65)),
             namespace: on_surface.fg(p.cyan.blend(p.fg, 0.4)),
             // An escape must break the string run without shouting; amber sits between
             // the number and attribute hues and appears only inside green strings.

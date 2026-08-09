@@ -500,6 +500,19 @@ fn on_bar(style: crate::theme::Style, theme: &Theme) -> crate::theme::Style {
     }
 }
 
+/// Puts a style's foreground on the help overlay panel's own background.
+///
+/// The panel is washed with `ui.status_bar`, but every style the panel then draws in —
+/// `text.body`, `ui.help_title`, `ui.help_border` — carries the *page* background,
+/// because that is the right background everywhere else they are used. Painting them
+/// unpatched put a slab of page background behind each string, exactly as wide as the
+/// string: the overlay read as if its text had been gone over with a marker pen
+/// (visual review, finding 2). Same shape as [`on_bar`]; the overlay simply borrows the
+/// bar's surface.
+fn on_panel(style: crate::theme::Style, theme: &Theme) -> crate::theme::Style {
+    on_bar(style, theme)
+}
+
 /// How the position reads: a percentage, or a word when a percentage would mislead.
 ///
 /// A document that fits on one screen is not "100 % read" with the cursor at the top
@@ -591,10 +604,10 @@ pub fn draw_help(buffer: &mut Buffer, area: Rect, app: &mut App) {
     buffer.set_style(overlay, term_style(theme.ui.status_bar));
     let mut block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(term_style(theme.ui.help_border))
+        .border_style(term_style(on_panel(theme.ui.help_border, &theme)))
         .title(TermSpan::styled(
             format!(" {} Keys ", icons.help),
-            term_style(theme.ui.help_title),
+            term_style(on_panel(theme.ui.help_title, &theme)),
         ));
     if tallest > visible {
         let hidden = tallest - visible - scroll;
@@ -603,7 +616,10 @@ pub fn draw_help(buffer: &mut Buffer, area: Rect, app: &mut App) {
         } else {
             " \u{2191} k scrolls back ".to_string()
         };
-        block = block.title_bottom(TermSpan::styled(note, term_style(theme.ui.help_title)));
+        block = block.title_bottom(TermSpan::styled(
+            note,
+            term_style(on_panel(theme.ui.help_title, &theme)),
+        ));
     }
     block.render(overlay, buffer);
 
@@ -698,7 +714,12 @@ fn draw_help_column(
         match line {
             help::HelpLine::Blank => {}
             help::HelpLine::Title(title) => {
-                buffer.set_string(area.x, y, *title, term_style(theme.ui.help_title));
+                buffer.set_string(
+                    area.x,
+                    y,
+                    *title,
+                    term_style(on_panel(theme.ui.help_title, theme)),
+                );
             }
             help::HelpLine::Row(row) => {
                 let text = TermLine::from(vec![
@@ -707,7 +728,7 @@ fn draw_help_column(
                     // would otherwise ragged-edge every row in the column.
                     TermSpan::styled(
                         crate::text::pad_to_width(&row.keys, key_width, Align::Right),
-                        term_style(theme.ui.status_key),
+                        term_style(on_panel(theme.ui.status_key, theme)),
                     ),
                     TermSpan::styled("  ", TermStyle::default()),
                     TermSpan::styled(
@@ -715,7 +736,7 @@ fn draw_help_column(
                             row.description,
                             usize::from(area.width).saturating_sub(key_width + 2),
                         ),
-                        term_style(theme.text.body),
+                        term_style(on_panel(theme.text.body, theme)),
                     ),
                 ]);
                 buffer.set_line(area.x, y, &text, area.width);

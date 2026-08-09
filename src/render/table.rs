@@ -194,6 +194,16 @@ fn render_row(
     if banded {
         style = style.patch(theme.table.row_alt);
     }
+    // The vertical rules belong to the row they divide, so they take the row's own
+    // background. `theme.table.border` carries the *page* background, and painting it
+    // straight onto a striped row punched a one-column hole in the stripe at every
+    // separator: the band read as two separate shaded boxes rather than one row, and
+    // in the light theme as two selected cells (visual review, finding 5). Attributes
+    // stay the border's own, so a header row's bold does not leak onto its rules.
+    let separator = Style {
+        bg: style.bg,
+        ..theme.table.border
+    };
     let cells: Vec<Canvas> = widths
         .iter()
         .enumerate()
@@ -220,7 +230,7 @@ fn render_row(
             col,
             height,
             &BorderSet::ROUNDED.vertical.to_string(),
-            theme.table.border,
+            separator,
         );
         out.blit(0, col + 2, cell, style);
         col += widths[index] + COLUMN_CHROME;
@@ -230,7 +240,7 @@ fn render_row(
         col,
         height,
         &BorderSet::ROUNDED.vertical.to_string(),
-        theme.table.border,
+        separator,
     );
     out
 }
