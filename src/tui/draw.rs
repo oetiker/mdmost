@@ -31,10 +31,14 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let dim_style = term_style(app.theme().text.dim);
     // The styles a box's own glyphs are painted in, so a viewport edge that cuts a rule
     // can close it rather than stamp a chevron over it. Diagram box art is deliberately
-    // not here: a widened diagram takes plain chevrons at the edge, which is the
-    // behaviour before this list existed. Whoever makes diagrams scrollable extends it
-    // with `theme.diagram.node_border` — after checking that `leading_rule`'s scan of the
-    // row means anything on a canvas whose rules are not full-width.
+    // not here, and now that diagrams are scrollable that is a decision rather than a
+    // gap: a table or a code fence is *one* box per row, so "the rule this edge cuts"
+    // has an answer, while a diagram row carries several node boxes and the routing
+    // between them. `leading_rule` scans the row for the first glyph in the style and
+    // would happily close the edge with a corner belonging to a different node — a `╮`
+    // invented in the middle of a chart, which reads far worse than a chevron. A chevron
+    // on box art says only "there is more to the right", which is exactly true. Checked
+    // in tmux at 80 columns on a chart widened to 190.
     let frame_styles = [app.theme().code.frame, app.theme().table.border];
 
     let buffer = frame.buffer_mut();

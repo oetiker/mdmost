@@ -1368,8 +1368,8 @@ fn a_renderer_that_reports_no_floor_stays_inside_the_probe_cap() {
     // instead. Without a probe cap this walks to the width cap one column at a time.
     let pie = "```mermaid\npie title Votes\n    \"Yes\" : 10\n    \"No\" : 3\n```\n";
     let (_, layouts) = layouts_for(pie, 16);
-    assert!(
-        layouts <= 8,
-        "the search spent {layouts} layouts on a diagram that reports no floor"
+    assert_eq!(
+        layouts, 2,
+        "doubling should have found this pie on the second layout"
     );
 }

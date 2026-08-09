@@ -58,13 +58,16 @@ impl Limits {
 /// The diagram this block draws, and the width it needed, at the narrowest width of at
 /// least `from` that works.
 ///
-/// The returned canvas is a document block exactly that many columns wide — the same
-/// thing [`render_block`](super::render_block) would return, had it been asked for that
-/// width — so the caller can use it directly, including in the common case where the
-/// answer is `from` itself and nothing needs to scroll.
+/// The returned canvas is a document block exactly that many columns wide, assembled
+/// the same way [`render_block`](super::render_block) assembles one, so the caller can
+/// use it directly — including in the common case where the answer is `from` itself and
+/// nothing needs to scroll.
 ///
-/// Diagrams are laid out here under [`Fit::ROOMY`]: a caller who can be wide has no
-/// business squeezing labels until words break.
+/// It is not always the canvas `render_block` would have produced at that width, because
+/// diagrams are laid out here under [`Fit::ROOMY`]: identical whenever a rung both
+/// policies share is what fits, more generous when only the budget bisection fits, and
+/// widened — or refused — where the compact policy would have minced the labels. A
+/// caller who can be wide has no business squeezing.
 ///
 /// `None` when the node is not a Mermaid fence, when the fence fails for any reason
 /// other than being too narrow, and when no width within `limits` draws it. In every

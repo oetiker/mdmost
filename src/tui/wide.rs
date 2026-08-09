@@ -9,16 +9,23 @@
 //! Widening the *whole* document would be the easy answer and the wrong one: prose
 //! reflowed to the width of one long code line would need horizontal scrolling to read
 //! a paragraph. So the widening is per block. Every top-level block is rendered at the
-//! viewport width; the ones that come back clipped — and only those — are re-rendered
-//! at the width they actually want. [`Canvas::append`] then stacks the parts, padding
-//! the narrow ones, and translates their anchors and search spans, so the result obeys
-//! the canvas contract exactly as a plain [`render_document`] would.
+//! viewport width; the ones that come back clipped are re-rendered at the width they
+//! actually want. [`Canvas::append`] then stacks the parts, padding the narrow ones, and
+//! translates their anchors and search spans, so the result obeys the canvas contract
+//! exactly as a plain [`render_document`] would.
 //!
-//! The common document has nothing clipped, pays for no extra render, and comes out
-//! byte-identical to [`render_document`] — including its side margins, which are
-//! applied here for the same reason and in the same place. That claim used to be false
-//! in exactly that one respect, and being false only about the margins is what made it
-//! survive: the pager looked right until you noticed nothing had a gutter.
+//! A Mermaid fence is the exception to "clipped" being the signal, and to matching
+//! [`render_document`] block for block. It never comes back clipped — a diagram that
+//! does not fit comes back as a *dump of its own source*, which fits fine — so it is
+//! asked first, through [`crate::render::diagram`], and it is asked under a policy that
+//! refuses to mince labels ([`Fit::ROOMY`](crate::mermaid::Fit::ROOMY)). A fence the
+//! piped renderer squeezes into the viewport may therefore be drawn wide here instead.
+//! That is the one deliberate difference; everything else in a document with nothing
+//! over-wide comes out byte-identical to [`render_document`] — including its side
+//! margins, which are applied here for the same reason and in the same place. That claim
+//! used to be false in exactly one other respect, and being false only about the margins
+//! is what made it survive: the pager looked right until you noticed nothing had a
+//! gutter.
 
 use crate::canvas::{Canvas, Cell};
 use crate::doc::{Doc, Node, NodeKind};

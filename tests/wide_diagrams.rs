@@ -105,6 +105,8 @@ fn a_renderer_that_reports_no_floor_stays_inside_the_width_cap() {
         "the search ran past three viewports: {} columns",
         canvas.width()
     );
+    // The probe cap itself is defence in depth — this chart resolves in two layouts,
+    // which `a_renderer_that_reports_no_floor_stays_inside_the_probe_cap` pins exactly.
     let text = canvas.plain_text();
     assert!(
         text.contains("Total") || text.contains("pie title"),
@@ -192,7 +194,10 @@ fn every_reported_floor_is_the_width_the_diagram_starts_drawing_at() {
         "sequenceDiagram\n    participant Reader\n    participant Pager\n    Reader->>Pager: press a key\n    Pager-->>Reader: a new frame\n",
         "gantt\n    title Release\n    dateFormat YYYY-MM-DD\n    section Work\n    Design :a1, 2026-01-01, 30d\n",
     ];
+    let mut checked = 0;
+    let mut families = 0;
     for source in sources {
+        let before = checked;
         for width in [10u16, 20, 40, 60, 78] {
             let Err(MermaidError::TooNarrow {
                 needed: Some(needed),
@@ -201,12 +206,26 @@ fn every_reported_floor_is_the_width_the_diagram_starts_drawing_at() {
             else {
                 continue;
             };
+            checked += 1;
             assert!(
                 render_mermaid(source, needed, &theme).is_ok(),
                 "at {width} columns this reports a floor of {needed}, which does not draw:\n{source}"
             );
+            assert!(
+                needed == 1 || render_mermaid(source, needed - 1, &theme).is_err(),
+                "the floor of {needed} is not the width it starts drawing at:\n{source}"
+            );
         }
+        families += usize::from(checked > before);
     }
+    // A sweep that silently checked nothing would pass just as quietly. Not every
+    // family reports a floor at every width — `pie` never reports one at all — so the
+    // bar is that most of the corpus took part, not all of it.
+    assert!(
+        families >= 6 && checked >= 12,
+        "only {checked} floors from {families} sources; the sweep is not exercising \
+         the families it claims to"
+    );
 }
 
 #[test]

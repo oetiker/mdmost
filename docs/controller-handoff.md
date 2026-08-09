@@ -146,6 +146,17 @@ routing findings (§2, §3, §8, §9), and `usability-review-2.md` findings 2-13
     (`Star`/`t`, `Repo`/`rt erro`/`r`). Two reviewers found this independently.
     **When you accept a trade-off, write down the premise it rests on**, because
     the premise is what a future change will quietly remove.
+    **Done, in Stage 2** (`899156b`): `Fit::ROOMY` drops those rungs *on the
+    pager path only* and `--render-once` keeps `Fit::COMPACT`, so `89e9c54`'s
+    reasoning is reversed exactly where the better counterfactual now exists and
+    nowhere else. This is not a regression — do not "restore" it.
+    A second lesson came out of implementing it: **dropping the rungs alone was
+    a no-op.** Budget bisection (1a) runs below the tightest *remaining* rung and
+    finds the largest budget that fits, which recovers everything a dropped rung
+    would have found. The policy needed a width-independent *floor* on the label
+    budget (14 columns) to have any teeth. A ladder change is now three things —
+    rungs, floor, and the bisection between them — and reasoning about one of
+    them alone will be wrong.
 14. **Two independent hostile reviewers, briefed differently and blind to each
     other, are worth far more than one.** One audited mechanics against the code
     and found the memory blow-up and the double layout; the other drove the
