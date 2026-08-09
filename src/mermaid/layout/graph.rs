@@ -59,8 +59,9 @@ use route::{Input, LevelEdge, Reach, Routing};
 /// Spacing tried in turn until the drawing fits the width budget.
 ///
 /// Each step is `(cross gap, share of the width a node label may use)`; later steps
-/// trade beauty for fit, and the last one is as tight as the engine will go before
-/// reporting [`MermaidError::TooNarrow`].
+/// trade beauty for fit, and the last rung is the tightest *derived from the width*.
+/// Exhausting the ladder is not the end of the search: [`draw`] then bisects the label
+/// budget below the last rung's, so the ladder is a fast path rather than the floor.
 ///
 /// The share caps one node, so it only bounds the whole drawing when the nodes stack
 /// across the width — a `TD` chart. Laid out `LR` the boxes sit side by side and their
@@ -80,15 +81,40 @@ const LADDER: &[(usize, u16)] = &[
     (1, 8),
 ];
 
+/// The narrowest label budget the engine will hand a node, at any width.
+///
+/// Every rung floors at this value, so a layout at `(1, MIN_BUDGET)` is the smallest
+/// drawing the engine can produce for a chart — and, crucially, it does not depend on
+/// `width` at all. That is what makes fit monotone: see [`draw`].
+const MIN_BUDGET: u16 = 6;
+
 /// Lays out `spec` into a canvas exactly `width` columns wide.
 ///
 /// The drawing is centred in the canvas. Nodes are drawn by `art`, which is called
 /// once per node per attempt at fitting the width budget.
 ///
+/// The search runs [`LADDER`] first and takes the first rung that fits, then — only if
+/// every rung overflowed — bisects the label budget below the tightest rung's. The
+/// second phase exists because a rung's budget is `width / share`, which *grows* with
+/// `width`: without it, one more column could hand every node a wider budget, overshoot,
+/// and turn a chart that drew at some width into an error one column wider.
+///
+/// Fit is therefore monotone in `width` — and the reason is the bisection's *first*
+/// probe rather than the bisection. That probe is `(1, MIN_BUDGET)`, whose drawing does
+/// not depend on `width` at all, so this function succeeds when a rung fits **or**
+/// `width` is at least that floor drawing's width. The rung half is still not monotone
+/// on its own — the rungs quantise exactly as they always did — but it is absorbed: no
+/// rung is tighter than `(1, MIN_BUDGET)` in either gap or budget, and the drawing only
+/// grows with each, so a rung that fits at `width` already means `width` clears the
+/// floor. Success collapses to `width >= floor`, which is monotone whatever the layout
+/// does in between. That the drawing really is nondecreasing in gap and budget is an
+/// empirical claim about the layout, checked by `tests/mermaid_layout_monotone.rs`.
+///
 /// # Errors
 ///
-/// Returns [`MermaidError::TooNarrow`] when even the tightest spacing and the smallest
-/// label budget do not fit into `width`.
+/// Returns [`MermaidError::TooNarrow`] when even the smallest drawing the engine can
+/// make — the tightest spacing at [`MIN_BUDGET`] — does not fit into `width`. `needed`
+/// is then that drawing's width: a true floor, not merely the narrowest attempt.
 pub fn draw(
     spec: &GraphSpec,
     art: &dyn NodeArt,
@@ -96,27 +122,67 @@ pub fn draw(
     theme: &Theme,
 ) -> Result<Canvas, MermaidError> {
     validate(spec)?;
-    let mut narrowest = None;
-    for &(gap, share) in LADDER {
-        let budget = (width / share).max(6);
-        let ctx = Ctx {
+    let attempt = |gap: usize, budget: u16| {
+        Ctx {
             spec,
             art,
             theme,
             budget,
             gap,
-        };
-        let drawn = ctx.group(&spec.root, spec.direction);
-        if drawn.canvas.width() <= width {
-            return Ok(centred(drawn.canvas, width, theme));
         }
-        narrowest =
-            Some(narrowest.map_or(drawn.canvas.width(), |at: u16| at.min(drawn.canvas.width())));
+        .group(&spec.root, spec.direction)
+        .canvas
+    };
+    let mut narrowest: Option<u16> = None;
+
+    for &(gap, share) in LADDER {
+        let canvas = attempt(gap, (width / share).max(MIN_BUDGET));
+        if canvas.width() <= width {
+            return Ok(centred(canvas, width, theme));
+        }
+        narrowest = narrower(narrowest, &canvas);
     }
-    Err(MermaidError::TooNarrow {
-        width,
-        needed: narrowest,
-    })
+
+    // The ladder is exhausted, so the tightest rung's budget is known not to fit and
+    // bounds the search above. Below it sits the floor, which the last rung has already
+    // drawn whenever the two coincide — at those widths there is nothing left to try.
+    let (tightest_gap, tightest_share) = *LADDER.last().expect("the ladder has rungs");
+    let mut hi = (width / tightest_share).max(MIN_BUDGET);
+    if hi == MIN_BUDGET {
+        return Err(MermaidError::TooNarrow {
+            width,
+            needed: narrowest,
+        });
+    }
+    let mut best = attempt(tightest_gap, MIN_BUDGET);
+    narrowest = narrower(narrowest, &best);
+    if best.width() > width {
+        return Err(MermaidError::TooNarrow {
+            width,
+            needed: narrowest,
+        });
+    }
+
+    // A fit exists; spend a handful of layouts finding the most generous one, keeping
+    // `MIN_BUDGET..=lo` fitting and `hi` overflowing.
+    let mut lo = MIN_BUDGET;
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        let canvas = attempt(tightest_gap, mid);
+        narrowest = narrower(narrowest, &canvas);
+        if canvas.width() <= width {
+            lo = mid;
+            best = canvas;
+        } else {
+            hi = mid;
+        }
+    }
+    Ok(centred(best, width, theme))
+}
+
+/// The narrower of `at` and `canvas`' width.
+fn narrower(at: Option<u16>, canvas: &Canvas) -> Option<u16> {
+    Some(at.map_or(canvas.width(), |at| at.min(canvas.width())))
 }
 
 /// Rejects a specification the engine cannot draw.
