@@ -12,7 +12,19 @@
 //! With [`RenderOptions::line_numbers`](super::RenderOptions::line_numbers) on, a
 //! themed gutter is drawn to the left of the code. The gutter is *outside* the
 //! clipped region: it is written at a fixed position and the code area shrinks by its
-//! width, so scrolling a long line horizontally never scrolls the numbers away.
+//! width, so this renderer's own clip cuts the code and never the numbers.
+//!
+//! That is a claim about this file and nothing else — it used to be written as "scrolling
+//! a long line horizontally never scrolls the numbers away", which was true of the clip
+//! and false of the pager, where the horizontal offset moved every column of a row alike
+//! and carried the gutter off the left edge with the code. Keeping the numbers on screen
+//! there is `tui`'s job: `tui::wide::pinned_prefix` finds this block's chrome by reading
+//! the drawn canvas, by style — the digits are the only cells in
+//! `theme.code.line_number`, the rule closing them is `GUTTER_RULE` in
+//! `theme.code.frame`, and the label in the top rule is the only `theme.code.language` —
+//! and `tui::draw` holds those columns still while the rest of each row scrolls under
+//! them. Changing a glyph, a style, or the order they are written in will move that seam;
+//! `tui::tests::the_gutter_rule_matches_the_renderer` is the tripwire.
 
 use crate::canvas::{BorderSet, Canvas};
 use crate::error::MermaidError;
@@ -170,8 +182,9 @@ fn code_area(lines: &[Line], width: u16, numbered: bool, ctx: Ctx<'_>) -> Canvas
         }
         out.write_line(row, gutter, line, theme.code.background);
     }
-    // The gutter sits left of the clip point, so scrolling a long line never scrolls
-    // the numbers away.
+    // The gutter sits left of the clip point, so the clip below cuts code and never
+    // numbers. The pager pins the same columns against its own horizontal offset; see
+    // the module header.
     debug_assert!(gutter < budget || budget == 0);
     out.clip_with_marker(width, OVERFLOW_MARKER, theme.code.overflow_marker);
     out.resize_width(width, theme.code.background);

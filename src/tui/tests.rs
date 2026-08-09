@@ -724,6 +724,27 @@ fn pager_named(source: &str, title: &str, width: u16, height: u16) -> App {
     app
 }
 
+/// Builds an app with `line_numbers = true`, the way a config file would.
+fn numbered_pager_at(source: &str, width: u16, height: u16) -> App {
+    let mut app = App::new(
+        Doc::parse(source),
+        Config {
+            line_numbers: true,
+            ..Config::default()
+        },
+        AppOptions {
+            title: "sample.md".to_string(),
+            icons: false,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(width, height);
+    let _ = app.canvas();
+    app
+}
+
 #[test]
 fn a_wide_block_makes_the_document_horizontally_scrollable() {
     // The disqualifying bug: the canvas was rendered *at* viewport width, so there
@@ -870,6 +891,91 @@ fn the_quote_bar_matches_the_renderer() {
     );
 }
 
+#[test]
+fn the_gutter_rule_matches_the_renderer() {
+    // The third private thing `super::wide` recognises by sight, and the one with the
+    // most to go wrong: not just a glyph but a glyph in a style, after a run of digits in
+    // *another* style. If the renderer changes any of the three — or the order it writes
+    // them in — the pager stops pinning the gutter and the numbers scroll away again,
+    // silently. Asserting the detected column rather than only the constant is what makes
+    // this a tripwire for the layout too.
+    let doc = Doc::parse("```javascript\nfirst\nsecond\n```\n");
+    let theme = crate::theme::Theme::default_dark();
+    let canvas = crate::render::render_document(
+        &doc,
+        40,
+        &theme,
+        &crate::render::RenderOptions::new(false, true),
+    );
+    let pinned = super::wide::pinned_prefix(&canvas, &theme);
+    let text = canvas.plain_text();
+    assert!(
+        text.contains(&format!("1 {} first", super::wide::GUTTER_RULE)),
+        "the renderer still draws `N {} code`: {text}",
+        super::wide::GUTTER_RULE
+    );
+    // ` │ 1 │ first`: margin, frame, padding, one digit, blank, rule, blank — code at 7.
+    let row = (0..canvas.height())
+        .find(|&row| canvas.row_text(row).contains("first"))
+        .expect("the first code line is drawn");
+    let line = canvas.row_text(row);
+    let code = line[..line.find("first").expect("drawn")].chars().count();
+    assert_eq!(
+        usize::from(pinned[row]),
+        code,
+        "the pinned prefix ends exactly where the code begins: {line:?}"
+    );
+    assert!(pinned[row] > 0, "and a numbered block has one at all");
+    // The frame rows are pinned with the run, or the box would open as the code slides.
+    let frame = (0..canvas.height())
+        .find(|&row| canvas.row_text(row).contains('╭'))
+        .expect("a framed block");
+    assert!(
+        pinned[frame] >= pinned[row],
+        "the fence's own rows travel with the gutter"
+    );
+    // The label in the top rule is chrome too, and the third style read off the canvas.
+    // Cut in the middle it leaves a fragment of a word sitting in a box rule — which is
+    // what happens the moment the prefix stops short of it.
+    let top = canvas.row_text(frame);
+    let after = top[..top
+        .find("javascript")
+        .expect("the fence names its language")
+        + 10]
+        .chars()
+        .count();
+    assert!(
+        usize::from(pinned[frame]) >= after,
+        "the fence's label is pinned whole, not cut mid-word: {top:?}"
+    );
+    let bottom = canvas.height() - 1;
+    assert_eq!(
+        pinned[bottom],
+        pinned[row],
+        "a rule with no label is pinned no further than the gutter: {:?}",
+        canvas.row_text(bottom)
+    );
+}
+
+#[test]
+fn a_viewport_no_wider_than_the_gutter_scrolls_anyway() {
+    // The one way a pinned prefix could take something away: if the prefix filled the
+    // pane there would be no column left for the code to scroll into, and the content
+    // behind the numbers would be unreachable. Losing the numbers is the better trade at
+    // that size, so the prefix is dropped rather than the content.
+    let reach = [200u16];
+    let pinned = [7u16];
+    let wide = super::draw::Offsets::scrolled_to(&reach, &pinned, 20, 40);
+    assert_eq!(wide.column(0, 0), 0, "the gutter is drawn at column zero");
+    assert_eq!(wide.column(0, 7), 27, "and the code scrolls beside it");
+    let narrow = super::draw::Offsets::scrolled_to(&reach, &pinned, 20, 7);
+    assert_eq!(
+        narrow.column(0, 0),
+        20,
+        "a pane no wider than the gutter scrolls the whole row instead"
+    );
+}
+
 /// A table wide enough that a fourteen-column viewport has to cut it.
 const WIDE_TABLE: &str = "| aaaaaaaaaa | bbbbbbbbbb |\n|---|---|\n| cccccccccc | dddddddddd |\n";
 
@@ -894,7 +1000,8 @@ fn edge_column(
     // The real per-row reach, so this test cannot disagree with the pager about which
     // rows move: a row that has nowhere to go is not cut, and must not be marked.
     let reach = super::wide::scroll_reach(canvas, width);
-    let offsets = super::draw::Offsets::scrolled_to(&reach, left, width);
+    let pinned = super::wide::pinned_prefix(canvas, theme);
+    let offsets = super::draw::Offsets::scrolled_to(&reach, &pinned, left, width);
     let rows = painted(width, height, |buffer, area| {
         super::draw::edge_markers(
             buffer,
@@ -1408,6 +1515,162 @@ fn scrolling_sideways_moves_only_the_over_wide_blocks() {
     assert!(
         !has("fn f() { let a ="),
         "the over-wide code block scrolls: {rows:?}"
+    );
+}
+
+/// A numbered code block with one line far wider than any viewport, and a token
+/// `ZEBRA` late in it that only a scrolled reader ever sees.
+///
+/// The table below it is over-wide too, so the two blocks merge into one scrolling run
+/// ([`super::wide::scroll_reach`]) — which is exactly the case that must *not* pin the
+/// table's first columns along with the fence's gutter. `Ocelot` is the token only a
+/// scrolled reader reaches, and unlike code, table cells carry search spans.
+const NUMBERED_WIDE: &str = "\
+# Numbered
+
+Prose that must keep wrapping to the viewport, never to the widest block.
+
+```rust
+fn f() { let a = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaa\"; let b = \"bbbbbbbbbbbbbbbbbbbbbbbbbb ZEBRA\"; }
+let second = 1;
+```
+
+| AlphaColumnOne | BetaColumnTwoLonger | GammaColumnThreeWider | DeltaColumnFourWider | Ocelot |
+|---|---|---|---|---|
+| 1 | 2 | 3 | 4 | 5 |
+";
+
+/// Paints one whole frame the way the pager does and hands back the buffer.
+fn framed_buffer(app: &mut App, width: u16, height: u16) -> Buffer {
+    let backend = ratatui::backend::TestBackend::new(width, height);
+    let mut terminal = ratatui::Terminal::new(backend).expect("a test terminal");
+    terminal
+        .draw(|frame| super::draw::draw(frame, app))
+        .expect("a frame");
+    terminal.backend().buffer().clone()
+}
+
+#[test]
+fn the_line_number_gutter_stays_put_while_the_code_scrolls_under_it() {
+    // The defect: `line_numbers = true` plus a code line wider than the pane, and the
+    // numbers scroll off to the left along with the code — they disappear at exactly
+    // the moment a long line makes them useful. `render::code` keeps the gutter out of
+    // its *own* clip; nothing kept it out of the pager's horizontal offset.
+    let mut app = numbered_pager_at(NUMBERED_WIDE, 80, 16);
+    assert!(app.hscroll_max() > 0, "the probe document must scroll");
+
+    let before = framed(&mut app, 80, 16);
+    let gutter = |rows: &[String], number: &str| {
+        rows.iter()
+            .filter(|row| row.starts_with(&format!(" │ {number} │")))
+            .count()
+    };
+    assert_eq!(gutter(&before, "1"), 1, "the gutter is drawn: {before:?}");
+    assert_eq!(gutter(&before, "2"), 1, "on every code row: {before:?}");
+
+    for _ in 0..40 {
+        app.act(Action::ScrollRight);
+    }
+    assert!(app.hscroll() > 0, "and must have been scrolled");
+    let after = framed(&mut app, 80, 16);
+
+    assert_eq!(
+        gutter(&after, "1"),
+        1,
+        "the gutter is still pinned to the left edge after scrolling: {after:?}"
+    );
+    assert_eq!(
+        gutter(&after, "2"),
+        1,
+        "on every code row, still: {after:?}"
+    );
+    // The frame's own corners are pinned with the run, so the box never opens — and the
+    // cut through its rules is left bare. A chevron there would claim the chrome had been
+    // truncated; a second `╭` stamped by `frame_close` would put a corner in the middle of
+    // a rule the box already closed one column to its left.
+    let rule = after
+        .iter()
+        .find(|row| row.starts_with(" ╭"))
+        .expect("the fence's top-left corner stays with its gutter");
+    assert!(
+        rule.matches('╭').count() == 1 && !rule.contains('‹'),
+        "the top rule is cut without being marked or re-cornered: {rule:?}"
+    );
+    let floor = after
+        .iter()
+        .find(|row| row.starts_with(" ╰"))
+        .expect("and so does the bottom-left one");
+    assert!(
+        floor.matches('╰').count() == 1 && !floor.contains('‹'),
+        "and so is the bottom rule: {floor:?}"
+    );
+    // The label is chrome too: pinned whole rather than cut mid-word.
+    assert!(
+        rule.contains("rust "),
+        "the fence keeps its language label: {rule:?}"
+    );
+    // And the code really did move, or this passes on a build where `→` does nothing.
+    assert!(
+        !after.iter().any(|row| row.contains("fn f() { let a =")),
+        "the over-wide code scrolls under the gutter: {after:?}"
+    );
+    assert!(
+        after.iter().any(|row| row.contains("ZEBRA")),
+        "what the reader scrolled to is on screen: {after:?}"
+    );
+}
+
+#[test]
+fn a_search_highlight_lands_on_its_match_in_a_pinned_block() {
+    // `blit`, `edge_markers` and `highlight_matches` share one `Offsets` precisely so
+    // they cannot disagree about where a row starts. A pinned prefix is a second thing
+    // to agree about: if the highlight kept using the plain offset it would paint the
+    // match `pinned` columns to the right of the text it belongs to.
+    let mut app = numbered_pager_at(NUMBERED_WIDE, 80, 22);
+    app.run_search("Ocelot");
+    assert_eq!(app.search().len(), 1, "the probe token occurs once");
+
+    // Scroll until the match is actually on screen; the merged run means the table
+    // travels the fence's distance, so the exact number of presses is not a constant.
+    // The status bar echoes the query, so only the document rows count.
+    let on_screen = |rows: &[String]| rows[..21].iter().any(|row| row.contains("Ocelot"));
+    let mut rows = framed(&mut app, 80, 22);
+    for _ in 0..40 {
+        if on_screen(&rows) {
+            break;
+        }
+        app.act(Action::ScrollRight);
+        rows = framed(&mut app, 80, 22);
+    }
+    assert!(app.hscroll() > 0, "the match was off to the right");
+    assert!(on_screen(&rows), "the match is on screen: {rows:?}");
+    // The same frame pins the fence's gutter, so this is the mixed case: one run, one
+    // offset, and only the numbered block keeps its first columns.
+    assert!(
+        rows.iter().any(|row| row.starts_with(" │ 1 │")),
+        "and the fence's gutter is pinned in that very frame: {rows:?}"
+    );
+
+    // The highlight is patched over whatever the cell already carried, so the marker is
+    // its background rather than the whole style.
+    let highlight = super::draw::term_style(app.theme().ui.search_current).bg;
+    assert!(
+        highlight.is_some(),
+        "the current match is marked by a background"
+    );
+    let buffer = framed_buffer(&mut app, 80, 22);
+    let mut painted = String::new();
+    for y in 0..22 {
+        for x in 0..80u16 {
+            let cell = &buffer[(x, y)];
+            if cell.style().bg == highlight {
+                painted.push_str(cell.symbol());
+            }
+        }
+    }
+    assert_eq!(
+        painted, "Ocelot",
+        "the highlight covers the match and nothing else"
     );
 }
 

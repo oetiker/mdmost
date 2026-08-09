@@ -12,6 +12,7 @@
 
 use crate::canvas::Canvas;
 use crate::render::RenderOptions;
+use crate::theme::Theme;
 
 /// Everything a render depends on.
 ///
@@ -35,6 +36,7 @@ pub struct RenderCache {
     key: Option<CacheKey>,
     canvas: Canvas,
     reach: Vec<u16>,
+    pinned: Vec<u16>,
     max_reach: u16,
 }
 
@@ -44,6 +46,7 @@ impl Default for RenderCache {
             key: None,
             canvas: Canvas::empty(0),
             reach: Vec::new(),
+            pinned: Vec::new(),
             max_reach: 0,
         }
     }
@@ -58,7 +61,7 @@ impl RenderCache {
         &mut self,
         version: u64,
         width: u16,
-        theme: &str,
+        theme: &Theme,
         options: RenderOptions,
         render: impl FnOnce() -> Canvas,
     ) -> bool {
@@ -69,20 +72,21 @@ impl RenderCache {
             key.version == version
                 && key.width == width
                 && key.options == options
-                && key.theme == theme
+                && key.theme == theme.name
         });
         if hit {
             return false;
         }
         self.canvas = render();
-        // Derived here rather than in the viewport because it is a property of the
+        // Derived here rather than in the viewport because both are properties of the
         // render — a scan of every cell, which would otherwise happen on every frame.
         self.reach = super::wide::scroll_reach(&self.canvas, width);
+        self.pinned = super::wide::pinned_prefix(&self.canvas, theme);
         self.max_reach = self.reach.iter().copied().max().unwrap_or(0);
         self.key = Some(CacheKey {
             version,
             width,
-            theme: theme.to_string(),
+            theme: theme.name.clone(),
             options,
         });
         true
@@ -98,6 +102,13 @@ impl RenderCache {
     /// See [`super::wide::scroll_reach`]; one entry per canvas row.
     pub fn reach(&self) -> &[u16] {
         &self.reach
+    }
+
+    /// How many leading columns of each row stay put while the rest scrolls.
+    ///
+    /// See [`super::wide::pinned_prefix`]; one entry per canvas row.
+    pub fn pinned(&self) -> &[u16] {
+        &self.pinned
     }
 
     /// The widest reach of any row, which is how far the document scrolls at all.

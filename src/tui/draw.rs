@@ -67,9 +67,10 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let scroll = app.scroll();
     let _ = app.canvas();
     // One offset per row, so that the block that is too wide scrolls and the prose
-    // around it does not. Computed once and shared: the document, its edge markers and
-    // its search highlights disagreeing about where a row starts would paint chevrons
-    // and highlights on the wrong columns.
+    // around it does not — and one pinned prefix per row, so a code block's line-number
+    // gutter stays put while its long lines scroll under it. Computed once and shared:
+    // the document, its edge markers and its search highlights disagreeing about where a
+    // row starts would paint chevrons and highlights on the wrong columns.
     let hscroll = Offsets::new(app, doc_area.width);
     blit(buffer, doc_area, app.rendered(), scroll, &hscroll, base);
     edge_markers(
@@ -138,9 +139,17 @@ pub fn draw_splash(frame: &mut Frame<'_>, app: &App) {
 /// is therefore moved only as far as it has anywhere to go — see
 /// [`super::wide::scroll_reach`] for what "anywhere" means and why it is a property of
 /// a run of rows rather than of one row.
+///
+/// A row may also keep a *prefix* out of the offset altogether: a code block's
+/// line-number gutter stays welded to the left edge while its long lines scroll
+/// underneath it. See [`super::wide::pinned_prefix`]. Everything a row start is needed
+/// for goes through [`Offsets::column`] or its inverse [`Offsets::x_of`], so no painter
+/// can hold a different opinion about which canvas column a viewport column shows.
 pub(super) struct Offsets<'a> {
     /// How far each row may be scrolled; one entry per canvas row.
     reach: &'a [u16],
+    /// How many leading columns of each row the offset leaves alone.
+    pinned: &'a [u16],
     /// The offset the reader has scrolled to.
     offset: u16,
     /// The number of columns of document on screen.
@@ -150,27 +159,65 @@ pub(super) struct Offsets<'a> {
 impl<'a> Offsets<'a> {
     /// Reads the offsets for the current frame.
     fn new(app: &'a App, viewport: u16) -> Self {
-        Self::scrolled_to(app.reach(), app.hscroll(), viewport)
+        Self::scrolled_to(app.reach(), app.pinned(), app.hscroll(), viewport)
     }
 
     /// The offsets for a reader who has scrolled to `offset` over a canvas whose rows
-    /// may travel as far as `reach`.
+    /// may travel as far as `reach` and hold `pinned` columns still.
     ///
     /// Separate from [`Offsets::new`] so a test can paint a frame without an [`App`];
     /// both go through the same arithmetic, so a test cannot drift from what the pager
     /// actually does.
-    pub(super) fn scrolled_to(reach: &'a [u16], offset: u16, viewport: u16) -> Self {
+    pub(super) fn scrolled_to(
+        reach: &'a [u16],
+        pinned: &'a [u16],
+        offset: u16,
+        viewport: u16,
+    ) -> Self {
         Self {
             reach,
+            pinned,
             offset,
             viewport,
         }
     }
 
-    /// The first canvas column drawn on `row`.
+    /// How far into the row the reader has scrolled, past whatever is pinned.
     fn at(&self, row: usize) -> u16 {
         let reach = self.reach.get(row).copied().unwrap_or(0);
         self.offset.min(reach.saturating_sub(self.viewport))
+    }
+
+    /// How many leading columns of `row` the offset leaves where they are.
+    ///
+    /// Clamped away entirely when the viewport is no wider than the prefix: a gutter
+    /// filling the whole pane would put the code behind it out of reach, which is worse
+    /// than losing the numbers on a terminal that narrow.
+    fn pinned(&self, row: usize) -> u16 {
+        let pinned = self.pinned.get(row).copied().unwrap_or(0);
+        if pinned >= self.viewport { 0 } else { pinned }
+    }
+
+    /// The canvas column drawn at viewport column `x` of `row`.
+    pub(super) fn column(&self, row: usize, x: u16) -> usize {
+        if x < self.pinned(row) {
+            usize::from(x)
+        } else {
+            usize::from(self.at(row)) + usize::from(x)
+        }
+    }
+
+    /// The viewport column canvas column `col` is drawn at, when it is drawn at all.
+    ///
+    /// `None` for the columns that have scrolled *behind* the pinned prefix, which are
+    /// on the canvas but on screen nowhere.
+    fn x_of(&self, row: usize, col: u16) -> Option<u16> {
+        let pinned = self.pinned(row);
+        if col < pinned {
+            return Some(col);
+        }
+        let x = col.checked_sub(self.at(row))?;
+        (x >= pinned).then_some(x)
     }
 }
 
@@ -179,6 +226,9 @@ impl<'a> Offsets<'a> {
 /// This is the only place canvas cells become terminal cells. Double-width characters
 /// keep their trailing continuation cell, and a wide character sliced in half by the
 /// horizontal offset is drawn as a space rather than a broken glyph.
+///
+/// A row's pinned prefix is drawn from column zero and the offset applies only after it,
+/// so a line-number gutter stays on screen while the code beside it scrolls.
 fn blit(
     buffer: &mut Buffer,
     area: Rect,
@@ -190,9 +240,9 @@ fn blit(
     for y in 0..area.height {
         let row = top + usize::from(y);
         let Some(cells) = canvas.row(row) else { break };
-        let left = left.at(row);
+        let pinned = left.pinned(row);
         for x in 0..area.width {
-            let column = usize::from(left) + usize::from(x);
+            let column = left.column(row, x);
             let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) else {
                 continue;
             };
@@ -202,8 +252,10 @@ fn blit(
             target.set_style(term_style(base.patch(cell.style())));
             if cell.is_continuation() {
                 // Either the lead cell is on screen — in which case ratatui expects an
-                // empty symbol here — or it was scrolled off to the left.
-                target.set_symbol(if x == 0 { " " } else { "" });
+                // empty symbol here — or it was scrolled off to the left. The pinned
+                // prefix is a second such seam: the first scrolled column can land on a
+                // continuation whose lead is behind the gutter.
+                target.set_symbol(if x == 0 || x == pinned { " " } else { "" });
             } else if cell.width() == 2 && x + 1 >= area.width {
                 target.set_symbol(" ");
             } else {
@@ -227,6 +279,9 @@ fn blit(
 /// never closes, which reads as a rendering fault rather than as scrollable content
 /// (`docs/qa/visual-review-3.md` §11). The content rows between the rules still carry
 /// the chevron, because they are what is actually cut off.
+///
+/// On a row with a pinned prefix the left marker moves right by that prefix, so it marks
+/// the left edge of the *scrolling region* rather than of the window.
 pub(super) fn edge_markers(
     buffer: &mut Buffer,
     area: Rect,
@@ -244,7 +299,8 @@ pub(super) fn edge_markers(
         let Some(cells) = canvas.row(row) else {
             break;
         };
-        let left = left.at(row);
+        let offset = left.at(row);
+        let pinned = left.pinned(row);
         let occupied = |range: std::ops::Range<usize>| {
             cells
                 .get(range)
@@ -268,10 +324,25 @@ pub(super) fn edge_markers(
                 }
             }
         };
-        if left > 0 && occupied(0..usize::from(left)) {
-            mark(buffer, area.x, usize::from(left), Side::Left);
+        // The left marker goes at the first column that actually moves, not at the
+        // viewport's own edge. With a pinned gutter the content scrolls off *behind* the
+        // numbers, so a chevron in column zero would sit on the frame border and claim
+        // the gutter was cut — while the place the reader can see a break is exactly
+        // where the code resumes. Unpinned rows are unaffected: the prefix is zero and
+        // this is column zero, as it always was.
+        //
+        // And on a pinned row the box's own left edge is *already on screen*, inside the
+        // prefix: a cut through one of its rules therefore needs neither a chevron nor a
+        // second corner stamped into the middle of the rule. What is hidden there is rule
+        // and the rule is drawn either side of the seam, so the honest thing is to draw
+        // nothing. The content rows between the rules are unaffected — code is not a
+        // frame glyph — and keep their chevron.
+        let hidden = usize::from(pinned)..usize::from(pinned) + usize::from(offset);
+        let closed = pinned > 0 && frame_close(cells, hidden.end, Side::Left, frames).is_some();
+        if offset > 0 && !closed && occupied(hidden.clone()) {
+            mark(buffer, area.x + pinned, hidden.end, Side::Left);
         }
-        let right = usize::from(left) + usize::from(area.width);
+        let right = usize::from(offset) + usize::from(area.width);
         if occupied(right..cells.len()) {
             // A double-width glyph whose lead lands in the second-to-last column owns the
             // last one, and is painted straight over anything stamped there — so on every
@@ -337,20 +408,22 @@ fn highlight_matches(buffer: &mut Buffer, area: Rect, app: &App, top: usize, lef
     let current = app.search_index();
     for y in 0..area.height {
         let row = top + usize::from(y);
-        let left = left.at(row);
         for (index, segment) in app.search().segments_on_row(row) {
             let style = if Some(index) == current {
                 theme.ui.search_current
             } else {
                 theme.ui.search_match
             };
-            let Some(start) = segment.col.checked_sub(left) else {
-                continue;
-            };
+            // Mapped column by column through the same `Offsets` `blit` painted with: a
+            // match that straddles a pinned prefix has part of itself on screen and part
+            // of itself behind the gutter, and only the arithmetic that drew the row can
+            // say which is which.
             for offset in 0..segment.cols {
-                let x = start + offset;
+                let Some(x) = left.x_of(row, segment.col.saturating_add(offset)) else {
+                    continue;
+                };
                 if x >= area.width {
-                    break;
+                    continue;
                 }
                 if let Some(cell) = buffer.cell_mut((area.x + x, area.y + y)) {
                     cell.set_style(patch_term(cell.style(), style));
