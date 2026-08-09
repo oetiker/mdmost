@@ -230,10 +230,19 @@ fn event_loop(
         if input.wait(POLL_INTERVAL)? == Wait::Gone {
             return Err(terminal_gone());
         }
-        // The descriptor was live a moment ago, so `crossterm` can look at it safely.
-        // Zero timeout: the waiting has already been done, and asking even when
-        // nothing arrived is what hands over events its parser is still holding from
-        // an earlier read.
+        // The descriptor was live a moment ago, so `crossterm` may look at it. Zero
+        // timeout: the waiting has already been done, and asking even when nothing
+        // arrived is what hands over events its parser is still holding from an
+        // earlier read.
+        //
+        // "A moment ago" is the premise, and it is not quite a guarantee. If the
+        // terminal dies in the microseconds between the wait above and the read
+        // below — or part-way through an escape sequence, where `crossterm` blocks
+        // reading the rest — the old spin is reachable again. That window is
+        // accepted: it needs input to arrive at the same instant as the hangup,
+        // where what this replaced was exposed the whole time it sat idle. Closing
+        // it properly means owning the descriptor and parsing terminal input here,
+        // which is `crossterm`'s job.
         if !crossterm::event::poll(Duration::ZERO)? {
             continue;
         }

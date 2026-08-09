@@ -301,6 +301,14 @@ impl Pty {
                 if first.elapsed() > SETTLE {
                     return Ok(());
                 }
+            } else if ready == 0
+                && first_output.is_some_and(|first: Instant| first.elapsed() > SETTLE)
+            {
+                // Settled and silent. Today `ratatui` writes a little on every frame
+                // so this arm is not the one that fires, but the test should not
+                // depend on that: silence is if anything better evidence of a pager
+                // parked waiting for input.
+                return Ok(());
             }
             if started.elapsed() > STARTUP_DEADLINE {
                 return Err(format!(
