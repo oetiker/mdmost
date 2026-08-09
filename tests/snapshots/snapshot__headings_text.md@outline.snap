@@ -1,0 +1,229 @@
+---
+source: tests/snapshot.rs
+expression: outline(&doc)
+---
+Document
+  Heading(h1, #feature-exerciser--headings-and-prose)
+    Text("Feature exerciser — headings and prose")
+  Paragraph
+    Text("This fixture walks the heading ladder an…")
+    SoftBreak
+    Text("and check two things by eye: that each h…")
+    SoftBreak
+    Text("the one above it ")
+    Emph
+      Text("and")
+    Text(" from body text, and that no inline cons…")
+  Heading(h1, #a-setext-level-one)
+    Text("A Setext level one")
+  Heading(h2, #a-setext-level-two)
+    Text("A Setext level two")
+  Heading(h2, #level-two-atx)
+    Text("Level two (ATX)")
+  Heading(h3, #level-three)
+    Text("Level three")
+  Heading(h4, #level-four)
+    Text("Level four")
+  Heading(h5, #level-five)
+    Text("Level five")
+  Heading(h6, #level-six)
+    Text("Level six")
+  Paragraph
+    Text("Body text follows level six, so the two …")
+    SoftBreak
+    Text("must be more prominent than the paragrap…")
+  Heading(h3, #the-whole-inline-surface-in-one-paragraph)
+    Text("The whole inline surface, in one paragra…")
+  Paragraph
+    Text("Text with ")
+    Emph
+      Text("emphasis")
+    Text(", ")
+    Emph
+      Text("emphasis again")
+    Text(", ")
+    Strong
+      Text("strong")
+    Text(", ")
+    Strong
+      Text("strong again")
+    Text(",")
+    SoftBreak
+    Emph
+      Strong
+        Text("both at once")
+    Text(", ")
+    Strikethrough
+      Text("strikethrough")
+    Text(", ")
+    Code
+    Text(", ")
+    Code
+    Text(",")
+    SoftBreak
+    Text("a ")
+    Link(https://example.com)
+      Text("plain link")
+    Text(", a ")
+    Link(https://example.com)
+      Text("titled link")
+    Text(",")
+    SoftBreak
+    Text("an autolink ")
+    Link(https://example.org/a/fairly/long/path/segment/here)
+      Text("https://example.org/a/fairly/long/path/s…")
+    Text(", a bare")
+    SoftBreak
+    Text("autolink ")
+    Link(https://example.net/bare)
+      Text("https://example.net/bare")
+    Text(", an email autolink ")
+    Link(mailto:nobody@example.com)
+      Text("nobody@example.com")
+    Text(",")
+    SoftBreak
+    Text("a ")
+    Link(https://example.com/reference)
+      Text("reference link")
+    Text(", a ")
+    Link(https://example.com/collapsed)
+      Text("collapsed reference")
+    Text(", a ")
+    Link(https://example.com/shortcut)
+      Text("shortcut reference")
+    Text(",")
+    SoftBreak
+    Text("an ")
+    Image(small.png)
+      Text("inline image")
+    Text(" and a hard break at the end of this lin…")
+    LineBreak
+    Text("which continues here after a backslash b…")
+    LineBreak
+    Text("which is the other spelling.")
+  Paragraph
+    Text("Escapes that must survive as literals: *…")
+    SoftBreak
+    Text("`not code`, [not a link], a backslash \\ …")
+    SoftBreak
+    Text("sign < that is not the start of a tag.")
+  Paragraph
+    Text("Entities: & < © … — \u{a0}(that was a hard sp…")
+  Heading(h3, #emphasis-that-has-to-wrap)
+    Text("Emphasis that has to wrap")
+  Paragraph
+    Text("A paragraph in which the ")
+    Emph
+      Text("emphasis runs across the line break so t…")
+      SoftBreak
+      Text("has to be split by the wrapper and re-st…")
+    Text(", followed by")
+    SoftBreak
+    Code
+    Text(", and a")
+    SoftBreak
+    Link(https://example.com/x)
+      Text("link whose text alone is wider than a fo…")
+    Text(".")
+  Heading(h3, #images)
+    Text("Images")
+  Paragraph
+    Image(picture.png)
+      Text("alt text for a picture")
+  Paragraph
+    Image(untitled.png)
+  Paragraph
+    Image(wide.png)
+      Text("an image whose alternative text is long …")
+  Heading(h3, #footnotes)
+    Text("Footnotes")
+  Paragraph
+    Text("A statement needing a source")
+    FootnoteReference
+    Text(", another needing two")
+    FootnoteReference
+    FootnoteReference
+    Text(", and one")
+    SoftBreak
+    Text("whose marker sits mid-sentence")
+    FootnoteReference
+    Text(" a second time.")
+  Heading(h2, #block-quotes)
+    Text("Block quotes")
+  BlockQuote
+    Paragraph
+      Text("A block quote spanning two source lines,…")
+      SoftBreak
+      Text("its own gutter at forty columns.")
+    BlockQuote
+      Paragraph
+        Text("A nested quote inside it,")
+      BlockQuote
+        Paragraph
+          Text("and a third level.")
+  BlockQuote
+    Paragraph
+      Text("A quote containing other blocks:")
+    Heading(h3, #a-heading-inside-a-quote)
+      Text("a heading inside a quote")
+    List(ordered=false)
+      Item
+        Paragraph
+          Text("a list")
+      Item
+        Paragraph
+          Text("inside a quote")
+    CodeBlock(rust)
+    Table(3 columns)
+      TableRow(header=true)
+        TableCell
+          Text("in")
+        TableCell
+          Text("a")
+        TableCell
+          Text("quote")
+      TableRow(header=false)
+        TableCell
+          Text("1")
+        TableCell
+          Text("2")
+        TableCell
+          Text("3")
+    ThematicBreak
+    Paragraph
+      Text("and a paragraph after a rule inside the …")
+  BlockQuote
+    Paragraph
+      Text("A lazy continuation quote")
+      SoftBreak
+      Text("where the second line has no marker at a…")
+  Heading(h2, #thematic-breaks)
+    Text("Thematic breaks")
+  Paragraph
+    Text("Three spellings, all of which must draw …")
+  ThematicBreak
+  ThematicBreak
+  ThematicBreak
+  Heading(h2, #paragraph-edge-cases)
+    Text("Paragraph edge cases")
+  Paragraph
+    Text("A paragraph immediately followed by a he…")
+    SoftBreak
+    Text("Markdown, but a paragraph containing a v…")
+    SoftBreak
+    Text("is one: supercalifragilisticexpialidocio…")
+  Paragraph
+    Text("A     paragraph     with     runs     of…")
+    SoftBreak
+    Text("must collapse to single spaces.")
+  FootnoteDefinition
+    Paragraph
+      Text("The first footnote body.")
+  FootnoteDefinition
+    Paragraph
+      Text("The second footnote body, long enough to…")
+      SoftBreak
+      Text("continuation indent can be inspected.")
+  FootnoteDefinition
+    Paragraph
+      Text("A footnote with a name rather than a num…")

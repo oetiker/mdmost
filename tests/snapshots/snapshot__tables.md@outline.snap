@@ -1,0 +1,354 @@
+---
+source: tests/snapshot.rs
+expression: outline(&doc)
+---
+Document
+  Heading(h1, #feature-exerciser--tables)
+    Text("Feature exerciser — tables")
+  Paragraph
+    Text("Column negotiation, alignment, nesting a…")
+    SoftBreak
+    Text("table small enough that the diff for it …")
+  Heading(h2, #narrow)
+    Text("Narrow")
+  Table(2 columns)
+    TableRow(header=true)
+      TableCell
+        Text("a")
+      TableCell
+        Text("b")
+    TableRow(header=false)
+      TableCell
+        Text("1")
+      TableCell
+        Text("2")
+  Heading(h2, #alignment-markers)
+    Text("Alignment markers")
+  Table(4 columns)
+    TableRow(header=true)
+      TableCell
+        Text("default")
+      TableCell
+        Text("left")
+      TableCell
+        Text("centre")
+      TableCell
+        Text("right")
+    TableRow(header=false)
+      TableCell
+        Text("x")
+      TableCell
+        Text("x")
+      TableCell
+        Text("x")
+      TableCell
+        Text("x")
+    TableRow(header=false)
+      TableCell
+        Text("a longer cell")
+      TableCell
+        Text("a longer cell")
+      TableCell
+        Text("a longer cell")
+      TableCell
+        Text("a longer cell")
+    TableRow(header=false)
+      TableCell
+        Text("1")
+      TableCell
+        Text("22")
+      TableCell
+        Text("333")
+      TableCell
+        Text("4444")
+  Heading(h2, #markdown-inside-cells)
+    Text("Markdown inside cells")
+  Table(2 columns)
+    TableRow(header=true)
+      TableCell
+        Text("construct")
+      TableCell
+        Text("rendered")
+    TableRow(header=false)
+      TableCell
+        Text("emphasis")
+      TableCell
+        Emph
+          Text("em")
+    TableRow(header=false)
+      TableCell
+        Text("strong")
+      TableCell
+        Strong
+          Text("strong")
+    TableRow(header=false)
+      TableCell
+        Text("strikethrough")
+      TableCell
+        Strikethrough
+          Text("gone")
+    TableRow(header=false)
+      TableCell
+        Text("code")
+      TableCell
+        Code
+    TableRow(header=false)
+      TableCell
+        Text("link")
+      TableCell
+        Link(https://example.com)
+          Text("a link")
+    TableRow(header=false)
+      TableCell
+        Text("image")
+      TableCell
+        Image(p.png)
+          Text("alt")
+    TableRow(header=false)
+      TableCell
+        Text("a list")
+      TableCell
+        Text("one")
+        LineBreak
+        Text("two")
+    TableRow(header=false)
+      TableCell
+        Text("escaped pipe")
+      TableCell
+        Text("a | b")
+    TableRow(header=false)
+      TableCell
+        Text("footnote-ish")
+      TableCell
+        Text("not a footnote")
+        FootnoteReference
+  Heading(h2, #ragged-rows)
+    Text("Ragged rows")
+  Table(3 columns)
+    TableRow(header=true)
+      TableCell
+        Text("one")
+      TableCell
+        Text("two")
+      TableCell
+        Text("three")
+    TableRow(header=false)
+      TableCell
+        Text("only one cell")
+      TableCell
+      TableCell
+    TableRow(header=false)
+      TableCell
+        Text("one")
+      TableCell
+        Text("two")
+      TableCell
+    TableRow(header=false)
+      TableCell
+        Text("one")
+      TableCell
+        Text("two")
+      TableCell
+        Text("three")
+  Heading(h2, #a-cell-that-must-wrap)
+    Text("A cell that must wrap")
+  Table(2 columns)
+    TableRow(header=true)
+      TableCell
+        Text("short")
+      TableCell
+        Text("long")
+    TableRow(header=false)
+      TableCell
+        Text("a")
+      TableCell
+        Text("A cell whose text is far longer than the…")
+  Heading(h2, #degenerate)
+    Text("Degenerate")
+  Table(1 columns)
+    TableRow(header=true)
+      TableCell
+    TableRow(header=false)
+      TableCell
+  Table(1 columns)
+    TableRow(header=true)
+      TableCell
+        Text("only a header")
+  Heading(h2, #wider-than-eighty-columns--must-side-scroll-not-mangle)
+    Text("Wider than eighty columns — must side-sc…")
+  Table(8 columns)
+    TableRow(header=true)
+      TableCell
+        Text("Component")
+      TableCell
+        Text("Responsibility")
+      TableCell
+        Text("Owner")
+      TableCell
+        Text("Status")
+      TableCell
+        Text("Milestones")
+      TableCell
+        Text("Since")
+      TableCell
+        Text("Tickets")
+      TableCell
+        Text("Notes")
+    TableRow(header=false)
+      TableCell
+        Text("renderer")
+      TableCell
+        Text("turns a tree into a canvas")
+      TableCell
+        Text("core")
+      TableCell
+        Text("green")
+      TableCell
+        Text("two")
+      TableCell
+        Text("2024")
+      TableCell
+        Text("17")
+      TableCell
+        Text("none")
+    TableRow(header=false)
+      TableCell
+        Text("pager")
+      TableCell
+        Text("scrolls the canvas")
+      TableCell
+        Text("tui")
+      TableCell
+        Text("amber")
+      TableCell
+        Text("one")
+      TableCell
+        Text("2025")
+      TableCell
+        Text("4")
+      TableCell
+        Text("watch the offsets")
+    TableRow(header=false)
+      TableCell
+        Text("mermaid")
+      TableCell
+        Text("lays diagrams out as box art")
+      TableCell
+        Text("core")
+      TableCell
+        Text("green")
+      TableCell
+        Text("seven")
+      TableCell
+        Text("2024")
+      TableCell
+        Text("31")
+      TableCell
+        Text("seven families")
+  Heading(h2, #far-wider-than-one-hundred-and-twenty-columns)
+    Text("Far wider than one hundred and twenty co…")
+  Table(16 columns)
+    TableRow(header=true)
+      TableCell
+        Text("c01")
+      TableCell
+        Text("c02")
+      TableCell
+        Text("c03")
+      TableCell
+        Text("c04")
+      TableCell
+        Text("c05")
+      TableCell
+        Text("c06")
+      TableCell
+        Text("c07")
+      TableCell
+        Text("c08")
+      TableCell
+        Text("c09")
+      TableCell
+        Text("c10")
+      TableCell
+        Text("c11")
+      TableCell
+        Text("c12")
+      TableCell
+        Text("c13")
+      TableCell
+        Text("c14")
+      TableCell
+        Text("c15")
+      TableCell
+        Text("c16")
+    TableRow(header=false)
+      TableCell
+        Text("aaaa")
+      TableCell
+        Text("bbbb")
+      TableCell
+        Text("cccc")
+      TableCell
+        Text("dddd")
+      TableCell
+        Text("eeee")
+      TableCell
+        Text("ffff")
+      TableCell
+        Text("gggg")
+      TableCell
+        Text("hhhh")
+      TableCell
+        Text("iiii")
+      TableCell
+        Text("jjjj")
+      TableCell
+        Text("kkkk")
+      TableCell
+        Text("llll")
+      TableCell
+        Text("mmmm")
+      TableCell
+        Text("nnnn")
+      TableCell
+        Text("oooo")
+      TableCell
+        Text("pppp")
+  Heading(h2, #wide-cells-of-double-width-text)
+    Text("Wide cells of double-width text")
+  Table(3 columns)
+    TableRow(header=true)
+      TableCell
+        Text("日本語の見出し")
+      TableCell
+        Text("もうひとつの見出し")
+      TableCell
+        Text("三番目")
+    TableRow(header=false)
+      TableCell
+        Text("日本語のセルは二倍幅です")
+      TableCell
+        Text("折り返しの確認")
+      TableCell
+        Text("👩\u{200d}💻")
+  Heading(h2, #a-table-inside-a-list-inside-a-quote)
+    Text("A table inside a list inside a quote")
+  BlockQuote
+    List(ordered=false)
+      Item
+        Paragraph
+          Text("and here it is:")
+        Table(2 columns)
+          TableRow(header=true)
+            TableCell
+              Text("in")
+            TableCell
+              Text("deep")
+          TableRow(header=false)
+            TableCell
+              Text("1")
+            TableCell
+              Text("2")
+  FootnoteDefinition
+    Paragraph
+      Text("A footnote defined outside the table but…")

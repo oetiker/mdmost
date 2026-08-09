@@ -1,0 +1,188 @@
+---
+source: tests/snapshot.rs
+expression: canvas.plain_text()
+---
+ ◆ Feature exerciser — headings and     
+   prose                                
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
+                                        
+ This fixture walks the heading ladder  
+ and the inline surface. Page through   
+ it and check two things by eye: that   
+ each heading level is distinguishable  
+ from the one above it and from body    
+ text, and that no inline construct     
+ vanishes.                              
+                                        
+ ◆ A Setext level one                   
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
+                                        
+ ◈ A Setext level two                   
+ ────────────────────────────────────── 
+                                        
+ ◈ Level two (ATX)                      
+ ────────────────────────────────────── 
+                                        
+ ◇ Level three                          
+                                        
+ ▸ Level four                           
+                                        
+ ▹ Level five                           
+                                        
+ ❯ Level six                            
+                                        
+ Body text follows level six, so the    
+ two can be compared directly. A        
+ heading must be more prominent than    
+ the paragraph it introduces, at every  
+ level.                                 
+                                        
+ ◇ The whole inline surface, in one     
+   paragraph                            
+                                        
+ Text with emphasis, emphasis again,    
+ strong, strong again, both at once,    
+ strikethrough, inline code, code with  
+ a ` tick, a plain link                 
+ (https://example.com), a titled link   
+ (https://example.com), an autolink     
+ https://example.org/a/fairly/long/path 
+ /segment/here, a bare autolink         
+ https://example.net/bare, an email     
+ autolink nobody@example.com, a         
+ reference link                         
+ (https://example.com/reference), a     
+ collapsed reference                    
+ (https://example.com/collapsed), a     
+ shortcut reference                     
+ (https://example.com/shortcut), an     
+ ╭ image ─────────────────────────────╮ 
+ │ inline image                       │ 
+ │ small.png                          │ 
+ ╰────────────────────────────────────╯ 
+ and a hard break at the end of this    
+ line,                                  
+ which continues here after a backslash 
+ break, and here after two spaces,      
+ which is the other spelling.           
+                                        
+ Escapes that must survive as literals: 
+ *not emphasis*, _not emphasis_, `not   
+ code`, [not a link], a backslash \ and 
+ an ampersand & and a less-than sign <  
+ that is not the start of a tag.        
+                                        
+ Entities: & < © … —  (that was a hard  
+ space).                                
+                                        
+ ◇ Emphasis that has to wrap            
+                                        
+ A paragraph in which the emphasis runs 
+ across the line break so the styled    
+ run has to be split by the wrapper and 
+ re-styled on the next line, followed   
+ by an inline code span long enough     
+ that it too must be broken across      
+ lines at forty columns, and a link     
+ whose text alone is wider than a forty 
+ column terminal                        
+ (https://example.com/x).               
+                                        
+ ◇ Images                               
+                                        
+ ╭ image ─────────────────────────────╮ 
+ │ alt text for a picture             │ 
+ │ picture.png                        │ 
+ ╰────────────────────────────────────╯ 
+                                        
+ ╭ image ─────────────────────────────╮ 
+ │ untitled.png                       │ 
+ ╰────────────────────────────────────╯ 
+                                        
+ ╭ image ─────────────────────────────╮ 
+ │ an image whose alternative text is │ 
+ │ long enough to need wrapping in a  │ 
+ │ narrow pane                        │ 
+ │ wide.png                           │ 
+ ╰────────────────────────────────────╯ 
+                                        
+ ◇ Footnotes                            
+                                        
+ A statement needing a source[1],       
+ another needing two[2][3], and one     
+ whose marker sits mid-sentence[1] a    
+ second time.                           
+                                        
+ ◈ Block quotes                         
+ ────────────────────────────────────── 
+                                        
+ ▌ A block quote spanning two source    
+ ▌ lines, long enough that it must wrap 
+ ▌ inside its own gutter at forty       
+ ▌ columns.                             
+ ▌                                      
+ ▌ ▌ A nested quote inside it,          
+ ▌ ▌                                    
+ ▌ ▌ ▌ and a third level.               
+                                        
+ ▌ A quote containing other blocks:     
+ ▌                                      
+ ▌ ◇ a heading inside a quote           
+ ▌                                      
+ ▌ • a list                             
+ ▌ • inside a quote                     
+ ▌                                      
+ ▌ ╭ rust ────────────────────────────╮ 
+ ▌ │ fn quoted() -> u8 { 7 }          │ 
+ ▌ ╰──────────────────────────────────╯ 
+ ▌                                      
+ ▌ ╭────┬───┬───────╮                   
+ ▌ │ in │ a │ quote │                   
+ ▌ ├────┼───┼───────┤                   
+ ▌ │ 1  │ 2 │     3 │                   
+ ▌ ╰────┴───┴───────╯                   
+ ▌                                      
+ ▌       ───────────◈────────────       
+ ▌                                      
+ ▌ and a paragraph after a rule inside  
+ ▌ the quote.                           
+                                        
+ ▌ A lazy continuation quote where the  
+ ▌ second line has no marker at all.    
+                                        
+ ◈ Thematic breaks                      
+ ────────────────────────────────────── 
+                                        
+ Three spellings, all of which must     
+ draw the same rule:                    
+                                        
+       ────────────◈─────────────       
+                                        
+       ────────────◈─────────────       
+                                        
+       ────────────◈─────────────       
+                                        
+ ◈ Paragraph edge cases                 
+ ────────────────────────────────────── 
+                                        
+ A paragraph immediately followed by a  
+ heading with no blank line is not      
+ legal Markdown, but a paragraph        
+ containing a very long unbreakable     
+ token is, and this is one:             
+ supercalifragilisticexpialidociousanti 
+ disestablishmentarianism.              
+                                        
+ A     paragraph     with     runs      
+ of     internal     whitespace         
+ that must collapse to single spaces.   
+                                        
+ [1] The first footnote body.           
+                                        
+ [2] The second footnote body, long     
+     enough to wrap at eighty columns   
+     so the continuation indent can be  
+     inspected.                         
+                                        
+ [3] A footnote with a name rather than 
+     a number.

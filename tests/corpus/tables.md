@@ -1,0 +1,85 @@
+# Feature exerciser — tables
+
+Column negotiation, alignment, nesting and the side-scrolling path, each in a
+table small enough that the diff for it can be read.
+
+## Narrow
+
+| a | b |
+|---|---|
+| 1 | 2 |
+
+## Alignment markers
+
+| default | left | centre | right |
+|---------|:-----|:------:|------:|
+| x | x | x | x |
+| a longer cell | a longer cell | a longer cell | a longer cell |
+| 1 | 22 | 333 | 4444 |
+
+## Markdown inside cells
+
+| construct | rendered |
+|-----------|----------|
+| emphasis | *em* |
+| strong | **strong** |
+| strikethrough | ~~gone~~ |
+| code | `let x = 1;` |
+| link | [a link](https://example.com) |
+| image | ![alt](p.png) |
+| a list | one<br>two |
+| escaped pipe | a \| b |
+| footnote-ish | not a footnote[^x] |
+
+[^x]: A footnote defined outside the table but referenced inside it.
+
+## Ragged rows
+
+| one | two | three |
+|-----|-----|-------|
+| only one cell |
+| one | two |
+| one | two | three | four, which the header did not declare |
+
+## A cell that must wrap
+
+| short | long |
+|-------|------|
+| a | A cell whose text is far longer than the column it lands in, so the table renderer has to wrap it inside the cell rather than let it push the border out of the pane. |
+
+## Degenerate
+
+| |
+|-|
+| |
+
+| only a header |
+|---------------|
+
+## Wider than eighty columns — must side-scroll, not mangle
+
+| Component | Responsibility | Owner | Status | Milestones | Since | Tickets | Notes |
+|-----------|----------------|-------|--------|------------|-------|---------|-------|
+| renderer | turns a tree into a canvas | core | green | two | 2024 | 17 | none |
+| pager | scrolls the canvas | tui | amber | one | 2025 | 4 | watch the offsets |
+| mermaid | lays diagrams out as box art | core | green | seven | 2024 | 31 | seven families |
+
+## Far wider than one hundred and twenty columns
+
+| c01 | c02 | c03 | c04 | c05 | c06 | c07 | c08 | c09 | c10 | c11 | c12 | c13 | c14 | c15 | c16 |
+|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|
+| aaaa | bbbb | cccc | dddd | eeee | ffff | gggg | hhhh | iiii | jjjj | kkkk | llll | mmmm | nnnn | oooo | pppp |
+
+## Wide cells of double-width text
+
+| 日本語の見出し | もうひとつの見出し | 三番目 |
+|----------------|--------------------|--------|
+| 日本語のセルは二倍幅です | 折り返しの確認 | 👩‍💻 |
+
+## A table inside a list inside a quote
+
+> - and here it is:
+>
+>   | in | deep |
+>   |----|------|
+>   | 1 | 2 |

@@ -1,0 +1,143 @@
+---
+source: tests/snapshot.rs
+expression: canvas.plain_text()
+---
+ ◆ Feature exerciser — tables           
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
+                                        
+ Column negotiation, alignment, nesting 
+ and the side-scrolling path, each in a 
+ table small enough that the diff for   
+ it can be read.                        
+                                        
+ ◈ Narrow                               
+ ────────────────────────────────────── 
+                                        
+ ╭───┬───╮                              
+ │ a │ b │                              
+ ├───┼───┤                              
+ │ 1 │ 2 │                              
+ ╰───┴───╯                              
+                                        
+ ◈ Alignment markers                    
+ ────────────────────────────────────── 
+                                        
+ ╭─────────┬────────┬────────┬────────╮ 
+ │ default │ left   │ centre │  right │ 
+ ├─────────┼────────┼────────┼────────┤ 
+ │ x       │ x      │   x    │      x │ 
+ │ a       │ a      │   a    │      a │ 
+ │ longer  │ longer │ longer │ longer │ 
+ │ cell    │ cell   │  cell  │   cell │ 
+ │ 1       │ 22     │  333   │   4444 │ 
+ ╰─────────┴────────┴────────┴────────╯ 
+                                        
+ ◈ Markdown inside cells                
+ ────────────────────────────────────── 
+                                        
+ ╭───────────────┬───────────────────╮  
+ │ construct     │ rendered          │  
+ ├───────────────┼───────────────────┤  
+ │ emphasis      │ em                │  
+ │ strong        │ strong            │  
+ │ strikethrough │ gone              │  
+ │ code          │ let x = 1;        │  
+ │ link          │ a link            │  
+ │ image         │ ╭ image ────────╮ │  
+ │               │ │ alt           │ │  
+ │               │ │ p.png         │ │  
+ │               │ ╰───────────────╯ │  
+ │ a list        │ one               │  
+ │               │ two               │  
+ │ escaped pipe  │ a | b             │  
+ │ footnote-ish  │ not a footnote[1] │  
+ ╰───────────────┴───────────────────╯  
+                                        
+ ◈ Ragged rows                          
+ ────────────────────────────────────── 
+                                        
+ ╭───────────────┬─────┬───────╮        
+ │ one           │ two │ three │        
+ ├───────────────┼─────┼───────┤        
+ │ only one cell │     │       │        
+ │ one           │ two │       │        
+ │ one           │ two │ three │        
+ ╰───────────────┴─────┴───────╯        
+                                        
+ ◈ A cell that must wrap                
+ ────────────────────────────────────── 
+                                        
+ ╭───────┬────────────────────────────╮ 
+ │ short │ long                       │ 
+ ├───────┼────────────────────────────┤ 
+ │ a     │ A cell whose text is far   │ 
+ │       │ longer than the column it  │ 
+ │       │ lands in, so the table     │ 
+ │       │ renderer has to wrap it    │ 
+ │       │ inside the cell rather     │ 
+ │       │ than let it push the       │ 
+ │       │ border out of the pane.    │ 
+ ╰───────┴────────────────────────────╯ 
+                                        
+ ◈ Degenerate                           
+ ────────────────────────────────────── 
+                                        
+ ╭───╮                                  
+ │   │                                  
+ ├───┤                                  
+ │   │                                  
+ ╰───╯                                  
+                                        
+ ╭───────────────╮                      
+ │ only a header │                      
+ ├───────────────┤                      
+ ╰───────────────╯                      
+                                        
+ ◈ Wider than eighty columns — must     
+   side-scroll, not mangle              
+ ────────────────────────────────────── 
+                                        
+ ╭───────────┬────────────────┬───────╮ 
+ │ Component │ Responsibility │ Owner › 
+ ├───────────┼────────────────┼───────┤ 
+ │ renderer  │ turns a tree   │ core  › 
+ │           │ into a canvas  │       › 
+ │ pager     │ scrolls the    │ tui   › 
+ │           │ canvas         │       › 
+ │           │                │       › 
+ │ mermaid   │ lays diagrams  │ core  › 
+ │           │ out as box art │       › 
+ ╰───────────┴────────────────┴───────╯ 
+                                        
+ ◈ Far wider than one hundred and       
+   twenty columns                       
+ ────────────────────────────────────── 
+                                        
+ ╭──────┬──────┬──────┬──────┬──────┬─╮ 
+ │ c01  │ c02  │ c03  │ c04  │ c05  │ › 
+ ├──────┼──────┼──────┼──────┼──────┼─┤ 
+ │ aaaa │ bbbb │ cccc │ dddd │ eeee │ › 
+ ╰──────┴──────┴──────┴──────┴──────┴─╯ 
+                                        
+ ◈ Wide cells of double-width text      
+ ────────────────────────────────────── 
+                                        
+ ╭──────────────────────────┬─────────╮ 
+ │ 日本語の見出し           │ もうひと› 
+ ├──────────────────────────┼─────────┤ 
+ │ 日本語のセルは二倍幅です │ 折り返し› 
+ ╰──────────────────────────┴─────────╯ 
+                                        
+ ◈ A table inside a list inside a quote 
+ ────────────────────────────────────── 
+                                        
+ ▌ • and here it is:                    
+ ▌                                      
+ ▌   ╭────┬──────╮                      
+ ▌   │ in │ deep │                      
+ ▌   ├────┼──────┤                      
+ ▌   │ 1  │ 2    │                      
+ ▌   ╰────┴──────╯                      
+                                        
+ [1] A footnote defined outside the     
+     table but referenced inside it.

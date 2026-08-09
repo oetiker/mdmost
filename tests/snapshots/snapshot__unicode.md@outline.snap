@@ -1,0 +1,133 @@
+---
+source: tests/snapshot.rs
+expression: outline(&doc)
+---
+Document
+  Heading(h1, #feature-exerciser--graphemes-and-scripts)
+    Text("Feature exerciser — graphemes and script…")
+  Paragraph
+    Text("Everything here exists to stress the wid…")
+    SoftBreak
+    Text("still be exactly the requested width, an…")
+  Heading(h2, #double-width-scripts)
+    Text("Double-width scripts")
+  Paragraph
+    Text("日本語のテキストと English が混ざった段…")
+    SoftBreak
+    Text("全角のスペース\u{3000}と半角のスペース の違い…")
+  Heading(h2, #right-to-left)
+    Text("Right to left")
+  Paragraph
+    Text("مرحبا بالعالم — هذه فقرة بالعربية مختلطة…")
+    SoftBreak
+    Text("שלום עולם — וזו פסקה בעברית עם English ב…")
+  Heading(h2, #indic-and-combining-marks)
+    Text("Indic and combining marks")
+  Paragraph
+    Text("नमस\u{94d}त\u{947} द\u{941}निया — द\u{947}वनागरी म\u{947}\u{902} एक वाक\u{94d}य।")
+    SoftBreak
+    Text("ไทย: สว\u{e31}สด\u{e35}ชาวโลก (no spaces between words…")
+    SoftBreak
+    Text("Combining: café (decomposed) and café (p…")
+    SoftBreak
+    Text("A base with many marks: x\u{327}\u{328}\u{31b}\u{30b}\u{308}\u{301}\u{362}.")
+  Heading(h2, #emoji)
+    Text("Emoji")
+  Paragraph
+    Text("Simple: 👍 ☕ ✅")
+    SoftBreak
+    Text("Skin tone: 👍🏽 👋🏿")
+    SoftBreak
+    Text("ZWJ family: 👨\u{200d}👩\u{200d}👧\u{200d}👦")
+    SoftBreak
+    Text("ZWJ profession: 👩\u{200d}💻 🧑\u{200d}🚀")
+    SoftBreak
+    Text("Flags: 🇨🇭 🇯🇵 🇺🇳")
+    SoftBreak
+    Text("Keycap: 1\u{fe0f}\u{20e3} #\u{fe0f}\u{20e3}")
+    SoftBreak
+    Text("Variation selectors: ❤\u{fe0f} versus ❤ and ✔\u{fe0f} …")
+  Heading(h2, #wider-than-two-columns)
+    Text("Wider than two columns")
+  Paragraph
+    Text("The one scalar in Unicode wider than two…")
+    SoftBreak
+    Text("which measures three: ៘ — here it is a…")
+    SoftBreak
+    Text("sentence that has to wrap around it at f…")
+  Paragraph
+    Text("A Tangut base plus a spacing Tai Tham ma…")
+  Heading(h2, #zero-width-and-invisible)
+    Text("Zero width and invisible")
+  Paragraph
+    Text("A zero-width space: a\u{200b}b. A zero-width joi…")
+    SoftBreak
+    Text("A soft hyphen: super\u{ad}cali\u{ad}fragilistic. A w…")
+    SoftBreak
+    Text("A non-breaking space: a b. A narrow no-b…")
+  Heading(h2, #control-ish-and-unusual)
+    Text("Control-ish and unusual")
+  Paragraph
+    Text("A tab\tbetween words. A form feed is not …")
+    SoftBreak
+    Text("Surrogate-free astral text: 𝕳𝖊𝖑𝖑𝖔 𝖜𝖔𝖗𝖑𝖉 …")
+    SoftBreak
+    Text("Enclosed alphanumerics: ⑴ ⒜ ㊙ ㈱.")
+  Heading(h2, #mixed-inside-every-container)
+    Text("Mixed inside every container")
+  Table(3 columns)
+    TableRow(header=true)
+      TableCell
+        Text("script")
+      TableCell
+        Text("sample")
+      TableCell
+        Text("width")
+    TableRow(header=false)
+      TableCell
+        Text("Japanese")
+      TableCell
+        Text("日本語のセル")
+      TableCell
+        Text("12")
+    TableRow(header=false)
+      TableCell
+        Text("Arabic")
+      TableCell
+        Text("مرحبا")
+      TableCell
+        Text("5")
+    TableRow(header=false)
+      TableCell
+        Text("Emoji")
+      TableCell
+        Text("👩\u{200d}💻🇨🇭")
+      TableCell
+        Text("4")
+    TableRow(header=false)
+      TableCell
+        Text("Khmer")
+      TableCell
+        Text("៘")
+      TableCell
+        Text("3")
+  List(ordered=false)
+    Item
+      Paragraph
+        Text("日本語のリスト項目で、四十桁のときに折り…")
+    TaskItem(checked=true)
+      Paragraph
+        Text("✅ タスク")
+    Item
+      Paragraph
+        Text("៘ a bullet whose first grapheme is thr…")
+  BlockQuote
+    Paragraph
+      Text("日本語の引用文で、これも折り返しが必要な…")
+      SoftBreak
+      Text("៘ and a three-column grapheme inside a…")
+  CodeBlock(text)
+  Heading(h2, #an-unbreakable-token-of-double-width-text)
+    Text("An unbreakable token of double-width tex…")
+  Paragraph
+    Text("日本語日本語日本語日本語日本語日本語日本…")
