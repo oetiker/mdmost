@@ -165,7 +165,7 @@ fn render_options_follow_the_flags_that_feed_them() {
 }
 
 #[test]
-fn the_status_bar_reports_a_horizontal_offset_only_when_scrolled() {
+fn there_is_a_horizontal_offset_only_when_something_is_over_wide() {
     let mut app = pager(SAMPLE);
     assert_eq!(app.hscroll(), 0);
 
@@ -975,6 +975,11 @@ fn painted(width: u16, height: u16, paint: impl FnOnce(&mut Buffer, Rect)) -> Ve
     let area = Rect::new(0, 0, width, height);
     let mut buffer = Buffer::empty(area);
     paint(&mut buffer, area);
+    buffer_rows(&buffer, width, height)
+}
+
+/// Reads a painted buffer back as one string per row.
+fn buffer_rows(buffer: &Buffer, width: u16, height: u16) -> Vec<String> {
     (0..height)
         .map(|y| {
             let mut row = String::new();
@@ -1137,5 +1142,82 @@ fn every_chrome_glyph_is_one_column_wide() {
                 "chrome glyph {glyph:?} must occupy exactly one column"
             );
         }
+    }
+}
+
+/// Paints one whole frame exactly as the pager does, and returns it as text rows.
+fn framed(app: &mut App, width: u16, height: u16) -> Vec<String> {
+    let backend = ratatui::backend::TestBackend::new(width, height);
+    let mut terminal = ratatui::Terminal::new(backend).expect("a test terminal");
+    terminal
+        .draw(|frame| super::draw::draw(frame, app))
+        .expect("a frame");
+    buffer_rows(terminal.backend().buffer(), width, height)
+}
+
+#[test]
+fn scrolling_sideways_moves_only_the_over_wide_blocks() {
+    // The disqualifying bug reported against the first horizontal scroll: one wide
+    // table dragged the *whole page* sideways, so the heading vanished and both
+    // paragraphs were decapitated mid-word while a third of the screen sat blank.
+    // Rows that fit have nowhere to go and must not go anywhere.
+    let mut app = pager_at(WIDE, 80, 20);
+    assert!(app.hscroll_max() > 0, "the probe document must scroll");
+    for _ in 0..8 {
+        app.act(Action::ScrollRight);
+    }
+    assert!(app.hscroll() > 0, "and must have been scrolled");
+
+    let rows = framed(&mut app, 80, 20);
+    let has = |needle: &str| rows.iter().any(|row| row.contains(needle));
+    assert!(has("Wide"), "the heading stays where it was: {rows:?}");
+    assert!(
+        has("Prose that must keep wrapping"),
+        "the paragraph stays where it was: {rows:?}"
+    );
+
+    // And the block that *is* over-wide really did move, or the assertions above
+    // would pass on a build where the arrow key does nothing at all.
+    assert!(
+        !has("fn f() { let a ="),
+        "the over-wide code block scrolls: {rows:?}"
+    );
+}
+
+#[test]
+fn the_status_bar_offers_the_horizontal_readout_before_it_is_needed() {
+    // A reader who is only shown `↔ 12/116` after already pressing the key has no way
+    // to learn there was anything to the right in the first place.
+    let app = pager_at(WIDE, 80, 20);
+    assert_eq!(app.hscroll(), 0);
+    let max = app.hscroll_max();
+    assert!(max > 0);
+    let rows = painted(80, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        rows[0].contains(&format!("0/{max}")),
+        "the offset readout is shown at offset 0 too: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn going_to_the_top_also_goes_back_to_the_left_edge() {
+    // There was no way home: `0` starts a count, and `g`, `Home`, `^` and `G` all
+    // left the horizontal offset exactly where it was.
+    for key in [Key::char('g'), Key::plain(KeyCode::Home)] {
+        // Short enough that the document also scrolls vertically, so the assertion
+        // that `g` went home is about both axes.
+        let mut app = pager_at(WIDE, 80, 8);
+        for _ in 0..8 {
+            app.act(Action::ScrollRight);
+        }
+        app.act(Action::LineDown);
+        assert!(app.hscroll() > 0 && app.scroll() > 0);
+
+        app.on_key(key);
+        assert_eq!(app.scroll(), 0, "{key:?} goes to the first row");
+        assert_eq!(app.hscroll(), 0, "{key:?} goes to the first column too");
     }
 }

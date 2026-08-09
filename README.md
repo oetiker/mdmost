@@ -127,11 +127,11 @@ same live binding table as the list below, so the two cannot drift apart.
 | `u`, `ctrl-u` | Scroll up half a screen |
 | `space`, `ctrl-f`, `pgdn` | Scroll down one screen |
 | `b`, `ctrl-b`, `pgup` | Scroll up one screen |
-| `g`, `home` | Go to the top of the document |
+| `g`, `home` | Go to the top, and back to the left edge |
 | `G`, `end` | Go to the bottom of the document |
 | `%` | Jump N percent into the document (`50%`) |
-| `left` | Scroll left (wide tables and code) |
-| `right` | Scroll right (wide tables and code) |
+| `left` | Scroll left (wide content) |
+| `right` | Scroll right (wide content) |
 
 #### Navigation
 

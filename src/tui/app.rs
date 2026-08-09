@@ -339,11 +339,21 @@ impl App {
     /// Zero when everything fits, which is how the status bar knows to say nothing
     /// about horizontal position. Non-zero when `--width` forced a wider render, or
     /// when [`super::wide`] widened a block that would otherwise have been clipped.
+    ///
+    /// Measured from the widest thing actually drawn rather than from the canvas
+    /// width, which also counts the right-hand margin past it: scrolling into that
+    /// margin moves nothing, and a readout that counted it would promise columns
+    /// there is nothing to see in.
     pub fn hscroll_max(&self) -> u16 {
-        self.cache
-            .canvas()
-            .width()
-            .saturating_sub(self.viewport_width())
+        self.cache.max_reach().saturating_sub(self.viewport_width())
+    }
+
+    /// How far each row of the rendered document may be scrolled sideways.
+    ///
+    /// One entry per canvas row; see [`super::wide::scroll_reach`]. The viewport uses
+    /// it to leave rows that fit at column 0 while an over-wide block scrolls.
+    pub fn reach(&self) -> &[u16] {
+        self.cache.reach()
     }
 
     /// The width the document is rendered at.
@@ -359,8 +369,9 @@ impl App {
     /// This is what the reader can see; the canvas may be wider. It exceeds
     /// [`App::content_width`] never, and falls short of the *canvas* width whenever
     /// `--width` forced a wider render or [`super::wide`] widened an over-wide block.
-    /// Either way the surplus is reached by scrolling horizontally, and
-    /// [`App::hscroll_max`] measures it.
+    /// Either way the surplus is reached by scrolling horizontally — as far as there
+    /// is anything drawn in it, which is what [`App::hscroll_max`] measures rather
+    /// than the canvas width itself.
     pub fn viewport_width(&self) -> u16 {
         // One column is the scrollbar's gutter.
         self.size
@@ -470,12 +481,7 @@ impl App {
     /// Clamps the scroll offsets into range.
     fn clamp(&mut self) {
         self.scroll = self.scroll.min(self.max_scroll());
-        let overflow = self
-            .cache
-            .canvas()
-            .width()
-            .saturating_sub(self.viewport_width());
-        self.hscroll = self.hscroll.min(overflow);
+        self.hscroll = self.hscroll.min(self.hscroll_max());
     }
 
     /// The smallest source offset drawn at or below `row`.
@@ -686,7 +692,15 @@ impl App {
             Action::PageDown => self.scroll_by(lines(height.saturating_sub(1).max(1))),
             Action::PageUp => self.scroll_by(-lines(height.saturating_sub(1).max(1))),
             // `100g` goes to line 100, as it does in `less`; a bare `g` goes home.
-            Action::Top => self.scroll_to(count.map_or(0, |line| line.saturating_sub(1))),
+            //
+            // Home is both axes. Horizontal scrolling is per-block now, but a reader
+            // who has followed a wide table sideways still has no other way back: `0`
+            // is the count prefix, and `^` is unbound. Going to a row means arriving
+            // at the start of it, whether or not a count named the row.
+            Action::Top => {
+                self.hscroll = 0;
+                self.scroll_to(count.map_or(0, |line| line.saturating_sub(1)));
+            }
             Action::Bottom => match count {
                 Some(line) => self.scroll_to(line.saturating_sub(1)),
                 None => {

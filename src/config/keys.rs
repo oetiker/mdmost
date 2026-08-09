@@ -27,7 +27,7 @@ pub enum Action {
     PageDown,
     /// Scroll a full screen up.
     PageUp,
-    /// Jump to the first line.
+    /// Jump to the first line, and back to the first column.
     Top,
     /// Jump to the last line.
     Bottom,
@@ -35,9 +35,9 @@ pub enum Action {
     Percent,
     /// Report the position in the document in the status bar.
     ReportPosition,
-    /// Scroll one column left (wide tables and code blocks).
+    /// Scroll one column left, through content wider than the viewport.
     ScrollLeft,
-    /// Scroll one column right (wide tables and code blocks).
+    /// Scroll one column right, through content wider than the viewport.
     ScrollRight,
     /// Start a forward search.
     SearchForward,
@@ -141,13 +141,13 @@ impl Action {
             Action::HalfPageUp => "Scroll up half a screen",
             Action::PageDown => "Scroll down one screen",
             Action::PageUp => "Scroll up one screen",
-            Action::Top => "Go to the top of the document",
+            Action::Top => "Go to the top, and back to the left edge",
             Action::Bottom => "Go to the bottom of the document",
             Action::Percent => "Jump N percent into the document (50%)",
             Action::ReportPosition => "Report where you are",
             Action::ToggleLineNumbers => "Show or hide code line numbers",
-            Action::ScrollLeft => "Scroll left (wide tables and code)",
-            Action::ScrollRight => "Scroll right (wide tables and code)",
+            Action::ScrollLeft => "Scroll left (wide content)",
+            Action::ScrollRight => "Scroll right (wide content)",
             Action::SearchForward => "Search forward",
             Action::SearchBackward => "Search backward",
             Action::NextMatch => "Go to the next match",

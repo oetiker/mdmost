@@ -20,7 +20,7 @@
 //! in exactly that one respect, and being false only about the margins is what made it
 //! survive: the pager looked right until you noticed nothing had a gutter.
 
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, Cell};
 use crate::doc::{Doc, Node, NodeKind};
 use crate::render::{RenderOptions, margins, render_block, render_document};
 use crate::theme::Theme;
@@ -42,7 +42,8 @@ const MAX_BLOCK_WIDTH: u16 = 2048;
 /// Renders `doc` at `width`, widening any block that would otherwise be clipped.
 ///
 /// The returned canvas is at least `width` columns wide and may be wider; the surplus
-/// is what the horizontal scroll keys reach.
+/// is what the horizontal scroll keys reach, as far as it is drawn in — see
+/// [`scroll_reach`], which measures that and is what moves each row.
 pub fn render_scrollable(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
     let clipped = ClipTest::new(theme);
     let blocks = &doc.root().children;
@@ -122,6 +123,76 @@ fn render_widened(
         }
     }
     fitted
+}
+
+/// How far each row of `canvas` may usefully be scrolled sideways, in columns.
+///
+/// Horizontal scrolling exists for the handful of blocks that did not fit. Applying one
+/// offset to every row drags the whole page: the heading disappears, paragraphs are
+/// decapitated mid-word, and the columns the prose used to occupy go blank — for the
+/// sake of one wide table further down. The viewport therefore offsets each row by
+/// `min(offset, reach - viewport)`, and this is where `reach` comes from.
+///
+/// A row's own content extent would be the naive answer and shears blocks apart: a
+/// diagram whose rows have ragged right edges would have every row stop at its own
+/// extent, sliding arrows off the boxes they attach to. The unit is instead a *run* of
+/// rows that scroll together, read off the drawn canvas the way `ruled_offsets` in the
+/// graph engine reads a node's rules rather than being told about them:
+///
+/// * Consecutive non-blank rows belong to one run and share the run's widest extent.
+///   [`render_scrollable`] separates top-level blocks with a blank row, so a run is
+///   normally exactly one block.
+/// * Runs on both sides of a blank gap are merged when *both* reach past `width`, the
+///   width the document was laid out at. A block with a blank row inside it — a loose
+///   list, a diagram with a gap between ranks — is thereby kept in one piece whenever
+///   the gap separates two over-wide parts. Two adjacent over-wide blocks are merged
+///   too, and then scroll together; that is the price of not being told where the block
+///   boundaries are, and it costs the narrower of the two some blank space on the right.
+/// * A run that fits within the viewport gets an offset of zero from the `min` above,
+///   which is the whole point: prose, headings and narrow blocks stay at column 0.
+///
+/// The returned vector has one entry per canvas row.
+pub fn scroll_reach(canvas: &Canvas, width: u16) -> Vec<u16> {
+    let mut reach: Vec<u16> = canvas.rows().iter().map(|row| row_extent(row)).collect();
+    let mut start = 0;
+    let mut previous: Option<std::ops::Range<usize>> = None;
+    while start < reach.len() {
+        if reach[start] == 0 {
+            start += 1;
+            continue;
+        }
+        let mut end = start;
+        while end < reach.len() && reach[end] > 0 {
+            end += 1;
+        }
+        let widest = reach[start..end].iter().copied().max().unwrap_or(0);
+        let run = match previous {
+            // Both sides over-wide: one block interrupted by a blank row, most likely.
+            Some(before) if widest > width && reach[before.start] > width => before.start..end,
+            _ => start..end,
+        };
+        let widest = reach[run.clone()].iter().copied().max().unwrap_or(0);
+        for row in &mut reach[run.clone()] {
+            *row = widest;
+        }
+        previous = Some(run);
+        start = end;
+    }
+    reach
+}
+
+/// The column one past the last thing a row actually draws.
+fn row_extent(cells: &[Cell]) -> u16 {
+    cells
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, cell)| !cell.is_blank() && !cell.is_continuation())
+        .map_or(0, |(index, cell)| {
+            u16::try_from(index)
+                .unwrap_or(u16::MAX)
+                .saturating_add(u16::from(cell.width()))
+        })
 }
 
 /// Recognises the renderers' "content was cut off here" marker.
