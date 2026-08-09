@@ -219,8 +219,10 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     let mut right: Vec<Segment> = Vec::new();
 
     // The file name is the one segment that can lose characters and still mean
-    // something, so it is elided before anything is dropped and dropped only when
-    // eliding it to nothing is still not enough.
+    // something, so it is elided rather than let any segment from `ELIDE_TO_KEEP` up be
+    // dropped, and given up altogether only when eliding it away is still not enough.
+    // Segments cheaper than that — a breadcrumb, a search chip, the meter — go first,
+    // because each of them is restated somewhere the reader can already see.
     left.push(Segment::new(
         Drop::Title,
         vec![
@@ -374,6 +376,19 @@ enum Drop {
     Never,
 }
 
+/// The cheapest segment the file name is shortened in order to keep.
+///
+/// Everything below it goes before the name loses a character, because everything below
+/// it is said somewhere else: the breadcrumb is on the page, the search chip is what the
+/// reader just typed, and the meter's value is printed beside it in words. From here up
+/// nothing else on the bar can shrink and nothing else says what it says — so the name,
+/// the one segment that can lose characters and still mean something, pays instead.
+///
+/// This is deliberately *not* "elide before anything at all is dropped": that reading
+/// spends thirteen columns of a file name to keep an eight-column gauge whose percentage
+/// is already on screen.
+const ELIDE_TO_KEEP: Drop = Drop::Hscroll;
+
 /// One status-bar segment, dropped or kept whole.
 struct Segment {
     /// When this segment is given up.
@@ -396,6 +411,16 @@ impl Segment {
     }
 }
 
+/// The file name as it currently reads, while it is still on the bar.
+///
+/// It is the leftmost segment's last span — the icon in front of it is not elidable.
+fn title(left: &[Segment]) -> Option<&str> {
+    left.first()
+        .filter(|segment| segment.priority == Drop::Title)
+        .and_then(|segment| segment.spans.last())
+        .map(|span| span.content.as_ref())
+}
+
 /// Lays segments out across the bar, dropping the cheapest until they fit.
 fn lay_out(
     mut left: Vec<Segment>,
@@ -404,8 +429,22 @@ fn lay_out(
     bar: TermStyle,
 ) -> Vec<TermSpan<'static>> {
     let total = |segments: &[Segment]| -> usize { segments.iter().map(|s| s.width).sum() };
-    // One column of clear air between the two halves, always.
-    while total(&left) + total(&right) + 1 > width {
+    // What the file name could give up if it were elided away entirely, measured through
+    // `fit` so it cannot drift from what the elision below actually reclaims.
+    let elidable = |left: &[Segment]| -> usize {
+        title(left).map_or(0, |name| {
+            display_width(name).saturating_sub(display_width(&fit(name, 0)))
+        })
+    };
+    // One column of clear air between the two halves, always — hence the strict `<`.
+    // `slack` is what the file name is willing to give up, when it is willing to.
+    let fits = |left: &[Segment], right: &[Segment], slack: usize| {
+        total(left) + total(right) < width + slack
+    };
+    loop {
+        if fits(&left, &right, 0) {
+            break;
+        }
         let worst = left
             .iter()
             .chain(right.iter())
@@ -413,22 +452,33 @@ fn lay_out(
             .filter(|priority| *priority != Drop::Never)
             .min();
         let Some(worst) = worst else { break };
+        // From `ELIDE_TO_KEEP` up, the file name gives up its own columns rather than let
+        // a segment go: the elision used to run only *after* this loop, so a forty-column
+        // terminal silently traded the `↔ n/N` chip — on the one terminal where
+        // horizontal scrolling matters most — for a long file name, and left ten columns
+        // of the bar empty doing it.
+        if worst >= ELIDE_TO_KEEP && fits(&left, &right, elidable(&left)) {
+            break;
+        }
         left.retain(|segment| segment.priority != worst);
         right.retain(|segment| segment.priority != worst);
     }
-    // Everything left is undroppable, so the file name — the one segment that can
-    // lose characters and still mean something — gives up the difference. The quit
-    // hint is never what goes (usability P2).
+    // Now the file name — the one segment that can lose characters and still mean
+    // something — gives up exactly the difference the loop above counted on it for. The
+    // quit hint is never what goes (usability P2). Guarded on the segment still *being*
+    // the file name: once it has been dropped, the leftmost segment is the position, and
+    // eliding `0%` would be nonsense.
     let mut used = total(&left) + total(&right);
     if used + 1 > width
-        && let Some(title) = left
+        && let Some(name) = left
             .first_mut()
+            .filter(|segment| segment.priority == Drop::Title)
             .and_then(|segment| segment.spans.last_mut())
     {
-        let room = display_width(&title.content).saturating_sub(used + 1 - width);
-        let short = fit(&title.content, room);
-        used -= display_width(&title.content) - display_width(&short);
-        title.content = short.into();
+        let room = display_width(&name.content).saturating_sub(used + 1 - width);
+        let short = fit(&name.content, room);
+        used -= display_width(&name.content) - display_width(&short);
+        name.content = short.into();
     }
     let gap = width.saturating_sub(used);
     let mut spans: Vec<TermSpan<'static>> = Vec::new();

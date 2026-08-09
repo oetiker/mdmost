@@ -703,11 +703,16 @@ fn f() { let a = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaa\"; let b = \"bbbbbbbbbbbbbbbbbbb
 
 /// Builds an app over `source` at an explicit size.
 fn pager_at(source: &str, width: u16, height: u16) -> App {
+    pager_named(source, "sample.md", width, height)
+}
+
+/// Builds an app over `source` at an explicit size, under a chosen file name.
+fn pager_named(source: &str, title: &str, width: u16, height: u16) -> App {
     let mut app = App::new(
         Doc::parse(source),
         Config::default(),
         AppOptions {
-            title: "sample.md".to_string(),
+            title: title.to_string(),
             icons: false,
             theme: "dark".to_string(),
             toc_open: false,
@@ -838,6 +843,33 @@ fn the_overflow_marker_matches_the_renderer() {
     );
 }
 
+#[test]
+fn the_quote_bar_matches_the_renderer() {
+    // The other private constant `super::wide` keeps a copy of. If the renderer ever
+    // changes the glyph, a quote's separator rows stop reading as blank, the quote
+    // becomes one run again, and a wide block inside it silently drags the quoted prose
+    // off the screen — with no test failing anywhere near the change.
+    let doc = Doc::parse("> before\n>\n> after\n");
+    let canvas = crate::render::render_document(
+        &doc,
+        20,
+        &crate::theme::Theme::default_dark(),
+        &crate::render::RenderOptions::new(false, false),
+    );
+    let separator = (0..canvas.height())
+        .map(|row| canvas.row_text(row))
+        .find(|text| {
+            let bare = text.trim();
+            !bare.is_empty() && !bare.contains("before") && !bare.contains("after")
+        })
+        .expect("a quote has a row between its two paragraphs");
+    assert_eq!(
+        separator.trim(),
+        super::wide::QUOTE_BAR,
+        "the row separating a quote's parts draws the bar and nothing else"
+    );
+}
+
 /// A table wide enough that a fourteen-column viewport has to cut it.
 const WIDE_TABLE: &str = "| aaaaaaaaaa | bbbbbbbbbb |\n|---|---|\n| cccccccccc | dddddddddd |\n";
 
@@ -932,6 +964,105 @@ fn a_viewport_edge_marks_box_art_inside_a_fence_rather_than_closing_it() {
         vec!['╮', '›', '›', '╯'],
         "the fence's own frame closes; its content is marked"
     );
+}
+
+/// A quote whose middle is a fence no terminal is wide enough for.
+///
+/// The prose lines are deliberately shorter than the viewport: a quoted line long
+/// enough to reflow at the widened width would be over-wide in its own right, and would
+/// then be merged with the fence by the both-sides-over-wide rule for a different and
+/// legitimate reason.
+const QUOTED_WIDE: &str = concat!(
+    "# Heading\n\n> A quoted sentence before the fence.\n>\n> ```text\n> LEFTEDGE",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "RIGHTEDGE\n> ```\n>\n> A quoted sentence after the fence.\n",
+);
+
+#[test]
+fn a_wide_block_inside_a_quote_does_not_drag_the_quoted_prose() {
+    // A blockquote paints its `▌` on every row, including the rows that separate its
+    // parts, so "consecutive non-blank rows" made the whole quote one run and a wide
+    // fence inside it gave the quoted prose the fence's reach. Scrolled to the end, both
+    // sentences and the quote bar were gone and the viewport was a rail of `‹` over
+    // empty space — the exact failure the per-run offsets were introduced to fix, one
+    // nesting level down.
+    let mut app = pager_at(QUOTED_WIDE, 80, 20);
+    assert!(app.hscroll_max() > 0, "the probe document must scroll");
+    while app.hscroll() < app.hscroll_max() {
+        app.act(Action::ScrollRight);
+    }
+
+    let rows = framed(&mut app, 80, 20);
+    let has = |needle: &str| rows.iter().any(|row| row.contains(needle));
+    assert!(
+        has("A quoted sentence before the fence."),
+        "the prose above the wide fence stays anchored: {rows:?}"
+    );
+    assert!(
+        has("A quoted sentence after the fence."),
+        "and so does the prose below it: {rows:?}"
+    );
+    // And the fence really did travel, or the two assertions above would pass on a
+    // build where the arrow key does nothing at all.
+    assert!(has("RIGHTEDGE"), "the fence scrolled to its end: {rows:?}");
+    assert!(!has("LEFTEDGE"), "and left its start behind: {rows:?}");
+}
+
+#[test]
+fn a_ragged_block_still_scrolls_as_one_piece() {
+    // The other half of the same rule, and the one it is easy to break while fixing the
+    // first: rows are grouped into runs precisely so a block with a ragged right edge —
+    // a diagram's rank of boxes, a fence of uneven lines — moves as one piece. Per-row
+    // extents would slide every row to its own right edge, flushing a ragged block
+    // straight and sliding arrows off the boxes they attach to. A green here before the
+    // fix as well as after is the point: this is the invariant, not the defect.
+    let filler = "x".repeat(100);
+    let ragged =
+        format!("```text\n{filler}xxxxxxxxxx AEND\n{filler} BEND\n{filler}xxxxxxxxxx CEND\n```\n");
+    let mut app = pager_at(&ragged, 40, 12);
+    assert!(app.hscroll_max() > 0, "the probe document must scroll");
+    while app.hscroll() < app.hscroll_max() {
+        app.act(Action::ScrollRight);
+    }
+    let rows = framed(&mut app, 40, 12);
+    let column = |needle: &str| {
+        rows.iter()
+            .find_map(|row| row.find(needle))
+            .unwrap_or_else(|| panic!("{needle} is on screen: {rows:?}"))
+    };
+    assert_eq!(
+        column("AEND"),
+        column("CEND"),
+        "rows of equal length still line up: {rows:?}"
+    );
+    assert_eq!(
+        column("BEND") + 10,
+        column("AEND"),
+        "and the short row keeps its ragged edge instead of being flushed right: {rows:?}"
+    );
+}
+
+#[test]
+fn the_right_edge_marker_is_not_hidden_under_a_double_width_glyph() {
+    // `blit` puts a wide glyph's lead in the second-to-last column and an empty
+    // continuation symbol in the last one; a chevron stamped into that continuation cell
+    // is painted over by the glyph in front of it. Which parity that happens on depends
+    // on the terminal width alone, so a CJK reader was given no cut indication at all on
+    // half of all widths.
+    let mut app = pager_at(
+        "# CJK\n\n```text\n丙业丛东丝丞丟丠両丢丣两严並丧丨丩个丫丬中丮丯丰丱串丳临丵丶丷丸丹为主丼丽举丿乀乁乂乃乄久乆乇么义乊之乌乍乎乏乐乑乒乓乔\n```\n",
+        60,
+        10,
+    );
+    for width in [59u16, 60, 61, 62] {
+        app.resize(width, 10);
+        let rows = framed(&mut app, width, 10);
+        assert!(
+            rows.iter().any(|row| row.contains('\u{203a}')),
+            "the cut is marked at width {width}: {rows:?}"
+        );
+    }
 }
 
 #[test]
@@ -1296,6 +1427,48 @@ fn the_status_bar_offers_the_horizontal_readout_before_it_is_needed() {
         "the offset readout is shown at offset 0 too: {:?}",
         rows[0]
     );
+}
+
+#[test]
+fn a_long_file_name_is_elided_before_the_horizontal_chip_is_dropped() {
+    // The bar's own comment promises the file name "is elided before anything is
+    // dropped and dropped only when eliding it to nothing is still not enough". The
+    // elision ran *after* the drop loop, so on a narrow bar a long file name silently
+    // cost the reader the `↔ n/N` chip — on exactly the terminal where horizontal
+    // scrolling matters most, and with ten columns of the bar left empty.
+    for title in ["a.md", "t_two_wide.md", "a-rather-long-file-name.md"] {
+        let app = pager_named(WIDE, title, 40, 12);
+        let max = app.hscroll_max();
+        assert!(max > 0, "the probe document must scroll");
+        let rows = painted(40, 1, |buffer, area| {
+            super::chrome::draw_status(buffer, area, &app)
+        });
+        assert!(
+            rows[0].contains(&format!("0/{max}")),
+            "the horizontal chip outlives the file name at 40 columns with {title:?}: {:?}",
+            rows[0]
+        );
+        assert!(
+            rows[0].contains("h help"),
+            "and the way out is still there: {:?}",
+            rows[0]
+        );
+        assert_eq!(
+            crate::text::display_width(&rows[0]),
+            40,
+            "the bar still fills the terminal exactly: {:?}",
+            rows[0]
+        );
+        // The other half of the trade: the name is elided to keep the chip, not to keep
+        // the meter, whose value is printed next to it in words.
+        if title == "a.md" {
+            assert!(
+                rows[0].contains("a.md"),
+                "a name this short is never elided at all: {:?}",
+                rows[0]
+            );
+        }
+    }
 }
 
 #[test]
