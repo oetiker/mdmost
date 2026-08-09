@@ -26,7 +26,10 @@
 //! tab-sensitive syntaxes (a `Makefile` recipe line) still parse correctly while the
 //! canvas — which has no notion of a tab — receives only printable text.
 
+mod acknowledgements;
 mod scopes;
+
+pub use acknowledgements::syntax_acknowledgements;
 
 use std::sync::LazyLock;
 
@@ -52,12 +55,23 @@ pub const MAX_HIGHLIGHT_BYTES: usize = 256 * 1024;
 /// Blocks with more lines than this are rendered as plain themed text.
 pub const MAX_HIGHLIGHT_LINES: usize = 10_000;
 
-/// Syntax definitions `syntect`'s default set does not ship, compiled into the binary.
+/// Syntax definitions written for `mdless`, compiled into the binary.
 ///
-/// Each is written for `mdless` under the project's own licence rather than vendored,
-/// and each declares its `file_extensions`, so the ordinary token lookup finds it with
-/// no alias entry. Keep the tuple's first element in step with the definition's `name`
-/// key: it is only used for the error message when a definition fails to parse.
+/// Each is written under the project's own licence rather than vendored, and each
+/// declares its `file_extensions`, so the ordinary token lookup finds it with no alias
+/// entry. Keep the tuple's first element in step with the definition's `name` key: it is
+/// only used for the error message when a definition fails to parse.
+///
+/// [`BUNDLED_SYNTAXES`] now carries a TOML and a Dockerfile definition of its own, so
+/// these two are no longer the only way to highlight those fences — they are kept because
+/// they are measurably better against this project's scope table. `bat`'s TOML gives a
+/// table header no scope at all, so `[server.http]` lands in the plain-text slot instead
+/// of the namespace one; its Dockerfile emits `RUN apk add --no-cache curl` as a single
+/// undifferentiated span. Both are asserted by
+/// `toml_covers_sections_keys_values_dates_and_arrays` and
+/// `dockerfile_directives_are_keywords_not_commands`, which is where the comparison was
+/// actually made. Delete these definitions only after re-running those two tests against
+/// the bundled set.
 const EXTRA_SYNTAXES: &[(&str, &str)] = &[
     (
         "TOML",
@@ -69,20 +83,26 @@ const EXTRA_SYNTAXES: &[(&str, &str)] = &[
     ),
 ];
 
-/// `syntect`'s own syntax set, deserialised from its compiled dump.
+/// The bundled syntax set, deserialised from a compiled dump.
 ///
-/// This is cheap (about a millisecond) because the dump is pre-linked, and it happens
-/// lazily on the first highlighted block.
-static DEFAULT_SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+/// Not `syntect`'s own `load_defaults_newlines`: that is the Sublime Text bundle as it
+/// stood in 2016 — seventy-five syntaxes with no TypeScript, Kotlin, Swift, Zig, Nix,
+/// Terraform, Elixir, GraphQL, Vue, Svelte or SCSS in it. `two-face` re-packages the set
+/// `bat` curates, versioned against a `bat` release, behind the same `SyntaxSet` type and
+/// the same lookup API. It costs roughly 0.6 MiB of embedded definitions.
+///
+/// Loading is lazy and pre-linked, so a document with no code block pays nothing and one
+/// with a code block pays a single deserialisation.
+static BUNDLED_SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
 
 /// A second set holding only [`EXTRA_SYNTAXES`].
 ///
-/// Deliberately *not* merged into [`DEFAULT_SYNTAXES`]: adding a definition to the
-/// default set means calling `into_builder().build()`, which re-links the context
-/// references of all seventy-five bundled syntaxes and costs about 180 ms — a cost
-/// every document with any code block would pay. Built on its own, the same two
-/// definitions link in about 9 ms, and only a document that actually contains a TOML
-/// or Dockerfile fence pays even that.
+/// Deliberately *not* merged into [`BUNDLED_SYNTAXES`]: adding a definition to that set
+/// means calling `into_builder().build()`, which re-links the context references of every
+/// bundled syntax and cost about 180 ms back when there were seventy-five of them — a
+/// cost every document with any code block would pay, and one that has only grown with
+/// the set. Built on its own, the same two definitions link in about 9 ms, and only a
+/// document that actually contains a TOML or Dockerfile fence pays even that.
 ///
 /// A definition that fails to parse is skipped rather than panicking;
 /// `every_extra_syntax_loads` asserts that none currently does, so a broken definition
@@ -97,35 +117,46 @@ static EXTRA_SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
     builder.build()
 });
 
-/// Language tags that `syntect`'s own name and extension lookup does not resolve, or
-/// resolves to something other than what a Markdown author means by the tag.
+/// Language tags that the bundled set's own name and extension lookup does not resolve,
+/// or resolves to something other than what a Markdown author means by the tag.
 ///
 /// The right-hand side is a `syntect` token — a syntax name or a file extension — that
 /// [`SyntaxSet::find_syntax_by_token`] does resolve.
 ///
+/// This table is a *last* resort, not a first one: `find_syntax_by_token` already matches
+/// every syntax name and every declared file extension case-insensitively, which covers
+/// `rs`, `py`, `yml`, `sh`, `ts`, `tsx`, `c++`, `hcl`, `kt` and most of what people write
+/// in a fence. An entry here is justified only when the raw tag resolves to nothing, or
+/// to the wrong thing; `aliases_only_cover_tags_syntect_misses_or_misresolves` fails if a
+/// row stops earning its place. Widening the bundled set retired four rows — `ts`, `tsx`,
+/// `typescript` no longer have to borrow JavaScript, `jinja` no longer has to borrow HTML,
+/// and `vim` no longer has to give up and render as plain text.
+///
 /// TOML and Dockerfiles have their own definitions in [`EXTRA_SYNTAXES`] and therefore
-/// need no alias. TypeScript has none, and borrows `JavaScript` — a superset sharing
-/// most of its surface — rather than falling back to plain text.
+/// need no alias either.
 const ALIASES: &[(&str, &str)] = &[
+    ("apache", "htaccess"),
     ("cjs", "JavaScript"),
     ("console", "sh"),
+    ("csharp", "cs"),
     ("docker", "dockerfile"),
+    ("fortran", "f90"),
+    ("fsharp", "f#"),
     ("golang", "go"),
-    ("jinja", "html"),
+    ("graphviz", "dot"),
     ("jsonc", "json"),
     ("jsx", "JavaScript"),
     ("ksh", "sh"),
     ("mjs", "JavaScript"),
     ("node", "JavaScript"),
+    ("objc", "objective-c"),
+    ("objcpp", "objective-c++"),
     ("plaintext", "txt"),
     ("python3", "python"),
+    ("scheme", "scm"),
     ("shell", "sh"),
     ("shell-session", "sh"),
     ("text", "txt"),
-    ("ts", "JavaScript"),
-    ("tsx", "JavaScript"),
-    ("typescript", "JavaScript"),
-    ("vim", "txt"),
 ];
 
 /// Highlights the body of a fenced code block.
@@ -164,7 +195,7 @@ pub fn syntax_name(lang: Option<&str>) -> Option<&'static str> {
 /// [`ALIASES`]; the result (or the token itself) is then handed to
 /// [`SyntaxSet::find_syntax_by_token`], which matches syntax names and file extensions
 /// case-insensitively. [`EXTRA_SYNTAX_SET`] is consulted first, so a definition written
-/// for `mdless` always wins over a same-named one appearing in a future `syntect`.
+/// for `mdless` always wins over a same-named one in [`BUNDLED_SYNTAXES`].
 /// `None` means "render as plain text".
 ///
 /// The set is returned alongside the syntax because a [`ParseState`] must be driven by
@@ -194,9 +225,9 @@ fn find_in_sets(token: &str) -> Option<(&'static SyntaxSet, &'static SyntaxRefer
     if let Some(syntax) = EXTRA_SYNTAX_SET.find_syntax_by_token(token) {
         return Some((&EXTRA_SYNTAX_SET, syntax));
     }
-    DEFAULT_SYNTAXES
+    BUNDLED_SYNTAXES
         .find_syntax_by_token(token)
-        .map(|syntax| (&*DEFAULT_SYNTAXES, syntax))
+        .map(|syntax| (&*BUNDLED_SYNTAXES, syntax))
 }
 
 /// Highlights `src` with `syntax`, or returns `None` if the parser gave up.

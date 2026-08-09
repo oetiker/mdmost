@@ -4,7 +4,25 @@
 
 use super::*;
 
-/// Every alias must point at a token the default syntax set actually knows, otherwise
+/// The bundled set must be the widened one, not `syntect`'s own defaults.
+///
+/// `syntect`'s `load_defaults_newlines` is the Sublime bundle as of 2016 and knows
+/// nothing of TypeScript, Kotlin, Swift, Zig, Nix, Terraform or GraphQL. Swapping
+/// [`BUNDLED_SYNTAXES`] back to it would compile, pass every per-language test that
+/// happens to name an old language, and quietly halve the coverage — so measure the
+/// difference here rather than trusting the call site to stay right.
+#[test]
+fn the_bundled_set_is_wider_than_syntects_own_defaults() {
+    let syntect_defaults = SyntaxSet::load_defaults_newlines().syntaxes().len();
+    let bundled = BUNDLED_SYNTAXES.syntaxes().len();
+    assert!(
+        bundled > syntect_defaults + 100,
+        "bundled set has {bundled} syntaxes against syntect's {syntect_defaults}; that is \
+         not the widened set"
+    );
+}
+
+/// Every alias must point at a token the bundled syntax set actually knows, otherwise
 /// the alias silently does nothing and the tag falls back to plain text.
 #[test]
 fn every_alias_resolves_to_a_real_syntax() {
@@ -59,6 +77,22 @@ fn absent_or_unknown_tags_resolve_to_nothing() {
     assert_eq!(syntax_name(Some("")), None);
     assert_eq!(syntax_name(Some("   ")), None);
     assert_eq!(syntax_name(Some("brainfuck-9000")), None);
+}
+
+/// The two languages the bundled set deliberately drops, recorded rather than assumed.
+///
+/// `two-face` ships two builds of the same curation, one per `syntect` regex engine, and
+/// excludes the definitions whose regexes the pure-Rust `fancy-regex` engine cannot
+/// compile. `mdless` picks the pure-Rust engine on purpose (no C toolchain, see
+/// `Cargo.toml`), so PowerShell and ARM assembly are the price. They fall back to plain
+/// text like any unknown tag — the point of this test is that the *README* says so, and
+/// this fails the day that stops being true, which is the day the README needs editing.
+#[test]
+fn the_languages_the_fancy_regex_build_drops_are_still_the_ones_the_readme_names() {
+    assert_eq!(syntax_name(Some("powershell")), None);
+    assert_eq!(syntax_name(Some("ps1")), None);
+    // x86_64 assembly survives; only the ARM definition is dropped.
+    assert_eq!(syntax_name(Some("asm")), Some("x86_64 Assembly"));
 }
 
 #[test]
@@ -163,6 +197,6 @@ fn each_syntax_is_paired_with_its_own_set() {
     assert!(set.find_syntax_by_name(&syntax.name).is_some());
 
     let (set, syntax) = resolve_syntax(Some("rust")).expect("rust resolves");
-    assert!(std::ptr::eq(set, &*DEFAULT_SYNTAXES));
+    assert!(std::ptr::eq(set, &*BUNDLED_SYNTAXES));
     assert!(set.find_syntax_by_name(&syntax.name).is_some());
 }

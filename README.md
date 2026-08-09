@@ -55,6 +55,8 @@ install -m755 target/release/mdless ~/.local/bin/
 ```
 
 Rust 2024 edition; no system dependencies beyond a terminal that speaks ANSI truecolour.
+Pure Rust all the way down — the build needs no C compiler, which is why the regex engine
+behind the highlighter is `fancy-regex` rather than oniguruma.
 
 ## Quick start
 
@@ -90,9 +92,39 @@ mdless --render-once --width 80 --no-icons doc.md > snapshot.txt
 | `--mouse` | Capture the mouse: wheel scrolls, the scrollbar drags, clicks jump in the contents pane, and dragging over the document copies the Markdown source behind it. |
 | `--toc` | Start with the table-of-contents pane open. |
 | `--config PATH` | Read configuration from this file instead of the default. |
+| `--licenses` | Print the licences of the bundled syntax definitions and exit. |
 
 Exit codes: `0` success, `1` unreadable input, `2` bad arguments. There is no `--color`
 flag — the truecolour decision is made from whether stdout is a terminal.
+
+## Syntax highlighting
+
+Fenced code is highlighted from the syntax definitions curated by
+[`bat`](https://github.com/sharkdp/bat) — a little over two hundred languages, compiled
+into the binary, so there is nothing to install and nothing to configure. That includes
+the ones a 2020s README actually contains: TypeScript and TSX, Kotlin, Swift, Zig, Nix,
+TOML, Dockerfile, Terraform/HCL, Elixir, Dart, Julia, Protobuf, GraphQL, Vue, Svelte,
+Sass and SCSS, F#, CMake, Solidity, Nim, x86-64 assembly, `.env` files, `go.mod`,
+`nginx.conf` and `.gitignore`.
+
+Two definitions are missing on purpose: **PowerShell** and **ARM assembly** need regex
+features the pure-Rust engine cannot compile, and `mdless` uses that engine so the build
+needs no C toolchain. They render as plain text, like any tag we do not know.
+
+The fence tag is matched against every syntax name and every file extension, so `rs`,
+`py`, `yml`, `sh`, `ts`, `tsx`, `kt`, `c++`, `hcl` and their friends all land where you
+would expect; a short table of aliases covers the rest (`golang`, `console`, `jsonc`,
+`csharp`, `fsharp`, `objc`, `plaintext`, …). Only the first word of the info string is
+read, so ```` ```rust,no_run ```` highlights as Rust. **A tag nobody recognises is never
+an error** — the block is drawn as plain themed text, still framed, still with its label.
+
+Colours never come from the syntax definitions. Each scope is mapped to a semantic slot
+— keyword, string, number, comment, type, namespace, escape — and the slot is filled from
+the active `mdless` theme, so code sits inside the palette instead of fighting it.
+
+TOML and Dockerfile use definitions written for `mdless` rather than the bundled ones,
+because the bundled TOML gives a `[table.header]` no scope at all and the bundled
+Dockerfile emits a whole `RUN` line as one undifferentiated span.
 
 ## Nerd Fonts
 
@@ -352,3 +384,11 @@ spec lives in `docs/superpowers/specs/`, and QA reports in `docs/qa/`.
 ## License
 
 MIT.
+
+The syntax definitions compiled into the binary are third-party work, curated by the
+[`bat` project](https://github.com/sharkdp/bat) and packaged by
+[`two-face`](https://codeberg.org/CosmicHarper/two-face). Most are under Sublime's
+permissive notice or the Unlicense; the MIT, BSD and Apache-2.0 ones among them require
+their notices to be reproduced in binary distributions, and `mdless --licenses` is where
+they are — inside the binary, which is the artefact people actually receive. The TOML and
+Dockerfile definitions in `assets/syntaxes/` are `mdless`'s own and MIT like the rest.

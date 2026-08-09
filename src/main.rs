@@ -96,6 +96,15 @@ struct Cli {
     /// Read configuration from this file instead of the default location.
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
+
+    /// Print the licences of the bundled syntax definitions and exit.
+    ///
+    /// The syntax definitions compiled into this binary are other people's work, and the
+    /// MIT, BSD and Apache ones among them require their notices to be reproduced in a
+    /// binary distribution. This is where they are. The output is Markdown, so
+    /// `mdless --licenses | mdless -` reads it.
+    #[arg(long)]
+    licenses: bool,
 }
 
 fn main() -> ExitCode {
@@ -169,6 +178,16 @@ fn is_broken_pipe(error: &anyhow::Error) -> bool {
 
 /// The real entry point.
 fn run(cli: Cli) -> anyhow::Result<ExitCode> {
+    // Before anything that could fail: this must work on a machine with no config, no
+    // terminal and no document, because it is what someone auditing the binary runs.
+    if cli.licenses {
+        let stdout = io::stdout();
+        let mut out = stdout.lock();
+        out.write_all(mdless::highlight::syntax_acknowledgements().as_bytes())?;
+        out.flush()?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
     if cli.width == Some(0) {
         let _ = writeln!(io::stderr(), "mdless: --width must be at least 1");
         return Ok(ExitCode::from(EXIT_USAGE));
