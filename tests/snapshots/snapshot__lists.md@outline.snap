@@ -1,0 +1,259 @@
+---
+source: tests/snapshot.rs
+expression: outline(&doc)
+---
+Document
+  Heading(h1, #feature-exerciser--lists)
+    Text("Feature exerciser — lists")
+  Paragraph
+    Text("Every list shape the parser can produce,…")
+    SoftBreak
+    Text("the tight/loose distinction can all be c…")
+  Heading(h2, #unordered-tight)
+    Text("Unordered, tight")
+  List(ordered=false)
+    Item
+      Paragraph
+        Text("one")
+    Item
+      Paragraph
+        Text("two")
+    Item
+      Paragraph
+        Text("three")
+  Heading(h2, #unordered-loose)
+    Text("Unordered, loose")
+  List(ordered=false)
+    Item
+      Paragraph
+        Text("one")
+    Item
+      Paragraph
+        Text("two")
+    Item
+      Paragraph
+        Text("three")
+  Heading(h2, #marker-spellings)
+    Text("Marker spellings")
+  List(ordered=false)
+    Item
+      Paragraph
+        Text("dash")
+  List(ordered=false)
+    Item
+      Paragraph
+        Text("star")
+  List(ordered=false)
+    Item
+      Paragraph
+        Text("plus")
+  Heading(h2, #ordered-tight)
+    Text("Ordered, tight")
+  List(ordered=true)
+    Item
+      Paragraph
+        Text("first")
+    Item
+      Paragraph
+        Text("second")
+    Item
+      Paragraph
+        Text("third")
+  Heading(h2, #ordered-loose-starting-elsewhere)
+    Text("Ordered, loose, starting elsewhere")
+  List(ordered=true)
+    Item
+      Paragraph
+        Text("seventh")
+    Item
+      Paragraph
+        Text("eighth")
+    Item
+      Paragraph
+        Text("ninth")
+  Heading(h2, #ordered-with-a-wide-number)
+    Text("Ordered with a wide number")
+  List(ordered=true)
+    Item
+      Paragraph
+        Text("ninety-eight")
+    Item
+      Paragraph
+        Text("ninety-nine")
+    Item
+      Paragraph
+        Text("one hundred, where the marker grows a co…")
+    Item
+      Paragraph
+        Text("one hundred and one")
+  Heading(h2, #ordered-with-the-other-delimiter)
+    Text("Ordered with the other delimiter")
+  List(ordered=true)
+    Item
+      Paragraph
+        Text("parenthesis form")
+    Item
+      Paragraph
+        Text("second")
+  Heading(h2, #items-that-wrap)
+    Text("Items that wrap")
+  List(ordered=false)
+    Item
+      Paragraph
+        Text("A list item long enough that it must wra…")
+        SoftBreak
+        Text("columns, so the continuation lines can b…")
+        SoftBreak
+        Text("against the bullet that introduced them.")
+    Item
+      Paragraph
+        Text("A short one after it.")
+  List(ordered=true)
+    Item
+      Paragraph
+        Text("An ordered item that also wraps, so the …")
+        SoftBreak
+        Text("marker can be compared with the one unde…")
+    Item
+      Paragraph
+        Text("Short.")
+  Heading(h2, #nested-five-deep)
+    Text("Nested five deep")
+  List(ordered=false)
+    Item
+      Paragraph
+        Text("level one")
+      List(ordered=false)
+        Item
+          Paragraph
+            Text("level two")
+          List(ordered=false)
+            Item
+              Paragraph
+                Text("level three")
+              List(ordered=false)
+                Item
+                  Paragraph
+                    Text("level four")
+                  List(ordered=false)
+                    Item
+                      Paragraph
+                        Text("level five, and this one wraps as well s…")
+                        SoftBreak
+                        Text("be seen against a forty column pane")
+                Item
+                  Paragraph
+                    Text("back to four")
+        Item
+          Paragraph
+            Text("back to two")
+    Item
+      Paragraph
+        Text("back to one")
+  Heading(h2, #ordered-inside-unordered-inside-ordered)
+    Text("Ordered inside unordered inside ordered")
+  List(ordered=true)
+    Item
+      Paragraph
+        Text("ordered one")
+      List(ordered=false)
+        Item
+          Paragraph
+            Text("unordered inside")
+          List(ordered=true)
+            Item
+              Paragraph
+                Text("ordered inside that")
+            Item
+              Paragraph
+                Text("and a sibling")
+        Item
+          Paragraph
+            Text("another unordered")
+    Item
+      Paragraph
+        Text("ordered two")
+  Heading(h2, #task-lists)
+    Text("Task lists")
+  List(ordered=false)
+    TaskItem(checked=true)
+      Paragraph
+        Text("a finished task")
+    TaskItem(checked=false)
+      Paragraph
+        Text("an unfinished task")
+    TaskItem(checked=true)
+      Paragraph
+        Text("a finished task with a capital marker")
+    TaskItem(checked=false)
+      Paragraph
+        Text("a task long enough to wrap so the checkb…")
+        SoftBreak
+        Text("the continuation indent")
+    Item
+      Paragraph
+        Text("a plain item mixed into a task list")
+      List(ordered=false)
+        TaskItem(checked=false)
+          Paragraph
+            Text("a nested unfinished task")
+        TaskItem(checked=true)
+          Paragraph
+            Text("a nested finished task")
+  Heading(h2, #ordered-task-list)
+    Text("Ordered task list")
+  List(ordered=true)
+    TaskItem(checked=true)
+      Paragraph
+        Text("a finished numbered task")
+    TaskItem(checked=false)
+      Paragraph
+        Text("an unfinished numbered task")
+  Heading(h2, #items-containing-other-blocks)
+    Text("Items containing other blocks")
+  List(ordered=false)
+    Item
+      Paragraph
+        Text("An item with a paragraph.")
+      Paragraph
+        Text("And a second paragraph inside the same i…")
+    Item
+      Paragraph
+        Text("An item with a quote:")
+      BlockQuote
+        Paragraph
+          Text("quoted inside a list item")
+    Item
+      Paragraph
+        Text("An item with code:")
+      CodeBlock(rust)
+    Item
+      Paragraph
+        Text("An item with a table:")
+      Table(2 columns)
+        TableRow(header=true)
+          TableCell
+            Text("a")
+          TableCell
+            Text("b")
+        TableRow(header=false)
+          TableCell
+            Text("1")
+          TableCell
+            Text("2")
+    Item
+      Paragraph
+        Text("An item with a nested diagram, which the…")
+      CodeBlock(mermaid)
+  Heading(h2, #degenerate)
+    Text("Degenerate")
+  List(ordered=false)
+    Item
+    Item
+      Paragraph
+        Text("an empty item precedes this one")
+  List(ordered=true)
+    Item
+    Item
+      Paragraph
+        Text("an empty ordered item precedes this one")

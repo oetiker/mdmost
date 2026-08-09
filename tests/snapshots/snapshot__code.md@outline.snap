@@ -1,0 +1,58 @@
+---
+source: tests/snapshot.rs
+expression: outline(&doc)
+---
+Document
+  Heading(h1, #feature-exerciser--code)
+    Text("Feature exerciser — code")
+  Paragraph
+    Text("Fences, indented code, the line-number g…")
+    SoftBreak
+    Text("This fixture is also rendered once with ")
+    Code
+    Text(" on, so the gutter has a")
+    SoftBreak
+    Text("golden of its own.")
+  Heading(h2, #a-fence-with-a-language)
+    Text("A fence with a language")
+  CodeBlock(rust)
+  Heading(h2, #a-fence-with-a-language-the-highlighter-does-not-know)
+    Text("A fence with a language the highlighter …")
+  CodeBlock(brainfuck)
+  Heading(h2, #a-fence-with-no-language-at-all)
+    Text("A fence with no language at all")
+  CodeBlock(-)
+  Heading(h2, #an-empty-fence)
+    Text("An empty fence")
+  CodeBlock(-)
+  Heading(h2, #a-tilde-fence-with-an-info-string-carrying-attributes)
+    Text("A tilde fence with an info string carryi…")
+  CodeBlock(python)
+  Heading(h2, #indented-code-four-spaces)
+    Text("Indented code, four spaces")
+  CodeBlock(-)
+  Heading(h2, #a-line-far-too-wide-for-any-pane)
+    Text("A line far too wide for any pane")
+  CodeBlock(rust)
+  Heading(h2, #box-drawing-art-inside-a-fence)
+    Text("Box-drawing art inside a fence")
+  CodeBlock(-)
+  Heading(h2, #double-width-and-emoji-inside-a-fence)
+    Text("Double-width and emoji inside a fence")
+  CodeBlock(text)
+  Heading(h2, #enough-lines-that-the-gutter-changes-width)
+    Text("Enough lines that the gutter changes wid…")
+  CodeBlock(python)
+  Heading(h2, #a-fence-nested-in-a-quote-in-a-list)
+    Text("A fence nested in a quote in a list")
+  List(ordered=false)
+    Item
+      BlockQuote
+        CodeBlock(sh)
+  Heading(h2, #inline-code-next-to-a-fence)
+    Text("Inline code next to a fence")
+  Paragraph
+    Text("A paragraph mentioning ")
+    Code
+    Text(" immediately before a fence:")
+  CodeBlock(sh)

@@ -1,0 +1,14 @@
+---
+source: tests/snapshot.rs
+expression: canvas.plain_text()
+---
+ ◆ The only heading in this document                                                                                    
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
+                                                                                                                        
+ A document whose sole heading is its level-one title, and whose body is plain prose. This is the shape a README, a     
+ changelog entry or a man page has, and it is the shape a title-banner feature has to look right in.                    
+                                                                                                                        
+ There is no second heading anywhere below, so the table of contents has exactly one entry and the banner, if there is  
+ one, has nothing to compete with.                                                                                      
+                                                                                                                        
+ A second paragraph, so the title is followed by more than a single line and the spacing beneath it can be judged.

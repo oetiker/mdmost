@@ -1,0 +1,21 @@
+---
+source: tests/snapshot.rs
+expression: outline(&doc)
+---
+Document
+  Heading(h1, #the-only-heading-in-this-document)
+    Text("The only heading in this document")
+  Paragraph
+    Text("A document whose sole heading is its lev…")
+    SoftBreak
+    Text("prose. This is the shape a README, a cha…")
+    SoftBreak
+    Text("is the shape a title-banner feature has …")
+  Paragraph
+    Text("There is no second heading anywhere belo…")
+    SoftBreak
+    Text("one entry and the banner, if there is on…")
+  Paragraph
+    Text("A second paragraph, so the title is foll…")
+    SoftBreak
+    Text("spacing beneath it can be judged.")

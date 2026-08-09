@@ -1,0 +1,5 @@
+---
+source: tests/snapshot.rs
+expression: outline(&doc)
+---
+Document

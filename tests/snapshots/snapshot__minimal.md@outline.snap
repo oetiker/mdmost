@@ -1,0 +1,7 @@
+---
+source: tests/snapshot.rs
+expression: outline(&doc)
+---
+Document
+  Paragraph
+    Text("one word")
