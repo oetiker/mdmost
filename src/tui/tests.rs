@@ -970,10 +970,55 @@ fn a_viewport_no_wider_than_the_gutter_scrolls_anyway() {
     assert_eq!(wide.column(0, 7), 27, "and the code scrolls beside it");
     let narrow = super::draw::Offsets::scrolled_to(&reach, &pinned, 20, 7);
     assert_eq!(
-        narrow.column(0, 0),
-        20,
+        narrow.column(0, 1),
+        21,
         "a pane no wider than the gutter scrolls the whole row instead"
     );
+    // What survives the clamp is the marker rail — one column, the document's own
+    // margin — because that is what keeps the chevron off the text rather than what
+    // keeps the numbers on screen.
+    assert_eq!(
+        narrow.column(0, 0),
+        0,
+        "the rail is still held still, whatever else the clamp drops"
+    );
+}
+
+#[test]
+fn the_offsets_map_and_its_inverse_agree_everywhere() {
+    // `blit` paints by `column`, `highlight_matches` by `x_of`, and a disagreement
+    // between them puts a search highlight on a cell that is not the match. The two are
+    // meant to be inverses; assert it rather than argue it, over a row with a pinned
+    // gutter, one without, and a range of offsets that includes the clamp.
+    for pinned in [0u16, 7] {
+        let reach = [200u16];
+        let pinned = [pinned];
+        for offset in [0u16, 1, 5, 40, 300] {
+            let offsets = super::draw::Offsets::scrolled_to(&reach, &pinned, offset, 40);
+            let prefix = offsets.pinned(0);
+            for x in 0..offsets.content() {
+                let column = offsets.column(0, x);
+                assert_eq!(
+                    offsets.x_of(0, u16::try_from(column).expect("a narrow canvas")),
+                    Some(x),
+                    "column {column} of a row pinned at {prefix} is drawn at {x}, at offset \
+                     {offset}"
+                );
+            }
+            // And the columns that are behind the prefix rather than on screen: the
+            // *only* ones without a viewport column, which is what the doc comment says.
+            for column in 0..offsets.column(0, offsets.content()) {
+                let column = u16::try_from(column).expect("a narrow canvas");
+                let hidden = column >= prefix && column < prefix + offsets.at(0);
+                assert_eq!(
+                    offsets.x_of(0, column).is_none(),
+                    hidden,
+                    "column {column} is {} the prefix at offset {offset}",
+                    if hidden { "behind" } else { "not behind" }
+                );
+            }
+        }
+    }
 }
 
 /// A table wide enough that a fourteen-column viewport has to cut it.
@@ -1808,4 +1853,226 @@ fn a_renderer_that_reports_no_floor_stays_inside_the_probe_cap() {
         layouts, 2,
         "doubling should have found this pie on the second layout"
     );
+}
+
+/// A code line whose every column holds a different character.
+///
+/// Printable ASCII from `!` to `~` is 94 distinct glyphs, none of them a space and none
+/// of them a box-drawing glyph, so a frame capture says exactly which columns of the line
+/// are on screen — which is what a claim about *losing* one has to be measured against.
+fn ruler() -> String {
+    (b'!'..=b'~').map(char::from).collect()
+}
+
+/// Walks `app` through every horizontal offset it has, checking each frame against the
+/// canvas it is a window on, and returns the document text seen along the way.
+///
+/// The check is the whole of finding 3: for every viewport column that the shared
+/// [`super::draw::Offsets`] maps to a column of the document, the terminal must be showing
+/// *that* column of the document. The edge markers are excluded by construction rather
+/// than by exception — they are painted in the rail, which is the one column on each side
+/// the offsets do not map any document column to — so a marker that stands on a character
+/// fails here whatever else it gets right.
+///
+/// Returns the set of canvas columns that were legible at some offset, per row, so a
+/// caller can also ask the weaker question the reproduction started from: is every
+/// character still reachable?
+fn every_offset(app: &mut App, width: u16, height: u16) -> Vec<std::collections::BTreeSet<usize>> {
+    let mut seen: Vec<std::collections::BTreeSet<usize>> = Vec::new();
+    loop {
+        let at = app.hscroll();
+        let buffer = framed_buffer(app, width, height);
+        let offsets = super::draw::Offsets::scrolled_to(
+            app.reach(),
+            app.pinned(),
+            app.hscroll(),
+            app.viewport_width(),
+        );
+        let canvas = app.rendered();
+        let content = offsets.content();
+        seen.resize(canvas.height(), std::collections::BTreeSet::new());
+        for y in 0..height - 1 {
+            let row = app.scroll() + usize::from(y);
+            let Some(cells) = canvas.row(row) else { break };
+            for x in 0..content {
+                // The one column on each side that is chrome: the rail the left marker is
+                // painted in sits just inside the pinned prefix, and the right rail is
+                // past `content` already.
+                if offsets.margin() > 0 && x + 1 == offsets.pinned(row) {
+                    continue;
+                }
+                let column = offsets.column(row, x);
+                let Some(cell) = cells.get(column) else { break };
+                if cell.is_continuation() {
+                    continue;
+                }
+                let expected = if cell.width() == 2 && x + 1 >= content {
+                    " "
+                } else {
+                    seen[row].insert(column);
+                    cell.text()
+                };
+                assert_eq!(
+                    buffer[(x, y)].symbol(),
+                    expected,
+                    "at offset {at}, viewport column {x} of row {row} shows canvas column \
+                     {column}; the frame reads {:?}",
+                    buffer_rows(&buffer, width, height)[usize::from(y)]
+                );
+            }
+        }
+        if at >= app.hscroll_max() {
+            return seen;
+        }
+        app.act(Action::ScrollRight);
+        assert!(app.hscroll() > at, "the offset must advance");
+    }
+}
+
+#[test]
+fn an_edge_marker_never_stands_on_a_column_of_the_document() {
+    // Finding 3, and the reproduction it came from: at 60 columns a fenced ruler line
+    // scrolled to offset 8 rendered as `‹6789…`, when the first character of the window
+    // is `5`. The chevron had been stamped into the first viewport column, over whatever
+    // the document had put there — in real code, `hMap::new()` shown as `‹Map::new()`.
+    //
+    // Marking is not the only thing that has to be right here, so the assertion is the
+    // general one, checked at every offset and every row: what the terminal shows is what
+    // the canvas holds. `every_offset` is where it lives.
+    let line = ruler();
+    let mut app = pager_at(&format!("```text\n{line}\n```\n"), 60, 8);
+    assert!(app.hscroll_max() > 0, "the probe document must scroll");
+    let seen = every_offset(&mut app, 60, 8);
+
+    // And the weaker property the reproduction was written as: every column of the line
+    // is legible at *some* offset. Weaker on purpose — it was already true before the
+    // fix, because the scroll step is smaller than the viewport, so a column destroyed at
+    // one offset survives at the next. It is still the promise the pager makes, and it is
+    // the one that breaks if the rail is ever widened without widening the reach with it.
+    let canvas = app.rendered();
+    let row = (0..canvas.height())
+        .find(|&row| canvas.row_text(row).contains("!\"#$"))
+        .expect("the ruler is on the canvas");
+    let cells = canvas.row(row).expect("a row");
+    let missing: Vec<&str> = cells
+        .iter()
+        .enumerate()
+        .filter(|(column, cell)| {
+            !cell.is_blank() && !cell.is_continuation() && !seen[row].contains(column)
+        })
+        .map(|(_, cell)| cell.text())
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "every column of the line is legible at some offset; these never were: {missing:?}"
+    );
+}
+
+#[test]
+fn an_edge_marker_stays_off_the_code_beside_a_pinned_gutter() {
+    // The pinned case, which is where the chevron cost a character of *code* rather than
+    // a column of margin: the left marker deliberately sits at the edge of the scrolling
+    // region rather than of the window, and the first column of the scrolling region is
+    // the first column of the code. The rail is the blank one before it — the separator
+    // `pinned_prefix` keeps between the gutter's rule and the code — so the marker still
+    // marks the same seam and no longer eats the first character behind it.
+    let mut app = numbered_pager_at(NUMBERED_WIDE, 80, 22);
+    assert!(app.hscroll_max() > 0, "the probe document must scroll");
+    every_offset(&mut app, 80, 22);
+}
+
+#[test]
+fn only_the_rows_whose_content_is_cut_are_marked_as_cut() {
+    // Finding 8. A widened fence carries its own wall down the far side of the canvas, so
+    // *every* row of it has something past the viewport's edge and every row was marked
+    // `›` — a blank line and a closing `}` claiming to be cut, in a column of chevrons
+    // running between a `╮` and a `╯` that both said the box ended there. `--render-once`
+    // has always had this right: the wall is drawn at the edge, and only the line that is
+    // really too long gets the marker.
+    let source = "```rust\nuse std::collections::HashMap;\n\nfn main() {\n    let mut m: \
+                  HashMap<String, Vec<(usize, &'static str)>> = HashMap::new();\n}\n```\n";
+    let mut app = pager_at(source, 80, 12);
+    let rows = framed(&mut app, 80, 12);
+    // The document's last column, which is the terminal's last but one: the scrollbar
+    // has the one after it.
+    let edge = |row: &str| row.chars().nth(78).expect("a full-width row");
+    let ends_with = |needle: &str| {
+        edge(
+            rows.iter()
+                .find(|row| row.contains(needle))
+                .unwrap_or_else(|| panic!("{needle} is on screen: {rows:?}")),
+        )
+    };
+    assert_eq!(
+        ends_with("HashMap::new()"),
+        '›',
+        "the line that is actually cut is marked: {rows:?}"
+    );
+    for row in ["use std::collections::HashMap;", "fn main() {", "}"] {
+        assert_eq!(
+            ends_with(row),
+            '│',
+            "a row that fits keeps the fence's wall instead: {rows:?}"
+        );
+    }
+    // The blank line inside the fence has no content of its own to find it by; it is the
+    // row between the `fn main() {` row and the one before it.
+    let blank = rows
+        .iter()
+        .position(|row| row.contains("fn main() {"))
+        .expect("the fence is on screen")
+        - 1;
+    assert_eq!(
+        edge(&rows[blank]),
+        '│',
+        "and so does the blank line: {:?}",
+        rows[blank]
+    );
+    // The frame still closes on its rules, which is the behaviour this must not undo.
+    assert!(
+        rows.iter().any(|row| edge(row) == '╮') && rows.iter().any(|row| edge(row) == '╯'),
+        "a cut rule still ends in its own corner: {rows:?}"
+    );
+}
+
+#[test]
+fn scrolling_is_still_per_run_while_marking_is_per_row() {
+    // The tension named in `wide::scroll_reach`: rows scroll as a *run* so a ragged block
+    // does not shear, and the marking must become per row without touching that. A block
+    // whose rows are of three different lengths moves as one piece — and says, row by
+    // row, which of those rows still has something past the edge.
+    let filler = "x".repeat(100);
+    let source =
+        format!("```text\n{filler}xxxxxxxxxx AEND\n{filler} BEND\n{filler}xxxxxxxxxx CEND\n```\n");
+    let mut app = pager_at(&source, 40, 12);
+    assert!(app.hscroll_max() > 0, "the probe document must scroll");
+    while app.hscroll() < app.hscroll_max() {
+        app.act(Action::ScrollRight);
+    }
+    let rows = framed(&mut app, 40, 12);
+    let ends = |needle: &str| {
+        rows.iter()
+            .find(|row| row.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} is on screen: {rows:?}"))
+            .chars()
+            .nth(38)
+            .expect("a full-width row")
+    };
+    // Scrolled to the end of the run, the two long rows have nothing left past the edge
+    // and the short one has had nothing for a while; none of them may claim otherwise.
+    for row in ["AEND", "BEND", "CEND"] {
+        assert_ne!(
+            ends(row),
+            '›',
+            "no row of a fully scrolled run is marked as cut: {rows:?}"
+        );
+    }
+    // And they are still one piece: the ragged edge survived the trip.
+    let column = |needle: &str| {
+        rows.iter()
+            .find_map(|row| row.find(needle))
+            .expect("on screen")
+    };
+    assert_eq!(column("AEND"), column("CEND"));
+    assert_eq!(column("BEND") + 10, column("AEND"));
 }
