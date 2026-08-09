@@ -311,6 +311,41 @@ fn chords_round_trip_through_their_canonical_form() {
 }
 
 #[test]
+fn every_default_chord_can_be_written_down_and_read_back() {
+    // `S` saves the settings by name, so a default binding the parser cannot spell is a
+    // binding that disappears the first time the reader saves — silently, because the
+    // file would still be valid. Checked over the whole table rather than over a list
+    // somebody has to remember to extend: the modified arrows added for match navigation
+    // are exactly the kind of chord that would have been forgotten.
+    let bindings = KeyBindings::defaults();
+    for action in Action::ALL {
+        for key in bindings.keys_for(*action) {
+            let text = key.canonical();
+            assert_eq!(
+                Key::parse(&text),
+                Some(key),
+                "`{text}`, bound to `{action}`, does not read back as itself"
+            );
+        }
+    }
+    // And the two the owner asked for are spelled the way the README says.
+    assert_eq!(
+        Key::parse("ctrl-down"),
+        Some(Key {
+            code: KeyCode::Down,
+            mods: KeyMods::CTRL
+        })
+    );
+    assert_eq!(
+        Key::parse("ctrl-up"),
+        Some(Key {
+            code: KeyCode::Up,
+            mods: KeyMods::CTRL
+        })
+    );
+}
+
+#[test]
 fn chord_parsing_is_case_and_separator_insensitive() {
     assert_eq!(Key::parse("Ctrl-D"), Key::parse("ctrl+d"));
     assert_eq!(Key::parse("CTRL-d"), Some(Key::ctrl('d')));

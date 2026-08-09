@@ -202,8 +202,8 @@ same live binding table as the list below, so the two cannot drift apart.
 |---|---|
 | `/` | Search forward |
 | `?` | Search backward |
-| `n` | Go to the next match |
-| `N` | Go to the previous match |
+| `n`, `ctrl-down` | Go to the next match |
+| `N`, `ctrl-up` | Go to the previous match |
 | `ctrl-r` | Switch literal / regex search |
 
 #### View
@@ -221,6 +221,13 @@ Notes on a few of these:
   focus from the contents pane, then closes it. It never quits; `q` does that.
 - `/` inside the contents pane filters the headings fuzzily instead of searching the
   document.
+- While a search is live the status bar carries the query, which match you are on out of
+  how many there are — `⌕ needle 3/17` — and, when there is more than one, the keys that
+  step between them: `n/N next/prev`, with `or Ctrl-↓/Ctrl-↑` beside it when the terminal
+  is wide enough. It always names the keys you have actually bound, not the defaults.
+  The current match is highlighted differently from the rest, and
+  reaching one scrolls sideways as well as down, so a hit inside a wide table or a long
+  code line is actually on screen when you arrive at it.
 - `←` / `→` scroll content that is wider than the terminal, such as a wide table or a
   long code line. Neither is ever reflowed or mangled to fit.
 - `S` writes the settings you can change — theme, line numbers, contents pane, body

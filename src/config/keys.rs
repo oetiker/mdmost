@@ -568,6 +568,26 @@ impl KeyBindings {
             (Key::char('?'), Action::SearchBackward),
             (Key::char('n'), Action::NextMatch),
             (Key::char('N'), Action::PrevMatch),
+            // Modified arrows for the same two actions, for readers who do not reach for
+            // vi keys (owner request). They are aliases, never the primary: a modified
+            // arrow is a CSI sequence some terminals and multiplexers swallow, so the
+            // status-bar hint names the letters first and these second — see
+            // `crate::tui::chrome`'s `match_hint`, which relies on this table's order
+            // (`KeyCode::Char` sorts before the arrows) rather than on a hard-coded list.
+            (
+                Key {
+                    code: KeyCode::Down,
+                    mods: KeyMods::CTRL,
+                },
+                Action::NextMatch,
+            ),
+            (
+                Key {
+                    code: KeyCode::Up,
+                    mods: KeyMods::CTRL,
+                },
+                Action::PrevMatch,
+            ),
             (Key::ctrl('r'), Action::ToggleSearchMode),
             (Key::plain(KeyCode::Tab), Action::ToggleToc),
             (Key::plain(KeyCode::Enter), Action::Confirm),

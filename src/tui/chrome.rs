@@ -369,6 +369,34 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
             term_style(theme.ui.status_bar),
         ));
         right.push(Segment::new(Drop::Search, spans));
+
+        // The counter above says matches exist and which one this is; only this says what
+        // moves between them. `n`/`N` have been bound since the first commit, and the
+        // author of the program still could not find them — a binding nothing on screen
+        // names is a binding nobody has. Shown while stepping is actually meaningful:
+        // with one match or none there is nowhere to step to, and a hint for a key that
+        // would visibly do nothing is worse than no hint.
+        if app.search().len() > 1 {
+            let hint = match_hint(app);
+            if let Some(primary) = hint.primary {
+                right.push(Segment::new(
+                    Drop::MatchHint,
+                    vec![TermSpan::styled(
+                        primary,
+                        term_style(on_bar(theme.ui.status_key, theme)),
+                    )],
+                ));
+            }
+            if let Some(alias) = hint.alias {
+                right.push(Segment::new(
+                    Drop::MatchAlias,
+                    vec![TermSpan::styled(
+                        alias,
+                        term_style(on_bar(theme.ui.status_key.dim(), theme)),
+                    )],
+                ));
+            }
+        }
     }
 
     let help_key = app
@@ -396,6 +424,63 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
 /// The width of the status bar's progress meter, in cells.
 const METER_WIDTH: usize = 8;
 
+/// What the status bar says about stepping between matches.
+///
+/// Two chips rather than one sentence, because they are given up at different widths:
+/// the alias is the first thing on the whole bar to go, and the primary hint outlives
+/// the breadcrumb beside it.
+struct MatchHint {
+    /// The keys the reader is told about first, with the words that say what they do.
+    primary: Option<String>,
+    /// A second pair of chords for the same two actions, when they exist.
+    alias: Option<String>,
+}
+
+/// The chips naming the keys that step between matches.
+///
+/// Generated from the live key table like every other hint on the bar and in the help
+/// overlay (design spec §10): a reader who moved `next_match` to `>` is told `>`. An
+/// action with no key at all is not mentioned — that would be advertising something the
+/// reader cannot do — and when only one of the pair is bound the chip names only it,
+/// rather than printing a slash with nothing on one side of it.
+///
+/// A chord *past* the second is left to the help overlay. The bar has a few dozen columns
+/// and an exhaustive dump of a rebound action would eat all of them; two is enough to say
+/// "there is more than one way in" without the bar becoming the manual.
+///
+/// Which pair is "primary" is the key table's own order, not a preference stated here:
+/// [`KeyCode::Char`](crate::config::KeyCode::Char) sorts before the arrow codes, so the
+/// letters lead and the modified arrows follow. That ordering is what the default table
+/// wants — a modified arrow is a CSI sequence some terminals never send, and a hint
+/// leading with a key that may not arrive is a hint that lies.
+fn match_hint(app: &App) -> MatchHint {
+    let chords = |action| {
+        app.config()
+            .keys
+            .keys_for(action)
+            .iter()
+            .map(crate::config::Key::label)
+            .collect::<Vec<_>>()
+    };
+    let next = chords(crate::config::Action::NextMatch);
+    let prev = chords(crate::config::Action::PrevMatch);
+    let pair = |rank: usize| match (next.get(rank), prev.get(rank)) {
+        (Some(next), Some(prev)) => Some(format!("{next}/{prev}")),
+        (Some(next), None) => Some(format!("{next} next")),
+        (None, Some(prev)) => Some(format!("{prev} prev")),
+        (None, None) => None,
+    };
+    MatchHint {
+        // The words ride on the first chip: they name what *both* pairs do, and the
+        // alias is only ever shown beside a primary that already carries them.
+        primary: pair(0).map(|keys| match (next.first(), prev.first()) {
+            (Some(_), Some(_)) => format!(" {keys} next/prev "),
+            _ => format!(" {keys} "),
+        }),
+        alias: pair(1).map(|keys| format!(" or {keys} ")),
+    }
+}
+
 /// How readily a status-bar segment is given up when the terminal is narrow.
 ///
 /// Ordered least valuable first, which is the order they are dropped in.
@@ -403,6 +488,16 @@ const METER_WIDTH: usize = 8;
 enum Drop {
     /// The heading, or the transient notice standing in for it.
     Context,
+    /// The second way of stepping between matches — the modified arrows, by default.
+    /// Cheaper than the hint that carries the words, because a reader who has the primary
+    /// chords has everything they need to move; dearer than the breadcrumb, because the
+    /// breadcrumb restates a heading that is on the page a few rows up and this names a
+    /// key that appears nowhere else on the screen at all.
+    MatchAlias,
+    /// The keys that step between matches. Cheaper than the count it explains: a reader
+    /// who can see `3/17` knows there is something to step to and can find the key in the
+    /// help overlay, while a hint with no count beside it explains nothing.
+    MatchHint,
     /// The search chip.
     Search,
     /// The progress meter, whose percentage is stated next to it anyway.
