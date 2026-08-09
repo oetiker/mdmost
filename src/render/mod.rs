@@ -47,11 +47,12 @@ mod tests;
 
 use crate::canvas::Canvas;
 use crate::doc::Doc;
+use crate::numbering::Numbering;
 use crate::theme::{Style, Theme};
 
 use glyphs::Glyphs;
 
-pub use block::{render_block, render_blocks};
+pub use block::{render_block, render_block_numbered, render_blocks};
 pub(crate) use diagram::{Limits, diagram};
 pub use inline::wrap;
 pub use table::render_table;
@@ -84,15 +85,23 @@ pub struct RenderOptions {
     /// declines itself whenever the art would not fit, so the setting exists for the
     /// reader who does not want banners at all rather than as a safety valve.
     pub title_banner: bool,
+    /// Whether a deeply nested document gets section numbers in front of its headings
+    /// (§9.3).
+    ///
+    /// On by default, and it costs nothing on a document that does not qualify: the
+    /// rule is "three or more distinct numbered levels", so a flat document is
+    /// unnumbered whatever this says. See [`crate::numbering`].
+    pub section_numbers: bool,
 }
 
 impl RenderOptions {
-    /// Creates options from the two flags, with the title banner on.
+    /// Creates options from the two flags, with the title banner and section numbers on.
     pub const fn new(icons: bool, line_numbers: bool) -> Self {
         Self {
             icons,
             line_numbers,
             title_banner: true,
+            section_numbers: true,
         }
     }
 
@@ -101,6 +110,15 @@ impl RenderOptions {
     pub const fn with_title_banner(self, title_banner: bool) -> Self {
         Self {
             title_banner,
+            ..self
+        }
+    }
+
+    /// The same options with section numbering turned on or off.
+    #[must_use]
+    pub const fn with_section_numbers(self, section_numbers: bool) -> Self {
+        Self {
+            section_numbers,
             ..self
         }
     }
@@ -143,6 +161,12 @@ pub(crate) struct Ctx<'a> {
     pub quote_depth: usize,
     /// How many tables enclose the current node, to stop pathological recursion.
     pub table_depth: usize,
+    /// The section numbers of the document being rendered, if it has any.
+    ///
+    /// `None` for a render that is not a whole document — a table cell rendered on its
+    /// own, a block handed to [`render_block`] — because "is this the only `#`" is a
+    /// question only the whole document can answer (design spec §9.3).
+    pub numbers: Option<&'a Numbering>,
 }
 
 /// The deepest table nesting that is rendered; deeper tables degrade to their text.
@@ -162,6 +186,15 @@ impl<'a> Ctx<'a> {
             list_depth: 0,
             quote_depth: 0,
             table_depth: 0,
+            numbers: None,
+        }
+    }
+
+    /// The same context, rendering the headings of a numbered document.
+    pub(crate) fn numbered(self, numbers: &'a Numbering) -> Self {
+        Self {
+            numbers: Some(numbers),
+            ..self
         }
     }
 
@@ -217,7 +250,10 @@ impl<'a> Ctx<'a> {
 /// by every block renderer: block renderers still receive a plain width budget and
 /// still return a canvas exactly that wide.
 pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
-    let ctx = Ctx::new(theme, options);
+    // Computed once, here, from the whole document — never at parse time (design spec
+    // §3), and never per block, which could not answer the question anyway.
+    let numbers = Numbering::enabled(doc, options.section_numbers);
+    let ctx = Ctx::new(theme, options).numbered(&numbers);
     let margin = margins(width);
     let body_width = width - 2 * margin;
     let blocks = &doc.root().children;
@@ -239,11 +275,16 @@ pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOpt
 
 /// The banner for a document that is titled by a lone `#` heading, if it has one.
 ///
-/// This is the *only* place the whole document is in view at once, which is why the
-/// "is there exactly one level-1 heading" question is answered here and not in
-/// [`block::render_block`]: a block renderer can see a level-1 heading but never
-/// whether it is the only one, and answering from a block would give a six-chapter
-/// manual six banners (design spec §9).
+/// Whether the document *has* a title is [`Doc::lone_title`]'s answer, not this
+/// function's: section numbering asks the same question (design spec §9.3) and the two
+/// must never disagree — a document cannot be banner'd and numbered from the wrong
+/// level at the same time. What is decided here is only whether the banner can be
+/// *drawn*, which needs a width and a glyph table and is therefore render-time.
+///
+/// Either way the question needs the whole document in view, which is why it is not
+/// asked in [`block::render_block`]: a block renderer can see a level-1 heading but
+/// never whether it is the only one, and answering from a block would give a
+/// six-chapter manual six banners (design spec §9).
 ///
 /// The rule under the banner is the same one an ordinary H1 draws, so a banner is a
 /// change of typeface, not a different kind of thing on the page.
@@ -261,18 +302,13 @@ pub(crate) fn title_banner(
         return None;
     }
     let ctx = Ctx::new(theme, options);
-    let mut level_ones = doc.headings().iter().filter(|heading| heading.level == 1);
-    let title = level_ones.next()?;
-    if level_ones.next().is_some() {
-        return None;
-    }
+    // The structural half of the question — "is this document titled?" — is
+    // `Doc::lone_title`, shared with section numbering so the two can never disagree
+    // about which heading is the title. What is left here is the banner's own half:
+    // whether the art can actually be drawn at this width.
+    let title = doc.lone_title()?;
     let first = doc.root().children.first()?;
-    let crate::doc::NodeKind::Heading { level: 1, id } = &first.kind else {
-        return None;
-    };
-    if id != &title.id {
-        return None;
-    }
+    let id = &title.id;
     let mut canvas = banner::render_title(first, id, width, ctx)?;
     if let Some(glyph) = block::heading_rule(1) {
         canvas.push_rule(glyph, ctx.theme.heading_rule(1));

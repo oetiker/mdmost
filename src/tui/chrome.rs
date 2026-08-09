@@ -126,8 +126,24 @@ pub fn draw_toc(buffer: &mut Buffer, area: Rect, app: &App) {
             .min(4)
             .min(usable.saturating_sub(fixed + MIN_TOC_TEXT) / 2);
         let prefix = format!("{marker}{}{}", "  ".repeat(depth), " ");
-        let room = usable.saturating_sub(display_width(&prefix));
+        let mut room = usable.saturating_sub(display_width(&prefix));
         let mut spans = vec![TermSpan::styled(prefix, term_style(base))];
+        // The section number, in the same quiet slot the page draws it in (design spec
+        // §9.3) — patched over `base`, so a selected or current row keeps its wash and
+        // the number goes on being the quieter half of the line. It gives way before
+        // the text does, on the same reasoning as the indent above: an entry that is
+        // all number and no words is a row the reader cannot use.
+        if let Some(number) = &entry.number {
+            let text = format!("{number} ");
+            let cost = display_width(&text);
+            if room.saturating_sub(cost) >= MIN_TOC_TEXT {
+                room -= cost;
+                spans.push(TermSpan::styled(
+                    text,
+                    term_style(base.patch(theme.heading_number)),
+                ));
+            }
+        }
         spans.extend(highlighted(
             &fit(&entry.text, room),
             &hit.positions,

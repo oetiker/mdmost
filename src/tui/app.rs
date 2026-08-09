@@ -201,7 +201,12 @@ impl App {
                 }),
             ),
         };
-        let toc = Toc::from_doc(&doc);
+        // The pane is numbered from the same computation the page is, gated by the same
+        // setting: two derivations of a section number is two chances to disagree.
+        let toc = Toc::from_doc(
+            &doc,
+            &crate::numbering::Numbering::enabled(&doc, config.section_numbers),
+        );
         let toc_open = options.toc_open;
         let mut app = Self {
             doc,
@@ -272,6 +277,7 @@ impl App {
     pub fn render_options(&self) -> RenderOptions {
         RenderOptions::new(self.options.icons, self.config.line_numbers)
             .with_title_banner(self.config.title_banner)
+            .with_section_numbers(self.config.section_numbers)
     }
 
     /// Turns Nerd Font glyphs on or off, in the chrome and the document alike.

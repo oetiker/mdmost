@@ -339,6 +339,43 @@ impl Doc {
         self.headings.iter().find(|h| h.id == id)
     }
 
+    /// The heading that is this document's *title*, if it has one.
+    ///
+    /// A title is **exactly one level-1 heading, and it is the document's first
+    /// block**. Both halves matter: a reference manual with a `#` per chapter has no
+    /// title, and a `#` that arrives after the prose is a section heading rather than
+    /// the document's name.
+    ///
+    /// This is one predicate with two readers, deliberately. The `FIGlet` banner
+    /// (design spec §9.2) and section numbering (§9.3) both turn on "is this document
+    /// titled", and two implementations of that question would eventually disagree —
+    /// at which point a document would show a banner *and* number its title, or number
+    /// from the wrong level under a banner. The banner adds conditions of its own on
+    /// top of this one (it must be switched on, and the art must be drawable at the
+    /// current width), but those are about whether the art can be *drawn*, never about
+    /// whether the heading is the title. A title whose banner is declined for a CJK
+    /// character is still the title, and still goes unnumbered.
+    ///
+    /// ```
+    /// use mdless::doc::Doc;
+    ///
+    /// assert_eq!(Doc::parse("# T\n\n## A\n").lone_title().map(|h| h.level), Some(1));
+    /// assert!(Doc::parse("# A\n\n# B\n").lone_title().is_none());
+    /// assert!(Doc::parse("intro\n\n# A\n").lone_title().is_none());
+    /// ```
+    pub fn lone_title(&self) -> Option<&Heading> {
+        let mut level_ones = self.headings.iter().filter(|heading| heading.level == 1);
+        let title = level_ones.next()?;
+        if level_ones.next().is_some() {
+            return None;
+        }
+        let first = self.root.children.first()?;
+        let NodeKind::Heading { level: 1, id } = &first.kind else {
+            return None;
+        };
+        (id == &title.id).then_some(title)
+    }
+
     /// A hash of the source, suitable as part of a render cache key together with the
     /// width and the theme (design spec §3).
     pub fn version(&self) -> u64 {

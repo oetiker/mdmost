@@ -2,37 +2,37 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- Feature exerciser — headings and prose                                         
+ 1 Feature exerciser — headings and prose                                       
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                                                                 
  This fixture walks the heading ladder and the inline surface. Page through it  
  and check two things by eye: that each heading level is distinguishable from   
  the one above it and from body text, and that no inline construct vanishes.    
                                                                                 
- A Setext level one                                                             
+ 2 A Setext level one                                                           
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                                                                 
- A Setext level two                                                             
+ 2.1 A Setext level two                                                         
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
- Level two (ATX)                                                                
+ 2.2 Level two (ATX)                                                            
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
- Level three                                                                    
+ 2.2.1 Level three                                                              
  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                                                                 
- Level four                                                                     
+ 2.2.1.1 Level four                                                             
  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄ 
                                                                                 
- Level five                                                                     
+ 2.2.1.1.1 Level five                                                           
  ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈ 
                                                                                 
- Level six                                                                      
+ 2.2.1.1.1.1 Level six                                                          
                                                                                 
  Body text follows level six, so the two can be compared directly. A heading    
  must be more prominent than the paragraph it introduces, at every level.       
                                                                                 
- The whole inline surface, in one paragraph                                     
+ 2.2.2 The whole inline surface, in one paragraph                               
  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                                                                 
  Text with emphasis, emphasis again, strong, strong again, both at once,        
@@ -57,7 +57,7 @@ expression: canvas.plain_text()
                                                                                 
  Entities: & < © … —  (that was a hard space).                                  
                                                                                 
- Emphasis that has to wrap                                                      
+ 2.2.3 Emphasis that has to wrap                                                
  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                                                                 
  A paragraph in which the emphasis runs across the line break so the styled run 
@@ -66,7 +66,7 @@ expression: canvas.plain_text()
  columns, and a link whose text alone is wider than a forty column terminal     
  (https://example.com/x).                                                       
                                                                                 
- Images                                                                         
+ 2.2.4 Images                                                                   
  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                                                                 
  ╭ image ─────────────────────────────────────────────────────────────────────╮ 
@@ -84,13 +84,13 @@ expression: canvas.plain_text()
  │ wide.png                                                                   │ 
  ╰────────────────────────────────────────────────────────────────────────────╯ 
                                                                                 
- Footnotes                                                                      
+ 2.2.5 Footnotes                                                                
  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                                                                 
  A statement needing a source[1], another needing two[2][3], and one whose      
  marker sits mid-sentence[1] a second time.                                     
                                                                                 
- Block quotes                                                                   
+ 2.3 Block quotes                                                               
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  ▌ A block quote spanning two source lines, long enough that it must wrap       
@@ -102,7 +102,7 @@ expression: canvas.plain_text()
                                                                                 
  ▌ A quote containing other blocks:                                             
  ▌                                                                              
- ▌ a heading inside a quote                                                     
+ ▌ 2.3.1 a heading inside a quote                                               
  ▌ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
  ▌                                                                              
  ▌ · a list                                                                     
@@ -124,7 +124,7 @@ expression: canvas.plain_text()
                                                                                 
  ▌ A lazy continuation quote where the second line has no marker at all.        
                                                                                 
- Thematic breaks                                                                
+ 2.4 Thematic breaks                                                            
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  Three spellings, all of which must draw the same rule:                         
@@ -135,7 +135,7 @@ expression: canvas.plain_text()
                                                                                 
               ─────────────────────────◈──────────────────────────              
                                                                                 
- Paragraph edge cases                                                           
+ 2.5 Paragraph edge cases                                                       
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  A paragraph immediately followed by a heading with no blank line is not legal  

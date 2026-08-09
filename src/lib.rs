@@ -22,6 +22,7 @@
 //! | [`render`] | Inline, block and table renderers |
 //! | [`highlight`] | Fenced code highlighting |
 //! | [`mermaid`] | Mermaid parsing and Unicode-art layout |
+//! | [`numbering`] | Section numbers for a deeply nested document |
 //! | [`toc`] | Heading tree and current-position tracking |
 //! | [`search`] | Source-text search mapped onto canvas positions |
 //! | [`config`] | TOML configuration, themes, key bindings |
@@ -49,6 +50,7 @@ pub mod error;
 pub mod highlight;
 pub mod mermaid;
 pub mod nerdfont;
+pub mod numbering;
 pub mod render;
 pub mod search;
 pub mod text;
