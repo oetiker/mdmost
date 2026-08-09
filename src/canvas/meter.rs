@@ -19,9 +19,26 @@ pub const EIGHTH_BLOCKS: [&str; 9] = ["", "▏", "▎", "▍", "▌", "▋", "�
 
 /// The glyph an unfilled meter track is drawn with.
 ///
-/// A gauge needs a track: left blank, an empty meter reads as a hole rather than as
-/// "nothing yet".
-pub const TROUGH: &str = "░";
+/// A gauge needs a track: left bare, an empty meter reads as a hole rather than as
+/// "nothing yet". The track is a **background**, though, so the glyph is a space.
+///
+/// It used to be `░` U+2591 LIGHT SHADE inked in the track colour, and that is what
+/// broke the part-filled cell twice over. A dithered cell's apparent colour is its ink
+/// mixed into whatever is behind it, so nothing that has to *match* a trough can be
+/// handed the track colour and expect to match: the part-filled cell's unfilled
+/// fraction is a flat background, and painted `scrollbar_track.fg` it came out about
+/// four times as heavy as the trough beside it. A flat track makes the two agree by
+/// construction instead of by compensation — see [`TRACK_INK`].
+pub const TROUGH: &str = " ";
+
+/// How much of the track colour a trough cell shows, over the surface behind it.
+///
+/// Exactly the coverage `░` used to ink, so the flat track reproduces the apparent
+/// colour the theme was tuned for: the meter looks as it always did, while becoming a
+/// true two-colour gauge that a neighbouring background can match. Painting the track
+/// colour neat instead would make the trough about four times heavier than the palette
+/// intends, loud enough to compete with the status-bar text beside it.
+pub const TRACK_INK: f32 = 0.25;
 
 /// Converts a `0.0..=1.0` fraction of `cells` columns into eighths of a cell.
 ///
@@ -66,19 +83,21 @@ pub struct Meter {
     ///
     /// A left-aligned eighth block paints only its left fraction; the rest of the cell
     /// shows through as background, so this run must be drawn with the fill colour in
-    /// front of the *track* colour.
+    /// front of the *same background the trough run is given* — which is only a colour
+    /// it can match because [`TROUGH`] is a space rather than a shade glyph.
     pub partial: String,
-    /// The cells past the value, drawn in the track colour alone.
+    /// The cells past the value: blank, and coloured entirely by their background.
     pub trough: String,
 }
 
 /// Splits a meter `width` cells wide into its filled, part-filled and unfilled runs.
 ///
-/// The three are returned separately because they are drawn in three different styles:
-/// the fill colour, the fill colour over the track colour, and the track colour. That
-/// middle style is the whole reason this is not a two-way split — an eighth block
-/// covers only the left fraction of its cell, so drawing it over anything but the
-/// track leaves a hole exactly where the eye reads the value off.
+/// The three are returned separately because the middle one is drawn differently: the
+/// filled cells take the fill colour, the trough takes the track colour, and the one
+/// part-filled cell takes the fill colour *in front of* the track colour. That is the
+/// whole reason this is not a two-way split — an eighth block covers only the left
+/// fraction of its cell, so drawing it over anything but the track leaves a seam
+/// exactly where the eye reads the value off.
 ///
 /// Their display widths always add up to exactly `width`, so a caller can write them
 /// one after the other and land where it expected.

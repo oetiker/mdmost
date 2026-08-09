@@ -142,10 +142,17 @@ before assuming any of it is unmerged:
     checked all 0x110000 scalars and closed the class.
 11. **Fixing a class finds worse than the instance.** The raw-tab fix found ESC
     reaching the canvas — an escape-injection hole nobody had reported.
-12. **A partial glyph needs an explicit background.** Three bugs, one shape: the
-    zebra stripe punched through at column rules, the help overlay's text in
-    dark boxes, the meter's part-filled cell on a hole. Grep for foregrounds
-    drawn with no background.
+12. **A partial glyph needs an explicit background — and the background has to
+    match what the neighbour *renders as*, not what its style says.** Four
+    bugs, one shape: the zebra stripe punched through at column rules, the help
+    overlay's text in dark boxes, the meter's part-filled cell on a hole, and
+    then that same cell given the meter track's declared colour when the track
+    was a `░` dither showing only a quarter of it — a slab four times too heavy
+    beside the trough it was meant to match. The durable fix is not to
+    compensate but to remove the mismatch: a surface a background must match
+    should *be* a background, so the meter's trough is now a space in a flat
+    colour. Grep for foregrounds drawn with no background, and distrust any
+    background copied from a colour that reaches the screen through a glyph.
 13. **An accepted trade-off should record the premise it rests on**, because a
     later change removes the premise silently. The word-breaking ladder rungs
     were justified by "the counterfactual is a source dump" — and scrollable

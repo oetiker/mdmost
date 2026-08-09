@@ -168,7 +168,15 @@ fn plot(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidEr
     let mut body = Canvas::new(content, slices.len(), base);
 
     for (index, slice) in slices.iter().enumerate() {
-        let accent = theme.accent(index);
+        // On the canvas's own surface, not on nothing. `Theme::accent` is a bare
+        // foreground, and `Canvas::write_str` *replaces* a cell's style rather than
+        // patching it, so an accent used raw hands the bar cells `bg: None` — and a
+        // bar's last cell is an eighth block, which inks only part of its cell and
+        // shows that missing background through the rest. It happens to look right
+        // today because the TUI blit patches `theme.base()` in behind every cell, but
+        // that is a safety net elsewhere, not a property of this bar: draw the same
+        // chart onto a striped table row and the seam appears.
+        let accent = base.patch(theme.accent(index));
         body.write_str(index, 0, SWATCH, accent);
         body.write_field(
             index,

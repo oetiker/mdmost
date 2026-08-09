@@ -15,8 +15,10 @@ use crate::theme::Theme;
 /// Left-growing block elements, indexed by how many eighths of a cell are filled.
 ///
 /// Index `0` is the empty string, index `8` is a full block. This is what gives pie
-/// bars their sub-cell precision (design spec §6.5). Gantt bars deliberately stay on
-/// whole cells so their texture can carry the task state.
+/// bars their sub-cell precision (design spec §6.5). Gantt bars stay on whole cells:
+/// a bar there is a span of dates, and half a cell of one is not a fact the chart
+/// knows. (It used to be said they did so to leave room for a fill texture; the
+/// textures went when state moved to colour alone — see `gantt::task_glyph`.)
 pub const EIGHTH_BLOCKS: [&str; 9] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
 
 /// Composes a finished plot into a canvas exactly `width` columns wide.
