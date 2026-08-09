@@ -14,6 +14,20 @@
 
 ---
 
+## Editorial note added after filing
+
+The section immediately above is **superseded**. It was accurate for the commit
+this review was built against (`2aa5d8a`), where glyph selection had no terminal
+probe. The autodetect work merged to `main` as `ba9eeae` shortly afterwards, so
+on current `main` glyph use *is* detected and a piped `--render-once` does emit
+the plain set. Nothing else in this review is affected: every rendering finding
+below concerns box art, colour, margins and layout, all of which are independent
+of which glyph set is in force, and every capture passed `--icons`/`--no-icons`
+explicitly in any case.
+
+Left in place rather than deleted, because a review that quietly rewrites what it
+observed is worth less than one that dates its observations.
+
 ## Index by severity
 
 Findings below are numbered in discovery order; this table is the severity ordering.
