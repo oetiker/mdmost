@@ -2008,6 +2008,71 @@ fn a_long_file_name_is_elided_before_the_horizontal_chip_is_dropped() {
 }
 
 #[test]
+fn the_meters_part_filled_cell_sits_on_the_track_colour() {
+    // Owner report: "the background color of the progressive bar char is not set to
+    // the non-active bar color causing an odd effect". An eighth block paints only the
+    // left fraction of its cell and lets the cell's background through on the right, so
+    // drawn on the status bar's background that one cell had a bar-coloured gap in it
+    // while the trough cells beside it were track-coloured — a visible break at exactly
+    // the boundary the eye reads the value off.
+    //
+    // This asserts styles, not glyphs: the bug never changed which characters appear,
+    // so a test that read the row as text would pass with it present.
+    for theme_name in ["dark", "light"] {
+        let mut app = themed_pager(PAINTED, theme_name, 80, 10);
+        let theme = app.theme().clone();
+        let thumb = super::draw::term_style(theme.ui.scrollbar_thumb).fg;
+        let track_fill = theme
+            .ui
+            .scrollbar_track
+            .fg
+            .expect("the track has a colour of its own");
+        let behind = super::draw::term_style(crate::theme::Style::new().bg(track_fill)).bg;
+        assert_ne!(
+            behind,
+            super::draw::term_style(theme.ui.status_bar).bg,
+            "{theme_name}: the test is only meaningful while the two differ"
+        );
+
+        // Progress that lands on a cell boundary draws no partial cell at all, and the
+        // scroll positions that produce one are not a constant, so walk the document.
+        let mut seen = 0usize;
+        for _ in 0..app.max_scroll() + 1 {
+            let area = Rect::new(0, 0, 80, 1);
+            let mut buffer = Buffer::empty(area);
+            super::chrome::draw_status(&mut buffer, area, &app);
+            let rows = buffer_rows(&buffer, 80, 1);
+            for x in 0..80u16 {
+                let cell = &buffer[(x, 0)];
+                if !crate::canvas::meter::EIGHTH_BLOCKS[1..8].contains(&cell.symbol()) {
+                    continue;
+                }
+                seen += 1;
+                assert_eq!(
+                    cell.style().bg,
+                    behind,
+                    "{theme_name}: the part-filled cell {:?} at column {x} shows \
+                     something other than the track behind it: {:?}",
+                    cell.symbol(),
+                    rows[0]
+                );
+                assert_eq!(
+                    cell.style().fg,
+                    thumb,
+                    "{theme_name}: and its filled fraction is still the thumb colour"
+                );
+            }
+            app.act(Action::LineDown);
+        }
+        assert!(
+            seen > 0,
+            "{theme_name}: no scroll position drew a part-filled cell, so the \
+             assertion above never ran"
+        );
+    }
+}
+
+#[test]
 fn going_to_the_top_also_goes_back_to_the_left_edge() {
     // There was no way home: `0` starts a count, and `g`, `Home`, `^` and `G` all
     // left the horizontal offset exactly where it was.
