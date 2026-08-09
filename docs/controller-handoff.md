@@ -101,15 +101,24 @@ from them.
 Work `visual-review-3.md` first; it is the harsher and more specific list, and
 its severes are the difference between "yes" and "no" on the headline question.
 
-1. **A seven-node flowchart will not draw at 80 columns** — it gives up and
-   dumps raw Mermaid source (`visual-review-3.md` §1, SEVERE). Box art is the
-   feature this project leads with and 80 columns is the commonest terminal
-   width, so this one finding is most of the "no". Related and cheap: §12, the
-   "cannot draw" message never says what it would have needed.
+1. **A seven-node `flowchart LR` will not draw below 92 columns** — it gives up
+   and dumps raw Mermaid source (`visual-review-3.md` §1, SEVERE). The reviewer
+   bisected it: falls back at 80/84/88, draws from 92. Box art is the feature
+   this project leads with and 80 columns is *the* default terminal width, so
+   this one finding is most of the "no". **The same graph as `flowchart TD`
+   draws fine at 80**, so the engine is capable and it is the LR path's width
+   budget that overruns — start there rather than in the shared layout code.
+   Related and cheap: §23, the "cannot draw" message is truncated mid-word and
+   sits in the fence *footer*, where it reads as decoration rather than as the
+   explanation it is.
 2. **Heading hierarchy is carried almost entirely by hue** (§16, SEVERE), so
-   every heading is *less* prominent than body text and the light theme's ramp
-   is flat. This is a theme/weight decision, not a layout bug, and it is the
-   finding most likely to change how the tool feels.
+   every heading is *dimmer* than the body text it introduces, and the light
+   theme's six-level ramp is flat — the reviewer measured contrast ratios of
+   4.80 → 4.95 → 4.86:1 across levels. This is a theme/weight decision, not a
+   layout bug, and it is the finding most likely to change how the tool feels.
+   Note `visual-review-2.md` §4 independently found levels 4-6 indistinguishable
+   in icon mode, so the two reviews agree the ramp is the problem even though
+   they disagree on the verdict.
 3. **No left margin and no right gutter in the live TUI** (§15, SEVERE; also
    `visual-review-2.md` §3). The two reviewers agree here — content is welded to
    the scrollbar. Cheap to fix, visible every session.
