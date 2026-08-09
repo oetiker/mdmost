@@ -36,7 +36,7 @@
 pub mod block;
 mod bridge;
 pub(crate) mod code;
-mod glyphs;
+pub(crate) mod glyphs;
 pub mod inline;
 pub mod table;
 

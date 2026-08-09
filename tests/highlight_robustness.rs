@@ -190,13 +190,21 @@ fn malformed_and_hostile_input_does_not_panic() {
     }
 }
 
-/// Highlighting a 5000-line block must stay well inside "a keypress felt instant".
+/// Highlighting must cost time in proportion to the number of lines, not worse.
 ///
-/// The bound is generous — the machine is shared and an unoptimised `cargo test` build
-/// of `fancy-regex` is roughly ten times slower than a release build — but it is still
-/// far below the point where the cost would be a rewrite rather than a regression.
+/// This began as a wall-clock budget — "5000 lines in under 40 seconds in a debug build"
+/// — and it failed on a machine whose load average was 47, having passed on the same
+/// commit an hour earlier. That is the defect a fixed budget always has on a shared
+/// machine: it measures the neighbours as much as the code, so it eventually cries wolf,
+/// and a gate that cries wolf gets ignored precisely when it is right.
+///
+/// What actually distinguishes "someone introduced a quadratic" from "the box is busy"
+/// is the *shape* of the curve, and contention scales both measurements together, so the
+/// ratio survives it. The slack is wide because scheduling noise is real; it is still far
+/// tighter than any absolute bound could be, because a genuine blow-up here would be
+/// super-linear by a large factor rather than by a few per cent.
 #[test]
-fn a_five_thousand_line_block_highlights_quickly() {
+fn highlighting_cost_grows_no_worse_than_linearly() {
     let theme = Theme::default_dark();
     let unit = "pub fn compute(alpha: u32, beta: &str) -> Option<String> {\n\
                 \x20   // a comment about things\n\
@@ -204,18 +212,36 @@ fn a_five_thousand_line_block_highlights_quickly() {
                 \x20   println!(\"value = {value} {}\", beta);\n\
                 \x20   Some(format!(\"{value}\"))\n\
                 }\n";
-    let src = unit.repeat(834);
-    assert!(src.lines().count() >= 5000);
+    let small = unit.repeat(104);
+    let large = unit.repeat(834);
+    assert!(large.lines().count() >= 5000, "the large case must be big");
 
-    let started = Instant::now();
-    let lines = highlight(Some("rust"), &src, &theme);
-    let elapsed = started.elapsed();
-    assert_eq!(lines.len(), 5004);
+    // Charge one-time setup — building the syntax set, resolving the theme — to nobody:
+    // left in, it would land entirely on the first measurement and flatter the ratio.
+    let _ = highlight(Some("rust"), &small, &theme);
 
-    let budget = if cfg!(debug_assertions) { 40.0 } else { 4.0 };
+    let time = |src: &str| {
+        let started = Instant::now();
+        let lines = highlight(Some("rust"), src, &theme);
+        let elapsed = started.elapsed().as_secs_f64();
+        (elapsed, lines.len())
+    };
+    let (small_secs, small_lines) = time(&small);
+    let (large_secs, large_lines) = time(&large);
+    assert_eq!(
+        large_lines, 5004,
+        "the large case must really be highlighted"
+    );
+
+    let size_ratio = large_lines as f64 / small_lines as f64;
+    // A floor on the divisor: if the small case is too quick to measure, the ratio is
+    // noise rather than evidence, and dividing by it would invent a failure.
+    let time_ratio = large_secs / small_secs.max(1e-3);
     assert!(
-        elapsed.as_secs_f64() < budget,
-        "highlighting 5000 lines took {elapsed:?}, budget was {budget}s"
+        time_ratio < size_ratio * 4.0,
+        "highlighting {large_lines} lines took {large_secs:.3}s against {small_secs:.3}s \
+         for {small_lines} — {time_ratio:.1}x the time for {size_ratio:.1}x the input, \
+         which is super-linear growth rather than a busy machine"
     );
 }
 

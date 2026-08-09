@@ -22,11 +22,49 @@ rendering, inline raster images, remote fetching.
 | Scope | Single-document pager; `mdless FILE` and stdin; usable as `$PAGER` |
 | Mermaid | Unicode/box-art only, never raster |
 | Mermaid families | flowchart, sequence, class, er, pie, gantt, state |
-| Terminal floor | Truecolor + full Unicode + Nerd Font glyphs (with `--no-icons` fallback) |
+| Terminal floor | Truecolor + full Unicode; Nerd Font glyphs when detected, plain Unicode otherwise (§2.1) |
 | Keys | less-compatible core, vim extras |
 | Config | TOML at `~/.config/mdless/config.toml`, themeable |
 | Images | Framed placeholder box showing alt text + target |
 | HTML | Not supported. Not rendered, not passed through. |
+
+### 2.1 Nerd Font glyphs are detected, not assumed
+
+**Decision changed 2026-08-09 by the user.** This spec previously recorded "Nerd Font
+glyphs are the default, `--no-icons` is the escape hatch" as settled, and it was settled
+— explicitly, in the original design brief. It is being changed on the record here so
+that the record is what a later reader finds, rather than the superseded version.
+
+*What was wrong with it.* No terminal can be asked what font it is using. Assuming a
+patched font means every first run on an unpatched terminal shows replacement boxes where
+heading markers and task boxes should be, and the reader has to already know that
+`--no-icons` exists to fix a screen that gives no hint of it. Two independent reviewers
+raised this against the previous default; a third flipped it unilaterally and was
+overruled on the grounds that the decision was already settled. That was the right call
+procedurally and the wrong outcome, which is why this section exists.
+
+*What replaces it.* When nobody has said, mdless asks whether an installed font covers
+**every** private-use code point it can draw, and uses glyphs only if one does. The
+question goes to fontconfig, and the code points are enumerated from the glyph tables
+themselves, so a glyph added later is automatically a glyph the probe requires — the
+detection list cannot drift from the drawing code because there is no second list.
+
+*The asymmetry that decides every unclear case.* Falling back to plain on a machine that
+could have drawn glyphs costs a little elegance. Drawing glyphs on a machine that cannot
+costs a screen full of tofu, and — because the chrome is laid out by measuring glyphs
+that are all supposed to be one column wide — possibly a misaligned status bar too. So
+**detection answers "yes" only on positive evidence**, and treats "cannot tell" as "no":
+no fontconfig, no terminal on stdout, `TERM=dumb` or `linux`, or an SSH session, where
+the fonts on this machine describe the wrong computer entirely.
+
+*Precedence*, lowest to highest: detection, `icons` in the config file, `MDLESS_ICONS`,
+then `--icons` / `--no-icons`. The nearer answer wins outright rather than combining, so
+`--no-icons` turns glyphs off for one run of a config that enables them. The env var
+exists mainly for the SSH case, where detection is blind by design and the fix belongs in
+the server's shell profile.
+
+*Unchanged:* the two glyph sets remain the same shape and the same display width, so
+which one is in force never affects layout (§9).
 
 ## 3. The central architectural rule
 
@@ -59,8 +97,11 @@ pub struct RenderOptions { pub icons: bool, pub line_numbers: bool }
 pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas
 ```
 
-`icons: false` (from `--no-icons`) substitutes plain Unicode for every Nerd Font glyph,
-at the same display width so no layout shifts. `line_numbers` adds a themed gutter to
+`icons: false` — from `--no-icons`, from `icons = false`, or from detection declining to
+promise a Nerd Font (§2.1) — substitutes plain Unicode for every Nerd Font glyph, at the
+same display width so no layout shifts. Note that `RenderOptions::icons` is a plain
+`bool`: by the time it is built the question has been answered, and no renderer ever has
+to know how. `line_numbers` adds a themed gutter to
 fenced code blocks, outside the horizontally scrollable region. Options are threaded
 through every recursive render call, table cells included, and form part of the render
 cache key alongside document version, width and theme.
@@ -205,7 +246,9 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
   `Theme::from_palette`, the same single implementation the built-ins use, so they
   cannot drift.
 - Nerd Font glyphs for heading bullets, list markers, code-fence language icons, and
-  the status bar. `--no-icons` and `icons = false` substitute plain Unicode.
+  the status bar, used when a Nerd Font is detected (§2.1). `--no-icons` and
+  `icons = false` substitute plain Unicode of the same display width, as does detection
+  failing or being unable to tell.
 - Headings are visually distinct by level (colour, weight, prefix glyph, rules under
   H1/H2), not merely by size-that-doesn't-exist.
 - Status bar: file name, position percentage with a fine-grained scrollbar, current
@@ -260,7 +303,7 @@ mdless [FILE]              # file, or stdin when FILE is absent or "-"
   --width N                # force render width in BOTH modes; in the TUI the surplus
                            # is reachable by horizontal scrolling
   --theme NAME
-  --icons / --no-icons     # Nerd Font glyphs on or off; on by default per §2
+  --icons / --no-icons     # Nerd Font glyphs on or off; detected when unset, per §2.1
   --mouse / --no-mouse     # mouse capture; off leaves native drag-select working
   --toc                    # start with TOC pane open
   --config PATH

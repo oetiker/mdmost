@@ -20,9 +20,20 @@ Some prose that is long enough to be worth wrapping at a narrow width indeed.
 - two
 ";
 
+/// The binary, with anything in the environment that could change its output removed.
+///
+/// `MDLESS_ICONS` outranks the config file, so a developer who exports it in their shell
+/// profile would otherwise be running a different program from everyone else — and the
+/// failure would look like a real regression rather than a local setting.
+fn command() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_mdless"));
+    command.env_remove("MDLESS_ICONS");
+    command
+}
+
 /// Runs the binary with the given arguments and no standard input.
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_mdless"))
+    command()
         .args(args)
         .stdin(Stdio::null())
         .output()
@@ -31,7 +42,7 @@ fn run(args: &[&str]) -> Output {
 
 /// Runs the binary with `input` on standard input.
 fn run_with_stdin(args: &[&str], input: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_mdless"))
+    let mut child = command()
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -196,7 +207,12 @@ fn a_broken_config_is_reported_and_defaults_are_used() {
 fn no_icons_reaches_the_renderer_not_just_the_chrome() {
     // `--render-once` draws no chrome at all, so any difference here is proof the
     // flag reached the document renderer.
-    let with = run_with_stdin(&["--render-once", "--width", "60"], SAMPLE);
+    //
+    // `--icons` is passed explicitly rather than relied on as the default: glyphs are
+    // detected now, and `--render-once` writes to a pipe, where detection deliberately
+    // gives up and picks plain Unicode. Without the flag both sides would be plain and
+    // this test would quietly compare nothing with nothing.
+    let with = run_with_stdin(&["--render-once", "--width", "60", "--icons"], SAMPLE);
     let without = run_with_stdin(&["--render-once", "--width", "60", "--no-icons"], SAMPLE);
     assert!(with.status.success() && without.status.success());
     assert_ne!(

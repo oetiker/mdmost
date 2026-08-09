@@ -42,15 +42,17 @@ const TOC_WIDTH_RANGE: std::ops::RangeInclusive<u16> = 12..=80;
 pub struct Config {
     /// The name of the theme to start in.
     pub theme: String,
-    /// Whether Nerd Font glyphs may be used.
+    /// Whether Nerd Font glyphs may be used, when the reader has said.
     ///
-    /// On by default: design spec §2 fixes the terminal floor at truecolour, full
-    /// Unicode and a Nerd Font. There is no way to ask a terminal whether it has a
-    /// patched font, so the fallback is a choice the reader makes rather than one
-    /// that can be detected — `--no-icons`, or `icons = false`, substitutes plain
-    /// Unicode of the same display width, and `--icons` overrides a config file that
-    /// turned them off.
-    pub icons: bool,
+    /// `None` — the default — means nobody has said, and the answer is detected instead
+    /// (see [`crate::nerdfont`]), falling back to plain Unicode whenever it cannot be
+    /// established. `icons = true` or `icons = false` in the config file settles it
+    /// without detection, and `--icons` / `--no-icons` override even that.
+    ///
+    /// This is deliberately tri-state: `Some(false)` and "unset" both draw plain
+    /// Unicode today, but only the first must keep doing so on a machine where the
+    /// glyphs would in fact render.
+    pub icons: Option<bool>,
     /// Whether fenced code blocks are drawn with a line-number gutter.
     pub line_numbers: bool,
     /// Whether the table-of-contents pane starts open.
@@ -76,7 +78,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             theme: "dark".to_string(),
-            icons: true,
+            icons: None,
             line_numbers: false,
             toc_open: false,
             toc_width: DEFAULT_TOC_WIDTH,
@@ -154,17 +156,43 @@ impl Config {
     ///
     /// `path` is used only for error messages.
     pub fn parse_str(text: &str, path: &Path) -> Loaded {
-        let raw: RawConfig = match toml::from_str(text) {
+        let mut problems = Vec::new();
+        let give_up = |problems: Vec<ConfigError>| Loaded {
+            config: Config::default(),
+            problems,
+            path: Some(path.to_path_buf()),
+        };
+
+        // The file is read as a plain table first, and keys this version does not know
+        // are dropped with a problem each, before it is deserialised into `RawConfig`.
+        //
+        // Deserialising straight into `RawConfig` is stricter than it looks: its
+        // `deny_unknown_fields` makes one unrecognised key fail the *whole* parse, so a
+        // single typo silently cost the reader their theme, their icon setting and every
+        // key binding they had written — which is the opposite of what this function
+        // promises, and of what it already does for an unknown action or an unknown
+        // theme name. Dropping the offending key and keeping the rest makes the three
+        // cases behave alike.
+        let Ok(table) = text.parse::<toml::Table>() else {
+            // Only a syntax error can reach here; that really is unrecoverable, because
+            // nothing after the broken line can be trusted to mean what it says.
+            let error = text
+                .parse::<toml::Table>()
+                .expect_err("the parse just failed");
+            return give_up(vec![toml_problem(text, path, &error)]);
+        };
+        let table = strip_unknown_keys(table, text, path, &mut problems);
+
+        let raw: RawConfig = match table.try_into() {
             Ok(raw) => raw,
             Err(error) => {
-                return Loaded {
-                    config: Config::default(),
-                    problems: vec![toml_problem(text, path, &error)],
-                    path: Some(path.to_path_buf()),
-                };
+                // A value of the wrong type, e.g. `scroll_step = "fast"`. The key is
+                // known, so this is a genuine mistake about that key rather than a key
+                // from a future version, and there is no sensible value to carry on with.
+                problems.push(toml_problem(text, path, &error));
+                return give_up(problems);
             }
         };
-        let mut problems = Vec::new();
         let config = raw.into_config(text, path, &mut problems);
         Loaded {
             config,
@@ -269,11 +297,14 @@ struct RawTheme {
 impl RawConfig {
     /// Validates the raw file into a [`Config`], collecting per-entry problems.
     fn into_config(self, text: &str, path: &Path, problems: &mut Vec<ConfigError>) -> Config {
-        let mut config = Config::default();
+        let mut config = Config {
+            // Carried straight across as an `Option`, unlike every setting below it: an
+            // absent `icons` key must stay absent so it reaches detection, rather than
+            // being resolved here to a fixed answer.
+            icons: self.icons,
+            ..Config::default()
+        };
 
-        if let Some(icons) = self.icons {
-            config.icons = icons;
-        }
         if let Some(line_numbers) = self.line_numbers {
             config.line_numbers = line_numbers;
         }
@@ -448,6 +479,68 @@ fn merge_keys(
         }
     }
     bindings
+}
+
+/// The top-level keys this version understands.
+const KNOWN_KEYS: &[&str] = &[
+    "theme",
+    "icons",
+    "line_numbers",
+    "mouse",
+    "scroll_step",
+    "toc",
+    "keys",
+    "themes",
+];
+
+/// The keys understood inside `[toc]`.
+const KNOWN_TOC_KEYS: &[&str] = &["open", "width"];
+
+/// Drops the keys this version does not understand, recording one problem for each.
+///
+/// Only the tables with a fixed shape are filtered: `[keys]` and `[themes.*]` accept any
+/// key by design and do their own per-entry reporting.
+fn strip_unknown_keys(
+    mut table: toml::Table,
+    text: &str,
+    path: &Path,
+    problems: &mut Vec<ConfigError>,
+) -> toml::Table {
+    if let Some(toml::Value::Table(toc)) = table.get_mut("toc") {
+        retain_known(toc, KNOWN_TOC_KEYS, text, path, problems);
+    }
+    retain_known(&mut table, KNOWN_KEYS, text, path, problems);
+    table
+}
+
+/// Removes every key of `table` outside `known`, reporting each by name and line.
+fn retain_known(
+    table: &mut toml::Table,
+    known: &[&str],
+    text: &str,
+    path: &Path,
+    problems: &mut Vec<ConfigError>,
+) {
+    let unknown: Vec<String> = table
+        .keys()
+        .filter(|key| !known.contains(&key.as_str()))
+        .cloned()
+        .collect();
+    for key in unknown {
+        table.remove(&key);
+        problems.push(problem(
+            text,
+            path,
+            &key,
+            &format!("unknown setting `{key}`, ignored — expected one of {}", {
+                known
+                    .iter()
+                    .map(|name| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }),
+        ));
+    }
 }
 
 /// Builds a problem, locating `key` in the source text so the message can name a line.

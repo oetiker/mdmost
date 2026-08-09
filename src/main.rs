@@ -50,10 +50,15 @@ struct Cli {
     theme: Option<String>,
 
     /// Use plain Unicode instead of Nerd Font glyphs, at the same display width.
+    ///
+    /// By default mdless checks whether an installed font has the glyphs and uses plain
+    /// Unicode whenever it cannot tell — over SSH, for instance, where the fonts on this
+    /// machine say nothing about the terminal at the other end. Set MDLESS_ICONS=1 or
+    /// `icons = true` to override the check for good.
     #[arg(long)]
     no_icons: bool,
 
-    /// Use Nerd Font glyphs. This is the default; needs a font that has them.
+    /// Use Nerd Font glyphs even if none appears to be installed.
     #[arg(long, conflicts_with = "no_icons")]
     icons: bool,
 
@@ -97,6 +102,41 @@ fn main() -> ExitCode {
     }
 }
 
+/// Whether to draw Nerd Font glyphs, from the four places that may have an opinion.
+///
+/// In order of authority: the command line, then `MDLESS_ICONS`, then the config file,
+/// then — only if nobody has said — detection, which falls back to plain Unicode
+/// whenever it cannot establish that the glyphs will render (see [`mdless::nerdfont`]).
+///
+/// The nearer answer wins outright rather than combining with the others, so
+/// `--no-icons` turns glyphs off for one run of a config that enables them, and
+/// `--icons` turns them on where detection would have given up.
+fn resolve_icons(cli: &Cli, configured: Option<bool>) -> bool {
+    if cli.no_icons {
+        return false;
+    }
+    if cli.icons {
+        return true;
+    }
+    if let Some(from_env) = env_icons() {
+        return from_env;
+    }
+    configured.unwrap_or_else(mdless::nerdfont::detect)
+}
+
+/// `MDLESS_ICONS` as a yes or a no, or `None` if it is unset or not either.
+///
+/// An unrecognised value is ignored rather than rejected: this is a convenience meant
+/// for a shell profile, and refusing to start over it would be a poor trade.
+fn env_icons() -> Option<bool> {
+    let raw = std::env::var("MDLESS_ICONS").ok()?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
 /// Whether a failure is nothing worse than the reader of our output going away.
 fn is_broken_pipe(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
@@ -132,7 +172,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     let doc = Doc::parse_auto(&source);
 
     let theme_name = cli.theme.clone().unwrap_or_else(|| config.theme.clone());
-    let icons = (config.icons || cli.icons) && !cli.no_icons;
+    let icons = resolve_icons(&cli, config.icons);
     if cli.mouse {
         config.mouse = true;
     }

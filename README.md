@@ -72,7 +72,7 @@ mdless --render-once --width 80 --no-icons doc.md > snapshot.txt
 | `--width N` | Render at this width instead of the terminal's. |
 | `--theme NAME` | The theme to start in. |
 | `--no-icons` | Use plain Unicode instead of Nerd Font glyphs, at the same display width. |
-| `--icons` | Use Nerd Font glyphs. **This is the default.** |
+| `--icons` | Use Nerd Font glyphs even if none appears to be installed. |
 | `--mouse` | Capture the mouse: wheel scrolls, clicks select in the contents pane. |
 | `--toc` | Start with the table-of-contents pane open. |
 | `--config PATH` | Read configuration from this file instead of the default. |
@@ -82,14 +82,27 @@ flag — the truecolour decision is made from whether stdout is a terminal.
 
 ## Nerd Fonts
 
-**`mdless` expects a Nerd Font, and uses one by default.** Headings, list bullets, code
-fences and the status bar are drawn with Nerd Font glyphs unless you say otherwise.
+Headings, list bullets, code fences and the status bar are drawn with Nerd Font glyphs
+when a Nerd Font is available, and with plain Unicode equivalents **of the same display
+width** when it is not — so the difference is what the markers look like, never where
+anything sits. Nothing shifts, nothing reflows, and no feature is lost either way.
 
-If your terminal font is not patched, those glyphs come out as replacement boxes. Pass
-`--no-icons`, or set `icons = false` in the configuration, and every one of them is
-substituted with a plain Unicode equivalent **of the same display width** — so the escape
-hatch changes the glyphs and never the layout. Nothing shifts, nothing reflows, and no
-feature is lost.
+**`mdless` works out which to use, and errs towards plain.** No terminal can be asked
+what font it is using, so mdless asks fontconfig whether an installed font covers every
+glyph it would draw, and uses glyphs only if one does. It picks plain whenever it cannot
+establish that — in particular when `fc-list` is unavailable, when output is not going to
+a terminal, on `TERM=dumb` or the Linux console, and **over SSH**, where the fonts on the
+machine running mdless say nothing about the terminal drawing the pixels. Guessing wrong
+towards plain costs a little elegance; guessing wrong towards glyphs fills the screen
+with replacement boxes, so the tie does not go to the prettier answer.
+
+To decide for yourself, in increasing order of authority:
+
+| | |
+|---|---|
+| `icons = true` / `false` in the configuration | settles it for this machine |
+| `MDLESS_ICONS=1` / `0` in the environment | settles it for this shell — the natural thing to export in the profile on a server you always reach from the same well-equipped terminal |
+| `--icons` / `--no-icons` | settles it for this run |
 
 ## Keys
 
@@ -166,12 +179,14 @@ binding costs you that binding and nothing else.
 
 ```toml
 theme        = "dark"    # name of a built-in or a [themes.*] table
-icons        = true      # Nerd Font glyphs; false substitutes plain Unicode
+icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to detect
 line_numbers = false     # line-number gutter in fenced code blocks
-toc_open     = false     # start with the contents pane open
-toc_width    = 32        # width of the contents pane, in columns
 mouse        = false     # wheel scrolls, clicks select in the contents pane
 scroll_step  = 3         # document lines per mouse-wheel notch
+
+[toc]
+open  = false            # start with the contents pane open
+width = 32               # width of the contents pane, in columns
 
 [keys]
 "ctrl-n" = "line_down"   # bind a chord to an action

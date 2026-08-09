@@ -25,6 +25,7 @@
 //! | [`toc`] | Heading tree and current-position tracking |
 //! | [`search`] | Source-text search mapped onto canvas positions |
 //! | [`config`] | TOML configuration, themes, key bindings |
+//! | [`nerdfont`] | Whether this terminal can draw Nerd Font glyphs |
 //! | [`tui`] | The ratatui application |
 //!
 //! # The shared layer
@@ -47,6 +48,7 @@ pub mod doc;
 pub mod error;
 pub mod highlight;
 pub mod mermaid;
+pub mod nerdfont;
 pub mod render;
 pub mod search;
 pub mod text;
