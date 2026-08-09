@@ -506,7 +506,7 @@ fn a_heading_too_narrow_for_its_number_keeps_its_words() {
 fn nested_lists_indent_and_change_their_bullet() {
     assert_eq!(
         lines("- one\n  - two\n    - three\n", 30),
-        ["● one", "  – two", "    ▪ three"]
+        ["* one", "  > two", "    + three"]
     );
 }
 
@@ -523,13 +523,40 @@ fn ordered_lists_respect_the_start_ordinal_and_align_the_numbers() {
 fn list_item_content_wraps_under_a_hanging_indent() {
     assert_eq!(
         lines("- alpha beta gamma delta\n", 12),
-        ["● alpha beta", "  gamma", "  delta"]
+        ["* alpha beta", "  gamma", "  delta"]
     );
 }
 
+/// The box is followed by *two* spaces, not one.
+///
+/// Reported by the owner on 2026-08-09: "the checkbox is a large double char affair
+/// which matches nicely between checked and unchecked, but it hugs the text following
+/// it… so I guess two spaces would be in order". Both boxes, both glyph sets.
 #[test]
 fn task_items_get_a_checkbox() {
-    assert_eq!(lines("- [x] done\n- [ ] todo\n", 20), ["☑ done", "☐ todo"]);
+    assert_eq!(
+        lines("- [x] done\n- [ ] todo\n", 20),
+        ["☑  done", "☐  todo"]
+    );
+}
+
+/// A plain item in an *unordered* task list starts its text in the same column.
+///
+/// The widened gap belongs to the list, not to the item: every item pads to the same
+/// marker field, so a bullet among checkboxes gets the same two columns of air and
+/// the text edge stays straight.
+#[test]
+fn a_plain_item_in_an_unordered_task_list_keeps_the_text_column() {
+    assert_eq!(lines("- [x] done\n- plain\n", 20), ["☑  done", "*  plain"]);
+}
+
+/// Continuation lines in an unordered task list hang under the text, past both spaces.
+#[test]
+fn an_unordered_task_item_wraps_under_its_text() {
+    assert_eq!(
+        lines("- [ ] alpha beta gamma\n", 16),
+        ["☐  alpha beta", "   gamma"]
+    );
 }
 
 /// An ordered task list has *two* things to say and has to say both.
@@ -542,7 +569,7 @@ fn task_items_get_a_checkbox() {
 fn an_ordered_task_list_keeps_its_numbers() {
     assert_eq!(
         lines("1. [x] done\n2. [ ] todo\n", 20),
-        ["1. ☑ done", "2. ☐ todo"]
+        ["1. ☑  done", "2. ☐  todo"]
     );
 }
 
@@ -551,7 +578,7 @@ fn an_ordered_task_list_keeps_its_numbers() {
 fn an_ordered_task_list_aligns_its_boxes_under_each_other() {
     assert_eq!(
         lines("9. [ ] item\n10. [ ] item\n", 20),
-        [" 9. ☐ item", "10. ☐ item"]
+        [" 9. ☐  item", "10. ☐  item"]
     );
 }
 
@@ -560,7 +587,7 @@ fn an_ordered_task_list_aligns_its_boxes_under_each_other() {
 fn a_plain_item_in_a_task_list_keeps_the_marker_column() {
     assert_eq!(
         lines("1. [x] done\n2. plain\n", 20),
-        ["1. ☑ done", "2.   plain"]
+        ["1. ☑  done", "2.    plain"]
     );
 }
 
@@ -569,14 +596,14 @@ fn a_plain_item_in_a_task_list_keeps_the_marker_column() {
 fn an_ordered_task_item_wraps_under_its_text() {
     assert_eq!(
         lines("1. [ ] alpha beta gamma\n", 16),
-        ["1. ☐ alpha beta", "     gamma"]
+        ["1. ☐  alpha beta", "      gamma"]
     );
 }
 
 #[test]
 fn tight_lists_are_dense_and_loose_lists_are_spaced() {
     assert_eq!(rows("- one\n- two\n", 20).len(), 2);
-    assert_eq!(rows("- one\n\n- two\n", 20), ["● one", "", "● two"]);
+    assert_eq!(rows("- one\n\n- two\n", 20), ["* one", "", "* two"]);
 }
 
 /// The document the wrapping-spaces-the-list rule is asserted against.
@@ -589,7 +616,7 @@ const THREE_BULLETS: &str = "- one\n- alpha beta gamma delta epsilon\n- three\n"
 fn a_list_stays_tight_while_every_item_fits_on_one_line() {
     assert_eq!(
         rows(THREE_BULLETS, 40),
-        ["● one", "● alpha beta gamma delta epsilon", "● three"]
+        ["* one", "* alpha beta gamma delta epsilon", "* three"]
     );
 }
 
@@ -600,12 +627,12 @@ fn a_list_is_spaced_throughout_as_soon_as_one_item_wraps() {
     assert_eq!(
         rows(THREE_BULLETS, 20),
         [
-            "● one",
+            "* one",
             "",
-            "● alpha beta gamma",
+            "* alpha beta gamma",
             "  delta epsilon",
             "",
-            "● three"
+            "* three"
         ]
     );
 }
@@ -616,12 +643,12 @@ fn a_list_already_loose_by_commonmark_does_not_gain_a_second_blank_row() {
     assert_eq!(
         rows(loose, 20),
         [
-            "● one",
+            "* one",
             "",
-            "● alpha beta gamma",
+            "* alpha beta gamma",
             "  delta epsilon",
             "",
-            "● three"
+            "* three"
         ]
     );
 }
@@ -634,7 +661,7 @@ fn ordered_and_task_lists_follow_the_same_rule() {
     );
     assert_eq!(
         rows("- [ ] one\n- [x] alpha beta gamma delta\n", 16),
-        ["☐ one", "", "☑ alpha beta", "  gamma delta"]
+        ["☐  one", "", "☑  alpha beta", "   gamma delta"]
     );
 }
 
@@ -645,7 +672,7 @@ fn each_list_level_decides_its_own_spacing() {
     // tight. Spacing appears exactly where the crowding is.
     assert_eq!(
         rows("- outer one\n  - in a\n  - in b\n- outer two\n", 30),
-        ["● outer one", "  – in a", "  – in b", "", "● outer two"]
+        ["* outer one", "  > in a", "  > in b", "", "* outer two"]
     );
 }
 
@@ -662,12 +689,12 @@ fn a_spaced_sublist_is_set_off_from_the_item_that_introduces_it() {
     assert_eq!(
         rows("- outer\n  - alpha beta gamma delta\n  - short\n", 16),
         [
-            "● outer",
+            "* outer",
             "",
-            "  – alpha beta",
+            "  > alpha beta",
             "    gamma delta",
             "",
-            "  – short",
+            "  > short",
         ]
     );
     // A chain of nested lists breathes at every level it descends through, rather
@@ -675,11 +702,11 @@ fn a_spaced_sublist_is_set_off_from_the_item_that_introduces_it() {
     assert_eq!(
         rows("- one\n  - two\n    - alpha beta gamma\n", 16),
         [
-            "● one",
+            "* one",
             "",
-            "  – two",
+            "  > two",
             "",
-            "    ▪ alpha beta",
+            "    + alpha beta",
             "      gamma",
         ]
     );
@@ -699,7 +726,7 @@ fn the_spacing_decision_is_re_taken_at_every_width() {
 fn a_list_inside_a_quote_inside_a_list_still_composes() {
     assert_eq!(
         lines("- outer\n  > quoted\n  > - inner\n", 30),
-        ["● outer", "  ▌ quoted", "  ▌", "  ▌ – inner"]
+        ["* outer", "  ▌ quoted", "  ▌", "  ▌ > inner"]
     );
 }
 
@@ -923,8 +950,8 @@ fn a_list_inside_a_cell_keeps_its_markers() {
     let canvas = render_block(&table, 30, &Theme::default_dark(), &PLAIN);
     canvas.check_invariants().expect("contract holds");
     let text = canvas.plain_text();
-    assert!(text.contains("● one"), "{text}");
-    assert!(text.contains("● two"), "{text}");
+    assert!(text.contains("* one"), "{text}");
+    assert!(text.contains("* two"), "{text}");
 }
 
 #[test]
@@ -1263,9 +1290,9 @@ fn options_reach_into_table_cells() {
     // The bullet is the same plain Unicode either way (`render::glyphs`); what the
     // options must still reach into the cell with is the *rest* of the glyph set, so
     // the check is that they agree here and differ where they should.
-    assert!(plain.plain_text().contains('●'));
+    assert!(plain.plain_text().contains('*'));
     assert!(
-        fancy.plain_text().contains('●'),
+        fancy.plain_text().contains('*'),
         "the cell must use the same bullet:\n{}",
         fancy.plain_text()
     );

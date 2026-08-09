@@ -133,10 +133,11 @@ Font is available, and with plain Unicode equivalents **of the same display widt
 it is not — so the difference is what the markers look like, never where anything sits.
 Nothing shifts, nothing reflows, and no feature is lost either way.
 
-List bullets are plain Unicode in both cases (`●`, `–`, `▪`, `▫`, one per nesting
-level), because the grades a bullet wants do not exist in an icon font: `·`, `•` and
-`●` are three sizes of the same mark, where every filled circle an icon font offers is
-one heavy disc. Headings have no marker at all — the rule beneath a heading says which
+List bullets are **ASCII** in both cases (`*`, `>`, `+`, `-`, one per nesting level).
+Lists turn up in nearly every document, so the bullet is the thing on the page that can
+least afford to be invisible, and ASCII is the only character class that renders
+everywhere without a font survey — three of the four are the Markdown source bullets
+themselves. Headings have no marker at all — the rule beneath a heading says which
 level it is.
 
 **`mdless` works out which to use, and errs towards plain.** No terminal can be asked

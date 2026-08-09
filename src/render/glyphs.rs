@@ -20,10 +20,10 @@
 //! The two marker families each own a distinct *shape* vocabulary, and no glyph is
 //! ever shared between them:
 //!
-//! | family      | shape                              | plain             | nerd            |
-//! |-------------|------------------------------------|-------------------|-----------------|
-//! | list bullet | disc, dash, square — one per depth | `● – ▪ ▫`         | the same        |
-//! | task box    | a box big enough to hold a tick    | ballot boxes      | squares         |
+//! | family      | shape                              | plain        | nerd     |
+//! |-------------|------------------------------------|--------------|----------|
+//! | list bullet | ASCII punctuation, one per depth   | `* > + -`    | the same |
+//! | task box    | a box big enough to hold a tick    | ballot boxes | squares  |
 //!
 //! A reader must never see one marker mean two things, so a test in this module
 //! asserts the two families are disjoint in both sets.
@@ -35,46 +35,61 @@
 //!
 //! # Why bullets are not icons any more
 //!
-//! The bullet ladder is the same text in both sets, and that is deliberate rather than
-//! an oversight. The size of the level-one bullet has been in question twice now, in
-//! both directions, and plain Unicode is the set that has the grades to answer it:
-//! `·`, `•` and `●` are three distinct sizes of the same mark, whereas every filled
-//! circle a Nerd Font offers — `nf-fa-circle`, `nf-md-circle`, `nf-md-circle_medium` —
-//! is a heavy disc drawn at icon size, one answer rather than a ladder. This also
-//! keeps the two sets *identical* here,
-//! which is the strongest possible form of the parity rule above, and it removes four
-//! private-use code points from what [`Glyphs::nerd_glyphs`] makes font detection
-//! demand. The theme already treats bullets this way: "bullets are punctuation, not
-//! accents".
+//! The bullet ladder is **ASCII, unconditionally**, and it is the same text in both
+//! sets — deliberately, not by oversight. There is no reason for a bullet to vary with
+//! font detection when the entire point of the choice is that it renders everywhere;
+//! that the Nerd set no longer differs from the plain one here is the intended
+//! outcome, and it is the strongest possible form of the parity rule above. It also
+//! removes four private-use code points from what [`Glyphs::nerd_glyphs`] makes font
+//! detection demand. The full argument is on [`BULLETS`]. The theme already treats
+//! bullets this way: "bullets are punctuation, not accents".
 
 /// The bullet at each nesting depth, shared by both glyph sets.
 ///
-/// A *shape* ladder rather than a ring of circles, changed on 2026-08-09 at the
-/// owner's request: "the bullet character chosen is too prominent… then for the second
-/// level maybe a heavy `-` and for the third a small square".
+/// **ASCII**, chosen by the owner on 2026-08-09: "since lists are so important… why
+/// play games at all… how about we use `*`, `>`, `+`, `-`".
 ///
-/// * `●` U+25CF — a filled disc. **Changed on 2026-08-09 at the owner's request**: the
-///   previous `·` U+00B7 was too small to read as a marker. The owner picked `⦁`
-///   U+2981 Z NOTATION SPOT from a rendered selection — bigger than `·`, smaller than
-///   `●` — and it cannot ship: U+2981 is **absent from `CommitMono` Nerd Font** (and
-///   from `DejaVu`; only `FreeSans`, STIX, Asana Math and `Noto`'s maths faces carry it), so
-///   in the terminal this is written for it draws as a blank. Rasterised at a 200-unit
-///   em, the four candidates measure `·` 32, `•` 48, `●` 108 in `CommitMono`, against
-///   `·` 22, `•` 72, `⦁` 88, `●` 146 in `FreeSans` — so the owner's pick is 0.44 em and
-///   `●` at 0.54 em is the closest thing the shipping font has to it (`•` is 0.24 em,
-///   twice as far the other way, and was rejected once already as too prominent
-///   before this ladder existed). This is the same defect that removed `◦` U+25E6:
-///   **rasterise a candidate in the font before believing it exists.**
-/// * `–` U+2013 — a dash with body. `‒` U+2012 and `−` U+2212 are indistinguishable
-///   from it at terminal sizes, and `━` U+2501 is a full-cell bar that reads as a
-///   rule rather than as a marker.
-/// * `▪` U+25AA — a small filled square: a change of shape, not another round thing.
-/// * `▫` U+25AB — the same square hollowed out; the faintest of the four, and so the
-///   deepest. `◦` U+25E6, the previous depth-two bullet, is *absent* from at least one
-///   popular patched font and draws as a blank there.
+/// Lists appear in very nearly every document, which makes the bullet the element on
+/// the page that can least afford to be invisible. ASCII is the only character class
+/// with genuinely universal coverage: no font survey to run, no fallback to depend on,
+/// and a single code point of display width 1 everywhere, guaranteed rather than
+/// checked. Three of the four — `*`, `+`, `-` — are also the literal bullet characters
+/// of Markdown source, so the rendered marker echoes the syntax the author typed.
+/// Reliability beats refinement for the commonest element on the page.
+///
+/// The same four are used whether or not a Nerd Font is detected. Bullets have no
+/// business varying with font detection when the entire point of the choice is that
+/// they render everywhere.
+///
+/// # The lesson this cost three rounds to learn
+///
+/// **Do not choose glyphs by how they measure, or by what one machine's fonts happen
+/// to contain — you do not control the reader's font.** For anything load-bearing,
+/// prefer characters that render everywhere.
+///
+/// `mdless` draws in whatever terminal font the reader has, so ink extents rasterised
+/// from any one face predict nothing about Iosevka, JetBrains Mono, Menlo or Fira
+/// Code; measuring optimises for one machine and silently mis-serves everyone else.
+/// Earlier revisions of this comment carried em-fractions to two decimal places and
+/// named a specific patched font as "the shipping font". Both were fiction. The font
+/// was a guess by an early session — it happened to be installed on the machine that
+/// session ran on — and every session afterwards cited the comment back as authority,
+/// laundering the guess into a premise by repetition. All of it has been deleted
+/// rather than corrected, because a false doc comment is worse than none.
+///
+/// The one real defect that survives from that era is *coverage*: an invisible bullet
+/// is a hard failure, and candidates have genuinely been lost to it — `◦` U+25E6 draws
+/// as a blank in at least one popular patched font, and `⦁` U+2981 Z NOTATION SPOT (a
+/// formal-methods symbol, never a bullet) is absent from many. ASCII ends that whole
+/// class of question.
+///
+/// Nothing here reaches a regular expression: the only pattern the program builds
+/// comes from the reader's search query, and search runs over the Markdown *source*,
+/// never over rendered marker cells. `*` and `+` being regex metacharacters is
+/// therefore inert.
 ///
 /// Each is a single code point of display width 1, which a test below enforces.
-const BULLETS: [&str; 4] = ["●", "–", "▪", "▫"];
+const BULLETS: [&str; 4] = ["*", ">", "+", "-"];
 
 /// The glyphs used for one rendering pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,14 +107,12 @@ pub(crate) struct Glyphs {
 impl Glyphs {
     /// Plain Unicode, for terminals without a Nerd Font (`--no-icons`).
     ///
-    /// The task boxes stay `☐` U+2610 and `☑` U+2611. `☒` U+2612 was weighed against
-    /// them on 2026-08-09 — it is the box designed as `☐`'s pair, so it was the
-    /// natural suspect for the size complaint — and the rasterisation says no: in
-    /// `DejaVu` Sans, the fallback a terminal reaches for here (`CommitMono` Nerd Font
-    /// carries *none* of the three), all three glyphs are the same 145×146 box at the
-    /// same stroke weight, and by ink they run `☐` 27%, `☑` 34%, `☒` 42%. `☑` is
-    /// already the closer partner; swapping in `☒` would make the ticked box heavier,
-    /// not better matched. The mismatch the owner saw is in [`Self::NERD`].
+    /// The task boxes stay `☐` U+2610 BALLOT BOX and `☑` U+2611 BALLOT BOX WITH CHECK.
+    /// `☒` U+2612 BALLOT BOX WITH X was weighed against them on 2026-08-09 and
+    /// rejected: it says *rejected*, not *done*, so it is the wrong word for a ticked
+    /// task however it happens to be drawn. `☐` and `☑` are the pair Unicode names for
+    /// the job — the same box, empty and checked — which is the only property that
+    /// survives a change of the reader's font.
     pub const PLAIN: Self = Self {
         bullets: BULLETS,
         task_checked: "☑",
@@ -110,21 +123,21 @@ impl Glyphs {
     /// Nerd Font glyphs, the default look where a Nerd Font is detected.
     ///
     /// The code points are named in the comments so they can be checked against
-    /// <https://www.nerdfonts.com/cheat-sheet>. The bullets are deliberately the
-    /// plain ones (see the module docs); what the icons buy here is the ticked task
-    /// box and the code-fence language icons.
+    /// <https://www.nerdfonts.com/cheat-sheet>. The bullets are deliberately ASCII
+    /// (see the module docs); what the icons buy here is the ticked task box and the
+    /// code-fence language icons.
     ///
     /// # The task boxes are a *pair*, and were not
     ///
     /// The owner reported on 2026-08-09 that the unticked box looks larger than the
-    /// ticked one, and it does. The two boxes used to be `nf-fa-square_o` U+F096 and
-    /// `nf-fa-check_square_o` U+F046; rasterised in `CommitMono` Nerd Font at a 200-unit
-    /// em they measure **120×121 and 97×97** — the same drawing at two different
-    /// sizes, 24% apart in every dimension, sitting one under the other in the marker
-    /// column where nothing hides it. Font Awesome 4 has no box that is both outlined
-    /// and metrically equal to U+F096, so the pair moves to Material Design's
-    /// `checkbox_blank_outline` / `checkbox_marked_outline`, which are drawn as a pair
-    /// and measure **72×73 and 72×73**: one box, with and without a tick.
+    /// ticked one. The two boxes used to be `nf-fa-square_o` U+F096 and
+    /// `nf-fa-check_square_o` U+F046, which are the same drawing at two different
+    /// sizes, sitting one under the other in the marker column where nothing hides the
+    /// mismatch. Font Awesome 4 has no outlined box that pairs with U+F096, so the two
+    /// move to Material Design's `checkbox_blank_outline` / `checkbox_marked_outline`,
+    /// which are *designed* as a pair: one box, with and without a tick. That they are
+    /// a pair by design is the durable reason; how large either one renders depends on
+    /// the reader's patched font and is not something this file can know.
     ///
     /// The cost is that these are five-digit code points, added to Nerd Fonts in v3
     /// (2023). A v2 patch does not carry them, so [`Self::nerd_glyphs`] — which is

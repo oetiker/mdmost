@@ -64,7 +64,7 @@ An enormous amount landed today. `git log --oneline` is the record; the shape:
   document could repaint the reader's terminal from inside a paragraph.
 - **The pager exits when its terminal dies** instead of spinning at 100 % CPU
   (user-reported from the wild).
-- **Owner-requested typography:** bullets step by shape (`●` `–` `▪` `▫`),
+- **Owner-requested typography:** bullets are ASCII (`*` `>` `+` `-`),
   heading prefix glyphs replaced by an underline ladder, a FIGlet banner for a
   lone `#` title, lists and multiline table rows get air, section numbering for
   deep documents, a body-width cap, `S` saves settings.
@@ -135,9 +135,13 @@ before assuming any of it is unmerged:
 8. **A test can be green for a reason unrelated to the code.** The hangup test
    had two false greens (inherited pty fds; an undrained pty). Ask: *what would
    make this pass with the bug present?*
-9. **Verify a glyph renders in the user's actual font.** Rasterising with
-   ImageMagick caught `◦` U+25E6 drawing as a blank *and* the user's own pick
-   `⦁` U+2981 being absent. Both would have shipped invisible.
+9. **Do not choose glyphs by measuring them — you do not control the reader's
+   font.** Three rounds were burnt tuning a bullet by rasterised em-fractions in
+   one font that an early session merely *guessed* the owner used, then cited
+   back as authority ever after. Coverage is the only legitimate font question
+   (`◦` U+25E6 and `⦁` U+2981 both draw blank in real fonts), and the durable
+   answer to it is to prefer characters that render everywhere: the bullets are
+   now ASCII. A guess repeated in a doc comment becomes a false premise.
 10. **When you enumerate a class, enumerate it exhaustively.** The U+17D8 fix
     checked all 0x110000 scalars and closed the class.
 11. **Fixing a class finds worse than the instance.** The raw-tab fix found ESC

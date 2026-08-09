@@ -171,7 +171,7 @@ fn toggling_icons_invalidates_the_render_cache() {
     // a stale frame that looks almost right, which is the worst kind.
     //
     // The document needs something that actually *changes* with the setting. Since the
-    // heading prefixes went and the bullets became plain Unicode in both sets, a task
+    // heading prefixes went and the bullets became ASCII in both sets, a task
     // box is the cheapest thing that does; `SAMPLE` has none.
     let mut app = pager("# Title\n\n- [x] done\n- [ ] todo\n");
     app.set_icons(true);

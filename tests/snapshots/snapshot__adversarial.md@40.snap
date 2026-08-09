@@ -31,18 +31,18 @@ expression: canvas.plain_text()
  Lists                                  
  ────────────────────────────────────── 
                                         
- ● level one                            
+ *  level one                           
                                         
-   – level two with a longer line that  
-     has to wrap somewhere sensible     
+    > level two with a longer line that 
+      has to wrap somewhere sensible    
                                         
-     ▪ level three                      
-       1. ordered inside unordered      
-       2. second                        
+      + level three                     
+        1. ordered inside unordered     
+        2. second                       
                                         
- ☑ a finished task                      
+ ☑  a finished task                     
                                         
- ☐ an unfinished task                   
+ ☐  an unfinished task                  
                                         
  Table with Markdown inside cells       
  ────────────────────────────────────── 

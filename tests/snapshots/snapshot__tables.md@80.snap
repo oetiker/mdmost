@@ -127,7 +127,7 @@ expression: canvas.plain_text()
  A table inside a list inside a quote                                           
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
- ▌ ● and here it is:                                                            
+ ▌ * and here it is:                                                            
  ▌                                                                              
  ▌   ╭────┬──────╮                                                              
  ▌   │ in │ deep │                                                              
