@@ -9,17 +9,16 @@
 > forward any lesson in §4/§5 that is still true. Fresh synthesis, not blank
 > page.
 
-Handoff commit: 67e135c   Date: 2026-08-08   Reason: context budget
+Handoff commit: ba9eeae   Date: 2026-08-09   Reason: context budget
 Worktree / branch: main checkout (/home/oetiker/checkouts/mdless) @ main
-Trunk at time of writing: `main` @ 67e135c — this IS trunk; there is no other
-branch. **Reader: re-derive anyway** (`git log --oneline -5`).
-Sibling worktrees: four stale scratch worktrees under
-`/scratch/oetiker/claude-worktrees/` (`mdless-gate` @ 6e4fcc6, `mdless-layout`
-@ 66e2898, `mdless-qa` @ 8883ed0, `mdless-rendercheck` @ bdd05f1). All are dead
-agent scratch, all behind trunk, none owns any workstream. **Delete them** (ask
-the user first — they are under `/scratch`, and this project's convention is to
-confirm before `rm`). Nothing of value is in them; every agent's work was swept
-into trunk.
+Trunk at time of writing: `main` @ ba9eeae — this IS trunk. **Re-derive anyway**
+(`git log --oneline -5`).
+Sibling worktrees: five under `/scratch/oetiker/claude-worktrees/`. Four
+(`mdless-gate`, `-layout`, `-qa`, `-rendercheck`) are dead agent scratch from
+the original build, all far behind trunk, all with uncommitted edits that were
+swept into trunk long ago; the user was asked on 2026-08-09 and chose to **leave
+them**, so leave them. The fifth, `mdless-icons` @ `icons-autodetect`, **is
+merged into main** and its handoff is a tombstone — do not work there.
 
 ## 1. Mission
 
@@ -36,194 +35,214 @@ again. Everything else follows from that — recursion over width budgets is wha
 makes Markdown-inside-tables work without special-casing, and `Canvas` is the
 single currency between every renderer.
 
-The project was built by a fan-out of ~12 agents over one session, then put
-through three adversarial QA reviews (visual, usability, code), then a full fix
-wave against those findings. It is feature-complete and green.
-
 ## 2. Where we are now
 
-As of the handoff commit: **697 tests passing, 0 failures, `clippy
+As of the handoff commit: **713 tests passing, 0 failures, `clippy
 --all-targets -- -D warnings` clean, `cargo fmt --check` clean.** Re-derive
 before trusting (§8).
 
-Everything in the design spec is implemented:
+**The second QA round is done and both verdicts flipped to "yes"** (first round
+was "no" on both). Reports are in `docs/qa/visual-review-2.md` and
+`docs/qa/usability-review-2.md`, written by two independent reviewers who drove
+the real binary in tmux and were forbidden to read the first round.
 
-- Foundation: `Canvas` contract, `text` width/wrapping primitives, `doc` AST,
-  `theme` with two built-ins plus TOML themes.
-- Renderers: inline, block, table (recursive Markdown in cells, natural-width
-  sizing, horizontal overflow), code with syntect mapped onto the mdless
-  palette.
-- All seven Mermaid families render: flowchart, sequence, class, ER, state,
-  pie, gantt. Class/ER/state sit on the shared graph engine without having
-  needed a single change to it.
-- Pager: horizontal scrolling (per-block widening via `tui::wide`), TOC pane,
-  search with literal/regex modes, scrollable help overlay, themes, config,
-  `--render-once` for headless/scripted use, `$PAGER`/stdin path.
-- README, spec, `docs/maintainer-notes.md`, three QA reports in `docs/qa/`.
+Landed this session, on top of the previous handoff's 697:
 
-**What is NOT verified:** the last workstream (`fix-tui`) ended without ever
-sending a status report, and its final uncommitted changes were committed by me
-sight-unseen at 67e135c (gate was green with them). So the pager's *polish*
-items — the ~15 smaller usability findings — are of unknown completeness. Some
-are demonstrably done (I drove them in tmux myself: horizontal scroll,
-non-destructive Esc, scrollable help, position report, status-bar separators).
-Others were never confirmed: theme background fill across TOC pane and
-overlays, TOC current-section tracking, `[toc] open` config field being read,
-SIGPIPE on `mdless x.md | head`, empty-document message, sticky TOC filter,
-search centring, SIGINT registration, startup performance on large documents,
-and whether `tui/icons.rs` still duplicates the eighth-block maths now that
-`canvas::meter` exists (and whether it has a display-width test — its twin in
-`render/glyphs.rs` had one and found a real bug through it).
+- **A real canvas-contract bug, found by the property test.** `cell_clusters`
+  split an over-wide grapheme cluster at the next *advancing* character, which
+  cut a ZWJ emoji sequence carrying a spacing mark in half: pieces claiming
+  2+2+1 columns for a cluster that draws 3. The pieces re-joined when written
+  into adjacent cells, so the row rendered two columns short while every
+  per-cell assertion passed. Split point is now chosen by measurement.
+- **`check_invariants` now measures the assembled row**, not only each cell.
+  That hole is why the bug reached a property test instead of a unit test.
+- **Nerd Font glyphs are detected, not assumed** — the user overturned the
+  original design decision (§7 of the previous handoff). Spec §2.1 records the
+  change on the record; read it before touching this.
+- **One unknown config setting no longer discards the whole file.** The second
+  usability review's highest finding, and the README's own example config
+  triggered it (`toc_open`/`toc_width` were never keys). A test now parses the
+  example straight out of `README.md`.
+- **The highlighter's cost guard measures the shape of the cost curve**, not a
+  wall-clock budget, so a loaded shared machine stops failing the gate.
 
-**Two QA agents (`qa-visual2`, `qa-use2`) were launched against this build and
-died before reporting.** That second review round is the single biggest open
-item — see §3.
+**The previous handoff's "unverified pager polish" list is now audited and is
+essentially all done.** Verified present in code: SIGINT/SIGTERM/SIGHUP
+registration (`tui/term.rs:46-50`), SIGPIPE (`main.rs`, `is_broken_pipe`),
+`[toc] open` read *and* consumed (`config.rs` → `main.rs:162` → `app.rs:171`),
+empty-document notice (`draw.rs:70`), TOC current-section tracking
+(`app.rs:409/560/909`), search centring (`reveal_centered`), sticky TOC filter,
+theme background fill across pane and overlays (`chrome.rs:55/537/588`).
+Startup measured at **0.31 s for a 300 KB / 6.4k-line document containing 34
+flowcharts**. `tui/icons.rs` had no display-width test — it does now, and the
+chrome/renderer glyph tables both enumerate their glyphs so detection derives
+from them.
 
 ## 3. Do this next
 
-1. **Re-run the second QA round.** Two fresh reviewers, one visual and one
-   usability, driving the real binary in tmux. Briefs: be ruthless, do NOT read
-   `docs/qa/` (those are the first round — you want independent eyes, not
-   confirmation of an existing list), and build to a **private**
-   `CARGO_TARGET_DIR` (see §4, trap 1). The first round's verdicts were both
-   "no"; the whole fix wave was aimed at moving them. Nobody has yet judged the
-   fixed build.
-2. **Audit the unverified pager polish list in §2** — cheapest as a single
-   agent owning `src/tui/**` that walks the list and reports done/not-done
-   before any new work is commissioned.
-3. **Ask the user about the icons default** (§7) — it is the one open product
-   question and two capable reviewers disagreed with the current answer.
+1. **The two MAJOR visual findings, both in diagram routing** — the only
+   substantial open defects. `docs/qa/visual-review-2.md` §1 (state-diagram edge
+   labels bisected by crossing wires) and §2 (two opposite-direction edges drawn
+   as one line, so the reader cannot see there are two). Both have captured
+   frames. These are graph-engine routing, so read
+   `src/mermaid/layout/graph/route*` and expect the fix to be in edge-lane
+   assignment rather than in any family's renderer.
+2. **The rest of `docs/qa/visual-review-2.md`** — findings 3-12, mostly MEDIUM
+   and LOW; the review ends with a suggested fix order, which is worth
+   following. Finding 3 (no gutter either side in the live TUI) is the one you
+   see every session.
+3. **The rest of `docs/qa/usability-review-2.md`** — findings 2-13. The cheap
+   high-value ones: `Esc` on a pending count cancels correctly but reports
+   "nothing to cancel" (a lie, in the one subsystem whose whole virtue is that
+   it never lies); `n`/`N` with no active search are silent; the help overlay
+   eats the next keypress in four different ways; the invalid-regex message is
+   truncated before the part that says what is wrong.
+4. A third visual reviewer (`qa-visual3`) may still be running and was told to
+   write `docs/qa/visual-review-2.md` — **which would overwrite the committed
+   report**. The committed version is safe in git; if the file is dirty, diff it
+   rather than assuming either side is the good one, and keep both as `-2` and
+   `-3` if the findings differ.
 
 ## 4. Lessons & traps ← the irreplaceable part
 
-1. **The shared `CARGO_TARGET_DIR` is the most expensive hazard in this
-   project.** `~/scratch/cargo-target` is shared, so with several agents
-   building concurrently: (a) test binaries go stale, so `cargo test` reports
-   results for code that is not on disk — symptoms include "0 passed, N
-   filtered out" while `--list` shows the tests present, and a finished module
-   reporting itself as an unimplemented stub; (b) the binary at
-   `debug/mdless` is *whichever agent built last*, so a visual check may be
-   showing you someone else's tree entirely; (c) a build race can replace the
-   rlib mid-rustdoc, making every doctest "fail" to compile. This bit or nearly
-   bit **every** agent, including the one who discovered it — twice, once badly
-   enough to report a regression that did not exist. Mitigation: give each
-   agent its own `CARGO_TARGET_DIR`, and `touch src/lib.rs && cargo build`
-   before regenerating a snapshot or believing a surprising result. One agent
-   nearly committed snapshots that silently reverted its own fixes this way.
-2. **False doc comments are the most dangerous defect class here.** The canvas
-   width bug survived the entire project behind a comment claiming the clamp
-   existed "so that the canvas contract cannot be violated" — it did the
-   opposite. A dead `pub fn` claimed "the viewport uses this for horizontal
-   scrolling"; it had no caller. `--help` advertised `--no-icons` as the
-   default after the default was reverted. **No test catches any of these.**
-   When you change behaviour, grep the prose.
-3. **One root cause reached four separate sites.** `grapheme_width` clamps a
-   cluster to ≤2 columns, but a wide base plus a *spacing* mark (category `Mc`,
-   not `Mn`) draws 3. Found in `Canvas::write_str`, `text::wrap`,
-   `truncate_to_width`, and `render/inline.rs` (where it dragged search spans
-   left of their own text — a user would report that as "search highlights the
-   wrong characters"). Treat any `grapheme_width`-based arithmetic as suspect.
-   `check_invariants` now asserts `display_width(cell.text()) == cell.width()`,
-   which is what makes the class findable at all.
-4. **Every duplication found was a missing shared operation, not a lazy
-   author** — and each workaround had quietly reintroduced a bug the shared
-   version did not have (three `align_offset` clones used bare subtraction
-   where the shared one saturates; two of them were latent panics). The tell
-   was `table.rs` importing a constant from `code.rs`: someone knew it should
-   be shared and had nowhere to put it. If you find duplication, add the op to
-   `src/canvas` or `src/text` rather than deduplicating in place.
-5. **Tests here have twice passed with *and* without their fix.** Two agents
-   caught this in their own work by deliberately disabling the fix and
-   confirming the test went red. Do that for every behavioural test. A code
-   reviewer separately found a snapshot test that was green and empty
-   (snapshotting a placeholder) and an assertion that was a tautology.
-6. **Agents go idle without reporting, constantly.** Silence means nothing.
-   Verify state yourself (`git status`, `wc -l`, run the binary) rather than
-   asking a third time. Conversely, **do not conclude an agent produced nothing
-   because the checkout looks empty** — one was working in a worktree; I wrote
-   it off, respawned its task, and the two collided, destroying the
-   replacement's work. `git worktree list` before writing anyone off.
-7. **Reviewer findings are wrong often enough to check.** Two were wrong on
-   contact with the code (a `.parse().ok()` that must stay `None` because it is
-   how the parser distinguishes a date from an id; a `NotImplemented` variant
-   that would have had no constructor). Both were caught by agents reading the
-   surrounding contract instead of applying the finding mechanically.
-8. **`git add -A` sweeps other agents' dirty files into your commits** — I
-   committed unformatted files this way and had to fix the fmt gate afterwards,
-   and committed one agent's work mid-edit. It is the right default when you
-   are the only committer, but check `git status` first.
-9. **Do not hand-edit insta snapshots.** I stripped `assertion_line:` metadata
-   trying to accept some by hand and turned 6 failures into 7. Use
-   `INSTA_UPDATE=always cargo test --test <target>`, and **review each diff** —
-   blind acceptance is how a regression becomes an expectation.
+1. **The shared `CARGO_TARGET_DIR` is still the most expensive hazard here.**
+   `~/scratch/cargo-target` is shared, so with several agents building: test
+   binaries go stale and `cargo test` reports results for code not on disk;
+   `debug/mdless` is whichever agent built last, so a visual check may show you
+   someone else's tree; a build race can replace the rlib mid-rustdoc. Give
+   every agent its own `CARGO_TARGET_DIR` — every brief in this project now
+   says so — and `touch src/lib.rs && cargo build` before believing a surprising
+   result.
+2. **Never read a gate's result through a pipe.** I ran
+   `cargo test 2>&1 | tail -40`, got exit 0 from `tail`, and reported the suite
+   green when it had a failure. The failure was a real latent bug. Use
+   `${PIPESTATUS[0]}`, or grep the summary lines and total them. This is the
+   single cheapest mistake available in this repo and it hides exactly the
+   findings you most want.
+3. **A green property test proves nothing about the run you didn't do.**
+   `render_property` is randomly seeded, so the ZWJ bug had been latent through
+   the entire project and surfaced on one run. The durable artifact is
+   `tests/render_property.proptest-regressions` — when it grows, **commit the
+   new seed with the fix**, and treat any suite that mysteriously fails once as
+   a real finding rather than a flake.
+4. **False doc comments remain the most dangerous defect class.** The ZWJ bug
+   sat behind a comment claiming ZWJ sequences were "untouched" and that
+   splitting moved the accounting "from a lie to the truth" — both false, in the
+   exact case that broke. Earlier instances: a clamp documented as upholding the
+   contract it violated, a dead `pub fn` with a claimed caller, `--help`
+   advertising a reverted default. **No test catches any of these.** When you
+   change behaviour, grep the prose — and prefer rules stated as *measurements*
+   over rules stated as *lists of cases*, because the list is what goes stale.
+5. **Per-item invariants do not add up to a whole-object invariant.** Every cell
+   was honest and the row was still short. If you add a check, ask what it
+   cannot see; the assembled-row check now in `check_invariants` is that lesson
+   made executable.
+6. **Tests here have passed with *and* without their fix, more than once.**
+   Prove every behavioural test red before you fix. I did this for the ZWJ fix;
+   for the new assembled-row check the proof came from having *seen*
+   `check_invariants` return `ok` on the broken row before the change.
+7. **Agents go silent, and they also finish the minute after you write them
+   off.** I checked for `qa-visual2`'s report, saw nothing, confirmed an idle
+   target dir, and respawned it — it had delivered one minute later, and the
+   replacement was pointed at the same output path and would have overwritten
+   it. **Back the deliverable up before respawning anything**, and prefer giving
+   a replacement a different output path. The previous handoff's version of this
+   lesson (an agent working in a worktree looked like it had produced nothing)
+   is the same trap from the other side.
+8. **Reviewer findings are wrong often enough to check — and your own changes
+   can destroy the evidence they were built on.** The usability review proved
+   the config bug by comparing Nerd vs plain glyphs; on my branch that
+   comparison no longer discriminated, because I had just made glyph use
+   auto-detected and `--render-once` to a pipe now picks plain. The finding was
+   real; the reproduction had to be redone another way. Re-verify against the
+   tree you actually have.
+9. **`git add -A` sweeps unrelated work into your commit.** It put the perf-test
+   rewrite inside the config-fix commit, whose message said nothing about it; I
+   split it back out. Check `git status` and stage by path.
+10. **A wall-clock budget on a shared 128-core box is a coin flip.** The
+    highlighter guard failed at 47 s against a 40 s budget on load average 47,
+    having passed an hour earlier on the same commit. Its author already knew
+    the machine was shared and had set the bound generously — no absolute bound
+    is generous enough. Measure a ratio, not a duration.
+11. **Every duplication found has been a missing shared operation.** If you find
+    duplication, add the op to `src/canvas` or `src/text` rather than
+    deduplicating in place. Related: `Glyphs::language()` became a table rather
+    than a `match` specifically so the icons could be *enumerated*, which is
+    what lets font detection derive its probe from the glyphs that actually
+    draw. Any second hand-written list of the same code points would drift.
+12. **Do not hand-edit insta snapshots.** Use
+    `INSTA_UPDATE=always cargo test --test <target>` and review each diff.
 
 ## 5. Don'ts & constraints
 
-- **No HTML.** Raw HTML is not rendered and not passed through. Settled in the
-  original design Q&A.
+- **No HTML.** Not rendered, not passed through. Settled in the design Q&A.
 - **Mermaid is Unicode box art only**, never raster. Settled the same way.
-- **Nerd Font glyphs are the default** (`--no-icons` is the escape hatch).
-  Settled explicitly in the design brief and spec §2 — but see §7, this is the
-  one I would reopen with the user.
+- **Nerd Font glyphs are DETECTED, not defaulted on** — changed by the user on
+  2026-08-09 and recorded in spec §2.1 with its reasoning. The previous handoff
+  said the opposite; that is the superseded position. Detection answers "yes"
+  only on positive evidence and falls back to plain whenever it cannot tell.
+  **Do not "fix" it back to an unconditional default.**
 - **`Esc` never quits.** It unwinds count → search → TOC filter → TOC focus →
   TOC pane, then says `nothing to cancel — press q to quit`. The spec was
-  changed to match the implementation, not the reverse.
-- **Do not widen the `NodeArt` seam.** One method, `render(node, budget, theme)
-  -> Canvas`, measuring and painting in one call so they cannot drift. Four
-  families were built on it without changing it. When the engine needed to know
-  about compartment rules, reading them back off the drawn canvas was cheaper
-  and more general than a new method.
-- **Gantt state is carried by colour alone.** Reintroducing per-state fill
-  densities reintroduces the finding that the *default* state became the least
-  visible thing on the page.
+  changed to match the implementation, not the reverse. (The pending-count step
+  reports the wrong message — see §3.3 — but the *behaviour* is right.)
+- **Do not widen the `NodeArt` seam.** One method,
+  `render(node, budget, theme) -> Canvas`, measuring and painting in one call so
+  they cannot drift. Four families were built on it without changing it.
+- **Gantt state is carried by colour alone.** Per-state fill densities made the
+  default state the least visible thing on the page.
 - **No 1000-node golden snapshot** (spec §13.2 records why): a diff nobody can
-  read gets rubber-stamped and manufactures false confidence. Scale is covered
-  by property tests.
+  read gets rubber-stamped. Scale is covered by property tests.
 - 4-core cap on this machine: `CARGO_BUILD_JOBS=2` on every cargo invocation.
 
 ## 6. Where the detail lives
 
-- Change history: `git log 67e135c..HEAD`, and `git log --oneline` for the
-  ~20-commit build.
+- Change history: `git log ba9eeae..HEAD`, and `git log --oneline` for the build.
 - **Design spec (the authority):** `docs/superpowers/specs/2026-08-08-mdless-design.md`
-  — §3 the central rule, §4 Canvas contract, §6 per-family Mermaid subsets,
-  §7 tables, §10 keys, §13 testing.
-- **Maintainer notes (judgment, not task state):** `docs/maintainer-notes.md`
-  — the engine seam, the cell-width contract, why gantt is colour-only, the two
-  verification traps.
-- **First-round QA reports:** `docs/qa/visual-review.md`,
+  — §2.1 the icons decision and why it changed, §3 the central rule, §4 Canvas
+  contract, §6 per-family Mermaid subsets, §7 tables, §10 keys, §13 testing.
+- **Maintainer notes (judgment):** `docs/maintainer-notes.md` — the engine seam,
+  the cell-width contract, why gantt is colour-only.
+- **QA, second round (current):** `docs/qa/visual-review-2.md`,
+  `docs/qa/usability-review-2.md`. Both verdicts "yes"; both end with what works
+  well, which is the list of things not to break.
+- **QA, first round (historical):** `docs/qa/visual-review.md`,
   `docs/qa/usability-review.md`, `docs/qa/code-review.md`. Both user-facing
-  verdicts were "no". Most findings are fixed; they are the record of what
-  "harsh enough" looks like for this project.
-- `README.md` — key map is generated from the live binding table, so it cannot
-  drift from the help overlay or the code.
+  verdicts were "no". Mostly fixed; kept as the record of what "harsh enough"
+  looks like here.
+- `README.md` — key map generated from the live binding table, and the second
+  usability review verified that claim by rebinding keys and watching the
+  overlay change. The config example is now covered by a test.
 
 ## 7. Open questions / pending decisions
 
-1. **The icons default.** Nerd Font glyphs are on by default, per the explicit
-   design decision. But two capable agents independently argued for
-   plain-Unicode-by-default, because you cannot ask a terminal whether it has a
-   patched font, so most first runs on an unpatched terminal show holes where
-   heading markers and task boxes should be. One of them flipped the default
-   and I overruled it on the grounds that the decision was already settled on
-   the record. **This is the user's call and worth putting to them plainly.**
-2. **Whether the pager polish list in §2 is actually done.** Unknown, not
-   unresolved — it needs an audit, not a decision.
-3. `src/render/glyphs.rs` has a display-width test for its icon set;
-   `src/tui/icons.rs` does not, and `tui/chrome.rs` sizes the status bar with
-   `display_width`, so one double-width icon would shift every right-hand
-   segment. The render-side twin found a real bug through exactly this test.
+1. **Nothing is blocked on the user.** The three questions the previous handoff
+   raised were put to them on 2026-08-09 and answered: detect-and-fall-back for
+   icons (done), run the second QA round (done), leave the stale worktrees
+   (done — leave them).
+2. **Whether `fc-list` is the right probe on macOS.** It is normally absent
+   there, so detection falls back to plain and every Mac user needs
+   `MDLESS_ICONS=1` or `icons = true`. That is safe but pessimistic, and nobody
+   has tested it on a Mac. A `TERM_PROGRAM`-based signal could help; it was
+   deliberately not added, because guessing from the terminal's *name* is the
+   category-enumeration mistake §4.4 warns about.
+3. Nothing has been pushed to any remote in this session — re-derive with
+   `git status -sb` and `git log --oneline @{u}..` rather than believing this
+   sentence.
 
 ## 8. Staleness watch
 
-- The §2 test count and gate status reflect commit 67e135c. **Re-run**:
-  `export CARGO_TARGET_DIR=/scratch/oetiker/cargo-target-mdless-lead && touch src/lib.rs && CARGO_BUILD_JOBS=2 cargo test`.
-- The §2 "not verified" list is my inference from an agent that never reported,
-  not a tested claim. Some of it may well be done.
-- **Integration state must be re-derived, never inherited.** Whether this
-  branch is merged, pushed or superseded is not knowable from this file:
+- The §2 test count and gate status reflect ba9eeae. **Re-run**:
+  `export CARGO_TARGET_DIR=/scratch/oetiker/cargo-target-mdless-lead && touch src/lib.rs && CARGO_BUILD_JOBS=2 cargo test`
+  — and read the exit code, not the tail of a pipe (§4.2).
+- §2's polish audit is a *code* audit: I confirmed each item exists and is
+  wired, not that each behaves perfectly under a user's fingers. The second
+  usability review drove most of them and was satisfied; where the two
+  disagree, believe the review.
+- `docs/qa/visual-review-2.md` may be overwritten by a still-running reviewer
+  (§3.4). Check `git status` before reading it as gospel.
+- **Integration state must be re-derived, never inherited.**
   `git merge-base --is-ancestor HEAD main`, `git log --oneline HEAD..main`,
-  `git branch -a --contains HEAD`. If this branch is merged, stop reading and
-  go to the successor's handoff.
-- **Sibling worktrees / other workstreams may exist that this file cannot
-  name** — anything started after the handoff commit is invisible here.
+  `git branch -a --contains HEAD`.
+- **Sibling worktrees or workstreams started after this commit are invisible
+  here.** `git worktree list`.
