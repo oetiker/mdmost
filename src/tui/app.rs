@@ -344,8 +344,24 @@ impl App {
     /// width, which also counts the right-hand margin past it: scrolling into that
     /// margin moves nothing, and a readout that counted it would promise columns
     /// there is nothing to see in.
+    ///
+    /// The document is drawn in [`super::draw::Offsets::content`] columns, not in the
+    /// whole viewport: one column on each side is the rail the edge markers are painted
+    /// in, so that they never stand on a column of the document. A maximum measured
+    /// against the viewport would stop the reader one column short of the far edge of a
+    /// wide block — and, being what [`App::clamp`] clamps to, would do it silently.
     pub fn hscroll_max(&self) -> u16 {
-        self.cache.max_reach().saturating_sub(self.viewport_width())
+        self.cache
+            .max_reach()
+            .saturating_sub(self.content_columns())
+    }
+
+    /// How many columns of the viewport the document itself is drawn in.
+    ///
+    /// The same arithmetic [`super::draw::Offsets`] paints with; see its `content`.
+    fn content_columns(&self) -> u16 {
+        let viewport = self.viewport_width();
+        viewport.saturating_sub(crate::render::margins(viewport))
     }
 
     /// How far each row of the rendered document may be scrolled sideways.
