@@ -9,9 +9,11 @@
 > forward any lesson in §4/§5 that is still true. Fresh synthesis, not blank
 > page.
 
-Handoff commit: 5ac8a5f   Date: 2026-08-09   Reason: context budget
+Handoff commit: see `git log -1` — this file is rewritten in place; the last
+commit touching it is the marker.   Date: 2026-08-09   Reason: context budget
 Worktree / branch: main checkout (/home/oetiker/checkouts/mdless) @ main
-Trunk at time of writing: `main` @ 5ac8a5f — this IS trunk. **Re-derive anyway.**
+Trunk at time of writing: `main`, with all of Stage 1 and Stage 2 merged — this
+IS trunk. **Re-derive anyway.**
 Sibling worktrees: **three implementer worktrees were live when this was
 written** (Stage 1a/1b/1c of the wide-diagram work, see §3), created by
 `isolation: worktree` subagents and therefore under
@@ -41,60 +43,74 @@ on mechanics; they want to be told when it is done and the reviewers are happy.
 
 ## 2. Where we are now
 
-Three findings from `docs/qa/visual-review-3.md` are fixed and on trunk:
+**The wide-diagram workstream is essentially done.** 755 tests, 24 suites, all
+green with the exit code read directly; clippy `-D warnings` clean; `fmt
+--check` clean. **Re-derive** — see §8.
 
-- **§1 SEVERE** — a seven-node `flowchart LR` dumped raw source below 92
-  columns. Now draws from ~76 at the fence, ~59-62 inner (`89e9c54`).
-- **§12 MEDIUM** — the too-narrow caption restated the width you already had.
-  Now names a floor (`7de4506`). **A later review showed the floor, while
-  honest, is badly wrong in size** — see §3.
-- **§15 SEVERE** — no left margin or right gutter in the live TUI, the one
-  finding both visual reviewers agreed on (`9409229`). The pager assembles its
-  own blocks in `tui::wide::render_scrollable` and had silently dropped the
-  inset `render_document` documents.
+Landed, in order:
 
-Gates at `9409229`: 717 tests, 22 suites, all green with the exit code read
-directly; clippy `-D warnings` clean; `fmt --check` clean. **Re-derive.**
-
-Since then, trunk carries only docs: the spec for the next feature and its
-revision after review.
+- **§1, §12, §15 of `visual-review-3.md`** (`89e9c54`, `7de4506`, `9409229`) —
+  the flowchart that dumped source at 80 columns, the caption that restated the
+  width you already had, and the pager's missing side margins.
+- **Stage 1a, monotone fit** (`351af4b`) — a floor probe at (gap 1, budget 6)
+  plus budget bisection after the ladder exhausts. A wider terminal can no
+  longer make a diagram disappear, and `TooNarrow.needed` is now the EXACT
+  narrowest width that draws.
+- **Stage 1b, the scroll model** (`bba73f3`) — per-run offsets, so the block
+  that is wide scrolls and the page does not; `g`/`Home` resets both axes;
+  `↔ n/N` shows at rest.
+- **Stage 1c, frame closing** (`d3ecb7f`) — a cut rule ends in its own corner
+  instead of a chevron, in the renderer *and* at the viewport edge.
+- **Stage 2, the feature** (`899156b`, `19cb74a`) — a diagram too wide for the
+  pane is drawn at the width it needs and reached by scrolling, capped at 3×
+  viewport and 8 probes, with a minimum surplus.
+- **The Stage 1 review's three defects** (`65a4b2d`) — quoted prose dragged by a
+  wide block inside a blockquote; the `↔` chip dropped at 40 columns for a long
+  file name; the right-edge chevron invisible behind a double-width glyph.
+- **An indivisible grapheme wider than a cell** (`01622b6`) — U+17D8, the only
+  scalar in Unicode wider than two columns, could reach `Cell::new` and break
+  the grid. Found by the property test, on a seed now committed with its fix.
+- **The pager outliving its terminal** (`0fd645a`, `32d654a`) — reported from
+  the wild by the user, who had to kill processes eating a core each.
 
 ## 3. Do this next
 
-The active workstream is
-`docs/superpowers/specs/2026-08-09-wide-diagram-scrolling-design.md`
-(**read revision 2, not revision 1** — revision 1 is in git and is wrong in
-four ways the reviews found). It began as "let diagrams side-scroll instead of
-dumping source" and two hostile design reviews turned it into a sequence.
+**In flight at this commit:** one agent pinning the line-number gutter so it
+stops scrolling off to the left (the user asked for this explicitly). Check
+`git worktree list` and `git branch -a` before assuming it is unmerged.
 
-**Stage 1, dispatched to three subagents in worktrees at this commit:**
+**Then the remaining `visual-review-3.md` findings**, which are now the largest
+untouched body of work:
 
-1. **1a — budget bisection.** Fit is non-monotone in width (draws at 63, fails
-   at 64, draws at 65) because `graph.rs` computes `budget = (width/share)` and
-   never uses *less* budget than a rung grants. Fix: a ninth step after the
-   ladder exhausts, bisecting on budget. Runs only on exhaustion, so everything
-   that draws today must stay byte-identical.
-2. **1b — the horizontal scroll model.** Scrolling drags the *whole page*: one
-   wide block scrolls the H1 off-screen and cuts every paragraph mid-word, and
-   `g`/`Home`/`0`/`^` all fail to return. Plus `↔ n/N` only appears after you
-   have already scrolled, and help/README say the arrows are for "wide tables
-   and code".
-3. **1c — chevrons on border rows** (`visual-review-3.md` §11), which make a
-   clipped table's frame never close. Promoted from "out of scope" because
-   these chevrons become the primary signal that a wide diagram continues.
+1. **§16 SEVERE — heading hierarchy is carried almost entirely by hue**, so
+   every heading is *dimmer* than the body text it introduces, and the light
+   theme's six-level ramp measured flat (4.80 → 4.95 → 4.86:1). `visual-review-2.md`
+   §4 independently found levels 4-6 indistinguishable. `tests/theme_headings.rs`
+   exists and is the place to assert a monotone ramp with measured ratios.
+   This is the finding most likely to change how the tool *feels*.
+2. **Diagram routing** — §2 connectors attaching off-centre or at box corners,
+   §3 rounded elbows mixed with square boxes, §8 and §9 duplicated edge labels in
+   ER and state diagrams. Expect the fixes in edge-lane assignment under
+   `src/mermaid/layout/graph/route*`.
+3. **`usability-review-2.md` findings 2-13** — cheap and high value: `Esc` on a
+   pending count cancels correctly but reports "nothing to cancel" (a lie, in the
+   one subsystem whose virtue is that it never lies); `n`/`N` are silent with no
+   active search; the help overlay eats the next keypress four ways.
 
-**Stage 2 is the feature itself** and must not start until 1a and 1b land: the
-`render::diagram` seam returning `(width, Canvas)` (returning only the width
-lays out every fitting diagram twice, +43 % startup), a width cap of ~3×
-viewport (one 929-column diagram costs 7× peak RSS because `Canvas::append`
-pads every row of the document), a probe cap of 8 (`pie` reports no floor and
-would linear-scan to 2048), a minimum surplus (never give the page a scrollbar
-to gain one column), and the ladder split described below.
+**Known, recorded, not fixed:**
 
-**After Stage 2, still open from `visual-review-3.md`:** §16 SEVERE (heading
-hierarchy carried by hue; light theme's six-level ramp measured flat at
-4.80→4.95→4.86:1 — `tests/theme_headings.rs` exists to extend), the diagram
-routing findings (§2, §3, §8, §9), and `usability-review-2.md` findings 2-13.
+- A widened CJK **table** appears to render differently with and without an
+  active search at the same offset, reproducibly. Two agents hit it and neither
+  could settle whether it is `highlight_matches` patching styles onto
+  continuation cells or a tmux grid artifact. **Needs a real terminal.**
+- Search finds a horizontally off-screen match and does not scroll to it.
+  Pre-existing; per-row offsets make it more reachable.
+- Nested diagrams (in a list or blockquote) are never widened, while nested
+  *tables* are — the same fence behaves differently indented two spaces.
+  Accepted for v1 and recorded in the feature spec's "Out of scope".
+- Mermaid subgraph titles truncate with no marker at all (`╭ Outer bounda╮`).
+- The residual race in the hangup fix: if the terminal dies between our `poll`
+  and crossterm's read, the old spin is still reachable. Documented at the code.
 
 ## 4. Lessons & traps ← the irreplaceable part
 
@@ -166,7 +182,29 @@ routing findings (§2, §3, §8, §9), and `usability-review-2.md` findings 2-13
     should say so.** Review B was briefed to argue that scrolling an LR diagram
     would be incoherent, tried it, found it reads as a filmstrip, and reported
     that instead. Brief for hostility, not for a predetermined conclusion.
-16. **Do not hand-edit insta snapshots.** `INSTA_UPDATE=always cargo test --test
+17. **Ask a reviewer to refute your diagnosis, not to implement it.** I told an
+    agent the CPU spin was inside crossterm's `read()`, with reasoning. It was
+    inside `poll()`, and the agent proved it with an instrumented probe before
+    fixing anything. The brief said "confirm or refute, I would rather be
+    corrected than have you implement around a wrong theory" — that sentence is
+    why the fix is correct. Put it in every brief where you are guessing.
+18. **A test can be green for a reason that has nothing to do with the code.**
+    The hangup test had two false greens before it was trustworthy: `openpty`
+    returns inheritable fds, so two tests in parallel each inherited the other's
+    *master* and neither pty ever hung up; and when the test stopped draining
+    the pty, the pager blocked in `write` and the test passed while the defect
+    was untouched. Ask what would make this test pass with the bug present.
+19. **Prefer a ratio against a physical constant over a wall-clock bound.** The
+    hangup test asserts the pager burned fewer than 50 jiffies, because a
+    spinner burns 100 per second. That holds on a loaded 128-core box where any
+    absolute timeout is a coin flip (§4.10 is the same lesson from the other
+    direction).
+20. **When you enumerate a class, enumerate it exhaustively if you can.** The
+    U+17D8 fix checked all 0x110000 scalars against the shipped
+    `unicode-width` and established it is the *only* scalar wider than two
+    columns. That turns "we fixed the reported character" into "we closed the
+    class", and it is the antidote to §4.4's list-of-cases failure mode.
+21. **Do not hand-edit insta snapshots.** `INSTA_UPDATE=always cargo test --test
     <target>`, and review each diff — the diff is the check on the fix.
 
 ## 5. Don'ts & constraints
