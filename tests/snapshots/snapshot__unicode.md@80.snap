@@ -52,7 +52,7 @@ expression: canvas.plain_text()
  Control-ish and unusual                                                        
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
- A tab	between words. A form feed is not included because it is not text.       
+ A tab between words. A form feed is not included because it is not text.       
  Surrogate-free astral text: 𝕳𝖊𝖑𝖑𝖔 𝖜𝖔𝖗𝖑𝖉 and 𝟙𝟚𝟛. Enclosed alphanumerics: ⑴ ⒜   
  ㊙ ㈱.                                                                         
                                                                                 

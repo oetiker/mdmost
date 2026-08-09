@@ -60,6 +60,50 @@ consumer of the grid assumes 0/1/2.
 That clamp was found in three separate places over the project's life. Treat any
 arithmetic built on `grapheme_width` as suspect until checked.
 
+A cell also holds **no control character**. That is the same contract read the other way
+round: `width` is a claim about what the *terminal* draws, and a control character is an
+instruction rather than a glyph. `unicode-width` prices every Unicode `Cc` character at
+one column, so a literal `TAB` in a paragraph passed every check in the program while the
+terminal jumped to the next tab stop and drew the row some six columns wider than it was
+laid out at; an `ESC` would have let a document write an escape sequence straight to the
+reader's screen. `cell_clusters` substitutes one column of real text for each — a space
+for the whitespace controls, `text::UNPLACEABLE` for the rest — and both `Cell::new` and
+`check_invariants` reject any that gets past it. Tabs *inside a code block* are still
+expanded to real tab stops by `highlight::expand_tabs`, which runs before anything
+measures the line; that is the only place a tab's alignment carries information, and the
+only place there is a column to expand it against.
+
+## What the terminal draws is not always what `unicode-width` says
+
+Investigated 2026-08-09 after a review reported emoji overflowing a 100-column pane and
+corrupting the scrollbar, diagnosed there as "VS16 presentation sequences measured 1,
+drawn 2". **That diagnosis is wrong**, and the measurements are worth keeping because the
+next person will suspect the same thing. Under `unicode-width` 0.2.2, and probed against
+tmux 3.4 by printing sixty copies into a 100-column pane and seeing which row the text
+wrapped onto:
+
+| Glyph | `display_width` | tmux 3.4 draws |
+|---|---|---|
+| `❤` `✔` `⚠` bare (text presentation) | 1 | 1 |
+| `❤️` `✔️` (VS16), `1️⃣` `#️⃣` (keycap) | 2 | 2 |
+| `☕` `✅` `👍` `👍🏽` (skin tone), `👩‍💻` (two-person ZWJ) | 2 | 2 |
+| `🇨🇭` regional-indicator flag | 2 | **1** |
+| `👨‍👩‍👧‍👦` four-person ZWJ sequence | 2 | **≈4** |
+
+So variation selectors are measured correctly and drawn correctly. The two rows that do
+not line up are both tmux 3.4 failing to treat an *extended grapheme cluster* as one
+cell — it clusters a two-person ZWJ sequence and stops there, and it does not cluster a
+flag at all. tmux 3.5 added extended grapheme cluster support; terminals that do their
+own clustering (kitty, foot, WezTerm) draw both at two columns, which is what we measure
+and what UTS #51 says.
+
+**Deliberately not fixed.** An override table pinning a flag at one column and a family
+at four would make `mdless` correct on tmux 3.4 and wrong everywhere else, and wrong in
+the direction that cannot be recovered — the canvas would then be lying about its own
+width. The honest position is that the canvas is right and the terminal is behind. If it
+has to be worked around one day, the workaround belongs behind a terminal capability
+probe, not in `src/text`.
+
 ## The shared layer is where shared logic goes
 
 `src/text` and `src/canvas` own grapheme-safe width arithmetic, wrapping, truncation,

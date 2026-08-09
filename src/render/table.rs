@@ -162,10 +162,14 @@ fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Layout {
     for (index, row) in drawn.iter().enumerate() {
         out.append(&row.canvas, ctx.base);
         let next = drawn.get(index + 1);
-        // The rule under the header is drawn even when no body row follows: a header
-        // resting straight on the bottom border reads as a broken box, not as an
-        // empty table.
-        let last_header = row.header && !next.is_some_and(|next| next.header);
+        // The rule under the header separates the header from the body, so it is drawn
+        // only when there *is* a body. **Changed 2026-08-09:** it used to be drawn
+        // unconditionally, on the argument that a header resting straight on the bottom
+        // border reads as a broken box. It is the other way round — a `├───┤` with a
+        // `╰───╯` directly beneath it is two rules with nothing between them, which is
+        // the box art for an empty row, and three reviews read it as broken. A header
+        // above the bottom border reads as a one-row table, which is what it is.
+        let last_header = row.header && !next.is_some_and(|next| next.header) && next.is_some();
         if last_header {
             rules.push((out.height(), Rule::Middle));
             out.append(

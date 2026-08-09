@@ -50,10 +50,7 @@ expression: canvas.plain_text()
  │▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│  
  │ link          │ a link            │  
  │▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄│  
- │ image         │ ╭ image ────────╮ │  
- │               │ │ alt           │ │  
- │               │ │ p.png         │ │  
- │               │ ╰───────────────╯ │  
+ │ image         │ ⟨alt⟩             │  
  │▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│  
  │ a list        │ one               │  
  │               │ two               │  
@@ -100,7 +97,6 @@ expression: canvas.plain_text()
                                         
  ╭───────────────╮                      
  │ only a header │                      
- ├───────────────┤                      
  ╰───────────────╯                      
                                         
  Wider than eighty columns — must       

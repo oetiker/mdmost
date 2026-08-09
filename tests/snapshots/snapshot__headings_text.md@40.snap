@@ -59,12 +59,8 @@ expression: canvas.plain_text()
  (https://example.com/collapsed), a     
  shortcut reference                     
  (https://example.com/shortcut), an     
- ╭ image ─────────────────────────────╮ 
- │ inline image                       │ 
- │ small.png                          │ 
- ╰────────────────────────────────────╯ 
- and a hard break at the end of this    
- line,                                  
+ ⟨inline image⟩ and a hard break at the 
+ end of this line,                      
  which continues here after a backslash 
  break, and here after two spaces,      
  which is the other spelling.           

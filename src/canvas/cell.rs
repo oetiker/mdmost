@@ -29,6 +29,11 @@ use crate::theme::Style;
 /// * A cell whose text is non-empty always has `width == grapheme_width(text)` for its
 ///   leading cluster; zero-width clusters (combining marks) are appended to the text
 ///   of the cell they modify rather than getting a cell of their own.
+/// * A cell holds no control character. `width` describes what the *terminal* will
+///   draw, and a control character is an instruction rather than a glyph: a `TAB`
+///   measures one column and draws up to eight, an `ESC` measures one column and draws
+///   whatever the sequence behind it says. `cell_clusters` substitutes a printable
+///   column of the same width for each of them.
 ///
 /// The invariants are maintained by [`Canvas`](crate::canvas::Canvas); construct cells
 /// through the constructors below rather than by hand.
@@ -67,6 +72,11 @@ impl Cell {
         debug_assert!(
             crate::text::display_width(cluster) <= 2,
             "a cell cannot hold {cluster:?}: split it with text::cell_clusters first"
+        );
+        debug_assert!(
+            !cluster.chars().any(char::is_control),
+            "a cell cannot hold the control character in {cluster:?}: split it with \
+             text::cell_clusters first, which substitutes one for a printable column"
         );
         Self {
             text: CompactString::new(cluster),

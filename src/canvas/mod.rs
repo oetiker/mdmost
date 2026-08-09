@@ -374,6 +374,21 @@ impl Canvas {
                 // aspirational: without it a clamped over-wide cluster reports two
                 // columns while drawing three, and every row containing one is a
                 // column too wide.
+                // A control character measures one column and draws something else
+                // entirely — a TAB jumps to the next tab stop, an ESC opens a sequence
+                // that can repaint the screen — so every check in this function agrees
+                // that the row is exact while the terminal draws it wider. The width
+                // guarantee is a guarantee about the *terminal*, so a control character
+                // in a cell is a violation of it even though the arithmetic adds up.
+                // `text::cell_clusters` substitutes a printable column for each one.
+                if let Some(ch) = cell.text().chars().find(|ch| ch.is_control()) {
+                    return Err(format!(
+                        "row {index}: cell {:?} carries control character U+{:04X}, \
+                         which the terminal will not draw as one column",
+                        cell.text(),
+                        u32::from(ch)
+                    ));
+                }
                 let drawn = display_width(cell.text());
                 if drawn != usize::from(cell.width()) {
                     return Err(format!(

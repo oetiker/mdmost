@@ -38,12 +38,8 @@ expression: canvas.plain_text()
  tick, a plain link (https://example.com), a titled link (https://example.com), an autolink                             
  https://example.org/a/fairly/long/path/segment/here, a bare autolink https://example.net/bare, an email autolink       
  nobody@example.com, a reference link (https://example.com/reference), a collapsed reference                            
- (https://example.com/collapsed), a shortcut reference (https://example.com/shortcut), an                               
- ╭ image ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
- │ inline image                                                                                                       │ 
- │ small.png                                                                                                          │ 
- ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ 
- and a hard break at the end of this line,                                                                              
+ (https://example.com/collapsed), a shortcut reference (https://example.com/shortcut), an ⟨inline image⟩ and a hard     
+ break at the end of this line,                                                                                         
  which continues here after a backslash break, and here after two spaces,                                               
  which is the other spelling.                                                                                           
                                                                                                                         

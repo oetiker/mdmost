@@ -106,13 +106,18 @@ pub(crate) fn render_sequence(nodes: &[Node], width: u16, ctx: Ctx<'_>, spaced: 
 
 /// Whether a node belongs to an inline run rather than being a block of its own.
 ///
-/// An image is deliberately *not* inline: it becomes a framed placeholder box
-/// (design spec §2). Inline HTML is, so that its collapsed marker stays in the
-/// sentence it was dropped from.
+/// An image is inline, so that its bracketed alt text stays in the sentence it was
+/// written in — as is inline HTML, so that its collapsed marker does. **Changed
+/// 2026-08-09**: an image used to be a block whatever it was written in, which cut
+/// every sentence containing one into three blocks with a full-width box between
+/// them. An image that is a paragraph of its own still gets that box; [`paragraph`]
+/// is the one place that decides so, because it is the only place that can see the
+/// image is alone.
 pub(crate) fn is_inline(node: &Node) -> bool {
     matches!(
         node.kind,
         NodeKind::Text(_)
+            | NodeKind::Image { .. }
             | NodeKind::SoftBreak
             | NodeKind::LineBreak
             | NodeKind::Code { .. }
@@ -187,11 +192,34 @@ pub(crate) fn heading(node: &Node, level: u8, id: &str, width: u16, ctx: Ctx<'_>
 
 /// A paragraph.
 ///
-/// An image that is a direct child of the paragraph becomes a framed placeholder box
-/// of its own (design spec §2), splitting the paragraph around it; images nested
-/// deeper degrade to their alt text, which the inline renderer handles.
+/// A paragraph that is *nothing but* an image becomes the framed placeholder box design
+/// spec §2 asks for. An image with words around it does not: it stays in the sentence as
+/// a bracketed alt text, which the inline renderer draws. The distinction is taken here
+/// because this is the only renderer that can see whether the image is alone — the
+/// inline renderer sees one node at a time, and the block dispatcher sees an image
+/// without its siblings.
 fn paragraph(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
+    if let Some(image) = sole_image(node) {
+        return render_block_ctx(image, width, ctx);
+    }
     render_sequence(&node.children, width, ctx, false)
+}
+
+/// The image a paragraph consists of, if an image is all it consists of.
+///
+/// Whitespace and the line breaks between `![a](b)` and the end of its line are not
+/// content; anything else is, and makes the image part of a sentence.
+fn sole_image(node: &Node) -> Option<&Node> {
+    let mut image = None;
+    for child in &node.children {
+        match &child.kind {
+            NodeKind::Image { .. } if image.is_none() => image = Some(child),
+            NodeKind::Text(text) if text.trim().is_empty() => {}
+            NodeKind::SoftBreak | NodeKind::LineBreak => {}
+            _ => return None,
+        }
+    }
+    image
 }
 
 /// A block quote, drawn with a coloured gutter bar that shifts hue with nesting depth.
@@ -266,7 +294,12 @@ const QUOTE_GUTTER: u16 = 2;
 /// resize re-renders and re-decides rather than serving a stale choice.
 fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
     let inner = ctx.in_list();
-    let field = marker_field(&node.children, info);
+    let field = marker_field(&node.children, info, ctx);
+    let boxes = if info.ordered {
+        task_field(&node.children, ctx)
+    } else {
+        0
+    };
     let indent = u16::try_from(field).unwrap_or(u16::MAX).min(width);
     // Rendered up front because the spacing decision needs every item's drawn height
     // before the first item can be placed. No item is rendered twice.
@@ -278,7 +311,7 @@ fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
     let spaced = !info.tight || items.iter().any(|item| item.height() > 1);
     let mut out = Canvas::empty(width);
     for (index, (item, content)) in node.children.iter().zip(&items).enumerate() {
-        let marker = marker_line(item, info, index, field, ctx);
+        let marker = marker_line(item, info, index, field, boxes, ctx);
         let part = hanging(&marker, content, ctx.base);
         if spaced && !out.is_empty() {
             out.push_blank_row(ctx.base);
@@ -289,43 +322,102 @@ fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> Canvas {
 }
 
 /// How many columns the marker column of a list occupies, including its trailing space.
-fn marker_field(items: &[Node], info: ListInfo) -> usize {
+///
+/// An *ordered* task list spends both fields: the ordinal is the item's identity — it
+/// is how the item is referred to — and the box is its state, and neither answers for
+/// the other. The two are laid out side by side as `1. ☑ `, so the field is the ordinal
+/// field plus the box and its space.
+fn marker_field(items: &[Node], info: ListInfo, ctx: Ctx<'_>) -> usize {
     if !info.ordered {
         return 2;
     }
     let last = info.start + items.len().saturating_sub(1);
-    display_width(&format!("{last}.")) + 1
+    let ordinal = display_width(&format!("{last}.")) + 1;
+    ordinal + task_field(items, ctx)
+}
+
+/// The columns an ordered list's checkbox column takes, or zero if it has no tasks.
+fn task_field(items: &[Node], ctx: Ctx<'_>) -> usize {
+    let has_task = items
+        .iter()
+        .any(|item| matches!(item.kind, NodeKind::TaskItem { .. }));
+    if !has_task {
+        return 0;
+    }
+    // Both boxes are the same width in both glyph sets, but measuring beats assuming:
+    // an icon set whose boxes differed would otherwise set the text ragged.
+    let box_width = display_width(ctx.glyphs.task(true)).max(display_width(ctx.glyphs.task(false)));
+    box_width + 1
 }
 
 /// The marker of one list item, padded to the marker field width.
-fn marker_line(item: &Node, info: ListInfo, index: usize, field: usize, ctx: Ctx<'_>) -> Line {
+///
+/// `boxes` is the checkbox column an ordered list reserves — zero unless the list has
+/// task items — and it is passed in rather than derived from `item` so that a plain
+/// item in a list that has tasks keeps its ordinal in the same column as its
+/// neighbours'.
+fn marker_line(
+    item: &Node,
+    info: ListInfo,
+    index: usize,
+    field: usize,
+    boxes: usize,
+    ctx: Ctx<'_>,
+) -> Line {
     let theme = ctx.theme;
-    if let NodeKind::TaskItem { checked } = item.kind {
-        let glyph = ctx.glyphs.task(checked);
-        let style = if checked {
-            theme.block.task_checked
-        } else {
-            theme.block.task_unchecked
-        };
+    let checked = match item.kind {
+        NodeKind::TaskItem { checked } => Some(checked),
+        _ => None,
+    };
+    if let Some(checked) = checked
+        && !info.ordered
+    {
+        let style = task_style(checked, theme);
         return Line::new(vec![Span::new(
-            pad_to_width(glyph, field, Align::Left),
+            pad_to_width(ctx.glyphs.task(checked), field, Align::Left),
             style,
         )]);
     }
-    let text = if info.ordered {
-        // The ordinal is right-aligned in the field, but the separating space always
-        // stays on the right, or the marker would touch the text.
-        let ordinal = format!("{}.", info.start + index);
-        format!(
-            "{} ",
-            pad_to_width(&ordinal, field.saturating_sub(1), Align::Right)
-        )
-    } else {
+    if !info.ordered {
         // The bullet glyph rotates with nesting depth, so a nested list reads as
         // nested even where the indentation alone would be ambiguous.
-        pad_to_width(ctx.glyphs.bullet(ctx.list_depth), field, Align::Left)
-    };
-    Line::new(vec![Span::new(text, theme.block.list_marker)])
+        return Line::new(vec![Span::new(
+            pad_to_width(ctx.glyphs.bullet(ctx.list_depth), field, Align::Left),
+            theme.block.list_marker,
+        )]);
+    }
+    // The ordinal is right-aligned in its own field, but the separating space always
+    // stays on the right, or the marker would touch what follows it.
+    let ordinal = format!("{}.", info.start + index);
+    let mut line = Line::new(vec![Span::new(
+        format!(
+            "{} ",
+            pad_to_width(&ordinal, field.saturating_sub(boxes + 1), Align::Right)
+        ),
+        theme.block.list_marker,
+    )]);
+    if boxes > 0 {
+        // `1. ☑ `. The ordinal is the item's identity and the box is its state; the
+        // box used to be drawn *instead of* the ordinal, which silently renumbered the
+        // author's list to nothing.
+        match checked {
+            Some(checked) => line.push(Span::new(
+                pad_to_width(ctx.glyphs.task(checked), boxes, Align::Left),
+                task_style(checked, theme),
+            )),
+            None => line.push(Span::new(" ".repeat(boxes), theme.block.list_marker)),
+        }
+    }
+    line
+}
+
+/// The style a task box is drawn in.
+fn task_style(checked: bool, theme: &Theme) -> Style {
+    if checked {
+        theme.block.task_checked
+    } else {
+        theme.block.task_unchecked
+    }
 }
 
 /// A thematic break.

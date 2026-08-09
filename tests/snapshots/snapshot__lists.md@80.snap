@@ -128,8 +128,8 @@ expression: canvas.plain_text()
  Ordered task list                                                              
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
- ☑  a finished numbered task                                                    
- ☐  an unfinished numbered task                                                 
+ 1. ☑ a finished numbered task                                                  
+ 2. ☐ an unfinished numbered task                                               
                                                                                 
  Items containing other blocks                                                  
  ────────────────────────────────────────────────────────────────────────────── 
