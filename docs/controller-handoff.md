@@ -9,9 +9,9 @@
 > forward any lesson in §4/§5 that is still true. Fresh synthesis, not blank
 > page.
 
-Handoff commit: ba9eeae   Date: 2026-08-09   Reason: context budget
+Handoff commit: 0ee8124   Date: 2026-08-09   Reason: context budget
 Worktree / branch: main checkout (/home/oetiker/checkouts/mdless) @ main
-Trunk at time of writing: `main` @ ba9eeae — this IS trunk. **Re-derive anyway**
+Trunk at time of writing: `main` @ 0ee8124 — this IS trunk. **Re-derive anyway**
 (`git log --oneline -5`).
 Sibling worktrees: five under `/scratch/oetiker/claude-worktrees/`. Four
 (`mdless-gate`, `-layout`, `-qa`, `-rendercheck`) are dead agent scratch from
@@ -41,10 +41,28 @@ As of the handoff commit: **713 tests passing, 0 failures, `clippy
 --all-targets -- -D warnings` clean, `cargo fmt --check` clean.** Re-derive
 before trusting (§8).
 
-**The second QA round is done and both verdicts flipped to "yes"** (first round
-was "no" on both). Reports are in `docs/qa/visual-review-2.md` and
-`docs/qa/usability-review-2.md`, written by two independent reviewers who drove
-the real binary in tmux and were forbidden to read the first round.
+**The second QA round is done, and its most important result is a
+disagreement.** Three independent reviewers drove the real binary in tmux,
+none allowed to read any earlier report:
+
+| report | question | verdict |
+|---|---|---|
+| `docs/qa/usability-review-2.md` | reach for it instead of `less`? | **yes** |
+| `docs/qa/visual-review-2.md` | happy to look at it every day? | **yes** |
+| `docs/qa/visual-review-3.md` | happy to look at it every day? | **no**, 22 findings, 3 severe |
+
+The first round was "no" on both. **Do not read this as "we passed".** The two
+visual reviewers saw the same commit under the same brief and split, and the
+pessimist is consistently the more specific of the two — it names widths,
+columns and code points where the optimist generalises. Its three severes are a
+seven-node flowchart declining to draw at 80 columns and dumping raw Mermaid
+source; heading hierarchy carried almost entirely by hue, leaving every heading
+*less* prominent than body text; and no left margin or right gutter in the live
+TUI (which `visual-review-2.md` also found, ranked medium — the one place they
+agree, which is a good reason to believe it).
+
+Treat "yes" as the ceiling of what this build has earned, not the finding.
+`visual-review-3.md` is the better worklist.
 
 Landed this session, on top of the previous handoff's 697:
 
@@ -80,28 +98,36 @@ from them.
 
 ## 3. Do this next
 
-1. **The two MAJOR visual findings, both in diagram routing** — the only
-   substantial open defects. `docs/qa/visual-review-2.md` §1 (state-diagram edge
-   labels bisected by crossing wires) and §2 (two opposite-direction edges drawn
-   as one line, so the reader cannot see there are two). Both have captured
-   frames. These are graph-engine routing, so read
-   `src/mermaid/layout/graph/route*` and expect the fix to be in edge-lane
-   assignment rather than in any family's renderer.
-2. **The rest of `docs/qa/visual-review-2.md`** — findings 3-12, mostly MEDIUM
-   and LOW; the review ends with a suggested fix order, which is worth
-   following. Finding 3 (no gutter either side in the live TUI) is the one you
-   see every session.
-3. **The rest of `docs/qa/usability-review-2.md`** — findings 2-13. The cheap
-   high-value ones: `Esc` on a pending count cancels correctly but reports
-   "nothing to cancel" (a lie, in the one subsystem whose whole virtue is that
-   it never lies); `n`/`N` with no active search are silent; the help overlay
-   eats the next keypress in four different ways; the invalid-regex message is
-   truncated before the part that says what is wrong.
-4. A third visual reviewer (`qa-visual3`) may still be running and was told to
-   write `docs/qa/visual-review-2.md` — **which would overwrite the committed
-   report**. The committed version is safe in git; if the file is dirty, diff it
-   rather than assuming either side is the good one, and keep both as `-2` and
-   `-3` if the findings differ.
+Work `visual-review-3.md` first; it is the harsher and more specific list, and
+its severes are the difference between "yes" and "no" on the headline question.
+
+1. **A seven-node flowchart will not draw at 80 columns** — it gives up and
+   dumps raw Mermaid source (`visual-review-3.md` §1, SEVERE). Box art is the
+   feature this project leads with and 80 columns is the commonest terminal
+   width, so this one finding is most of the "no". Related and cheap: §12, the
+   "cannot draw" message never says what it would have needed.
+2. **Heading hierarchy is carried almost entirely by hue** (§16, SEVERE), so
+   every heading is *less* prominent than body text and the light theme's ramp
+   is flat. This is a theme/weight decision, not a layout bug, and it is the
+   finding most likely to change how the tool feels.
+3. **No left margin and no right gutter in the live TUI** (§15, SEVERE; also
+   `visual-review-2.md` §3). The two reviewers agree here — content is welded to
+   the scrollbar. Cheap to fix, visible every session.
+4. **Diagram routing and label placement** — where the two visual reviews
+   overlap most. Connectors attaching off-centre or at box corners
+   (`-3` §2), edge labels bisected by crossing wires and opposite-direction
+   edges collapsing into one line (`-2` §1 and §2), duplicated edge labels in ER
+   and state diagrams (`-3` §8, §9). Expect the fixes in edge-lane assignment
+   under `src/mermaid/layout/graph/route*` rather than in any family's renderer.
+5. **`docs/qa/usability-review-2.md` findings 2-13.** The cheap high-value ones:
+   `Esc` on a pending count cancels correctly but reports "nothing to cancel" (a
+   lie, in the one subsystem whose whole virtue is that it never lies); `n`/`N`
+   with no active search are silent; the help overlay eats the next keypress in
+   four different ways; the invalid-regex message is truncated before the part
+   that says what is wrong.
+
+Both visual reviews end with a "what looks good — do not break this" section and
+`-2` ends with a suggested fix order. Read those before touching the renderers.
 
 ## 4. Lessons & traps ← the irreplaceable part
 
@@ -197,7 +223,7 @@ from them.
 
 ## 6. Where the detail lives
 
-- Change history: `git log ba9eeae..HEAD`, and `git log --oneline` for the build.
+- Change history: `git log 0ee8124..HEAD`, and `git log --oneline` for the build.
 - **Design spec (the authority):** `docs/superpowers/specs/2026-08-08-mdless-design.md`
   — §2.1 the icons decision and why it changed, §3 the central rule, §4 Canvas
   contract, §6 per-family Mermaid subsets, §7 tables, §10 keys, §13 testing.
@@ -239,8 +265,9 @@ from them.
   wired, not that each behaves perfectly under a user's fingers. The second
   usability review drove most of them and was satisfied; where the two
   disagree, believe the review.
-- `docs/qa/visual-review-2.md` may be overwritten by a still-running reviewer
-  (§3.4). Check `git status` before reading it as gospel.
+- The §2 verdict table is the least stale thing here and the most easily
+  misread. Two reviewers said yes and one said no; quoting only the first half
+  of that would be the kind of claim this project has been bitten by before.
 - **Integration state must be re-derived, never inherited.**
   `git merge-base --is-ancestor HEAD main`, `git log --oneline HEAD..main`,
   `git branch -a --contains HEAD`.
