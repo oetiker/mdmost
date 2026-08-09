@@ -1,0 +1,13 @@
+---
+source: tests/mermaid_layout_flowchart.rs
+expression: "render(&seven_node_pipeline(), 78)"
+---
+                                          ┌───────────┐                       
+                                          │ Layout to │   ╭──────╮            
+                                     ╭───▶│  canvas   ├╮  ├──────┤            
+                                     │yes └───────────┘╰─▶│ Draw ├╮           
+                                     │                    ├──────┤│           
+            ┌──────────┐             │     ┌────────┐     ╰──────╯│           
+╭───────╮   │  Parse   │    ╱──────╲ │     │ Report │             │  ╭──────╮ 
+( Start )──▶│ Markdown ├──▶│ Valid? ├┴────▶│ error  ├─────────────┴─▶( Stop ) 
+╰───────╯   └──────────┘    ╲──────╱  no   └────────┘                ╰──────╯

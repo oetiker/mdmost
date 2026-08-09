@@ -61,7 +61,24 @@ use route::{Input, LevelEdge, Reach, Routing};
 /// Each step is `(cross gap, share of the width a node label may use)`; later steps
 /// trade beauty for fit, and the last one is as tight as the engine will go before
 /// reporting [`MermaidError::TooNarrow`].
-const LADDER: &[(usize, u16)] = &[(3, 1), (3, 2), (2, 2), (2, 3), (1, 3), (1, 4)];
+///
+/// The share caps one node, so it only bounds the whole drawing when the nodes stack
+/// across the width — a `TD` chart. Laid out `LR` the boxes sit side by side and their
+/// widths *add*, so a six-rank chart of ordinary labels can overrun 80 columns while
+/// every single node is comfortably inside a quarter of it. The last two rungs are for
+/// that case: they are tight enough to wrap a short label onto a second line, which is
+/// the only lever this engine has to shorten a row of boxes. Nothing that fits at an
+/// earlier rung ever reaches them, because the first fit wins.
+const LADDER: &[(usize, u16)] = &[
+    (3, 1),
+    (3, 2),
+    (2, 2),
+    (2, 3),
+    (1, 3),
+    (1, 4),
+    (1, 6),
+    (1, 8),
+];
 
 /// Lays out `spec` into a canvas exactly `width` columns wide.
 ///

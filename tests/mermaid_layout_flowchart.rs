@@ -241,6 +241,53 @@ fn a_single_node_and_no_edges() {
     ));
 }
 
+/// The chart from `docs/qa/visual-review-3.md` §1, which used to give up below 92
+/// columns and dump its own source instead.
+///
+/// It is a small, entirely ordinary `flowchart LR`, and 80 columns is the default
+/// terminal width — minus the two the fence chrome takes, the engine sees 78.
+fn seven_node_pipeline() -> Flowchart {
+    let nodes = vec![
+        node("Start", "Start", NodeShape::Stadium),
+        node("Parse", "Parse Markdown", NodeShape::Rect),
+        node("Check", "Valid?", NodeShape::Rhombus),
+        node("Layout", "Layout to canvas", NodeShape::Rect),
+        node("Error", "Report error", NodeShape::Rect),
+        node("Draw", "Draw", NodeShape::Cylinder),
+        node("Stop", "Stop", NodeShape::Stadium),
+    ];
+    let edges = vec![
+        edge(0, 1),
+        edge(1, 2),
+        FlowEdge {
+            label: Some(Label::line("yes")),
+            ..edge(2, 3)
+        },
+        FlowEdge {
+            label: Some(Label::line("no")),
+            ..edge(2, 4)
+        },
+        edge(3, 5),
+        edge(5, 6),
+        edge(4, 6),
+    ];
+    chart(Direction::LeftToRight, nodes, edges)
+}
+
+#[test]
+fn an_ordinary_pipeline_draws_in_an_eighty_column_terminal() {
+    insta::assert_snapshot!(render(&seven_node_pipeline(), 78));
+}
+
+#[test]
+fn the_same_pipeline_top_to_bottom_is_unchanged() {
+    let chart = Flowchart {
+        direction: Direction::TopToBottom,
+        ..seven_node_pipeline()
+    };
+    insta::assert_snapshot!(render(&chart, 78));
+}
+
 #[test]
 fn a_very_long_label_is_wrapped() {
     let nodes = vec![
