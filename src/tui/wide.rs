@@ -42,7 +42,8 @@ const MAX_BLOCK_WIDTH: u16 = 2048;
 /// Renders `doc` at `width`, widening any block that would otherwise be clipped.
 ///
 /// The returned canvas is at least `width` columns wide and may be wider; the surplus
-/// is what the horizontal scroll keys reach.
+/// is what the horizontal scroll keys reach, as far as it is drawn in — see
+/// [`scroll_reach`], which measures that and is what moves each row.
 pub fn render_scrollable(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
     let clipped = ClipTest::new(theme);
     let blocks = &doc.root().children;

@@ -369,8 +369,9 @@ impl App {
     /// This is what the reader can see; the canvas may be wider. It exceeds
     /// [`App::content_width`] never, and falls short of the *canvas* width whenever
     /// `--width` forced a wider render or [`super::wide`] widened an over-wide block.
-    /// Either way the surplus is reached by scrolling horizontally, and
-    /// [`App::hscroll_max`] measures it.
+    /// Either way the surplus is reached by scrolling horizontally — as far as there
+    /// is anything drawn in it, which is what [`App::hscroll_max`] measures rather
+    /// than the canvas width itself.
     pub fn viewport_width(&self) -> u16 {
         // One column is the scrollbar's gutter.
         self.size
