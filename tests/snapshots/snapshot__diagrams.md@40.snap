@@ -2,7 +2,7 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- ◆ Feature exerciser — Mermaid          
+ Feature exerciser — Mermaid            
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                         
  All seven families, each exercising    
@@ -11,7 +11,7 @@ expression: canvas.plain_text()
  box art can be read as a diff. Wide    
  and degenerate cases are at the end.   
                                         
- ◈ flowchart — shapes and edge kinds    
+ flowchart — shapes and edge kinds      
  ────────────────────────────────────── 
                                         
                               ┌──────┐  
@@ -51,8 +51,8 @@ expression: canvas.plain_text()
                                │ end │  
                                └─────┘  
                                         
- ◈ flowchart — left to right, with a    
-   subgraph                             
+ flowchart — left to right, with a      
+ subgraph                               
  ────────────────────────────────────── 
                                         
  ╭ mermaid ───────────────────────────╮ 
@@ -67,8 +67,8 @@ expression: canvas.plain_text()
  │   C --> D[four]                    │ 
  ╰ needs 45 columns to draw — this b… ╯ 
                                         
- ◈ sequenceDiagram — arrows, notes and  
-   blocks                               
+ sequenceDiagram — arrows, notes and    
+ blocks                                 
  ────────────────────────────────────── 
                                         
  ╭ mermaid ───────────────────────────╮ 
@@ -93,8 +93,8 @@ expression: canvas.plain_text()
  │   deactivate B                     │ 
  ╰ needs 39 columns to draw — this b… ╯ 
                                         
- ◈ classDiagram — compartments,         
-   visibility, stereotypes, relations   
+ classDiagram — compartments,           
+ visibility, stereotypes, relations     
  ────────────────────────────────────── 
                                         
  ╭ mermaid ───────────────────────────╮ 
@@ -118,8 +118,8 @@ expression: canvas.plain_text()
  │   Circle ..|> Drawable             │ 
  ╰ needs 39 columns to draw — this b… ╯ 
                                         
- ◈ erDiagram — attributes, keys,        
-   cardinalities                        
+ erDiagram — attributes, keys,          
+ cardinalities                          
  ────────────────────────────────────── 
                                         
  ┌────────────────────────────────────┐ 
@@ -149,8 +149,8 @@ expression: canvas.plain_text()
               │ PUBLISHER │             
               └───────────┘             
                                         
- ◈ stateDiagram-v2 — composites,        
-   choice, fork, notes                  
+ stateDiagram-v2 — composites, choice,  
+ fork, notes                            
  ────────────────────────────────────── 
                                         
                        ●                
@@ -190,7 +190,7 @@ expression: canvas.plain_text()
                                  ▼      
                                  ◉      
                                         
- ◈ pie                                  
+ pie                                    
  ────────────────────────────────────── 
                                         
             Effort by stage             
@@ -202,7 +202,7 @@ expression: canvas.plain_text()
    ──────────────────────────────────   
    Total                    100.0%   11 
                                         
- ◈ gantt — sections, tags, dependencies 
+ gantt — sections, tags, dependencies   
  ────────────────────────────────────── 
                                         
               Release plan              
@@ -220,8 +220,8 @@ expression: canvas.plain_text()
                                         
                  █ done   █ active      
                                         
- ◈ Directives and comments are parsed   
-   and ignored                          
+ Directives and comments are parsed and 
+ ignored                                
  ────────────────────────────────────── 
                                         
          ┌───────────────────┐          
@@ -232,7 +232,7 @@ expression: canvas.plain_text()
            │ and a comment │            
            └───────────────┘            
                                         
- ◈ Wider than eighty columns            
+ Wider than eighty columns              
  ────────────────────────────────────── 
                                         
  ╭ mermaid ───────────────────────────╮ 
@@ -240,21 +240,21 @@ expression: canvas.plain_text()
  │   Ingest[Ingest the source] --> P› │ 
  ╰ needs 47 columns to draw — this b… ╯ 
                                         
- ◈ Degenerate — a single node           
+ Degenerate — a single node             
  ────────────────────────────────────── 
                                         
            ┌───────────────┐            
            │ Just one node │            
            └───────────────┘            
                                         
- ◈ Degenerate — an empty diagram        
+ Degenerate — an empty diagram          
  ────────────────────────────────────── 
                                         
  ╭ mermaid ───────────────────────────╮ 
  │ flowchart TD                       │ 
  ╰ line 1: flowchart has no nodes ────╯ 
                                         
- ◈ Not a supported diagram at all       
+ Not a supported diagram at all         
  ────────────────────────────────────── 
                                         
  ╭ mermaid ───────────────────────────╮ 
@@ -264,7 +264,7 @@ expression: canvas.plain_text()
  │     Make tea: 5: Me                │ 
  ╰ not a diagram type — mdless draws… ╯ 
                                         
- ◈ Not valid mermaid at all             
+ Not valid mermaid at all               
  ────────────────────────────────────── 
                                         
  ╭ mermaid ───────────────────────────╮ 

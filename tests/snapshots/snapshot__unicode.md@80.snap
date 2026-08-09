@@ -2,38 +2,38 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- ◆ Feature exerciser — graphemes and scripts                                    
+ Feature exerciser — graphemes and scripts                                      
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                                                                 
  Everything here exists to stress the width machinery: every rendered row must  
  still be exactly the requested width, and no cluster may ever be split.        
                                                                                 
- ◈ Double-width scripts                                                         
+ Double-width scripts                                                           
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  日本語のテキストと English が混ざった段落です。中文、한국어、そして日本語。    
  全角のスペース　と半角のスペース の違いも確認します。                          
                                                                                 
- ◈ Right to left                                                                
+ Right to left                                                                  
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  مرحبا بالعالم — هذه فقرة بالعربية مختلطة مع English في نفس السطر. שלום עולם —  
  וזו פסקה בעברית עם English בתוכה.                                              
                                                                                 
- ◈ Indic and combining marks                                                    
+ Indic and combining marks                                                      
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  नमस्ते दुनिया — देवनागरी में एक वाक्य। ไทย: สวัสดีชาวโลก (no spaces between words).     
  Combining: café (decomposed) and café (precomposed), q̈ and a̐ and e⃝. A base     
  with many marks: x̧̨̛̋̈́͢.                                                            
                                                                                 
- ◈ Emoji                                                                        
+ Emoji                                                                          
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  Simple: 👍 ☕ ✅ Skin tone: 👍🏽 👋🏿 ZWJ family: 👨‍👩‍👧‍👦 ZWJ profession: 👩‍💻 🧑‍🚀 Flags:  
  🇨🇭 🇯🇵 🇺🇳 Keycap: 1️⃣ #️⃣ Variation selectors: ❤️ versus ❤ and ✔️ versus ✔        
                                                                                 
- ◈ Wider than two columns                                                       
+ Wider than two columns                                                         
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  The one scalar in Unicode wider than two columns is U+17D8 KHMER SIGN BEYYAL,  
@@ -42,21 +42,21 @@ expression: canvas.plain_text()
                                                                                 
  A Tangut base plus a spacing Tai Tham mark, one grapheme of three columns: 𗀀ᩗ 
                                                                                 
- ◈ Zero width and invisible                                                     
+ Zero width and invisible                                                       
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  A zero-width space: a​b. A zero-width joiner between letters: a‍b. A soft        
  hyphen: super­cali­fragilistic. A word joiner: a⁠b. A non-breaking space: a b. A  
  narrow no-break space: 1 000.                                                  
                                                                                 
- ◈ Control-ish and unusual                                                      
+ Control-ish and unusual                                                        
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  A tab	between words. A form feed is not included because it is not text.       
  Surrogate-free astral text: 𝕳𝖊𝖑𝖑𝖔 𝖜𝖔𝖗𝖑𝖉 and 𝟙𝟚𝟛. Enclosed alphanumerics: ⑴ ⒜   
  ㊙ ㈱.                                                                         
                                                                                 
- ◈ Mixed inside every container                                                 
+ Mixed inside every container                                                   
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  ╭──────────┬──────────────┬───────╮                                            
@@ -68,9 +68,9 @@ expression: canvas.plain_text()
  │ Khmer    │ �            │ 3     │                                            
  ╰──────────┴──────────────┴───────╯                                            
                                                                                 
- • 日本語のリスト項目で、四十桁のときに折り返しが起きるだけの長さがあります。   
+ · 日本語のリスト項目で、四十桁のときに折り返しが起きるだけの長さがあります。   
  ☑ ✅ タスク                                                                    
- • �   a bullet whose first grapheme is three columns wide                      
+ · �   a bullet whose first grapheme is three columns wide                      
                                                                                 
  ▌ 日本語の引用文で、これも折り返しが必要な長さになっています。 �   and a       
  ▌ three-column grapheme inside a quote.                                        
@@ -81,7 +81,7 @@ expression: canvas.plain_text()
  │ 👩‍💻 in a fence                                                              │ 
  ╰────────────────────────────────────────────────────────────────────────────╯ 
                                                                                 
- ◈ An unbreakable token of double-width text                                    
+ An unbreakable token of double-width text                                      
  ────────────────────────────────────────────────────────────────────────────── 
                                                                                 
  日本語日本語日本語日本語日本語日本語日本語日本語日本語日本語日本語日本語日本語 

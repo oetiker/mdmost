@@ -2,7 +2,7 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- ◆ The only heading in this document                                                                                    
+ The only heading in this document                                                                                      
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                                                                                                         
  A document whose sole heading is its level-one title, and whose body is plain prose. This is the shape a README, a     

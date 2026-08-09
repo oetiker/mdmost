@@ -2,13 +2,13 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- ◆ Feature exerciser — Mermaid                                                                                          
+ Feature exerciser — Mermaid                                                                                            
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                                                                                                         
  All seven families, each exercising the syntax the README claims to support, each small enough that its box art can be 
  read as a diff. Wide and degenerate cases are at the end.                                                              
                                                                                                                         
- ◈ flowchart — shapes and edge kinds                                                                                    
+ flowchart — shapes and edge kinds                                                                                      
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                                                          ┌──────┐                                       
@@ -47,7 +47,7 @@ expression: canvas.plain_text()
                                                                           │ end │                                       
                                                                           └─────┘                                       
                                                                                                                         
- ◈ flowchart — left to right, with a subgraph                                                                           
+ flowchart — left to right, with a subgraph                                                                             
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                     ╭ Outer ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮                                               
@@ -62,7 +62,7 @@ expression: canvas.plain_text()
                                     ╎                                   ╎                                               
                                     ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯                                               
                                                                                                                         
- ◈ sequenceDiagram — arrows, notes and blocks                                                                           
+ sequenceDiagram — arrows, notes and blocks                                                                             
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                    ╭─────╮                ◯                                                             
@@ -100,7 +100,7 @@ expression: canvas.plain_text()
                                    │ Ana │               ╱│╲                                                            
                                    ╰─────╯               Bo                                                             
                                                                                                                         
- ◈ classDiagram — compartments, visibility, stereotypes, relations                                                      
+ classDiagram — compartments, visibility, stereotypes, relations                                                        
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                                ┌────────────────────┐                                                   
@@ -130,7 +130,7 @@ expression: canvas.plain_text()
                              │ Point │   │ Style │   │ Canvas │   │ Helper │   │ Drawable │                             
                              └───────┘   └───────┘   └────────┘   └────────┘   └──────────┘                             
                                                                                                                         
- ◈ erDiagram — attributes, keys, cardinalities                                                                          
+ erDiagram — attributes, keys, cardinalities                                                                            
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                        ┌───────────────────────────────────────┐                                        
@@ -160,7 +160,7 @@ expression: canvas.plain_text()
                                                      │ PUBLISHER │                                                      
                                                      └───────────┘                                                      
                                                                                                                         
- ◈ stateDiagram-v2 — composites, choice, fork, notes                                                                    
+ stateDiagram-v2 — composites, choice, fork, notes                                                                      
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                                                   ●                                                     
@@ -200,7 +200,7 @@ expression: canvas.plain_text()
                                                                              ▼                                          
                                                                              ◉                                          
                                                                                                                         
- ◈ pie                                                                                                                  
+ pie                                                                                                                    
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                                     Effort by stage                                                     
@@ -212,7 +212,7 @@ expression: canvas.plain_text()
    ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────   
    Total                                                                                                    100.0%   11 
                                                                                                                         
- ◈ gantt — sections, tags, dependencies                                                                                 
+ gantt — sections, tags, dependencies                                                                                   
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                                       Release plan                                                      
@@ -230,7 +230,7 @@ expression: canvas.plain_text()
                                                                                                                         
                   █ done   █ active   █ critical   ◆ milestone                                                          
                                                                                                                         
- ◈ Directives and comments are parsed and ignored                                                                       
+ Directives and comments are parsed and ignored                                                                         
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                                  ┌───────────────────┐                                                  
@@ -241,28 +241,28 @@ expression: canvas.plain_text()
                                                    │ and a comment │                                                    
                                                    └───────────────┘                                                    
                                                                                                                         
- ◈ Wider than eighty columns                                                                                            
+ Wider than eighty columns                                                                                              
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
    ┌───────────────────┐   ┌─────────────────┐   ┌──────────────────┐   ┌─────────────────┐   ┌────────────────────┐    
    │ Ingest the source ├──▶│ Parse to an AST ├──▶│ Negotiate widths ├──▶│ Draw the canvas ├──▶│ Paint the viewport │    
    └───────────────────┘   └─────────────────┘   └──────────────────┘   └─────────────────┘   └────────────────────┘    
                                                                                                                         
- ◈ Degenerate — a single node                                                                                           
+ Degenerate — a single node                                                                                             
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                                    ┌───────────────┐                                                    
                                                    │ Just one node │                                                    
                                                    └───────────────┘                                                    
                                                                                                                         
- ◈ Degenerate — an empty diagram                                                                                        
+ Degenerate — an empty diagram                                                                                          
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
  ╭ mermaid ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
  │ flowchart TD                                                                                                       │ 
  ╰ line 1: flowchart has no nodes ────────────────────────────────────────────────────────────────────────────────────╯ 
                                                                                                                         
- ◈ Not a supported diagram at all                                                                                       
+ Not a supported diagram at all                                                                                         
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
  ╭ mermaid ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
@@ -272,7 +272,7 @@ expression: canvas.plain_text()
  │     Make tea: 5: Me                                                                                                │ 
  ╰ not a diagram type — mdless draws flowchart, sequenceDiagram, classDiagram, erDiagram, stateDiagram-v2, pie, gantt ╯ 
                                                                                                                         
- ◈ Not valid mermaid at all                                                                                             
+ Not valid mermaid at all                                                                                               
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
  ╭ mermaid ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 

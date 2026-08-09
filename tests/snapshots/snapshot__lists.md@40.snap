@@ -2,7 +2,7 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- ◆ Feature exerciser — lists            
+ Feature exerciser — lists              
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                         
  Every list shape the parser can        
@@ -11,39 +11,39 @@ expression: canvas.plain_text()
  distinction can all be compared on one 
  screen.                                
                                         
- ◈ Unordered, tight                     
+ Unordered, tight                       
  ────────────────────────────────────── 
                                         
- • one                                  
- • two                                  
- • three                                
+ · one                                  
+ · two                                  
+ · three                                
                                         
- ◈ Unordered, loose                     
+ Unordered, loose                       
  ────────────────────────────────────── 
                                         
- • one                                  
+ · one                                  
                                         
- • two                                  
+ · two                                  
                                         
- • three                                
+ · three                                
                                         
- ◈ Marker spellings                     
+ Marker spellings                       
  ────────────────────────────────────── 
                                         
- • dash                                 
+ · dash                                 
                                         
- • star                                 
+ · star                                 
                                         
- • plus                                 
+ · plus                                 
                                         
- ◈ Ordered, tight                       
+ Ordered, tight                         
  ────────────────────────────────────── 
                                         
  1. first                               
  2. second                              
  3. third                               
                                         
- ◈ Ordered, loose, starting elsewhere   
+ Ordered, loose, starting elsewhere     
  ────────────────────────────────────── 
                                         
  7. seventh                             
@@ -52,7 +52,7 @@ expression: canvas.plain_text()
                                         
  9. ninth                               
                                         
- ◈ Ordered with a wide number           
+ Ordered with a wide number             
  ────────────────────────────────────── 
                                         
   98. ninety-eight                      
@@ -65,23 +65,23 @@ expression: canvas.plain_text()
                                         
  101. one hundred and one               
                                         
- ◈ Ordered with the other delimiter     
+ Ordered with the other delimiter       
  ────────────────────────────────────── 
                                         
  1. parenthesis form                    
  2. second                              
                                         
- ◈ Items that wrap                      
+ Items that wrap                        
  ────────────────────────────────────── 
                                         
- • A list item long enough that it must 
+ · A list item long enough that it must 
    wrap even at one hundred and twenty  
    columns, so the continuation lines   
    can be checked for hanging           
    indentation against the bullet that  
    introduced them.                     
                                         
- • A short one after it.                
+ · A short one after it.                
                                         
  1. An ordered item that also wraps, so 
     the hanging indent under a numeric  
@@ -90,38 +90,38 @@ expression: canvas.plain_text()
                                         
  2. Short.                              
                                         
- ◈ Nested five deep                     
+ Nested five deep                       
  ────────────────────────────────────── 
                                         
- • level one                            
-   ◦ level two                          
-     ⁃ level three                      
-       · level four                     
-         • level five, and this one     
+ · level one                            
+   – level two                          
+     ▪ level three                      
+       ▫ level four                     
+         · level five, and this one     
            wraps as well so the deepest 
            indentation can be seen      
            against a forty column pane  
                                         
-       · back to four                   
+       ▫ back to four                   
                                         
-   ◦ back to two                        
+   – back to two                        
                                         
- • back to one                          
+ · back to one                          
                                         
- ◈ Ordered inside unordered inside      
-   ordered                              
+ Ordered inside unordered inside        
+ ordered                                
  ────────────────────────────────────── 
                                         
  1. ordered one                         
-    ◦ unordered inside                  
+    – unordered inside                  
       1. ordered inside that            
       2. and a sibling                  
                                         
-    ◦ another unordered                 
+    – another unordered                 
                                         
  2. ordered two                         
                                         
- ◈ Task lists                           
+ Task lists                             
  ────────────────────────────────────── 
                                         
  ☑ a finished task                      
@@ -135,35 +135,35 @@ expression: canvas.plain_text()
    checkbox column can be checked       
    against the continuation indent      
                                         
- • a plain item mixed into a task list  
+ · a plain item mixed into a task list  
    ☐ a nested unfinished task           
    ☑ a nested finished task             
                                         
- ◈ Ordered task list                    
+ Ordered task list                      
  ────────────────────────────────────── 
                                         
  ☑  a finished numbered task            
  ☐  an unfinished numbered task         
                                         
- ◈ Items containing other blocks        
+ Items containing other blocks          
  ────────────────────────────────────── 
                                         
- • An item with a paragraph.            
+ · An item with a paragraph.            
                                         
    And a second paragraph inside the    
    same item.                           
                                         
- • An item with a quote:                
+ · An item with a quote:                
                                         
    ▌ quoted inside a list item          
                                         
- • An item with code:                   
+ · An item with code:                   
                                         
    ╭ rust ────────────────────────────╮ 
    │ fn in_a_list() {}                │ 
    ╰──────────────────────────────────╯ 
                                         
- • An item with a table:                
+ · An item with a table:                
                                         
    ╭───┬───╮                            
    │ a │ b │                            
@@ -171,7 +171,7 @@ expression: canvas.plain_text()
    │ 1 │ 2 │                            
    ╰───┴───╯                            
                                         
- • An item with a nested diagram, which 
+ · An item with a nested diagram, which 
    the pager deliberately does not      
    widen:                               
                                         
@@ -179,11 +179,11 @@ expression: canvas.plain_text()
    │ In a list ├──▶│ Still in a list │  
    └───────────┘   └─────────────────┘  
                                         
- ◈ Degenerate                           
+ Degenerate                             
  ────────────────────────────────────── 
                                         
- •                                      
- • an empty item precedes this one      
+ ·                                      
+ · an empty item precedes this one      
                                         
  1.                                     
                                         

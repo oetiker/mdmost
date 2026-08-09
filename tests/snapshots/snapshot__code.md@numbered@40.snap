@@ -2,7 +2,7 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- ◆ Feature exerciser — code             
+ Feature exerciser — code               
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                         
  Fences, indented code, the line-number 
@@ -11,7 +11,7 @@ expression: canvas.plain_text()
  with line_numbers on, so the gutter    
  has a golden of its own.               
                                         
- ◈ A fence with a language              
+ A fence with a language                
  ────────────────────────────────────── 
                                         
  ╭ rust ──────────────────────────────╮ 
@@ -22,15 +22,15 @@ expression: canvas.plain_text()
  │ 5 │ }                              │ 
  ╰───┴────────────────────────────────╯ 
                                         
- ◈ A fence with a language the          
-   highlighter does not know            
+ A fence with a language the            
+ highlighter does not know              
  ────────────────────────────────────── 
                                         
  ╭ brainfuck ─────────────────────────╮ 
  │ 1 │ ++++++++[>++++[>++>+++>+++>+<› │ 
  ╰───┴────────────────────────────────╯ 
                                         
- ◈ A fence with no language at all      
+ A fence with no language at all        
  ────────────────────────────────────── 
                                         
  ╭───┬────────────────────────────────╮ 
@@ -38,14 +38,14 @@ expression: canvas.plain_text()
  │ 2 │     indentation inside must b› │ 
  ╰───┴────────────────────────────────╯ 
                                         
- ◈ An empty fence                       
+ An empty fence                         
  ────────────────────────────────────── 
                                         
  ╭───┬────────────────────────────────╮ 
  ╰───┴────────────────────────────────╯ 
                                         
- ◈ A tilde fence with an info string    
-   carrying attributes                  
+ A tilde fence with an info string      
+ carrying attributes                    
  ────────────────────────────────────── 
                                         
  ╭ python ────────────────────────────╮ 
@@ -53,7 +53,7 @@ expression: canvas.plain_text()
  │ 2 │     return x * 2               │ 
  ╰───┴────────────────────────────────╯ 
                                         
- ◈ Indented code, four spaces           
+ Indented code, four spaces             
  ────────────────────────────────────── 
                                         
  ╭───┬────────────────────────────────╮ 
@@ -62,14 +62,14 @@ expression: canvas.plain_text()
  │ 3 │ and a tab   inside it          │ 
  ╰───┴────────────────────────────────╯ 
                                         
- ◈ A line far too wide for any pane     
+ A line far too wide for any pane       
  ────────────────────────────────────── 
                                         
  ╭ rust ──────────────────────────────╮ 
  │ 1 │ fn wide() { let _ = "a single› │ 
  ╰───┴────────────────────────────────╯ 
                                         
- ◈ Box-drawing art inside a fence       
+ Box-drawing art inside a fence         
  ────────────────────────────────────── 
                                         
  ╭───┬────────────────────────────────╮ 
@@ -81,8 +81,7 @@ expression: canvas.plain_text()
  │ 6 │  ╰──────────┴───────────┴────› │ 
  ╰───┴────────────────────────────────╯ 
                                         
- ◈ Double-width and emoji inside a      
-   fence                                
+ Double-width and emoji inside a fence  
  ────────────────────────────────────── 
                                         
  ╭ text ──────────────────────────────╮ 
@@ -91,8 +90,8 @@ expression: canvas.plain_text()
  │ 3 │ khmer  = "�  "                 │ 
  ╰───┴────────────────────────────────╯ 
                                         
- ◈ Enough lines that the gutter changes 
-   width                                
+ Enough lines that the gutter changes   
+ width                                  
  ────────────────────────────────────── 
                                         
  ╭ python ────────────────────────────╮ 
@@ -109,14 +108,14 @@ expression: canvas.plain_text()
  │ 11 │ k = 11                        │ 
  ╰────┴───────────────────────────────╯ 
                                         
- ◈ A fence nested in a quote in a list  
+ A fence nested in a quote in a list    
  ────────────────────────────────────── 
                                         
- • ▌ ╭ sh ────────────────────────────╮ 
+ · ▌ ╭ sh ────────────────────────────╮ 
    ▌ │ 1 │ echo nested                │ 
    ▌ ╰───┴────────────────────────────╯ 
                                         
- ◈ Inline code next to a fence          
+ Inline code next to a fence            
  ────────────────────────────────────── 
                                         
  A paragraph mentioning cargo test      
