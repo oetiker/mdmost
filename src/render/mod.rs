@@ -33,6 +33,7 @@
 //! assert!(canvas.row_text(0).starts_with(' '));
 //! ```
 
+pub(crate) mod banner;
 pub mod block;
 pub(crate) mod bridge;
 pub(crate) mod code;
@@ -76,14 +77,31 @@ pub struct RenderOptions {
     pub icons: bool,
     /// Whether fenced code blocks get a line-number gutter.
     pub line_numbers: bool,
+    /// Whether a document titled by a lone `#` heading gets a `FIGlet` banner (§9).
+    ///
+    /// On by default. It costs nothing on a document that does not qualify — the
+    /// condition is "exactly one level-1 heading, and it is the first block" — and
+    /// declines itself whenever the art would not fit, so the setting exists for the
+    /// reader who does not want banners at all rather than as a safety valve.
+    pub title_banner: bool,
 }
 
 impl RenderOptions {
-    /// Creates options from the two flags.
+    /// Creates options from the two flags, with the title banner on.
     pub const fn new(icons: bool, line_numbers: bool) -> Self {
         Self {
             icons,
             line_numbers,
+            title_banner: true,
+        }
+    }
+
+    /// The same options with the title banner turned on or off.
+    #[must_use]
+    pub const fn with_title_banner(self, title_banner: bool) -> Self {
+        Self {
+            title_banner,
+            ..self
         }
     }
 
@@ -201,10 +219,65 @@ impl<'a> Ctx<'a> {
 pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
     let ctx = Ctx::new(theme, options);
     let margin = margins(width);
-    let body = block::render_sequence(&doc.root().children, width - 2 * margin, ctx, true);
+    let body_width = width - 2 * margin;
+    let blocks = &doc.root().children;
+    let body = match title_banner(doc, body_width, theme, options) {
+        Some(mut banner) => {
+            let rest = block::render_sequence(&blocks[1..], body_width, ctx, true);
+            if !rest.is_empty() {
+                banner.push_blank_row(ctx.base);
+                banner.append(&rest, ctx.base);
+            }
+            banner
+        }
+        None => block::render_sequence(blocks, body_width, ctx, true),
+    };
     let mut canvas = body.indent(margin, margin, theme.base());
     canvas.resize_width(width, theme.base());
     canvas
+}
+
+/// The banner for a document that is titled by a lone `#` heading, if it has one.
+///
+/// This is the *only* place the whole document is in view at once, which is why the
+/// "is there exactly one level-1 heading" question is answered here and not in
+/// [`block::render_block`]: a block renderer can see a level-1 heading but never
+/// whether it is the only one, and answering from a block would give a six-chapter
+/// manual six banners (design spec §9).
+///
+/// The rule under the banner is the same one an ordinary H1 draws, so a banner is a
+/// change of typeface, not a different kind of thing on the page.
+///
+/// Both document-level entry points call this — [`render_document`] and the pager's
+/// [`crate::tui::wide::render_scrollable`], which assembles the top level block by
+/// block and would otherwise silently not have the feature.
+pub(crate) fn title_banner(
+    doc: &Doc,
+    width: u16,
+    theme: &Theme,
+    options: &RenderOptions,
+) -> Option<Canvas> {
+    if !options.title_banner {
+        return None;
+    }
+    let ctx = Ctx::new(theme, options);
+    let mut level_ones = doc.headings().iter().filter(|heading| heading.level == 1);
+    let title = level_ones.next()?;
+    if level_ones.next().is_some() {
+        return None;
+    }
+    let first = doc.root().children.first()?;
+    let crate::doc::NodeKind::Heading { level: 1, id } = &first.kind else {
+        return None;
+    };
+    if id != &title.id {
+        return None;
+    }
+    let mut canvas = banner::render_title(first, id, width, ctx)?;
+    if let Some(glyph) = block::heading_rule(1) {
+        canvas.push_rule(glyph, ctx.theme.heading_rule(1));
+    }
+    Some(canvas)
 }
 
 /// The blank columns kept clear on each side of the document body (design spec §9).

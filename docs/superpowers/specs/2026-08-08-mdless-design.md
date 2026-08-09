@@ -66,6 +66,17 @@ the server's shell profile.
 *Unchanged:* the two glyph sets remain the same shape and the same display width, so
 which one is in force never affects layout (§9).
 
+*Amended 2026-08-09.* This section used to say the three marker families — heading
+prefixes, list bullets, task boxes — each own a distinct shape vocabulary and never share
+a glyph. Two of those three are gone as icon families. Heading prefixes were removed
+outright (§9.1). List bullets are now the *same plain Unicode in both sets* (`·`, `–`,
+`▪`, `▫`, by nesting depth), because the owner asked for a less prominent bullet and
+every filled circle a Nerd Font offers — `nf-fa-circle`, `nf-md-circle`,
+`nf-md-circle-medium` — is a heavy disc at icon size, which is the complaint itself;
+plain Unicode has the finer grades. What remains is the rule that bullets and task boxes
+never share a glyph, still tested, and the width rule, which now holds trivially for
+bullets. Detection therefore no longer demands the four bullet code points.
+
 ## 3. The central architectural rule
 
 > Rendering is a pure function of `(AST, width, theme)`.
@@ -89,11 +100,11 @@ Consequences that are binding on every module:
 
 ### 3.1 Render options
 
-Two user-facing settings are capabilities rather than colours, so they travel beside
+A few user-facing settings are capabilities rather than colours, so they travel beside
 the theme rather than inside it:
 
 ```rust
-pub struct RenderOptions { pub icons: bool, pub line_numbers: bool }
+pub struct RenderOptions { pub icons: bool, pub line_numbers: bool, pub title_banner: bool }
 pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas
 ```
 
@@ -142,6 +153,7 @@ Each module has one purpose, a narrow interface, and its own tests.
 | `doc` | Owned AST: parse Markdown once, mark HTML nodes as skipped, assign heading ids and source offsets | `Doc::parse(&str) -> Doc` |
 | `render::inline` | Inline spans → styled runs; grapheme-safe, width-aware wrapping | `wrap(&[Span], width) -> Vec<Line>` |
 | `render::block` | Headings, paragraphs, lists, block quotes, rules, code blocks, image placeholders | `render_block(&Node, width, &Theme) -> Canvas` |
+| `render::banner` | The FIGlet *Small* font and its smushing, for a document's lone `#` title (§9.2) | `layout(&str, budget) -> Option<Banner>` |
 | `render::table` | Column-width negotiation, then recursive per-cell document render, then border drawing | `render_table(&Table, width, &Theme) -> Canvas` |
 | `highlight` | Fenced code → styled lines, language detection, graceful unknown-language fallback | `highlight(lang, src, &Theme) -> Vec<Line>` |
 | `mermaid::parse` | Mermaid source → typed `Diagram` enum; unknown syntax → recoverable error | `parse(&str) -> Result<Diagram, MermaidError>` |
@@ -245,12 +257,66 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
   than a full fifteen-colour palette. Config themes derive their semantic styles through
   `Theme::from_palette`, the same single implementation the built-ins use, so they
   cannot drift.
-- Nerd Font glyphs for heading bullets, list markers, code-fence language icons, and
-  the status bar, used when a Nerd Font is detected (§2.1). `--no-icons` and
-  `icons = false` substitute plain Unicode of the same display width, as does detection
-  failing or being unable to tell.
-- Headings are visually distinct by level (colour, weight, prefix glyph, rules under
-  H1/H2), not merely by size-that-doesn't-exist.
+- Nerd Font glyphs for task boxes, code-fence language icons and the status bar, used
+  when a Nerd Font is detected (§2.1). `--no-icons` and `icons = false` substitute plain
+  Unicode of the same display width, as does detection failing or being unable to tell.
+- Headings are visually distinct by level (colour, weight, and the rule *under* them),
+  not merely by size-that-doesn't-exist.
+
+### 9.1 Heading levels are marked by the rule under them
+
+**Decision changed 2026-08-09 by the owner**, reversing what this spec previously
+recorded. Headings used to carry a prefix glyph — `◆ ◈ ◇ ▸ ▹ ❯` in plain Unicode, Font
+Awesome diamonds and carets with icons — and a rule under levels 1 and 2 only. The owner:
+*"the special character before the sectioning lines is a strange habit, I see the intent,
+but nobody does that... try to stay more conventional. Different types of underline for
+the different sectioning levels."*
+
+*What replaces it.* No heading has a prefix; every heading starts at the margin like the
+prose it introduces. The level is carried by a ladder of rules that steps down in **ink**,
+which is the property that survives being read at a glance:
+
+| level | rule | why |
+|---|---|---|
+| H1 | `━` U+2501, heavy solid | the signature line of the document |
+| H2 | `─` U+2500, light solid | same coverage, half the weight |
+| H3 | `╌` U+254C, light double dash | the first broken rule |
+| H4 | `┄` U+2504, light triple dash | broken finer |
+| H5 | `┈` U+2508, light quadruple dash | finest pattern that still reads as a line |
+| H6 | none | after five steps the next one down is nothing |
+
+`Theme::heading_has_rule` owns *which* levels are ruled and `render::block::heading_rule`
+owns *what they draw*; a test asserts the two agree, because two answers to that question
+would eventually disagree. The rule takes the level's own tint (`Theme::heading_rules`),
+not one fixed colour.
+
+*The constraint this rests on.* A separate review measured the heading colour ramp as
+nearly flat in the light theme (4.80 → 4.89 → 4.92 → 4.95 → 4.90 → 4.86:1 against the
+page), so in that theme the rule pattern is doing almost all of the work; the dark theme
+does step (8.42 → 5.56:1) and the rules with it (7.20 → 4.94:1). Levels 3, 4 and 5
+therefore differ in the light theme by dash *period* alone. That is legible but it is
+thin, and it is the argument for fixing the colour ramp rather than a reason to keep the
+prefix glyphs.
+
+### 9.2 A lone `#` heading is set as a banner
+
+**Added 2026-08-09 at the owner's request**: *"for documents where there is only one `#`
+(an obvious title) level you could use the 'small' figlet font for typesetting the
+title"*.
+
+When a document has **exactly one level-1 heading and it is the document's first block**,
+that heading is drawn in the FIGlet font *Small* (Glenn Chappell, 1994), embedded as a
+table of printable-ASCII glyphs plus an implementation of FIGlet's controlled horizontal
+smushing — no crate, no font files at runtime. Both conditions matter: a reference manual
+with a `#` per chapter must not become a wall of banners, and a `#` that arrives after
+the prose is a section title rather than the document's.
+
+It degrades to the ordinary heading, never to broken art: a title outside printable ASCII
+(CJK, emoji, accented Latin) has no glyphs; a banner wider than the pane is declined
+rather than truncated, wrapped or scrolled, which is what makes a 40-column terminal
+safe; and `title_banner = false` declines it always. The banner keeps the heading's TOC
+anchor and carries one search span per character per row, so the title is still jumped to
+and still found by search.
 - Status bar: file name, position percentage with a fine-grained scrollbar, current
   heading, search state, key hint.
 - TOC pane toggled with `Tab`, docked left, showing the heading tree with the current

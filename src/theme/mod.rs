@@ -111,10 +111,11 @@ pub struct BlockStyles {
     pub task_unchecked: Style,
     /// Thematic break (`---`).
     pub rule: Style,
-    /// The rule drawn beneath H1 and H2.
+    /// The rule drawn beneath a heading, at level 1.
+    ///
+    /// Levels 2 and below have their own tints in [`Theme::heading_rules`]; this slot
+    /// is the level-1 value, kept for callers that have no level in hand.
     pub heading_rule: Style,
-    /// The glyph prefix in front of a heading.
-    pub heading_prefix: Style,
     /// The footnote definition label.
     pub footnote_label: Style,
     /// Caption text under images, diagrams and degraded blocks.
@@ -293,11 +294,6 @@ pub struct Theme {
     /// One hue family that dims with depth, so a deeper heading recedes instead of
     /// competing with the one above it. Read it through [`Theme::heading`].
     pub headings: [Style; 6],
-    /// Style of the glyph in front of a heading, indexed by level 1..=6.
-    ///
-    /// Derived from the heading's own colour, so the marker encodes the level it
-    /// belongs to. Read it through [`Theme::heading_prefix`].
-    pub heading_prefixes: [Style; 6],
     /// Style of the rule drawn beneath a heading, indexed by level 1..=6.
     ///
     /// Also derived from the heading's colour, and deliberately no fainter than body
@@ -363,15 +359,6 @@ impl Theme {
         self.headings[Self::level_index(level)]
     }
 
-    /// The style for the prefix glyph of a heading of the given level.
-    ///
-    /// A tint of that level's own heading colour, one shade quieter than the text, so
-    /// the marker announces the level instead of being one fixed accent everywhere.
-    /// Levels outside `1..=6` are clamped.
-    pub fn heading_prefix(&self, level: u8) -> Style {
-        self.heading_prefixes[Self::level_index(level)]
-    }
-
     /// The style for the rule drawn beneath a heading of the given level.
     ///
     /// Levels outside `1..=6` are clamped; see [`Theme::heading_has_rule`] for whether
@@ -381,8 +368,14 @@ impl Theme {
     }
 
     /// Whether a rule should be drawn beneath a heading of this level.
+    ///
+    /// Every level but the sixth, since 2026-08-09: headings no longer carry a prefix
+    /// glyph, so the rule underneath is what tells the levels apart, and a level with
+    /// no rule has only the colour ramp left. The glyph each level draws is the
+    /// renderer's business (`render::block::heading_rule`), which a test holds in step
+    /// with this answer.
     pub fn heading_has_rule(&self, level: u8) -> bool {
-        level <= 2
+        level <= 5
     }
 
     /// The zero-based index of a heading level, clamped into `1..=6`.

@@ -55,6 +55,12 @@ pub struct Config {
     pub icons: Option<bool>,
     /// Whether fenced code blocks are drawn with a line-number gutter.
     pub line_numbers: bool,
+    /// Whether a document titled by a lone `#` heading opens with a `FIGlet` banner.
+    ///
+    /// On by default: it only ever applies to a document whose first block is its one
+    /// and only level-1 heading, and it declines itself when the art will not fit the
+    /// pane, so the reader who wants no banners at all is the one this key is for.
+    pub title_banner: bool,
     /// Whether the table-of-contents pane starts open.
     pub toc_open: bool,
     /// The width of the table-of-contents pane, in columns.
@@ -80,6 +86,7 @@ impl Default for Config {
             theme: "dark".to_string(),
             icons: None,
             line_numbers: false,
+            title_banner: true,
             toc_open: false,
             toc_width: DEFAULT_TOC_WIDTH,
             mouse: false,
@@ -250,6 +257,7 @@ struct RawConfig {
     theme: Option<String>,
     icons: Option<bool>,
     line_numbers: Option<bool>,
+    title_banner: Option<bool>,
     mouse: Option<bool>,
     scroll_step: Option<u16>,
     #[serde(default)]
@@ -307,6 +315,9 @@ impl RawConfig {
 
         if let Some(line_numbers) = self.line_numbers {
             config.line_numbers = line_numbers;
+        }
+        if let Some(title_banner) = self.title_banner {
+            config.title_banner = title_banner;
         }
         if let Some(mouse) = self.mouse {
             config.mouse = mouse;
@@ -486,6 +497,7 @@ const KNOWN_KEYS: &[&str] = &[
     "theme",
     "icons",
     "line_numbers",
+    "title_banner",
     "mouse",
     "scroll_step",
     "toc",

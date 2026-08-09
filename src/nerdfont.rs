@@ -252,14 +252,16 @@ mod tests {
 
         // Both glyph tables must be represented, or half the program could be drawing
         // tofu with detection none the wiser. The status bar's file marker lives in the
-        // Material range that only Nerd Fonts v3 carries, and the renderer's heading
-        // marker in the classic Font Awesome block.
+        // Material range that only Nerd Fonts v3 carries, and the renderer's unticked
+        // task box in the classic Font Awesome block. (The renderer's heading markers
+        // used to stand for the second half; they were removed on 2026-08-09, and the
+        // bullets that might have replaced them are plain Unicode in both sets now.)
         assert!(
             points.contains(&0xf0219),
             "the chrome's glyphs are not probed"
         );
         assert!(
-            points.contains(&0xf219),
+            points.contains(&0xf096),
             "the renderer's glyphs are not probed"
         );
 

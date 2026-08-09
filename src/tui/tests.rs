@@ -88,14 +88,33 @@ fn progress_is_one_when_the_whole_document_fits() {
 fn a_resize_keeps_the_reader_in_place() {
     let mut app = pager(SAMPLE);
     app.act(Action::Bottom);
-    let heading_before = app.current_heading();
+    let top_before = top_of_viewport(&mut app);
     app.resize(40, 12);
     assert!(app.scroll() <= app.max_scroll());
     assert_eq!(
-        app.current_heading(),
-        heading_before,
-        "a reflow must not move the reader to a different section"
+        top_of_viewport(&mut app),
+        top_before,
+        "a reflow must keep the same text at the top of the viewport"
     );
+}
+
+/// The first word on the top row of the viewport.
+///
+/// This is what "keeps the reader in place" means, and it is what the assertion above
+/// is written against. It used to compare `current_heading()` instead, which held only
+/// as long as both widths happened to lay the document out to the same height: the
+/// reader lands one row above the bottom rather than on it, `heading_probe_row`'s
+/// end-of-document case therefore does not apply, and the section it names changes
+/// while the text on screen does not. The banner made those heights differ; the
+/// assertion was resting on a coincidence either way.
+fn top_of_viewport(app: &mut App) -> String {
+    let scroll = app.scroll();
+    app.canvas()
+        .row_text(scroll)
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[test]
@@ -117,7 +136,11 @@ fn toggling_icons_invalidates_the_render_cache() {
     // The render cache key must include RenderOptions. If it does not, the canvas
     // rendered with Nerd Font glyphs is served again after icons are switched off —
     // a stale frame that looks almost right, which is the worst kind.
-    let mut app = pager(SAMPLE);
+    //
+    // The document needs something that actually *changes* with the setting. Since the
+    // heading prefixes went and the bullets became plain Unicode in both sets, a task
+    // box is the cheapest thing that does; `SAMPLE` has none.
+    let mut app = pager("# Title\n\n- [x] done\n- [ ] todo\n");
     app.set_icons(true);
     let with_icons = app.canvas().plain_text();
 

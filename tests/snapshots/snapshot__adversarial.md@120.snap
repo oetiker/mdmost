@@ -2,13 +2,16 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- ◆ mdless torture test                                                                                                  
+           _ _             _           _                  _          _                                                  
+  _ __  __| | |___ ______ | |_ ___ _ _| |_ _  _ _ _ ___  | |_ ___ __| |_                                                
+ | '  \/ _` | / -_|_-<_-< |  _/ _ \ '_|  _| || | '_/ -_) |  _/ -_|_-<  _|                                               
+ |_|_|_\__,_|_\___/__/__/  \__\___/_|  \__|\_,_|_| \___|  \__\___/__/\__|                                               
  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
                                                                                                                         
  A paragraph with emphasis, strong, strikethrough, inline code, a link (https://example.com) and an autolink            
  https://example.org/very/long/path/that/will/not/fit/in/forty/columns.                                                 
                                                                                                                         
- ◈ Mixed scripts                                                                                                        
+ Mixed scripts                                                                                                          
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
  日本語のテキストと English が混ざった段落です。مرحبا بالعالم — नमस्ते दुनिया. Emoji: 👩‍💻 🇨🇭 👍🏽 and a combining sequence:   
@@ -17,18 +20,18 @@ expression: canvas.plain_text()
                                                                                                                         
  An unbreakable-token stress case: supercalifragilisticexpialidociousantidisestablishmentarianism                       
                                                                                                                         
- ◈ Lists                                                                                                                
+ Lists                                                                                                                  
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
- • level one                                                                                                            
-   ◦ level two with a longer line that has to wrap somewhere sensible                                                   
-     ⁃ level three                                                                                                      
+ · level one                                                                                                            
+   – level two with a longer line that has to wrap somewhere sensible                                                   
+     ▪ level three                                                                                                      
        1. ordered inside unordered                                                                                      
        2. second                                                                                                        
  ☑ a finished task                                                                                                      
  ☐ an unfinished task                                                                                                   
                                                                                                                         
- ◈ Table with Markdown inside cells                                                                                     
+ Table with Markdown inside cells                                                                                       
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
  ╭──────────────┬─────────────────┬────────────╮                                                                        
@@ -40,7 +43,8 @@ expression: canvas.plain_text()
  │ 日本語のセル │       👩‍💻        │         -1 │                                                                        
  ╰──────────────┴─────────────────┴────────────╯                                                                        
                                                                                                                         
- ◇ Nested table                                                                                                         
+ Nested table                                                                                                           
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                                                                                                         
  ╭─────────────────────────────────────────────────────────────────────────────────╮                                    
  │ outer                                                                           │                                    
@@ -48,7 +52,8 @@ expression: canvas.plain_text()
  │ a cell containing another table is legal in this renderer because cells recurse │                                    
  ╰─────────────────────────────────────────────────────────────────────────────────╯                                    
                                                                                                                         
- ◇ Degenerate tables                                                                                                    
+ Degenerate tables                                                                                                      
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                                                                                                         
  ╭───╮                                                                                                                  
  │   │                                                                                                                  
@@ -56,7 +61,8 @@ expression: canvas.plain_text()
  │   │                                                                                                                  
  ╰───╯                                                                                                                  
                                                                                                                         
- ◇ Wider than the page                                                                                                  
+ Wider than the page                                                                                                    
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
                                                                                                                         
  ╭───────────┬────────────────────────────┬───────────┬────────┬────────────┬───────┬─────────╮                         
  │ Component │ Responsibility             │ Ownership │ Status │ Milestones │ Since │ Tickets │                         
@@ -65,7 +71,7 @@ expression: canvas.plain_text()
  │ pager     │ scrolls the canvas         │ tui       │ amber  │ one        │ 2025  │ 4       │                         
  ╰───────────┴────────────────────────────┴───────────┴────────┴────────────┴───────┴─────────╯                         
                                                                                                                         
- ◈ Code                                                                                                                 
+ Code                                                                                                                   
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
  ╭ rust ──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
@@ -79,7 +85,7 @@ expression: canvas.plain_text()
  │ no language tag at all                                                                                             │ 
  ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ 
                                                                                                                         
- ◈ Mermaid                                                                                                              
+ Mermaid                                                                                                                
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
                                                         ┌───────┐                                                       
@@ -103,14 +109,14 @@ expression: canvas.plain_text()
  │ this is not valid mermaid at all                                                                                   │ 
  ╰ not a diagram type — mdless draws flowchart, sequenceDiagram, classDiagram, erDiagram, stateDiagram-v2, pie, gantt ╯ 
                                                                                                                         
- ◈ HTML is not supported                                                                                                
+ HTML is not supported                                                                                                  
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
  ⟨html⟩                                                                                                                 
                                                                                                                         
  Inline ⟨html⟩ html is dropped too.                                                                                     
                                                                                                                         
- ◈ Quotes and rules                                                                                                     
+ Quotes and rules                                                                                                       
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
  ▌ A block quote spanning two lines.                                                                                    
@@ -119,7 +125,7 @@ expression: canvas.plain_text()
                                                                                                                         
                     ───────────────────────────────────────◈────────────────────────────────────────                    
                                                                                                                         
- ◈ Images and footnotes                                                                                                 
+ Images and footnotes                                                                                                   
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
  ╭ image ─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
@@ -129,13 +135,13 @@ expression: canvas.plain_text()
                                                                                                                         
  A statement needing a source[1].                                                                                       
                                                                                                                         
- ◈ Duplicate heading                                                                                                    
+ Duplicate heading                                                                                                      
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
- ◈ Duplicate heading                                                                                                    
+ Duplicate heading                                                                                                      
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
- ◈ Every diagram family through the document path                                                                       
+ Every diagram family through the document path                                                                         
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
                                                                                                                         
  Each family is deliberately small: these goldens exist to prove a diagram survives margins, block spacing and a        

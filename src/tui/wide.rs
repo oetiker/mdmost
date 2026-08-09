@@ -83,8 +83,15 @@ pub fn render_scrollable(doc: &Doc, width: u16, theme: &Theme, options: &RenderO
     let margin = margins(width);
     let body_width = width - 2 * margin;
     let mut out = Canvas::empty(body_width);
-    for node in blocks {
-        let part = render_widened(node, body_width, theme, options, &clipped);
+    // The lone-`#` title banner is a whole-document decision, so it is taken by the
+    // renderer and only *placed* here; assembling the top level ourselves means we
+    // would otherwise not have the feature at all in the pager.
+    let mut banner = crate::render::title_banner(doc, body_width, theme, options);
+    for (index, node) in blocks.iter().enumerate() {
+        let part = match banner.take() {
+            Some(banner) if index == 0 => banner,
+            _ => render_widened(node, body_width, theme, options, &clipped),
+        };
         if part.is_empty() {
             continue;
         }

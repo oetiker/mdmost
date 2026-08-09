@@ -16,6 +16,14 @@ use crate::theme::{Attributes, Theme};
 /// [`icons_change_the_glyphs_but_never_the_layout`] covers the other setting.
 const PLAIN: RenderOptions = RenderOptions::new(false, false);
 
+/// The same, with the lone-`#` title banner declined.
+///
+/// Used by the tests whose subject is an ordinary heading: a one-heading document is
+/// the shortest way to write those, and it is also exactly the document that gets a
+/// banner. [`a_lone_top_level_heading_is_drawn_as_a_banner`] and its neighbours cover
+/// the banner itself.
+const NO_BANNER: RenderOptions = PLAIN.with_title_banner(false);
+
 /// Renders `markdown` at `width` with the plain glyph set, checking the invariants.
 fn render(markdown: &str, width: u16) -> Canvas {
     render_with(markdown, width, &PLAIN)
@@ -166,16 +174,15 @@ fn html_never_reaches_the_canvas() {
 
 // -------------------------------------------------------------------- headings
 
+/// Headings start at the margin — no prefix glyph, removed at the owner's request on
+/// 2026-08-09 — and every level but the sixth is underlined.
 #[test]
-fn headings_have_a_prefix_an_anchor_and_a_rule_for_levels_one_and_two() {
-    for (level, ruled) in [(1u8, true), (2, true), (3, false), (6, false)] {
+fn headings_are_anchored_and_underlined_by_level() {
+    for (level, ruled) in [(1u8, true), (2, true), (3, true), (5, true), (6, false)] {
         let markdown = format!("{} Title\n", "#".repeat(usize::from(level)));
-        let canvas = render(&markdown, 20);
+        let canvas = render_with(&markdown, 20, &NO_BANNER);
         let first = canvas.row_text(0);
-        assert!(
-            first.trim_end().ends_with(" Title"),
-            "level {level}: {first:?}"
-        );
+        assert_eq!(first.trim_end(), " Title", "level {level}: {first:?}");
         assert_eq!(canvas.anchors().len(), 1);
         assert_eq!(canvas.anchors()[0].row, 0);
         assert_eq!(canvas.anchors()[0].level, level);
@@ -184,32 +191,36 @@ fn headings_have_a_prefix_an_anchor_and_a_rule_for_levels_one_and_two() {
     }
 }
 
+/// The rule under a heading is the *only* thing that says which level it is, now that
+/// the prefix glyph has gone, so no two levels may draw the same one.
 #[test]
-fn heading_levels_use_distinct_prefixes() {
-    let prefixes: Vec<char> = (1..=6)
+fn heading_levels_use_distinct_rules() {
+    let rules: Vec<Option<char>> = (1..=6)
         .map(|level| {
             let markdown = format!("{} T\n", "#".repeat(level));
-            rows(&markdown, 10)[0]
-                .chars()
-                .next()
-                .expect("a prefix glyph")
+            let drawn = body_rows(&render_with(&markdown, 12, &NO_BANNER));
+            drawn.get(1).and_then(|rule| rule.chars().next())
         })
         .collect();
-    let unique: std::collections::HashSet<char> = prefixes.iter().copied().collect();
-    assert_eq!(unique.len(), 6, "every level needs its own glyph");
+    assert_eq!(rules[5], None, "level 6 draws no rule at all");
+    let unique: std::collections::HashSet<Option<char>> = rules.iter().copied().collect();
+    assert_eq!(unique.len(), 6, "every level needs its own rule");
+    assert_eq!(rules[0], Some('━'), "the heaviest rule is level one's");
 }
 
 #[test]
-fn heading_text_wraps_under_a_hanging_indent() {
+fn heading_text_wraps_at_the_margin() {
     assert_eq!(
         lines("# a long heading that wraps\n", 12),
-        ["◆ a long", "  heading", "  that wraps", "━━━━━━━━━━━━"]
+        ["a long", "heading that", "wraps", "━━━━━━━━━━━━"]
     );
 }
 
 #[test]
 fn anchors_are_recorded_for_every_heading_in_order() {
-    let canvas = render("# One\n\ntext\n\n## Two\n\n## Two\n", 30);
+    // Without the banner: `a_lone_top_level_heading_is_drawn_as_a_banner` asserts that
+    // a banner keeps its anchor, and this test is about the ordering of all of them.
+    let canvas = render_with("# One\n\ntext\n\n## Two\n\n## Two\n", 30, &NO_BANNER);
     let ids: Vec<&str> = canvas
         .anchors()
         .iter()
@@ -227,13 +238,93 @@ fn anchors_are_recorded_for_every_heading_in_order() {
     }
 }
 
+// --------------------------------------------------------------- title banner
+
+/// The document's own title, and only that, is set in the `FIGlet` font.
+#[test]
+fn a_lone_top_level_heading_is_drawn_as_a_banner() {
+    let canvas = render("# Title\n\nbody\n", 40);
+    let drawn = body_rows(&canvas);
+    assert_eq!(
+        drawn[..5],
+        [
+            " _____ _ _   _",
+            "|_   _(_) |_| |___",
+            "  | | | |  _| / -_)",
+            "  |_| |_|\\__|_\\___|",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        ],
+        "{}",
+        canvas.plain_text()
+    );
+    // Still a heading in every way the rest of the program cares about: the table of
+    // contents jumps to it, and searching for it finds it.
+    assert_eq!(canvas.anchors().len(), 1);
+    assert_eq!(canvas.anchors()[0].id, "title");
+    assert_eq!(canvas.anchors()[0].level, 1);
+    assert_eq!(canvas.anchors()[0].row, 0);
+    let mut search = crate::search::Search::new(
+        "# Title\n\nbody\n",
+        "Title",
+        crate::search::SearchMode::Literal,
+    )
+    .expect("a literal query");
+    search.locate("# Title\n\nbody\n", canvas.spans());
+    let hit = &search.hits()[0];
+    assert_eq!(hit.row(), Some(0), "the hit must be found on the banner");
+    assert!(
+        hit.segments.len() >= 4,
+        "every row of the art belongs to the match: {:?}",
+        hit.segments
+    );
+}
+
+/// One `#` per chapter is a book, not a title page.
+#[test]
+fn a_document_with_several_top_level_headings_gets_no_banner() {
+    let drawn = lines("# One\n\ntext\n\n# Two\n\nmore\n", 40);
+    assert_eq!(drawn[0], "One");
+    assert!(!drawn.concat().contains('_'), "{drawn:?}");
+}
+
+/// A `#` that arrives after the prose is a section heading, not the document's title.
+#[test]
+fn a_late_top_level_heading_gets_no_banner() {
+    let drawn = lines("intro paragraph\n\n# Title\n\nbody\n", 40);
+    assert_eq!(drawn[0], "intro paragraph");
+    assert_eq!(drawn[1], "Title");
+}
+
+/// Too wide to draw is answered with the ordinary heading, never with truncated art.
+#[test]
+fn a_title_banner_gives_way_to_a_plain_heading_when_it_will_not_fit() {
+    for (width, first) in [
+        (20u16, "A Title Nobody Could"),
+        (30, "A Title Nobody Could Fit"),
+        (40, "A Title Nobody Could Fit"),
+    ] {
+        let drawn = lines("# A Title Nobody Could Fit\n\nbody\n", width);
+        assert_eq!(drawn[0], first, "at width {width}: {drawn:?}");
+    }
+    // And a title the font cannot draw at all: no banner at any width.
+    let drawn = lines("# Übersicht\n\nbody\n", 100);
+    assert_eq!(drawn[0], "Übersicht");
+}
+
+/// The banner is a render option like any other, so it can be turned off.
+#[test]
+fn the_title_banner_can_be_switched_off() {
+    let drawn = body_rows(&render_with("# Title\n\nbody\n", 40, &NO_BANNER));
+    assert_eq!(drawn[0], "Title");
+}
+
 // ----------------------------------------------------------------------- lists
 
 #[test]
 fn nested_lists_indent_and_change_their_bullet() {
     assert_eq!(
         lines("- one\n  - two\n    - three\n", 30),
-        ["• one", "  ◦ two", "    ⁃ three"]
+        ["· one", "  – two", "    ▪ three"]
     );
 }
 
@@ -250,7 +341,7 @@ fn ordered_lists_respect_the_start_ordinal_and_align_the_numbers() {
 fn list_item_content_wraps_under_a_hanging_indent() {
     assert_eq!(
         lines("- alpha beta gamma delta\n", 12),
-        ["• alpha beta", "  gamma", "  delta"]
+        ["· alpha beta", "  gamma", "  delta"]
     );
 }
 
@@ -262,14 +353,14 @@ fn task_items_get_a_checkbox() {
 #[test]
 fn tight_lists_are_dense_and_loose_lists_are_spaced() {
     assert_eq!(rows("- one\n- two\n", 20).len(), 2);
-    assert_eq!(rows("- one\n\n- two\n", 20), ["• one", "", "• two"]);
+    assert_eq!(rows("- one\n\n- two\n", 20), ["· one", "", "· two"]);
 }
 
 #[test]
 fn a_list_inside_a_quote_inside_a_list_still_composes() {
     assert_eq!(
         lines("- outer\n  > quoted\n  > - inner\n", 30),
-        ["• outer", "  ▌ quoted", "  ▌", "  ▌ ◦ inner"]
+        ["· outer", "  ▌ quoted", "  ▌", "  ▌ – inner"]
     );
 }
 
@@ -473,8 +564,8 @@ fn a_list_inside_a_cell_keeps_its_markers() {
     let canvas = render_block(&table, 30, &Theme::default_dark(), &PLAIN);
     canvas.check_invariants().expect("contract holds");
     let text = canvas.plain_text();
-    assert!(text.contains("• one"), "{text}");
-    assert!(text.contains("• two"), "{text}");
+    assert!(text.contains("· one"), "{text}");
+    assert!(text.contains("· two"), "{text}");
 }
 
 #[test]
@@ -669,10 +760,12 @@ fn icons_change_the_glyphs_but_never_the_layout() {
         );
         assert_eq!(plain.spans(), fancy.spans(), "spans must agree at {width}");
     }
-    // The glyphs themselves really do differ.
+    // The glyphs themselves really do differ. Headings and bullets no longer do —
+    // the prefix went and the bullets are plain Unicode in both sets — so the probe is
+    // a task box, which is the shortest thing that still changes.
     assert_ne!(
-        render_with("# Title\n", 20, &PLAIN).row_text(0),
-        render_with("# Title\n", 20, &nerd).row_text(0)
+        render_with("- [ ] todo\n", 20, &PLAIN).row_text(0),
+        render_with("- [ ] todo\n", 20, &nerd).row_text(0)
     );
 }
 
@@ -797,10 +890,13 @@ fn options_reach_into_table_cells() {
     let theme = Theme::default_dark();
     let plain = render_block(&table, 30, &theme, &PLAIN);
     let fancy = render_block(&table, 30, &theme, &RenderOptions::new(true, false));
-    assert!(plain.plain_text().contains('•'));
+    // The bullet is the same plain Unicode either way (`render::glyphs`); what the
+    // options must still reach into the cell with is the *rest* of the glyph set, so
+    // the check is that they agree here and differ where they should.
+    assert!(plain.plain_text().contains('·'));
     assert!(
-        !fancy.plain_text().contains('•'),
-        "the cell must use the Nerd bullet too:\n{}",
+        fancy.plain_text().contains('·'),
+        "the cell must use the same bullet:\n{}",
         fancy.plain_text()
     );
     assert_eq!(plain.height(), fancy.height());
@@ -973,7 +1069,11 @@ fn a_zero_width_budget_is_survivable() {
 
 #[test]
 fn render_block_and_render_blocks_agree_with_the_document_renderer() {
-    let markdown = "# Title\n\nbody text\n";
+    // Two level-1 headings, so the document renderer does not add the title banner
+    // that only it knows about: that is the one place the two paths differ, by
+    // design, and `a_lone_top_level_heading_is_drawn_as_a_banner` is where it is
+    // asserted rather than worked around.
+    let markdown = "# Title\n\nbody text\n\n# Another\n";
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     let whole = render_document(&doc, 30 + 2 * DOCUMENT_MARGIN, &theme, &PLAIN);

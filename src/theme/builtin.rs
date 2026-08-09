@@ -74,12 +74,6 @@ const HEADING_RAMP: [f32; 6] = [0.0, 0.16, 0.32, 0.48, 0.64, 0.80];
 /// steps down, so a deep heading settles into the page rather than shouting from it.
 const HEADING_BOLD_THROUGH: usize = 3;
 
-/// How far a heading's prefix glyph is blended towards the page background.
-///
-/// The glyph takes the heading's own colour — that is the whole point of it — but one
-/// shade quieter, so the marker introduces the heading rather than competing with it.
-const HEADING_PREFIX_FADE: f32 = 0.15;
-
 /// How far a heading's rule is blended towards [`Palette::border`].
 ///
 /// Kept small on purpose: the rule under the signature heading must not be fainter
@@ -115,8 +109,6 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             style
         }
     });
-    let heading_prefixes: [Style; 6] =
-        std::array::from_fn(|i| base.fg(heading_color(&p, i).blend(p.bg, HEADING_PREFIX_FADE)));
     let heading_rules: [Style; 6] =
         std::array::from_fn(|i| base.fg(heading_color(&p, i).blend(p.border, HEADING_RULE_FADE)));
 
@@ -124,7 +116,6 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
         name: name.to_string(),
         is_dark,
         headings,
-        heading_prefixes,
         heading_rules,
         text: TextStyles {
             body: base,
@@ -149,10 +140,9 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             task_checked: base.fg(p.green),
             task_unchecked: base.fg(p.muted),
             rule: base.fg(p.border),
-            // Level-aware variants live in `heading_rules` / `heading_prefixes`; these
-            // two keep the level-1 value so existing call sites stay correct.
+            // The level-aware variants live in `heading_rules`; this slot keeps the
+            // level-1 value so a call site with no level in hand stays correct.
             heading_rule: heading_rules[0],
-            heading_prefix: heading_prefixes[0],
             footnote_label: base.fg(p.blue).bold(),
             caption: muted.italic(),
             image_border: base.fg(p.border),
