@@ -39,6 +39,7 @@ fn pager(source: &str) -> App {
         Doc::parse(source),
         Config::default(),
         AppOptions {
+            config_path: None,
             title: "sample.md".to_string(),
             icons: false,
             theme: "dark".to_string(),
@@ -49,6 +50,38 @@ fn pager(source: &str) -> App {
     app.resize(80, 12);
     let _ = app.canvas();
     app
+}
+
+#[test]
+fn the_body_cap_reaches_the_render_through_the_pager() {
+    // The cap lives in the configuration and is applied by `wide::render_scrollable`;
+    // this is the wire between them, which nothing else in this module would notice
+    // was cut. A paragraph long enough to fill any width, at a viewport far wider
+    // than the cap.
+    let source = "Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega, and some more words after that.\n";
+    let config = Config {
+        body_width: Some(40),
+        ..Config::default()
+    };
+    let mut app = App::new(
+        Doc::parse(source),
+        config,
+        AppOptions {
+            config_path: None,
+            title: "sample.md".to_string(),
+            icons: false,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(120, 12);
+    let row = app.canvas().row_text(0);
+    let indent = row.len() - row.trim_start().len();
+    assert!(
+        indent > 30,
+        "the paragraph was not capped and centred: {indent} columns of indent\n{row}"
+    );
 }
 
 #[test]
@@ -149,6 +182,7 @@ fn render_options_follow_the_flags_that_feed_them() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            config_path: None,
             title: "x".to_string(),
             icons: false,
             theme: "dark".to_string(),
@@ -183,6 +217,7 @@ fn there_is_a_horizontal_offset_only_when_something_is_over_wide() {
         Doc::parse(SAMPLE),
         Config::default(),
         AppOptions {
+            config_path: None,
             title: "x".to_string(),
             icons: false,
             theme: "dark".to_string(),
@@ -544,6 +579,7 @@ fn rebinding_a_key_changes_what_it_does() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            config_path: None,
             title: "x".to_string(),
             icons: false,
             theme: "dark".to_string(),
@@ -581,6 +617,7 @@ fn an_unknown_start_theme_falls_back_without_refusing_to_start() {
         Doc::parse("# x\n"),
         Config::default(),
         AppOptions {
+            config_path: None,
             title: "x".to_string(),
             icons: false,
             theme: "no such theme".to_string(),
@@ -663,6 +700,7 @@ fn a_forced_width_overrides_the_terminal() {
         Doc::parse(SAMPLE),
         Config::default(),
         AppOptions {
+            config_path: None,
             title: "x".to_string(),
             icons: false,
             theme: "dark".to_string(),
@@ -712,6 +750,7 @@ fn pager_named(source: &str, title: &str, width: u16, height: u16) -> App {
         Doc::parse(source),
         Config::default(),
         AppOptions {
+            config_path: None,
             title: title.to_string(),
             icons: false,
             theme: "dark".to_string(),
@@ -733,6 +772,7 @@ fn numbered_pager_at(source: &str, width: u16, height: u16) -> App {
             ..Config::default()
         },
         AppOptions {
+            config_path: None,
             title: "sample.md".to_string(),
             icons: false,
             theme: "dark".to_string(),
@@ -820,6 +860,7 @@ fn the_pager_keeps_the_document_margin_the_renderer_promises() {
     let canvas = super::wide::render_scrollable(
         &doc,
         width,
+        None,
         &crate::theme::Theme::default_dark(),
         &crate::render::RenderOptions::new(false, false),
     );
@@ -984,7 +1025,7 @@ fn scrollable(markdown: &str, width: u16) -> (crate::canvas::Canvas, crate::them
     let doc = Doc::parse(markdown);
     let theme = crate::theme::Theme::default_dark();
     let options = crate::render::RenderOptions::new(false, false);
-    let canvas = super::wide::render_scrollable(&doc, width, &theme, &options);
+    let canvas = super::wide::render_scrollable(&doc, width, None, &theme, &options);
     (canvas, theme)
 }
 
@@ -1422,6 +1463,7 @@ fn a_wide_character_binding_does_not_ragged_edge_the_help_column() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            config_path: None,
             title: "x".to_string(),
             icons: false,
             theme: "dark".to_string(),
@@ -1771,6 +1813,7 @@ fn layouts_for(markdown: &str, width: u16) -> (crate::canvas::Canvas, usize) {
         super::wide::render_scrollable(
             &doc,
             width,
+            None,
             &crate::theme::Theme::default_dark(),
             &crate::render::RenderOptions::new(false, false),
         )

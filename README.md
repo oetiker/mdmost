@@ -69,7 +69,9 @@ mdless --render-once --width 80 --no-icons doc.md > snapshot.txt
 | Option | Meaning |
 |---|---|
 | `--render-once` | Render one frame to stdout and exit. Needs no terminal. |
-| `--width N` | Render at this width instead of the terminal's. |
+| `--width N` | Render the whole document at this width instead of the terminal's. |
+| `--body-width N` | Cap the prose body at N columns and centre it; `0` for no cap. |
+| `--no-body-width` | Let the body use the full terminal width. |
 | `--theme NAME` | The theme to start in. |
 | `--no-icons` | Use plain Unicode instead of Nerd Font glyphs, at the same display width. |
 | `--icons` | Use Nerd Font glyphs even if none appears to be installed. |
@@ -159,6 +161,7 @@ same live binding table as the list below, so the two cannot drift apart.
 |---|---|
 | `t` | Switch to the next theme |
 | `-` | Show or hide code line numbers |
+| `S` | Save the current settings for next time |
 
 Notes on a few of these:
 
@@ -169,6 +172,12 @@ Notes on a few of these:
   document.
 - `←` / `→` scroll content that is wider than the terminal, such as a wide table or a
   long code line. Neither is ever reflowed or mangled to fit.
+- `S` writes the settings you can change — theme, line numbers, contents pane, body
+  width — back to the configuration file, and tells you which file it wrote. It edits
+  that file rather than regenerating it: your comments, your ordering and any key a
+  newer mdless understands are all still there afterwards, the previous version is kept
+  as `config.toml.bak`, and a save whose result would not read back identically is
+  refused rather than guessed at.
 
 ## Configuration
 
@@ -183,6 +192,7 @@ icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to det
 line_numbers = false     # line-number gutter in fenced code blocks
 mouse        = false     # wheel scrolls, clicks select in the contents pane
 scroll_step  = 3         # document lines per mouse-wheel notch
+body_width   = 100       # widest the prose body is laid out; 0 for no cap
 
 [toc]
 open  = false            # start with the contents pane open
@@ -203,6 +213,33 @@ can be a two-line tweak rather than a full palette. Overridable colours: `bg`, `
 `overlay`, `fg`, `muted`, `border`, `accent`, `red`, `orange`, `yellow`, `green`, `cyan`,
 `blue`, `purple`, plus `dark = true|false` to tell the renderer which way the palette
 leans. `t` cycles through the built-ins and anything you have defined.
+
+## Line length
+
+Prose is capped at 100 columns by default and centred when the terminal is wider,
+because a line that runs the full width of a wide terminal is hard to come back from —
+the eye loses the start of the next one. Set `body_width` (or `--body-width`) to taste,
+or `0` / `--no-body-width` to switch the cap off. On a terminal of 102 columns or fewer
+the default cap does nothing at all.
+
+The cap is about text that can be reflowed, so it does not apply to everything:
+
+- **Tables and Mermaid diagrams ignore the cap** and are laid out at the full terminal
+  width. Both stop at their natural width — a table does not stretch its columns to fill
+  the room, and a diagram is drawn at the narrowest width that works — so this costs
+  nothing when they are small. Wherever it ends up, a block is centred on the same axis
+  as the prose rather than stranded at the left edge; only something as wide as the
+  terminal starts at the margin.
+- **Everything else takes the full width as soon as the cap would cut it short.** That
+  is what a fenced code block gets: a short snippet sits with the prose, and a block with
+  a long line takes the whole terminal. The same applies to a wide table or fence nested
+  inside a block quote or list item.
+- Content wider than the terminal itself is unaffected by any of this: it is still laid
+  out at the width it needs and reached with `←` / `→`.
+
+`--width` is a different setting and does not replace this one: it changes the width the
+whole document is rendered at, including tables and code. `--body-width` caps only the
+prose within whatever that width is.
 
 ## Mermaid
 

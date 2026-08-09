@@ -24,6 +24,8 @@ struct CacheKey {
     version: u64,
     /// The width the document was rendered at.
     width: u16,
+    /// The cap the body was laid out under, if any.
+    body_width: Option<u16>,
     /// The name of the theme it was rendered with.
     theme: String,
     /// The capability flags it was rendered under.
@@ -61,6 +63,7 @@ impl RenderCache {
         &mut self,
         version: u64,
         width: u16,
+        body_width: Option<u16>,
         theme: &Theme,
         options: RenderOptions,
         render: impl FnOnce() -> Canvas,
@@ -71,6 +74,7 @@ impl RenderCache {
         let hit = self.key.as_ref().is_some_and(|key| {
             key.version == version
                 && key.width == width
+                && key.body_width == body_width
                 && key.options == options
                 && key.theme == theme.name
         });
@@ -86,6 +90,7 @@ impl RenderCache {
         self.key = Some(CacheKey {
             version,
             width,
+            body_width,
             theme: theme.name.clone(),
             options,
         });

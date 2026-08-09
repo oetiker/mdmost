@@ -139,6 +139,24 @@ fn the_configuration_example_in_the_readme_is_valid() {
 }
 
 #[test]
+fn the_body_width_cap_is_read_and_range_checked() {
+    let loaded = Config::parse_str("body_width = 72\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.body_width, Some(72));
+
+    // Zero is how the file says "no cap", so that turning it off is a value rather
+    // than a key you have to know to delete.
+    let loaded = Config::parse_str("body_width = 0\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.body_width, None);
+
+    // Out of range keeps the default and says so, the way `toc.width` does.
+    let loaded = Config::parse_str("body_width = 3\n", path());
+    assert_eq!(loaded.problems.len(), 1, "{:?}", loaded.problems);
+    assert_eq!(loaded.config.body_width, Some(DEFAULT_BODY_WIDTH));
+}
+
+#[test]
 fn several_unknown_keys_are_all_reported() {
     let loaded = Config::parse_str("nope = 1\ntheme = \"light\"\nalso_nope = 2\n", path());
     assert_eq!(loaded.problems.len(), 2, "{:?}", loaded.problems);

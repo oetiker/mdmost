@@ -41,9 +41,26 @@ struct Cli {
     #[arg(long)]
     render_once: bool,
 
-    /// Render at this width instead of the terminal's.
+    /// Render the whole document at this width instead of the terminal's.
+    ///
+    /// This is the width everything is laid out at, tables and code included; anything
+    /// past the terminal's edge is reached with the horizontal scroll keys. To keep
+    /// prose readable on a wide terminal without changing the layout width, you want
+    /// --body-width instead.
     #[arg(long, value_name = "N")]
     width: Option<u16>,
+
+    /// Cap the prose body at this many columns and centre it in the terminal.
+    ///
+    /// Only prose is capped: tables and diagrams keep the full terminal width, and a
+    /// code block takes it as soon as the cap would cut a line short. Defaults to 100;
+    /// pass 0, or --no-body-width, for no cap at all.
+    #[arg(long, value_name = "N")]
+    body_width: Option<u16>,
+
+    /// Let the document body use the full terminal width, however wide it is.
+    #[arg(long, conflicts_with = "body_width")]
+    no_body_width: bool,
 
     /// The theme to start in.
     #[arg(long, value_name = "NAME")]
@@ -161,6 +178,10 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         let _ = writeln!(io::stderr(), "mdless: {problem}");
     }
     let mut config = loaded.config;
+    if let Some(problem) = apply_body_width(&cli, &mut config) {
+        let _ = writeln!(io::stderr(), "mdless: {problem}");
+        return Ok(ExitCode::from(EXIT_USAGE));
+    }
 
     let (source, title) = match read_input(cli.file.as_deref()) {
         Ok(pair) => pair,
@@ -173,6 +194,13 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
 
     let theme_name = cli.theme.clone().unwrap_or_else(|| config.theme.clone());
     let icons = resolve_icons(&cli, config.icons);
+    // An answer that came from the command line or the environment is a statement the
+    // reader made; recording it here is what lets `S` save it. Detection's answer is
+    // deliberately *not* recorded — freezing it would defeat design spec §2.1 on a
+    // machine that later grows a Nerd Font.
+    if cli.icons || cli.no_icons || env_icons().is_some() {
+        config.icons = Some(icons);
+    }
     if cli.mouse {
         config.mouse = true;
     }
@@ -200,11 +228,41 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             theme: theme_name,
             // `[toc] open` in the configuration file counts as much as `--toc` does.
             toc_open: cli.toc || config_toc_open,
+            config_path: cli
+                .config
+                .clone()
+                .or_else(mdless::config::Config::default_path),
             width: cli.width,
         },
     );
     tui::run(&mut app)?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// Applies `--body-width` / `--no-body-width` over the configured cap.
+///
+/// Returns a message when the value is unusable, in which case nothing is applied:
+/// the flag is an argument, so a bad one is a usage error rather than something to
+/// carry on from (design spec §11, exit code 2).
+fn apply_body_width(cli: &Cli, config: &mut Config) -> Option<String> {
+    if cli.no_body_width {
+        config.body_width = None;
+        return None;
+    }
+    let width = cli.body_width?;
+    if width == 0 {
+        config.body_width = None;
+        return None;
+    }
+    if !mdless::config::BODY_WIDTH_RANGE.contains(&width) {
+        return Some(format!(
+            "--body-width must be 0 (no cap) or between {} and {}",
+            mdless::config::BODY_WIDTH_RANGE.start(),
+            mdless::config::BODY_WIDTH_RANGE.end()
+        ));
+    }
+    config.body_width = Some(width);
+    None
 }
 
 /// Renders one frame to standard output and returns.

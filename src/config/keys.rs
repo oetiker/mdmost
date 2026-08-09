@@ -65,6 +65,8 @@ pub enum Action {
     Quit,
     /// Show or hide the line-number gutter in fenced code blocks.
     ToggleLineNumbers,
+    /// Write the current settings back to the configuration file.
+    SaveConfig,
     /// Unwind: clear the search, close an overlay, close the table of contents.
     Cancel,
 }
@@ -95,6 +97,7 @@ impl Action {
         Action::Confirm,
         Action::CycleTheme,
         Action::ToggleLineNumbers,
+        Action::SaveConfig,
         Action::Help,
         Action::Cancel,
         Action::Quit,
@@ -114,6 +117,7 @@ impl Action {
             Action::Percent => "percent",
             Action::ReportPosition => "report_position",
             Action::ToggleLineNumbers => "toggle_line_numbers",
+            Action::SaveConfig => "save_config",
             Action::ScrollLeft => "scroll_left",
             Action::ScrollRight => "scroll_right",
             Action::SearchForward => "search_forward",
@@ -146,6 +150,7 @@ impl Action {
             Action::Percent => "Jump N percent into the document (50%)",
             Action::ReportPosition => "Report where you are",
             Action::ToggleLineNumbers => "Show or hide code line numbers",
+            Action::SaveConfig => "Save the current settings for next time",
             Action::ScrollLeft => "Scroll left (wide content)",
             Action::ScrollRight => "Scroll right (wide content)",
             Action::SearchForward => "Search forward",
@@ -188,7 +193,9 @@ impl Action {
             | Action::NextMatch
             | Action::PrevMatch
             | Action::ToggleSearchMode => ActionGroup::Search,
-            Action::CycleTheme | Action::ToggleLineNumbers => ActionGroup::View,
+            Action::CycleTheme | Action::ToggleLineNumbers | Action::SaveConfig => {
+                ActionGroup::View
+            }
             Action::Help | Action::Quit | Action::Cancel => ActionGroup::Exit,
         }
     }
@@ -553,6 +560,7 @@ impl KeyBindings {
             (Key::ctrl('g'), Action::ReportPosition),
             (Key::char('='), Action::ReportPosition),
             (Key::char('-'), Action::ToggleLineNumbers),
+            (Key::char('S'), Action::SaveConfig),
             (Key::plain(KeyCode::End), Action::Bottom),
             (Key::plain(KeyCode::Left), Action::ScrollLeft),
             (Key::plain(KeyCode::Right), Action::ScrollRight),
