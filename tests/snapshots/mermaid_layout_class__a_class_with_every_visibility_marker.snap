@@ -2,13 +2,13 @@
 source: tests/mermaid_layout_class.rs
 expression: "render(&chart, 60)"
 ---
-               ┌────────────────────────────┐               
-               │           Animal           │               
-               ├────────────────────────────┤               
-               │ +id: int                   │               
-               │ -secret: String            │               
-               │ #kin                       │               
-               │ ~shared: bool$             │               
-               ├────────────────────────────┤               
-               │ +rename(to: String): void* │               
-               └────────────────────────────┘
+┌────────────────────────────┐                              
+│           Animal           │                              
+├────────────────────────────┤                              
+│ +id: int                   │                              
+│ -secret: String            │                              
+│ #kin                       │                              
+│ ~shared: bool$             │                              
+├────────────────────────────┤                              
+│ +rename(to: String): void* │                              
+└────────────────────────────┘

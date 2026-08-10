@@ -459,6 +459,19 @@ is the intended use.
 Configuration, in TOML. A broken file never stops the program from starting: the
 problem is reported and the rest of the file still applies. The platform's own
 configuration directory is used where it differs.
+.PP
+Most command-line options have a configuration-file counterpart, and a few settings
+exist only there. In particular
+.B title_banner
+is
+.B false
+unless asked for: set
+.B title_banner = true
+to have a document whose first block is its one and only
+.B #
+heading drawn as a FIGlet banner. Section numbering,
+.BR section_numbers ,
+is on by default; the banner is not.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -1152,16 +1165,34 @@ upgrade path and that the Windows build has never been run."
 
 ### Task 5: The demo recording
 
+> **Ordering:** this task runs **last**, after the `code-provenance` branch has merged.
+> Act 4 copies a table as TSV and a fenced block as its source, and neither exists
+> until that work lands. Step 0 refuses to start if it has not.
+
 **Files:**
 - Create: `demo/tour.md`
-- Create: `demo/mdmost.toml`
+- Create: `demo/config.toml` (mdmost's own config for the recording)
+- Create: `demo/tmux.conf` (the split, the mouse, and the clipboard)
+- Create: `demo/mdmost.toml` (the ansidrama script)
 - Create: `docs/demo/mdmost.webp` (generated)
 - Modify: `README.md` (insert the demo after the opening paragraphs)
 - Modify: `docs/maintainer-notes.md` (how to regenerate)
 
 **Interfaces:**
-- Consumes: a release `mdmost` binary, and `less` from the host.
+- Consumes: a release `mdmost` binary, `less`, `nano`, `tmux` (>= 3.4) from the host.
 - Produces: `docs/demo/mdmost.webp`, referenced from the README.
+
+Design authority: `docs/superpowers/specs/2026-08-09-publishing-design.md` §7.
+
+- [ ] **Step 0: Refuse to start if the copy work has not merged**
+
+```bash
+cargo test --jobs 4 export:: 2>&1 | tail -3
+grep -rn "Hotspot" src/render/ | head -3
+```
+
+Both must find something. If the `export` tests do not exist or `Hotspot` is absent,
+**stop and report** — act 4 cannot be recorded and a four-act demo is not this task.
 
 - [ ] **Step 1: Build ansidrama**
 
@@ -1176,255 +1207,130 @@ the field names and the one-action-per-scene rule are exact.
 
 - [ ] **Step 2: Write `demo/tour.md`**
 
-The document must be one `less` visibly fails at: a wide table, a fenced block, a
-Mermaid diagram, and enough headings for the contents pane to be worth opening.
+Six beats, in this order, per design §7.2. The widths are not decoration — they decide
+whether the drag in act 2 shows anything:
 
-```markdown
-# Field Notes
+1. `# Field Notes` and two paragraphs of prose.
+2. A **3-column table** whose cells wrap at 48 columns and settle to single-line rows
+   by 60.
+3. A small **`flowchart LR`** of four nodes, whose labels wrap at 48 and are single-line
+   by 64.
+4. A **5-column table** needing at least 59 columns — wider than the 50-column pane.
+5. A **wide mermaid diagram** — lift the chart from `tests/corpus/pipeline.mmd`, which
+   needs 188 columns.
+6. A fenced **Rust** block, for syntax highlighting and the act 4 copy.
 
-A pager that knows what Markdown means. This paragraph exists so there is prose to
-select, and so the body-width cap has something to centre.
+Enough `##` headings that the contents pane is worth opening in act 5.
 
-## Why box art beats source
+- [ ] **Step 3: Prove the widths before recording anything**
 
-- Tables get **real borders** and negotiated column widths.
-- Fenced code is syntax-highlighted, in the theme's own palette.
-- Mermaid diagrams are laid out, not printed.
+This is the step that makes the demo work. Do not skip it because the document "looks
+right".
 
-1. Parse once.
-2. Draw at the current width.
-3. Resize, and it reflows.
-
-- [x] read the document
-- [ ] believe the screenshots
-
-## A table wider than the terminal
-
-| Component | Responsibility | Input | Output | Notes |
-| --- | --- | --- | --- | --- |
-| `doc` | parse Markdown into a tree | source text | `Doc` | comrak, once per document |
-| `render` | tree to canvas at a width | `Doc`, width, theme | `Canvas` | pure function, no I/O |
-| `mermaid` | lay diagrams out as box art | fence body | `Canvas` | flowchart, sequence, class, ER, state, pie, gantt |
-| `tui` | event loop, panes, search | `Canvas` | frames | ratatui and crossterm |
-| `theme` | colours and glyph choices | config | `Theme` | truecolour, contrast-checked |
-
-## Some code
-
-```rust
-pub fn render(doc: &Doc, width: u16, theme: &Theme) -> Canvas {
-    let mut canvas = Canvas::new(width);
-    for node in doc.root().children.iter() {
-        canvas.push(block(node, width, theme));
-    }
-    canvas
-}
+```bash
+B=target/release/mdmost
+for w in 48 50 60 64 100; do
+  echo "=== $w ==="
+  $B --render-once --width $w demo/tour.md | perl -pe 's/\e\[[0-9;]*[a-zA-Z]//g'
+done
 ```
 
-## And a diagram
+Assert, by reading the output:
+- the 3-column table has **two-line cells at 48** and **single-line rows at 60**;
+- the flowchart labels **wrap at 48** and are **single-line at 64**;
+- the 5-column table and the wide diagram are **wider than 50 columns** at every width.
 
-```mermaid
-flowchart LR
-    A["Markdown source"] --> B["parse"]
-    B --> C["render at width"]
-    C --> D["canvas"]
-    D --> E["frame"]
-```
+If any of those is false the drag shows nothing. Fix `demo/tour.md` and re-run. Record
+the observed widths in the task report.
 
-## The end
+- [ ] **Step 4: Write `demo/config.toml` and `demo/tmux.conf`**
 
-Scroll back up, or press `q`.
-```
-
-- [ ] **Step 3: Write `demo/mdmost.toml`**
-
-Paths are relative to the config file's directory. `PATH` is prefixed so the recorded
-shell finds the release binary being demonstrated; replace `/abs/path/to/target/release`
-with the real target directory before recording.
+`demo/config.toml` pins everything the recording depends on so it never inherits the
+maintainer's `~/.config/mdmost/config.toml`. `title_banner` is opt-in and defaults to
+`false`, so the demo must ask for it:
 
 ```toml
-# The README trailer: `less` and `mdmost` on the same document, back to back.
-# Regenerate with the command in docs/maintainer-notes.md.
-launch  = "PS1='$ ' PATH=/abs/path/to/target/release:$PATH bash --norc --noprofile -i"
-cols    = 100
-rows    = 30
-font_px = 18
-card_font_px = 40
-out     = "../docs/demo/mdmost.webp"
-env     = { COLORTERM = "truecolor", TERM = "xterm-256color" }
-settle_ms = 900
-quit_keys = ["C-c"]
-
-[chrome]
-style   = "macos"
-title   = "mdmost"
-padding = 12
-
-[[scene]]
-card    = { lines = ["a Markdown file.", "and a pager."], fg = "#fef9c3" }
-hold_cs = 260
-
-# Act one: the file as `less` shows it.
-[[scene]]
-text    = "less tour.md"
-hold_cs = 40
-[[scene]]
-keys    = ["Enter"]
-hold_cs = 200
-[[scene]]
-keys    = ["space"]
-hold_cs = 200
-[[scene]]
-keys    = ["space"]
-hold_cs = 240
-[[scene]]
-keys    = ["q"]
-hold_cs = 80
-
-[[scene]]
-card    = { text = "the same file, in mdmost", fg = "#fef9c3" }
-hold_cs = 260
-
-# Act two.
-[[scene]]
-text    = "mdmost --mouse tour.md"
-hold_cs = 40
-[[scene]]
-keys    = ["Enter"]
-hold_cs = 320
-
-[[scene]]
-keys    = ["space"]
-hold_cs = 180
-[[scene]]
-keys    = ["]", "]"]
-hold_cs = 200
-
-# The contents pane, opened and then clicked.
-[[scene]]
-keys    = ["Tab"]
-hold_cs = 200
-[[scene]]
-click   = { x = 12, y = 6 }
-hold_cs = 220
-[[scene]]
-keys    = ["Tab"]
-hold_cs = 150
-
-# The wide table, scrolled sideways while the prose holds still.
-[[scene]]
-scroll  = { x = 50, y = 15, dir = "down", n = 4 }
-hold_cs = 200
-[[scene]]
-keys    = ["Right", "Right", "Right"]
-hold_cs = 260
-
-# The scrollbar, dragged.
-[[scene]]
-drag    = { from = [99, 6], to = [99, 22] }
-hold_cs = 240
-
-# A drag across prose copies the Markdown source behind it.
-[[scene]]
-drag    = { from = [8, 8], to = [60, 10] }
-hold_cs = 320
-
-[[scene]]
-card    = { lines = ["mdmost", "brew install mdmost"], fg = "#fef9c3" }
-hold_cs = 320
+title_banner = true
 ```
 
-- [ ] **Step 4: Record it**
+`demo/tmux.conf`:
 
-```bash
-mkdir -p docs/demo
-cd demo && ~/scratch/cargo-target/release/ansidrama record mdmost.toml; cd ..
-ls -lh docs/demo/mdmost.webp
+```tmux
+set -g mouse on
+set -g set-clipboard on
+set -g status off
+set -g default-terminal "tmux-256color"
+set -ga terminal-overrides ",*:Tc"
 ```
 
-Expected: a `.webp` is written. If a scene errors, ansidrama says which one.
+`set-clipboard on` is what makes act 4 work: mdmost writes OSC 52 unconditionally, tmux
+consumes it into its own paste buffer, and `C-b ]` pastes it into the other pane. No
+display server is involved.
 
-- [ ] **Step 5: Look at it — do not skip this**
-
-Coordinates in the script (the TOC click at 12,6; the scrollbar drag at column 99; the
-prose drag) are guesses about where things land at 100×30. They are almost certainly
-wrong on the first pass. Dump frames and look:
-
-```bash
-cd demo && ~/scratch/cargo-target/release/ansidrama record mdmost.toml --dump-png /tmp/frames; cd ..
-ls /tmp/frames | head
-```
-
-Then use the Read tool on individual PNGs — at minimum one frame from each of: the
-`less` act, the mdmost banner, the open contents pane, the sideways-scrolled table, the
-scrollbar drag, and the copy. Check that the click actually hit a contents entry, that
-the table really moved sideways, and that the status bar says `copied` or
-`sent … (unconfirmed)` after the drag. Adjust the coordinates and re-record until each
-beat lands. If `--dump-png` is not supported by `record`, use `--dump-png` on an
-`encode` config, or fall back to checking the final `.webp` in an image viewer and say
-so.
-
-- [ ] **Step 6: Make the config reproducible**
-
-The absolute `PATH` in `launch` must not be committed. Replace it with a relative one
-that works when recording from `demo/`:
+- [ ] **Step 5: Write `demo/mdmost.toml`**
 
 ```toml
-launch  = "PS1='$ ' PATH=../target/release:$PATH bash --norc --noprofile -i"
+cols = 100
+rows = 30
+launch = "tmux -f demo/tmux.conf new-session -s demo -x 100 -y 30 'bash --norc --noprofile -i' \; split-window -h -t demo 'target/release/mdmost --mouse --config demo/config.toml demo/tour.md'"
+env = { COLORTERM = "truecolor", DISPLAY = "", WAYLAND_DISPLAY = "" }
+out = "docs/demo/mdmost.webp"
 ```
 
-This repository uses a shared `CARGO_TARGET_DIR`, so `../target/release` will not exist.
-Record with a symlink or an explicit `PATH` export in the shell instead, and document
-whichever you used in the next step rather than leaving a path that only worked once.
+`DISPLAY` and `WAYLAND_DISPLAY` are emptied deliberately: with a reachable display server
+arboard also takes the copy and the status bar says one thing, without one it says
+another. Pinning it keeps re-recordings identical.
 
-- [ ] **Step 7: Put the demo in the README**
+Pane 0 is a **shell**, not `less` directly. That is what lets act 4 replace `less` with
+`nano` by typing, and act 5 close the pane with `exit`, without any tmux command-mode
+keystrokes.
 
-After the opening two paragraphs of `README.md` (immediately before the paragraph
-beginning "It parses the document once"), insert:
+The acts, per design §7.3. Note the drag direction: **mdmost is the right pane, so the
+divider moves LEFT to widen it.** The divider sits at column 50.
 
-```markdown
-![less, then mdmost, on the same document](docs/demo/mdmost.webp)
-```
+1. Card, then `type = "less demo/tour.md"` and `Enter` in pane 0.
+2. `drag = { from = [50, 15], to = [36, 15] }` widens mdmost to ~63; then back to
+   `[50, 15]`; then once more. One frame per cell, so this animates.
+3. Click into the mdmost pane, `space` to the wide table, then `Right` several times,
+   then `g`.
+4. Click pane 0, `q` to leave `less`, `type = "nano /tmp/pasted.txt"`, `Enter`. Then for
+   each of the three copies: click the mdmost pane, make the copy (a drag across a
+   paragraph; the table's `[copy]`; the fence's `[copy]`), click pane 0, `C-b` `]`.
+5. Click pane 0, `C-x` to leave nano, `type = "exit"`, `Enter` — the pane closes and
+   mdmost takes all 100 columns. Then `Tab` for the contents pane, `/` for a search, and
+   the theme key.
 
-- [ ] **Step 8: Document the regeneration in `docs/maintainer-notes.md`**
-
-Append a section:
-
-```markdown
-## Regenerating the demo
-
-`docs/demo/mdmost.webp` is recorded with [ansidrama](https://github.com/oetiker/ansidrama)
-from `demo/mdmost.toml`, against `demo/tour.md`. Rendering is deterministic, so
-re-recording an unchanged script produces identical bytes.
-
-```sh
-cargo build --release
-PATH="$(cargo metadata --format-version 1 --no-deps \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/release:$PATH"
-cd demo && ansidrama record mdmost.toml
-```
-
-The scene coordinates — the contents-pane click, the scrollbar drag, the selection drag
-— are tied to the 100×30 grid and to where the document's headings fall. Change
-`tour.md` and they need checking again; `ansidrama record --dump-png <dir>` writes every
-frame out for that.
-```
-
-- [ ] **Step 9: Commit**
+- [ ] **Step 6: Record, then check the size**
 
 ```bash
-git add demo/tour.md demo/mdmost.toml docs/demo/mdmost.webp README.md docs/maintainer-notes.md
-git commit -m "docs: a recording of less and mdmost on the same document
-
-Two acts on one file. First `less`, where a wide table is pipes and dashes and
-a Mermaid block is unreadable source; then mdmost on the same document, with
-the banner, the contents pane, a table scrolled sideways while the prose holds
-still, the scrollbar dragged, and a selection that copies Markdown source
-rather than glyphs.
-
-tour.md is built to be unkind to a plain pager, which is the point. The scene
-coordinates are tied to the 100x30 grid, so maintainer-notes says how to dump
-frames and check them after any change."
+~/scratch/cargo-target/release/ansidrama record demo/mdmost.toml
+ls -l docs/demo/mdmost.webp
 ```
+
+`ansidrama` emits **lossless** WebP. If the file is heavier than about 2 MB, trim act 5's
+tour beats — **not** the drags in act 2 or the copies in act 4, which are the reason the
+demo exists. Report the final byte size.
+
+- [ ] **Step 7: README and maintainer notes**
+
+Insert the demo after the opening paragraphs of `README.md`. Add a `## Regenerating the
+demo` section to `docs/maintainer-notes.md` with the exact command from step 6. Task 6
+added a separate `## Releasing` section to that file; do not disturb it.
+
+- [ ] **Step 8: Gates and commit**
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --jobs 4 -- -D warnings
+cargo test --jobs 4
+```
+
+All three in the foreground, exit status read directly. No source changed in this task,
+so the count must match the baseline exactly; if it does not, say so and account for it.
+
+Commit `demo/`, `docs/demo/mdmost.webp`, `README.md` and `docs/maintainer-notes.md`
+together. Task 6's step 1 verified tasks 1-4 only — **re-run its four gates and its
+package build now that the demo has landed**, and say in the commit body that you did.
 
 ---
 
@@ -1453,10 +1359,12 @@ Windows check `Finished`.
 - [ ] **Step 2: Confirm no stale names survive**
 
 ```bash
-grep -rin "mdless\|mdmst" --exclude-dir=.git --exclude-dir=target . | wc -l
+grep -rin "mdless\|mdmst" src/ tests/ assets/ man/ README.md Cargo.toml Cargo.lock CHANGES.md LICENSE-MIT .github/ | wc -l
 ```
 
-Expected: `0`.
+Expected: `0`. Scoped to the shipping surface, not the whole tree: `docs/` deliberately
+records the rename (design notes, the controller handoff, this plan) and a check that
+can only pass by deleting the history it documents is a badly specified check.
 
 - [ ] **Step 3: Confirm the packages still build after every change**
 

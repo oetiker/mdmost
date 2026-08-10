@@ -13,6 +13,8 @@ use crate::mermaid::ast::{
     LineStyle,
 };
 
+use crate::mermaid::entity;
+
 use super::intern;
 use super::lex::{self, Nesting, SrcLine};
 
@@ -147,9 +149,9 @@ impl Builder {
         let (name, alias) = split_alias(text);
         let id = self.intern_entity(lex::unquote(name));
         if let Some(alias) = alias
-            && let Some(entity) = self.entities.get_mut(id.0)
+            && let Some(target) = self.entities.get_mut(id.0)
         {
-            entity.alias = Some(alias.to_string());
+            target.alias = Some(entity::decode(alias).into_owned());
         }
         id
     }
@@ -262,7 +264,10 @@ fn parse_attribute(text: &str, line: usize) -> Result<ErAttribute, MermaidError>
             let close = rest
                 .find('"')
                 .ok_or_else(|| lex::syntax(line, "unterminated attribute comment"))?;
-            (text[..open].trim(), Some(rest[..close].to_string()))
+            (
+                text[..open].trim(),
+                Some(entity::decode(&rest[..close]).into_owned()),
+            )
         }
         None => (text.trim(), None),
     };

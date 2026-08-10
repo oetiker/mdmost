@@ -2,8 +2,8 @@
 source: tests/mermaid_layout_class.rs
 expression: "render(&diagram(vec![square], Vec::new()), 40)"
 ---
-           ┌───────────────┐            
-           │ Square<Shape> │            
-           ├───────────────┤            
-           │ +side: int    │            
-           └───────────────┘
+┌───────────────┐                       
+│ Square<Shape> │                       
+├───────────────┤                       
+│ +side: int    │                       
+└───────────────┘

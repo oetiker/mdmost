@@ -2,14 +2,14 @@
 source: tests/mermaid_layout_state.rs
 expression: "render(&chart, 50)"
 ---
-                    ╭──────╮                      
-                    │ Open │                      
-                    ╰─┬──┬─╯                      
-                      │  ▲                        
-                      │  ╰╮                       
-                      │close                      
-                      │   │open                   
-                      ▼   │                       
-                   ╭──────┴─╮                     
-                   │ Closed │                     
-                   ╰────────╯
+ ╭──────╮                                         
+ │ Open │                                         
+ ╰─┬──┬─╯                                         
+   │  ▲                                           
+   │  ╰╮                                          
+   │close                                         
+   │   │open                                      
+   ▼   │                                          
+╭──────┴─╮                                        
+│ Closed │                                        
+╰────────╯

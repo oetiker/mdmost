@@ -203,7 +203,6 @@ expression: canvas.plain_text()
                 ╎      │       ╎ │                                            
                 ╰╌╌╌╌╌╌┼╌╌╌╌╌╌╌╯ │                                            
                        ╰─────────┤                                            
-                                 │more                                        
                                  ▼                                            
                                 ╱╲                                            
                                ╱  ╲                                           
@@ -247,13 +246,13 @@ expression: canvas.plain_text()
  ignored                                                                      
  ──────────────────────────────────────                                       
                                                                               
-         ┌───────────────────┐                                                
-         │ after a directive │                                                
-         └─────────┬─────────┘                                                
-                   ▼                                                          
-           ┌───────────────┐                                                  
-           │ and a comment │                                                  
-           └───────────────┘                                                  
+ ┌───────────────────┐                                                        
+ │ after a directive │                                                        
+ └─────────┬─────────┘                                                        
+           ▼                                                                  
+   ┌───────────────┐                                                          
+   │ and a comment │                                                          
+   └───────────────┘                                                          
                                                                               
  Wider than eighty columns                                                    
  ──────────────────────────────────────                                       
@@ -266,9 +265,9 @@ expression: canvas.plain_text()
  Degenerate — a single node                                                   
  ──────────────────────────────────────                                       
                                                                               
-           ┌───────────────┐                                                  
-           │ Just one node │                                                  
-           └───────────────┘                                                  
+ ┌───────────────┐                                                            
+ │ Just one node │                                                            
+ └───────────────┘                                                            
                                                                               
  Degenerate — an empty diagram                                                
  ──────────────────────────────────────                                       

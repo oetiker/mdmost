@@ -25,6 +25,10 @@
 /// a line break inside the label and *not* HTML to be rendered (design spec §2 forbids
 /// HTML rendering). The parser splits on it, so a renderer only ever sees plain lines.
 ///
+/// Character entities such as `&lt;` are decoded here too, for the reasons set out in
+/// [`entity`](crate::mermaid::entity) — after the split, so that an author who wrote
+/// `&lt;br&gt;` gets the visible text `<br>` rather than a line break.
+///
 /// A label never contains an empty `lines` vector: an empty label is `lines == [""]`
 /// only if the source really said so; otherwise use [`Label::is_empty`].
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
@@ -34,20 +38,22 @@ pub struct Label {
 }
 
 impl Label {
-    /// Builds a label from raw label text, splitting on `<br>` variants and newlines.
+    /// Builds a label from raw label text, splitting on `<br>` variants and newlines
+    /// and decoding character entities in each resulting line.
     ///
-    /// Leading and trailing whitespace is trimmed from every resulting line.
+    /// Leading and trailing whitespace is trimmed from every resulting line. Trimming
+    /// also precedes decoding, so a leading `&nbsp;` survives as a visible space.
     pub fn parse(text: &str) -> Self {
         let mut lines = Vec::new();
         let mut rest = text;
         loop {
             match find_break(rest) {
                 Some((at, len)) => {
-                    lines.push(rest[..at].trim().to_string());
+                    lines.push(line_text(&rest[..at]));
                     rest = &rest[at + len..];
                 }
                 None => {
-                    lines.push(rest.trim().to_string());
+                    lines.push(line_text(rest));
                     break;
                 }
             }
@@ -71,6 +77,11 @@ impl Label {
     pub fn text(&self) -> String {
         self.lines.join("\n")
     }
+}
+
+/// Trims one line of a label and decodes its character entities.
+fn line_text(text: &str) -> String {
+    crate::mermaid::entity::decode(text.trim()).into_owned()
 }
 
 /// Finds the next line break marker, returning its byte offset and byte length.

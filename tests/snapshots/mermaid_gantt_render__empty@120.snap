@@ -2,6 +2,6 @@
 source: tests/mermaid_gantt_render.rs
 expression: canvas.plain_text()
 ---
-                                                    Nothing planned                                                     
+Nothing planned                                                                                                         
                                                                                                                         
-                                                       (no tasks)
+  (no tasks)

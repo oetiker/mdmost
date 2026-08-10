@@ -1,0 +1,194 @@
+.TH MDMOST 1 "2026-08-09" "mdmost" "User Commands"
+.SH NAME
+mdmost \- full-screen terminal pager for a single Markdown document
+.SH SYNOPSIS
+.B mdmost
+.RI [ OPTIONS ]
+.RI [ FILE ]
+.SH DESCRIPTION
+.B mdmost
+parses a Markdown document once and draws it as styled Unicode: tables get real
+borders and negotiated column widths, fenced code is syntax-highlighted, and Mermaid
+diagrams are laid out as box art rather than shown as source. Resizing the terminal
+reflows everything, because rendering is a pure function of the document, the width,
+the theme and the options.
+.PP
+With no
+.IR FILE ,
+the document is read from standard input; the keyboard is then read from
+.I /dev/tty
+so the pager stays interactive. When standard output is not a terminal,
+.B \-\-render\-once
+is implied, so
+.B mdmost doc.md | cat
+produces plain text rather than escape sequences.
+.SH OPTIONS
+.TP
+.B \-\-render\-once
+Render one frame to standard output and exit. Needs no terminal.
+.TP
+.BI \-\-width " N"
+Render the whole document at this width instead of the terminal's.
+.TP
+.BI \-\-body\-width " N"
+Cap the prose body at N columns and centre it;
+.B 0
+for no cap.
+.TP
+.B \-\-no\-body\-width
+Let the body use the full terminal width.
+.TP
+.BI \-\-theme " NAME"
+The theme to start in.
+.TP
+.B \-\-icons
+Use Nerd Font glyphs even if none appears to be installed.
+.TP
+.B \-\-no\-icons
+Use plain Unicode instead of Nerd Font glyphs, at the same display width.
+.TP
+.B \-\-mouse
+Capture the mouse: the wheel scrolls, the scrollbar drags, clicks jump in the
+contents pane, and dragging over the document copies the Markdown source behind it.
+.TP
+.B \-\-toc
+Start with the table-of-contents pane open.
+.TP
+.BI \-\-config " PATH"
+Read configuration from this file instead of the default.
+.TP
+.B \-\-licenses
+Print the licences of the bundled syntax definitions and exit.
+.TP
+.B \-h ", " \-\-help
+Print help and exit.
+.TP
+.B \-V ", " \-\-version
+Print the version and exit.
+.SH KEYS
+.SS Moving
+.TP
+.BR j ", " Down
+Scroll down one line.
+.TP
+.BR k ", " Up
+Scroll up one line.
+.TP
+.BR d ", " Ctrl\-d
+Scroll down half a screen.
+.TP
+.BR u ", " Ctrl\-u
+Scroll up half a screen.
+.TP
+.BR space ", " Ctrl\-f ", " PgDn
+Scroll down one screen.
+.TP
+.BR b ", " Ctrl\-b ", " PgUp
+Scroll up one screen.
+.TP
+.BR g ", " Home
+Go to the top, and back to the left edge.
+.TP
+.BR G ", " End
+Go to the bottom of the document.
+.TP
+.B %
+Jump N percent into the document, as in
+.BR 50% .
+.TP
+.BR Left ", " Right
+Scroll wide content sideways.
+.SS Structure
+.TP
+.B [
+Go to the previous heading.
+.TP
+.B ]
+Go to the next heading.
+.TP
+.BR = ", " Ctrl\-g
+Report where you are.
+.TP
+.B Tab
+Show or hide the table of contents.
+.TP
+.B Enter
+Jump to the selected heading.
+.SS Searching
+.TP
+.B /
+Search forward.
+.TP
+.B ?
+Search backward.
+.TP
+.BR n ", " Ctrl\-Down
+Go to the next match.
+.TP
+.BR N ", " Ctrl\-Up
+Go to the previous match.
+.TP
+.B Ctrl\-r
+Switch between literal and regex search.
+.SS Other
+.TP
+.B t
+Switch to the next theme.
+.TP
+.B \-
+Show or hide code line numbers.
+.TP
+.BR h ", " F1
+Show or hide the help overlay.
+.TP
+.B Esc
+Clear the search, or close the overlay or pane.
+.TP
+.B q
+Quit.
+.SH ENVIRONMENT
+.TP
+.B MDMOST_ICONS
+.B 1
+or
+.B 0
+forces Nerd Font glyphs on or off. It outranks the configuration file and is
+outranked by
+.BR \-\-icons / \-\-no\-icons .
+.TP
+.B PAGER
+.B mdmost
+is usable as a pager;
+.B export PAGER=mdmost
+is the intended use.
+.SH FILES
+.TP
+.I ~/.config/mdmost/config.toml
+Configuration, in TOML. A broken file never stops the program from starting: the
+problem is reported and the rest of the file still applies. The platform's own
+configuration directory is used where it differs.
+.PP
+Most command-line options have a configuration-file counterpart, and a few settings
+exist only there. In particular
+.B title_banner
+is
+.B false
+unless asked for: set
+.B title_banner = true
+to have a document whose first block is its one and only
+.B #
+heading drawn as a FIGlet banner. Section numbering,
+.BR section_numbers ,
+is on by default; the banner is not.
+.SH EXIT STATUS
+.TP
+.B 0
+Success, including a quit from the pager and a broken pipe.
+.TP
+.B 1
+The document could not be read, or the terminal could not be set up.
+.SH SEE ALSO
+.BR less (1),
+.BR bat (1)
+.SH AUTHOR
+Tobias Oetiker

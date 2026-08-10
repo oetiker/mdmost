@@ -49,7 +49,7 @@ pub use spec::{EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Ter
 use crate::canvas::{BorderSet, Canvas};
 use crate::error::MermaidError;
 use crate::mermaid::ast::Direction;
-use crate::text::{Align, Line, Span};
+use crate::text::{Line, Span};
 use crate::theme::Theme;
 
 use frame::{Frame, Pen};
@@ -162,8 +162,9 @@ impl Fit {
 
 /// Lays out `spec` into a canvas exactly `width` columns wide.
 ///
-/// The drawing is centred in the canvas. Nodes are drawn by `art`, which is called
-/// once per node per attempt at fitting the width budget.
+/// The drawing is anchored at the left of the canvas, with any unused columns on the
+/// right ([`anchored`]). Nodes are drawn by `art`, which is called once per node per
+/// attempt at fitting the width budget.
 ///
 /// The search runs `fit`'s rungs first and takes the first that fits, then — only if
 /// every rung overflowed — bisects the label budget below the tightest rung's, down to
@@ -215,7 +216,7 @@ pub fn draw(
     for &(gap, share) in fit.ladder {
         let canvas = attempt(gap, (width / share).max(fit.floor));
         if canvas.width() <= width {
-            return Ok(centred(canvas, width, theme));
+            return Ok(anchored(canvas, width, theme));
         }
         narrowest = narrower(narrowest, &canvas);
     }
@@ -254,7 +255,7 @@ pub fn draw(
             hi = mid;
         }
     }
-    Ok(centred(best, width, theme))
+    Ok(anchored(best, width, theme))
 }
 
 /// The narrower of `at` and `canvas`' width.
@@ -345,19 +346,15 @@ fn reach_of(canvas: &Canvas, spot: Spot, direction: Direction, inwards: bool) ->
     }
 }
 
-/// Centres `canvas` in a canvas exactly `width` columns wide.
-fn centred(canvas: Canvas, width: u16, theme: &Theme) -> Canvas {
-    let left = crate::canvas::align_offset(
-        usize::from(width),
-        usize::from(canvas.width()),
-        Align::Center,
-    );
-    let left = u16::try_from(left).unwrap_or(0);
-    let mut out = canvas.indent(
-        left,
-        width.saturating_sub(canvas.width() + left),
-        theme.base(),
-    );
+/// Anchors `canvas` at the left of a canvas exactly `width` columns wide.
+///
+/// The drawing used to be centred in the budget it was given. It is not any more: every
+/// block in a document starts at the same left margin (see `render::document::placed`),
+/// and a diagram centred in its budget came to rest well to the right of the prose above
+/// it — a third left edge on one page. The unused columns are kept on the right, so the
+/// canvas is still exactly `width` wide, which is what every caller was promised.
+fn anchored(canvas: Canvas, width: u16, theme: &Theme) -> Canvas {
+    let mut out = canvas.indent(0, width.saturating_sub(canvas.width()), theme.base());
     out.resize_width(width, theme.base());
     out
 }

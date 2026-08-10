@@ -125,3 +125,31 @@ Two failure modes cost real time on this project:
 - **Tests that cannot fail.** Check every behavioural test in both directions by
   disabling the fix and confirming the test goes red. Several tests here passed with
   *and* without their fix and were only caught this way.
+
+## Releasing
+
+Releases are cut by the `Release` workflow, run from the Actions tab with a release type
+of `bugfix`, `feature` or `major`. It must be run from `main`, and it refuses otherwise.
+
+Before the first release:
+
+1. Create `https://github.com/oetiker/mdmost` and push `main`.
+2. Add the `CRATES_IO_TOKEN` repository secret (Settings → Secrets and variables →
+   Actions). It is the only secret this project uses.
+3. Settings → Actions → General → Workflow permissions: allow read and write. The
+   `version` job pushes a commit and a tag, and the `homebrew` job pushes the rewritten
+   formula.
+
+Each release:
+
+1. Put what changed under `## Unreleased` in `CHANGES.md`. The workflow moves that block
+   into a dated section and uses it verbatim as the release notes — nothing else writes
+   them.
+2. Run the workflow. It bumps `Cargo.toml`, tags, builds five targets, packages `.deb`
+   and `.rpm` for the two musl targets, publishes the crate, and rewrites
+   `Formula/mdmost.rb` with the new checksums.
+3. `git pull` afterwards: the workflow has pushed two commits and a tag to `main`.
+
+What is deliberately not automated, and why, is in
+`docs/superpowers/specs/2026-08-09-publishing-design.md` §1 — there is no apt/yum
+repository, no Pages site, no container image and no macOS notarisation.

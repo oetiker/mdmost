@@ -195,7 +195,16 @@ fn inline_markup_carries_the_theme_styles() {
         style_at(&canvas, 0, column("del")),
         theme.text.strikethrough
     );
-    assert_eq!(style_at(&canvas, 0, column("code")), theme.text.code);
+    // Inline code sets no background of its own, so what lands on the page is the body
+    // style wearing the code hue — which is exactly how it is applied.
+    assert_eq!(
+        style_at(&canvas, 0, column("code")),
+        theme.text.body.patch(theme.text.code)
+    );
+    assert_eq!(
+        theme.text.code.bg, None,
+        "inline code is a colour, not a box: it must not carry a background"
+    );
 }
 
 #[test]
@@ -1889,11 +1898,14 @@ const STRIPED: &str = "\
 ";
 
 #[test]
-fn a_striped_row_is_shaded_from_border_to_border() {
-    // The stripe told the reader "these two rows go together" and the vertical rules
-    // punched a hole in it at every column boundary, because `table.border` carries
-    // the *page* background. A banded row rendered as two separate shaded boxes with
-    // an unshaded gap between them — in the light theme, as two selected cells.
+fn a_striped_row_shades_its_cells_and_stops_at_the_column_separators() {
+    // The stripe groups the *content* of a row, and the vertical rules are not content:
+    // they are the table's frame, and they run the full height of the box. A stripe
+    // painted through them crossed the frame — worst on a wrapped row, where the rule
+    // continues through the half-block gap that the stripe deliberately does not fill,
+    // so the same divider changed background twice in three lines. So the rule keeps the
+    // page background it is drawn in everywhere else, and the stripe fills each cell
+    // between the rules, unbroken.
     let theme = Theme::default_dark();
     let stripe = theme
         .table
@@ -1920,25 +1932,106 @@ fn a_striped_row_is_shaded_from_border_to_border() {
     let cells = canvas.row(banded[0]).expect("the striped row");
     let first = cells
         .iter()
-        .position(|cell| cell.style().bg == Some(stripe))
-        .expect("a striped cell");
+        .position(|cell| cell.text() == "\u{2502}")
+        .expect("the row's left border");
     let last = cells
         .iter()
-        .rposition(|cell| cell.style().bg == Some(stripe))
-        .expect("a striped cell");
+        .rposition(|cell| cell.text() == "\u{2502}")
+        .expect("the row's right border");
     let text: String = cells[first..=last].iter().map(|cell| cell.text()).collect();
     assert!(
-        text.contains('\u{2502}'),
-        "the span under test must actually contain a column separator: {text:?}"
+        text[3..text.len() - 3].contains('\u{2502}'),
+        "the span under test must contain an *inner* column separator: {text:?}"
     );
     for (offset, cell) in cells[first..=last].iter().enumerate() {
+        let (want, what) = if cell.text() == "\u{2502}" {
+            (page, "a column separator must not take the stripe")
+        } else {
+            (stripe, "the stripe must not break inside a cell")
+        };
         assert_eq!(
             cell.style().bg,
-            Some(stripe),
-            "column {} ({:?}) breaks the stripe in {text:?}",
+            Some(want),
+            "column {} ({:?}): {what}, in {text:?}",
             first + offset,
             cell.text()
         );
+    }
+}
+
+/// A table whose second body row is striped and whose cells contain inline code.
+const STRIPED_CODE: &str = "\
+| part | does |
+| --- | --- |
+| `doc` | parse |
+| `render` | lay out |
+";
+
+#[test]
+fn inline_code_in_a_table_takes_the_ground_of_the_row_it_sits_on() {
+    // Inline code used to paint `surface` behind itself — the very colour the zebra
+    // stripes with. On a plain row that put a stray grey box mid-sentence that looked
+    // like a fragment of stripe; on a striped row it vanished into one. The hue alone
+    // marks code, so the background goes and the row's own ground shows through.
+    let theme = Theme::default_dark();
+    let page = theme.palette.bg;
+    let stripe = theme
+        .table
+        .row_alt
+        .bg
+        .expect("the stripe is defined as a background");
+    let code = theme.text.code.fg.expect("inline code has a foreground");
+    let canvas = render(STRIPED_CODE, 40);
+
+    let mut grounds = Vec::new();
+    for row in 0..canvas.height() {
+        for cell in canvas.row(row).into_iter().flatten() {
+            if cell.style().fg == Some(code) {
+                grounds.push((row, cell.style().bg));
+            }
+        }
+    }
+    assert_eq!(
+        grounds.len(),
+        "doc".len() + "render".len(),
+        "both code spans must be found: {grounds:?}"
+    );
+    let plain = grounds[0].0;
+    let banded = grounds[grounds.len() - 1].0;
+    assert_ne!(plain, banded, "the two spans must be on different rows");
+    for (row, ground) in grounds {
+        let want = if row == plain { page } else { stripe };
+        assert_eq!(
+            ground,
+            Some(want),
+            "inline code on row {row} does not take that row's ground"
+        );
+    }
+}
+
+#[test]
+fn every_vertical_rule_of_a_table_is_drawn_on_the_same_ground() {
+    // A rule is one object running the height of the box, and it has to look like one.
+    // Tinting it per row is what made the stripe cross the frame; tinting it on the
+    // striped rows but not on the half-block gap between two wrapped ones would be
+    // worse still, because those three lines are adjacent and the seam is at eye level.
+    let theme = Theme::default_dark();
+    let page = theme.palette.bg;
+    let canvas = render(WRAPPING, 70);
+    assert!(
+        !gap_rows(&canvas).is_empty(),
+        "the fixture must wrap, so that a gap row is under test"
+    );
+    for row in 0..canvas.height() {
+        for (column, cell) in canvas.row(row).into_iter().flatten().enumerate() {
+            if cell.text() == "\u{2502}" {
+                assert_eq!(
+                    cell.style().bg,
+                    Some(page),
+                    "the rule at {row}:{column} is not on the page background"
+                );
+            }
+        }
     }
 }
 
@@ -1988,6 +2081,73 @@ fn a_table_whose_rows_wrap_gets_air_between_them() {
         gap_rows(&canvas).len(),
         2,
         "three body rows want two gaps: {out:#?}"
+    );
+}
+
+/// A table of one-line rows whose second column is far too long to read as a label.
+///
+/// Rendered wide enough that nothing wraps, so the height rule alone leaves it dense.
+const LONG_CELLS: &str = "\
+| part | does |
+| --- | --- |
+| renderer | turns the parsed document into a canvas |
+| pager | owns the viewport and the key bindings |
+| theme | every colour the renderer may reach for |
+";
+
+#[test]
+fn a_table_of_long_one_line_rows_gets_air_too() {
+    // Length is crowding just as much as height is. Three forty-column sentences stacked
+    // edge to edge are the same slab of prose the gap exists to break up, and at a wide
+    // measure they never wrap, so the height rule never noticed them.
+    let canvas = render(LONG_CELLS, 120);
+    let out = body_rows(&canvas);
+    assert!(
+        out.iter()
+            .any(|row| row.contains("turns the parsed document into a canvas")),
+        "the fixture must not wrap at this width: {out:#?}"
+    );
+    assert_eq!(
+        gap_rows(&canvas).len(),
+        2,
+        "three long body rows want two gaps: {out:#?}"
+    );
+}
+
+#[test]
+fn a_long_header_cell_alone_does_not_space_a_table() {
+    // Consistent with the height rule: a header is fenced off by its own `├───┼───┤` and
+    // does not earn a gap, however long it is.
+    let long = "x".repeat(40);
+    let markdown = format!("| {long} | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n");
+    let canvas = render(&markdown, 120);
+    assert_eq!(
+        gap_rows(&canvas),
+        Vec::<usize>::new(),
+        "{:#?}",
+        body_rows(&canvas)
+    );
+}
+
+#[test]
+fn a_crowded_cell_is_measured_in_display_columns() {
+    // Sixteen double-width glyphs are 32 columns on screen and 16 `char`s. The rule is
+    // about what the reader sees, so they space the table; the same count of
+    // single-width glyphs does not.
+    let table = |cell: &str| format!("| a | b |\n| --- | --- |\n| {cell} | x |\n| y | z |\n");
+    let wide = render(&table(&"あ".repeat(16)), 120);
+    assert_eq!(
+        gap_rows(&wide).len(),
+        1,
+        "32 display columns must space the table: {:#?}",
+        body_rows(&wide)
+    );
+    let narrow = render(&table(&"a".repeat(16)), 120);
+    assert_eq!(
+        gap_rows(&narrow),
+        Vec::<usize>::new(),
+        "16 display columns must not: {:#?}",
+        body_rows(&narrow)
     );
 }
 

@@ -2,56 +2,56 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
-    mdmost torture test                                                                                         
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━                                    
+ mdmost torture test                                                                                            
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━                                       
                                                                                                                 
-    A paragraph with emphasis, strong, strikethrough, inline code, a link                                       
-    (https://example.com) and an autolink                                                                       
-    https://example.org/very/long/path/that/will/not/fit/in/forty/columns.                                      
+ A paragraph with emphasis, strong, strikethrough, inline code, a link                                          
+ (https://example.com) and an autolink                                                                          
+ https://example.org/very/long/path/that/will/not/fit/in/forty/columns.                                         
                                                                                                                 
-    Mixed scripts                                                                                               
-    ────────────────────────────────────────────────────────────────────────                                    
+ Mixed scripts                                                                                                  
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
-    日本語のテキストと English が混ざった段落です。مرحبا بالعالم — नमस्ते                                         
-    दुनिया. Emoji: 👩‍💻 🇨🇭 👍🏽 and a combining sequence: café (decomposed) and                                      
-    café (precomposed). A cluster wider than a terminal cell: 𗀀ᩗ (a Tangut                                     
-    base plus a spacing Tai Tham mark: one grapheme, three columns) and a                                       
-    zero-width space: a​b.                                                                                       
+ 日本語のテキストと English が混ざった段落です。مرحبا بالعالم — नमस्ते                                            
+ दुनिया. Emoji: 👩‍💻 🇨🇭 👍🏽 and a combining sequence: café (decomposed) and                                         
+ café (precomposed). A cluster wider than a terminal cell: 𗀀ᩗ (a Tangut                                        
+ base plus a spacing Tai Tham mark: one grapheme, three columns) and a                                          
+ zero-width space: a​b.                                                                                          
                                                                                                                 
-    An unbreakable-token stress case:                                                                           
-    supercalifragilisticexpialidociousantidisestablishmentarianism                                              
+ An unbreakable-token stress case:                                                                              
+ supercalifragilisticexpialidociousantidisestablishmentarianism                                                 
                                                                                                                 
-    Lists                                                                                                       
-    ────────────────────────────────────────────────────────────────────────                                    
+ Lists                                                                                                          
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
-    *    level one                                                                                              
+ *    level one                                                                                                 
                                                                                                                 
-         > level two with a longer line that has to wrap somewhere sensible                                     
+      > level two with a longer line that has to wrap somewhere sensible                                        
                                                                                                                 
-           + level three                                                                                        
-             1. ordered inside unordered                                                                        
-             2. second                                                                                          
+        + level three                                                                                           
+          1. ordered inside unordered                                                                           
+          2. second                                                                                             
                                                                                                                 
-    [x]  a finished task                                                                                        
+ [x]  a finished task                                                                                           
                                                                                                                 
-    [ ]  an unfinished task                                                                                     
+ [ ]  an unfinished task                                                                                        
                                                                                                                 
-    Table with Markdown inside cells                                                                            
-    ────────────────────────────────────────────────────────────────────────                                    
+ Table with Markdown inside cells                                                                               
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
-    ╭──────────────┬─────────────────┬────────────╮                                                             
-    │ Left         │     Centre      │      Right │                                                             
-    ├──────────────┼─────────────────┼────────────┤                                                             
-    │ em           │      code       │          1 │                                                             
-    │▄▄▄▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄▄│                                                             
-    │ a list:      │ bold and a link │ 1234567890 │                                                             
-    │ not html     │                 │            │                                                             
-    │▀▀▀▀▀▀▀▀▀▀▀▀▀▀│▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│▀▀▀▀▀▀▀▀▀▀▀▀│                                                             
-    │ 日本語のセル │       👩‍💻        │         -1 │                                                             
-    ╰──────────────┴─────────────────┴────────────╯                                                             
+ ╭──────────────┬─────────────────┬────────────╮                                                                
+ │ Left         │     Centre      │      Right │                                                                
+ ├──────────────┼─────────────────┼────────────┤                                                                
+ │ em           │      code       │          1 │                                                                
+ │▄▄▄▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄▄│                                                                
+ │ a list:      │ bold and a link │ 1234567890 │                                                                
+ │ not html     │                 │            │                                                                
+ │▀▀▀▀▀▀▀▀▀▀▀▀▀▀│▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀│▀▀▀▀▀▀▀▀▀▀▀▀│                                                                
+ │ 日本語のセル │       👩‍💻        │         -1 │                                                                
+ ╰──────────────┴─────────────────┴────────────╯                                                                
                                                                                                                 
-    Nested table                                                                                                
-    ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                    
+ Nested table                                                                                                   
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                       
                                                                                                                 
  ╭────────────────────────────────────────────────────────────────────────────╮                                 
  │ outer                                                                      │                                 
@@ -60,17 +60,17 @@ expression: canvas.plain_text()
  │ recurse                                                                    │                                 
  ╰────────────────────────────────────────────────────────────────────────────╯                                 
                                                                                                                 
-    Degenerate tables                                                                                           
-    ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                    
+ Degenerate tables                                                                                              
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                       
                                                                                                                 
-    ╭───╮                                                                                                       
-    │   │                                                                                                       
-    ├───┤                                                                                                       
-    │   │                                                                                                       
-    ╰───╯                                                                                                       
+ ╭───╮                                                                                                          
+ │   │                                                                                                          
+ ├───┤                                                                                                          
+ │   │                                                                                                          
+ ╰───╯                                                                                                          
                                                                                                                 
-    Wider than the page                                                                                         
-    ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                    
+ Wider than the page                                                                                            
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                       
                                                                                                                 
  ╭───────────┬────────────────┬───────────┬────────┬────────────┬───────┬─────────╮                             
  │ Component │ Responsibility │ Ownership │ Status │ Milestones │ Since │ Tickets │                             
@@ -82,8 +82,8 @@ expression: canvas.plain_text()
  │           │ canvas         │           │        │            │       │         │                             
  ╰───────────┴────────────────┴───────────┴────────┴────────────┴───────┴─────────╯                             
                                                                                                                 
-    Code                                                                                                        
-    ────────────────────────────────────────────────────────────────────────                                    
+ Code                                                                                                           
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
  ╭ rust ──────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
  │ fn main() {                                                                                                │ 
@@ -92,120 +92,120 @@ expression: canvas.plain_text()
  │ }                                                                                                          │ 
  ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ 
                                                                                                                 
-    ╭──────────────────────────────────────────────────────────────────────╮                                    
-    │ no language tag at all                                               │                                    
-    ╰──────────────────────────────────────────────────────────────────────╯                                    
+ ╭──────────────────────────────────────────────────────────────────────╮                                       
+ │ no language tag at all                                               │                                       
+ ╰──────────────────────────────────────────────────────────────────────╯                                       
                                                                                                                 
-    Mermaid                                                                                                     
-    ────────────────────────────────────────────────────────────────────────                                    
+ Mermaid                                                                                                        
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
-                                    ┌───────┐                                                                   
-                                    │ Start │                                                                   
-                                    └─┬───┬─┘                                                                   
-                                      │   ▲                                                                     
-                                      ╰─╮ │                                                                     
-                                        ├─╯                                                                     
-                                        │no                                                                     
-                                        ▼                                                                       
-                                   ╱────┴───╲                                                                   
-                                  │ Decision │                                                                  
-                                   ╲────┬───╱                                                                   
-                                        │yes                                                                    
-                                        ▼                                                                       
-                                    ╭──────╮                                                                    
-                                    ( Done )                                                                    
-                                    ╰──────╯                                                                    
+   ┌───────┐                                                                                                    
+   │ Start │                                                                                                    
+   └─┬───┬─┘                                                                                                    
+     │   ▲                                                                                                      
+     ╰─╮ │                                                                                                      
+       ├─╯                                                                                                      
+       │no                                                                                                      
+       ▼                                                                                                        
+  ╱────┴───╲                                                                                                    
+ │ Decision │                                                                                                   
+  ╲────┬───╱                                                                                                    
+       │yes                                                                                                     
+       ▼                                                                                                        
+   ╭──────╮                                                                                                     
+   ( Done )                                                                                                     
+   ╰──────╯                                                                                                     
                                                                                                                 
  ╭ mermaid ───────────────────────────────────────────────────────────────────╮                                 
  │ this is not valid mermaid at all                                           │                                 
  ╰ not a diagram type — mdmost draws flowchart, sequenceDiagram, classDiagra… ╯                                 
                                                                                                                 
-    HTML is not supported                                                                                       
-    ────────────────────────────────────────────────────────────────────────                                    
+ HTML is not supported                                                                                          
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
-    ⟨html⟩                                                                                                      
+ ⟨html⟩                                                                                                         
                                                                                                                 
-    Inline ⟨html⟩ html is dropped too.                                                                          
+ Inline ⟨html⟩ html is dropped too.                                                                             
                                                                                                                 
-    Quotes and rules                                                                                            
-    ────────────────────────────────────────────────────────────────────────                                    
+ Quotes and rules                                                                                               
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
-    ▌ A block quote spanning two lines.                                                                         
-    ▌                                                                                                           
-    ▌ ▌ and a nested one.                                                                                       
+ ▌ A block quote spanning two lines.                                                                            
+ ▌                                                                                                              
+ ▌ ▌ and a nested one.                                                                                          
                                                                                                                 
-                ───────────────────────◈────────────────────────                                                
+             ───────────────────────◈────────────────────────                                                   
                                                                                                                 
-    Images and footnotes                                                                                        
-    ────────────────────────────────────────────────────────────────────────                                    
+ Images and footnotes                                                                                           
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
-    ╭ image ───────────────────────────────────────────────────────────────╮                                    
-    │ alt text for a picture                                               │                                    
-    │ picture.png                                                          │                                    
-    ╰──────────────────────────────────────────────────────────────────────╯                                    
+ ╭ image ───────────────────────────────────────────────────────────────╮                                       
+ │ alt text for a picture                                               │                                       
+ │ picture.png                                                          │                                       
+ ╰──────────────────────────────────────────────────────────────────────╯                                       
                                                                                                                 
-    A statement needing a source[1].                                                                            
+ A statement needing a source[1].                                                                               
                                                                                                                 
-    Duplicate heading                                                                                           
-    ────────────────────────────────────────────────────────────────────────                                    
+ Duplicate heading                                                                                              
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
-    Duplicate heading                                                                                           
-    ────────────────────────────────────────────────────────────────────────                                    
+ Duplicate heading                                                                                              
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
-    Every diagram family through the document path                                                              
-    ────────────────────────────────────────────────────────────────────────                                    
+ Every diagram family through the document path                                                                 
+ ────────────────────────────────────────────────────────────────────────                                       
                                                                                                                 
-    Each family is deliberately small: these goldens exist to prove a                                           
-    diagram survives margins, block spacing and a 40-column budget, and a                                       
-    diff nobody can read would be rubber-stamped rather than reviewed.                                          
+ Each family is deliberately small: these goldens exist to prove a                                              
+ diagram survives margins, block spacing and a 40-column budget, and a                                          
+ diff nobody can read would be rubber-stamped rather than reviewed.                                             
                                                                                                                 
-                                ╭─────╮  ╭─────╮                                                                
-                                │ Ana │  │ Bo  │                                                                
-                                ╰─────╯  ╰─────╯                                                                
-                                   ┆        ┆                                                                   
-                                   ┆  ping  ┆                                                                   
-                                   ┆────────▶                                                                   
-                                   ┆  pong  ┆                                                                   
-                                   ◀╌╌╌╌╌╌╌╌┆                                                                   
-                                   ┆        ┆                                                                   
-                                ╭─────╮  ╭─────╮                                                                
-                                │ Ana │  │ Bo  │                                                                
-                                ╰─────╯  ╰─────╯                                                                
+ ╭─────╮  ╭─────╮                                                                                               
+ │ Ana │  │ Bo  │                                                                                               
+ ╰─────╯  ╰─────╯                                                                                               
+    ┆        ┆                                                                                                  
+    ┆  ping  ┆                                                                                                  
+    ┆────────▶                                                                                                  
+    ┆  pong  ┆                                                                                                  
+    ◀╌╌╌╌╌╌╌╌┆                                                                                                  
+    ┆        ┆                                                                                                  
+ ╭─────╮  ╭─────╮                                                                                               
+ │ Ana │  │ Bo  │                                                                                               
+ ╰─────╯  ╰─────╯                                                                                               
                                                                                                                 
-                                ┌──────────────┐                                                                
-                                │    Shape     │                                                                
-                                ├──────────────┤                                                                
-                                │ +area(): f64 │                                                                
-                                └───────┬──────┘                                                                
-                                        △                                                                       
-                                   ┌────┴───┐                                                                   
-                                   │ Circle │                                                                   
-                                   └────────┘                                                                   
+ ┌──────────────┐                                                                                               
+ │    Shape     │                                                                                               
+ ├──────────────┤                                                                                               
+ │ +area(): f64 │                                                                                               
+ └───────┬──────┘                                                                                               
+         △                                                                                                      
+    ┌────┴───┐                                                                                                  
+    │ Circle │                                                                                                  
+    └────────┘                                                                                                  
                                                                                                                 
-                                  ┌────────┐                                                                    
-                                  │ AUTHOR │                                                                    
-                                  └────┬───┘                                                                    
-                                       ┼                                                                        
-                                       ┼                                                                        
-                                       │writes                                                                  
-                                       ○                                                                        
-                                       ∧                                                                        
-                                   ┌──────┐                                                                     
-                                   │ BOOK │                                                                     
-                                   └──────┘                                                                     
+ ┌────────┐                                                                                                     
+ │ AUTHOR │                                                                                                     
+ └────┬───┘                                                                                                     
+      ┼                                                                                                         
+      ┼                                                                                                         
+      │writes                                                                                                   
+      ○                                                                                                         
+      ∧                                                                                                         
+  ┌──────┐                                                                                                      
+  │ BOOK │                                                                                                      
+  └──────┘                                                                                                      
                                                                                                                 
-                                       ●                                                                        
-                                       ▼                                                                        
-                                   ╭──────╮                                                                     
-                                   │ Idle │                                                                     
-                                   ╰───┬──╯                                                                     
-                                       │start                                                                   
-                                       ▼                                                                        
-                                   ╭──────╮                                                                     
-                                   │ Busy │                                                                     
-                                   ╰───┬──╯                                                                     
-                                       ▼                                                                        
-                                       ◉                                                                        
+     ●                                                                                                          
+     ▼                                                                                                          
+ ╭──────╮                                                                                                       
+ │ Idle │                                                                                                       
+ ╰───┬──╯                                                                                                       
+     │start                                                                                                     
+     ▼                                                                                                          
+ ╭──────╮                                                                                                       
+ │ Busy │                                                                                                       
+ ╰───┬──╯                                                                                                       
+     ▼                                                                                                          
+     ◉                                                                                                          
                                                                                                                 
                                      Effort                                                                     
                                                                                                                 
@@ -223,10 +223,10 @@ expression: canvas.plain_text()
    design    │     ████████████████████████                                                                     
    build     │                             ███████████████████████████████                                      
                                                                                                                 
-    A single-node graph is a degenerate case worth pinning.                                                     
+ A single-node graph is a degenerate case worth pinning.                                                        
                                                                                                                 
-                               ┌───────────────┐                                                                
-                               │ Just one node │                                                                
-                               └───────────────┘                                                                
+ ┌───────────────┐                                                                                              
+ │ Just one node │                                                                                              
+ └───────────────┘                                                                                              
                                                                                                                 
-    [1] The footnote body.
+ [1] The footnote body.
