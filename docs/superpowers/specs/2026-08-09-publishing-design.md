@@ -160,31 +160,100 @@ the way around it.
 
 ## 7. The demo
 
-`demo/tour.md` — a document chosen to be unkind to `less`: prose, a nested list, a task
-list, a fenced Rust block, a table wider than the terminal, and a mermaid flowchart.
+The demo runs `less` and `mdmost` **side by side on the same document**, in a tmux split
+inside the recording. A back-to-back comparison — first `less`, then `mdmost` — was the
+earlier design and was dropped: it asks the reader to remember what they saw twenty
+seconds ago. Side by side the comparison makes itself, and the pane divider becomes an
+instrument for showing the one thing no screenshot can show, which is that rendering is
+a function of width.
 
-`demo/mdmost.toml` — an `ansidrama record` script; 100×30, `chrome.style = "macos"`,
-output `docs/demo/mdmost.webp`. Two acts, 35-45 seconds:
+### 7.1 The frame, and why it is 100 columns
 
-1. Card — *"a Markdown file. and a pager."*
-2. `less tour.md`, `space` twice: pipes, dashes, fence markers, and the mermaid block as
-   unreadable source. `q`.
-3. Card — *"the same file, in mdmost"*.
-4. `mdmost --mouse tour.md` — the FIGlet banner and the styled body.
-5. `space`, then `]` `]` — screen scroll, then heading to heading.
-6. `tab` opens the contents pane; a click on an entry jumps to it.
-7. Wheel scroll to the wide table, then `right` `right` `right` — the table scrolls
-   sideways while the prose around it holds still.
-8. A drag on the right-edge scrollbar; the document tracks the thumb.
-9. A drag across a paragraph; on release the status bar reports the Markdown source was
-   copied.
-10. Card — *"mdmost"* with the install line.
+`cols = 100`, `rows = 30`, split into panes of 50 and 49. The width was chosen by
+rendering the content, not by taste:
 
-`--mouse` is required for beats 6-9: mouse capture is opt-in.
+| content | narrowest width that fits | in a 50-column pane |
+| --- | --- | --- |
+| 3-column table | 48 | fits; cells wrap to two lines |
+| small `flowchart LR` | ~30 | fits; node labels wrap to three lines |
+| 5-column table | 59 | **does not fit — scrolls horizontally** |
+| `pipeline.mmd` diagram | 188 | **does not fit — scrolls horizontally** |
+
+The last two are deliberate. A pane narrower than its content is how act 3 shows that
+wide content scrolls rather than being mangled, so `tour.md` carries content on both
+sides of the pane width on purpose.
+
+`ansidrama`'s `cols` is fixed for the whole recording. There is no way to narrow the
+frame after the `less` pane closes, so act 5 plays at the full 100 columns. At that
+width mdmost's 72-column body cap leaves roughly 13 columns of margin per side, which is
+where the contents pane opens — the margin is used, not wasted.
+
+### 7.2 `demo/tour.md`
+
+Written to react at the widths the drag passes through, in this order:
+
+1. Title and prose — re-breaks its lines at every width.
+2. A 3-column table — two-line cells at 48, single-line rows from 60 on, then stable.
+3. A small `flowchart LR` — labels wrap (`sou`/`rce`) at 48, single-line by 64.
+4. A 5-column table, 59 columns minimum — too wide for the pane; scrolls.
+5. A wide mermaid diagram, the `tests/corpus/pipeline.mmd` chart at 188 columns — the
+   scale at which no reflow could help, so scrolling is the only honest answer.
+6. A fenced Rust block — syntax highlighting, and the source for the act 4 copy.
+
+The reaction in beats 2 and 3 is the point: **prose, tables and diagrams each respond to
+the same drag differently.** A table renegotiates its column widths; a diagram re-lays
+its node boxes; prose only re-wraps. One motion, three behaviours.
+
+### 7.3 The five acts
+
+1. **Split.** `less tour.md` left, `mdmost tour.md` right. At 50 columns `less` breaks
+   words mid-glyph (`para`/`graph`) and shows `| --- | --- |` as literal text.
+2. **Drags.** An `ansidrama` `drag` on the divider column, right to ~64 and back to ~50,
+   twice. tmux resizes both panes, both processes take `SIGWINCH`, and mdmost reflows
+   while `less` re-wraps into different mush.
+3. **Scrolling what cannot reflow.** Page down to the 5-column table and the wide
+   diagram; `Right` several times. Only the focused block moves — title and prose hold
+   still — with the `↔ n/m` readout; `g` returns to the first row and first column.
+4. **Copy, into the other pane.** `less` is replaced by `nano`. Three copies are made in
+   mdmost and pasted next door: a prose selection arrives as **Markdown source**, a table
+   as **TSV**, a fenced block as **its original source code**.
+5. **Full width.** The second pane is killed; mdmost takes all 100 columns for the
+   contents pane, search, and theme cycling.
+
+### 7.4 How the clipboard crosses the split
+
+mdmost writes **OSC 52 unconditionally** — the `clipboard` feature (arboard) is only the
+second half of a copy, for the local display server. With `set -g set-clipboard on`,
+tmux consumes the OSC 52 sequence into its own paste buffer, which `prefix ]` pastes into
+the `nano` pane. The whole path stays inside tmux, so **the recording needs no display
+server and no real clipboard**.
+
+For that reason the demo environment must unset `DISPLAY` and `WAYLAND_DISPLAY`. If
+arboard can reach a display server the status bar says one thing, and if it cannot it
+says another; a demo whose wording depends on the recording host cannot be re-recorded
+identically.
+
+### 7.5 Dependency on the code-provenance work
+
+Act 4 is **not buildable from this branch alone**. Copying a prose selection as Markdown
+source already works. Copying a **table as TSV** and a **fenced block as its source** are
+delivered by `docs/superpowers/plans/2026-08-10-code-provenance.md`. The demo is
+therefore recorded **after that work merges**, and is the last thing done rather than the
+fifth of six tasks.
+
+### 7.6 Determinism and size
 
 The `.webp` is generated locally and committed, as `ansidrama` does with its own.
 Rendering is deterministic, so regenerating produces identical bytes and does not churn
-the diff. The regeneration command goes in `docs/maintainer-notes.md`.
+the diff. The pager is launched with `--config demo/config.toml` so the recording never
+inherits the maintainer's `~/.config/mdmost/config.toml`, and `--mouse` is required
+throughout: mouse capture is opt-in, and acts 2 and 4 depend on it.
+
+`ansidrama` emits **lossless** WebP, and five acts is a long recording for a README hero
+image. If the file is too heavy, trim act 5's tour beats first. The drags and the copies
+are the reason the demo exists, and are cut last.
+
+The regeneration command goes in `docs/maintainer-notes.md`.
 
 ## 8. Manual steps for the maintainer
 
