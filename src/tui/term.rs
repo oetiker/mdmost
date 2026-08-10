@@ -5,8 +5,9 @@
 //!
 //! * a [`Restore`] guard, for the ordinary return and for `?`;
 //! * a panic hook, installed before `ratatui`'s so it runs after it;
-//! * a `SIGTERM`/`SIGHUP`/`SIGINT` flag polled by the loop, plus `Ctrl-C`, which raw
-//!   mode delivers as an ordinary key event rather than as a signal.
+//! * a `SIGTERM`/`SIGINT` flag polled by the loop, plus `SIGHUP` on unix, plus
+//!   `Ctrl-C`, which raw mode delivers as an ordinary key event rather than as a
+//!   signal.
 //!
 //! A terminal can also go away without asking. `SIGHUP` covers the polite case and is
 //! not enough on its own: it only interrupts the wait, and the loop used never to get
@@ -185,6 +186,9 @@ pub fn run(app: &mut App) -> io::Result<()> {
     // A failure to register is not worth refusing to start over; the guard and the
     // panic hook still cover every other exit path.
     let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&terminate));
+    // `SIGHUP` is the terminal-went-away signal and has no Windows counterpart;
+    // `SIGTERM` and `SIGINT` do, and `signal-hook` exports both there.
+    #[cfg(unix)]
     let _ = signal_hook::flag::register(signal_hook::consts::SIGHUP, Arc::clone(&terminate));
     // `Ctrl-C` arrives as a key event under raw mode, but `kill -INT` from another
     // terminal does not; without this it would leave the alternate screen up.

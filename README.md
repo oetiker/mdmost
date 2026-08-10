@@ -53,6 +53,53 @@ The scope is deliberately narrow, and these are decisions rather than gaps:
 
 ## Install
 
+**Homebrew** (macOS and Linux) — this repository is its own tap:
+
+```sh
+brew tap oetiker/mdmost https://github.com/oetiker/mdmost
+brew install mdmost
+```
+
+**Debian, Ubuntu** — download `mdmost_<version>_amd64.deb` (or `_arm64.deb`) from the
+[releases page](https://github.com/oetiker/mdmost/releases):
+
+```sh
+sudo dpkg -i mdmost_*_amd64.deb
+man mdmost
+```
+
+**Fedora, RHEL, openSUSE** — download the matching `.rpm`:
+
+```sh
+sudo rpm -i mdmost-*.x86_64.rpm
+```
+
+There is no apt or yum repository, so `apt upgrade` will not find new versions: come
+back to the releases page for those.
+
+**Any Linux** — the tarballs are static musl builds and need nothing installed:
+
+```sh
+tar xzf mdmost-*-x86_64-unknown-linux-musl.tar.gz
+sudo install mdmost/mdmost /usr/local/bin/
+```
+
+**macOS without Homebrew** — the tarball binaries are neither signed nor notarised, so
+Gatekeeper will quarantine them; `brew install` above is the path of least resistance.
+
+**Windows** — unzip `mdmost-<version>-x86_64-pc-windows-msvc.zip` and put `mdmost.exe`
+on your `PATH`. The Windows build compiles and is checked on every push, but it has not
+been exercised in anger: expect the mouse, the clipboard and font detection to be less
+well behaved there than on Unix.
+
+**Rust** —
+
+```sh
+cargo install mdmost
+```
+
+**From source** —
+
 ```sh
 cargo build --release
 install -m755 target/release/mdmost ~/.local/bin/
@@ -381,7 +428,7 @@ Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
   wide terminal and spaced in a narrow one.
 - **Grapheme-safe throughout.** Widths are display columns, never bytes or `char`s.
   Combining marks, ZWJ emoji sequences and regional-indicator flags are never split, and
-  every rendered row is exactly the requested width.
+  every row the pager draws is padded to exactly the width of the pane.
 - **Wide content scrolls, it does not mangle.** A table or code line too wide for the
   terminal keeps its shape and is reached with `←`/`→`. A cut line is marked with a `›`
   at the edge — or a `‹` once you have scrolled — while a box's own rules close with the

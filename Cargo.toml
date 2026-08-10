@@ -5,6 +5,12 @@ edition = "2024"
 description = "A full-screen terminal pager for a single Markdown document"
 license = "MIT"
 repository = "https://github.com/oetiker/mdmost"
+readme = "README.md"
+keywords = ["markdown", "pager", "terminal", "tui", "mermaid"]
+categories = ["command-line-utilities", "text-processing"]
+# The demo recording and the design docs are for readers of the repository, not for
+# anyone building the crate, and the `.webp` is the largest file in the tree.
+exclude = ["docs/**", "demo/**", "tests/corpus/**", "tests/snapshots/**"]
 
 [lib]
 name = "mdmost"
@@ -89,3 +95,35 @@ proptest = "1.11.0"
 [profile.dev]
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
+
+[package.metadata.deb]
+maintainer = "Tobias Oetiker <tobi@oetiker.ch>"
+copyright = "2026, Tobias Oetiker <tobi@oetiker.ch>"
+license-file = ["LICENSE-MIT", "0"]
+extended-description = """\
+A full-screen terminal pager for a single Markdown document. Tables get real \
+borders and negotiated column widths, fenced code is syntax-highlighted, and \
+Mermaid diagrams are laid out as box art rather than shown as source. Rendering \
+is a pure function of the document, width, theme and options, so a resize \
+reflows everything. A single static binary."""
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/mdmost", "usr/bin/", "755"],
+    ["man/mdmost.1", "usr/share/man/man1/", "644"],
+    ["README.md", "usr/share/doc/mdmost/README.md", "644"],
+    ["LICENSE-MIT", "usr/share/doc/mdmost/LICENSE-MIT", "644"],
+]
+
+[package.metadata.generate-rpm]
+summary = "Full-screen terminal pager for a single Markdown document"
+license = "MIT"
+# The musl builds are statically linked, so there is nothing to depend on — and the
+# host's find-requires cannot inspect a cross-built aarch64 binary anyway.
+auto-req = "no"
+assets = [
+    { source = "target/release/mdmost", dest = "/usr/bin/mdmost", mode = "755" },
+    { source = "man/mdmost.1", dest = "/usr/share/man/man1/mdmost.1", mode = "644", doc = true },
+    { source = "README.md", dest = "/usr/share/doc/mdmost/README.md", mode = "644", doc = true },
+    { source = "LICENSE-MIT", dest = "/usr/share/doc/mdmost/LICENSE-MIT", mode = "644", doc = true },
+]
