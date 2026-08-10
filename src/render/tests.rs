@@ -2330,6 +2330,37 @@ fn a_clipped_code_line_spans_only_the_drawn_columns() {
     );
 }
 
+#[test]
+fn trailing_whitespace_past_the_clip_draws_no_marker_and_keeps_the_full_span() {
+    // Trailing spaces are blank cells (`Cell::is_blank`), so `Canvas::clip_with_edges`
+    // does not mark this row even though the raw line — spaces included — is longer
+    // than the budget: only the eighteen `a`s are content, and all of them fit inside a
+    // 20-column area. The span has to ask the same question the canvas will, or it
+    // deducts a column for a marker that was never drawn and loses the last `a`.
+    let markdown = format!("```\n{}    \n```\n", "a".repeat(18));
+    let canvas = render(&markdown, 24);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].starts_with('a'))
+        .expect("a span for the line");
+    let row = canvas.row_text(span.row);
+    assert!(
+        !row.contains(code::OVERFLOW_MARKER),
+        "trailing whitespace is blank and must not be marked as cut: {row:?}"
+    );
+    let text: String = row
+        .chars()
+        .skip(usize::from(span.col))
+        .take(usize::from(span.cols))
+        .collect();
+    assert_eq!(
+        text,
+        "a".repeat(18),
+        "the span must cover every 'a' actually drawn, not fewer"
+    );
+}
+
 /// The byte range of a span, as a `Range`, for slicing the source in assertions.
 fn s_range(span: &crate::canvas::SearchSpan) -> std::ops::Range<usize> {
     span.source_start..span.source_end

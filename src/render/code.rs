@@ -335,12 +335,20 @@ fn code_area(
             // same length. Deciding it from the block's widest line (`natural`) instead
             // used to report a row one column and one byte short of what was actually
             // drawn, whenever a shorter row happened to fit exactly.
+            //
+            // It is also a question about *content*, not about width: `is_blank` is
+            // true of a space, so a line whose only overflow is trailing whitespace is
+            // not marked either, and asking `line.width()` — which counts those spaces
+            // — deducted a marker column that was never drawn and left the last
+            // character of the line outside its own span, unreachable to search and to
+            // copy. Trimming to content asks the canvas's question.
             let code_budget = budget.saturating_sub(gutter);
-            let clipped = line.width() > code_budget;
+            let content_width = display_width(line.text().trim_end_matches(' '));
+            let clipped = content_width > code_budget;
             let drawn = if clipped {
                 code_budget.saturating_sub(display_width(OVERFLOW_MARKER))
             } else {
-                line.width()
+                content_width
             };
             if drawn > 0 {
                 let text = raw.get(row).copied().unwrap_or_default();
