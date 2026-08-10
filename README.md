@@ -428,7 +428,7 @@ Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
   wide terminal and spaced in a narrow one.
 - **Grapheme-safe throughout.** Widths are display columns, never bytes or `char`s.
   Combining marks, ZWJ emoji sequences and regional-indicator flags are never split, and
-  every rendered row is exactly the requested width.
+  every row the pager draws is padded to exactly the width of the pane.
 - **Wide content scrolls, it does not mangle.** A table or code line too wide for the
   terminal keeps its shape and is reached with `←`/`→`. A cut line is marked with a `›`
   at the edge — or a `‹` once you have scrolled — while a box's own rules close with the
