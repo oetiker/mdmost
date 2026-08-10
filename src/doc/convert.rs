@@ -103,6 +103,17 @@ fn code_lines(offsets: &LineOffsets<'_>, span: SourceSpan, literal: &str) -> Vec
     let mut index = offsets.line_index(span.start);
     let last = offsets.line_index(span.end.saturating_sub(1));
     for line in lines {
+        // comrak keeps a CRLF document's `\r` in the literal (confirmed against
+        // comrak's `parser/mod.rs`: the code-block path appends the raw slice
+        // verbatim and strips `\r` only from the info string, never the content), but
+        // `offsets.line` above strips it from the *source* side it searches. Left
+        // unstripped here, `line` carried a trailing byte the source line never had,
+        // so `text.ends_with(line)` could never hold and every line of every code
+        // block in a CRLF document — fenced or indented — got no provenance at all.
+        // Stripping it before the emptiness check matters too: a literal line that is
+        // only `"\r"` (a blank line in a CRLF document) must still become an empty
+        // span, not a doomed search for a single carriage return.
+        let line = line.strip_suffix('\r').unwrap_or(line);
         if line.is_empty() {
             // A blank line pushes an empty span without advancing `index`, which widens
             // the search window for the next line by one slot. That is safe: an empty

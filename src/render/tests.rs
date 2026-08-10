@@ -2252,31 +2252,51 @@ fn a_row_that_exactly_fits_is_not_shortened_because_another_row_overflows() {
 }
 
 #[test]
-fn a_crlf_authored_fence_maps_correctly_if_it_maps_at_all() {
-    // comrak keeps CRLF's `\r` inside a code block's `literal`
-    // (`literal == "let needle = 1;\r\n"`), which `doc::convert::code_lines` cannot
-    // currently match against the `\r`-stripped source line `LineOffsets::line`
-    // searches — this line ends up with no provenance, the same safe "could not locate
-    // it" outcome any other unmatched line gets (empty `SourceSpan`, filtered out
-    // before a span is recorded).
-    //
-    // What this settles is the *row-alignment* question a review raised: does
-    // `bridge::highlight`'s per-line split still line up, row for row, with
-    // `origins` when a literal carries an extra byte per line that
-    // `doc::literal_lines`'s split also has to account for? It does — both split only
-    // on `\n`, so the `\r` travels with the same line on both sides — and rendering
-    // this must neither panic nor invent a span pointing at the wrong bytes. If a span
-    // for this line ever does appear (comrak's `\r` handling is not this task's to
-    // fix), it must be exactly the line, with no `\r` and no overrun into the fence.
+fn a_crlf_authored_fence_maps_to_the_source_without_the_carriage_return() {
+    // comrak keeps a CRLF document's `\r` inside a code block's `literal`
+    // (`literal == "let needle = 1;\r\n"`), but `LineOffsets::line` strips it from the
+    // *source* line `doc::convert::code_lines` searches — so before that function
+    // stripped it too, `text.ends_with(line)` could never hold and every line of every
+    // code block in a CRLF document got no provenance at all. `doc::literal_lines`'s
+    // split and `bridge::highlight`'s both split only on `\n`, so the `\r` travels
+    // with the same line on both sides and the row alignment between `origins` and the
+    // drawn lines was never in question — only the byte match was broken.
     let markdown = "```rust\r\nlet needle = 1;\r\n```\r\n";
     let canvas = render(markdown, 40);
-    if let Some(span) = canvas
+    let span = canvas
         .spans()
         .iter()
         .find(|s| markdown[s.source_start..s.source_end].contains("needle"))
-    {
-        assert_eq!(&markdown[s_range(span)], "let needle = 1;");
-    }
+        .expect("a CRLF-authored code line must still map to its source");
+    let text = &markdown[s_range(span)];
+    assert_eq!(text, "let needle = 1;");
+    assert!(
+        !text.contains('\r'),
+        "a copy must never carry the line's own carriage return: {text:?}"
+    );
+}
+
+#[test]
+fn a_crlf_fence_with_a_blank_line_still_maps_the_lines_around_it() {
+    // The blank-line branch of `code_lines` returns early, without advancing the
+    // search index, before ever reaching the `ends_with` match this fix repairs — so
+    // it needs its own coverage: a CRLF literal's blank line is `"\r"`, not `""`, and
+    // has to be recognised as empty *after* the `\r` is stripped, or every line after
+    // it searches from the wrong index.
+    let markdown = "```rust\r\nlet needle = 1;\r\n\r\nlet other = 2;\r\n```\r\n";
+    let canvas = render(markdown, 40);
+    let needle = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].contains("needle"))
+        .expect("the line before the blank line must map");
+    assert_eq!(&markdown[s_range(needle)], "let needle = 1;");
+    let other = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].contains("other"))
+        .expect("the line after the blank line must map");
+    assert_eq!(&markdown[s_range(other)], "let other = 2;");
 }
 
 #[test]
