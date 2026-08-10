@@ -242,10 +242,19 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
     }
     gap.channels = channels;
     gap.label_base = gap.tail_len + gap.tail_note + channels;
+    // A label belongs to the edge, not to the piece of it that happens to cross this
+    // gap. An edge spanning several ranks is cut into one segment per gap, and every
+    // one of them sees the same non-empty label — so the carrier has to be picked, or
+    // the label is drawn once per rank crossed. It is the segment leaving the real
+    // node, which is also the only segment a single-rank edge has: the label then sits
+    // beside its source in every case, wherever the edge ends up going.
     let labelled: Vec<usize> = members
         .iter()
         .copied()
-        .filter(|&index| !input.edges[input.layered.segs[index].edge].label.is_empty())
+        .filter(|&index| {
+            let seg = &input.layered.segs[index];
+            is_item(input, seg.a) && !input.edges[seg.edge].label.is_empty()
+        })
         .collect();
     let mut spans = Vec::with_capacity(labelled.len());
     let mut extents = Vec::with_capacity(labelled.len());

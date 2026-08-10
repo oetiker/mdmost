@@ -349,6 +349,32 @@ fn a_long_edge_skips_a_rank() {
 }
 
 #[test]
+fn a_labelled_edge_that_skips_a_rank_draws_its_label_once() {
+    // The edge is cut into one segment per rank it crosses, but the label belongs to
+    // the edge, not to a segment: drawing it per segment paints it several times.
+    let nodes = vec![
+        node("A", "One", NodeShape::Rect),
+        node("B", "Two", NodeShape::Rect),
+        node("C", "Three", NodeShape::Rect),
+        node("D", "Four", NodeShape::Rect),
+    ];
+    let long = FlowEdge {
+        label: Some(Label::line("skip")),
+        ..edge(0, 3)
+    };
+    let edges = vec![edge(0, 1), edge(1, 2), edge(2, 3), long];
+    for direction in [Direction::TopToBottom, Direction::LeftToRight] {
+        let text = render(&chart(direction, nodes.clone(), edges.clone()), 70);
+        assert_eq!(
+            text.matches("skip").count(),
+            1,
+            "label drawn {} times going {direction:?}:\n{text}",
+            text.matches("skip").count()
+        );
+    }
+}
+
+#[test]
 fn wide_and_emoji_labels_keep_the_grid() {
     let nodes = vec![
         node("A", "开始处理", NodeShape::Round),
