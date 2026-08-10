@@ -459,6 +459,19 @@ is the intended use.
 Configuration, in TOML. A broken file never stops the program from starting: the
 problem is reported and the rest of the file still applies. The platform's own
 configuration directory is used where it differs.
+.PP
+Most command-line options have a configuration-file counterpart, and a few settings
+exist only there. In particular
+.B title_banner
+is
+.B false
+unless asked for: set
+.B title_banner = true
+to have a document whose first block is its one and only
+.B #
+heading drawn as a FIGlet banner. Section numbering,
+.BR section_numbers ,
+is on by default; the banner is not.
 .SH EXIT STATUS
 .TP
 .B 0
@@ -1154,7 +1167,8 @@ upgrade path and that the Windows build has never been run."
 
 **Files:**
 - Create: `demo/tour.md`
-- Create: `demo/mdmost.toml`
+- Create: `demo/config.toml` (mdmost's own config for the recording)
+- Create: `demo/mdmost.toml` (the ansidrama script)
 - Create: `docs/demo/mdmost.webp` (generated)
 - Modify: `README.md` (insert the demo after the opening paragraphs)
 - Modify: `docs/maintainer-notes.md` (how to regenerate)
@@ -1235,7 +1249,21 @@ flowchart LR
 Scroll back up, or press `q`.
 ```
 
-- [ ] **Step 3: Write `demo/mdmost.toml`**
+- [ ] **Step 3a: Write `demo/config.toml`**
+
+`title_banner` is opt-in and defaults to `false`, so without this the recording opens
+on a plain `# Field Notes` heading and design §7 beat 4 — "the FIGlet banner and the
+styled body" — never happens. The recording must not depend on whatever is in the
+maintainer's `~/.config/mdmost/config.toml` either, so mdmost is launched with
+`--config config.toml` and this file pins everything the demo relies on:
+
+```toml
+# mdmost's own configuration for the recording. Passed with `--config config.toml`
+# so the demo does not inherit the maintainer's ~/.config/mdmost/config.toml.
+title_banner = true
+```
+
+- [ ] **Step 3b: Write `demo/mdmost.toml`**
 
 Paths are relative to the config file's directory. `PATH` is prefixed so the recorded
 shell finds the release binary being demonstrated; replace `/abs/path/to/target/release`
@@ -1286,7 +1314,7 @@ hold_cs = 260
 
 # Act two.
 [[scene]]
-text    = "mdmost --mouse tour.md"
+text    = "mdmost --mouse --config config.toml tour.md"
 hold_cs = 40
 [[scene]]
 keys    = ["Enter"]
@@ -1393,7 +1421,9 @@ Append a section:
 ## Regenerating the demo
 
 `docs/demo/mdmost.webp` is recorded with [ansidrama](https://github.com/oetiker/ansidrama)
-from `demo/mdmost.toml`, against `demo/tour.md`. Rendering is deterministic, so
+from `demo/mdmost.toml`, against `demo/tour.md`. The pager is launched with
+`--config demo/config.toml` so the recording shows the opt-in title banner and does not
+inherit the maintainer's own configuration. Rendering is deterministic, so
 re-recording an unchanged script produces identical bytes.
 
 ```sh
@@ -1412,7 +1442,7 @@ frame out for that.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add demo/tour.md demo/mdmost.toml docs/demo/mdmost.webp README.md docs/maintainer-notes.md
+git add demo/tour.md demo/config.toml demo/mdmost.toml docs/demo/mdmost.webp README.md docs/maintainer-notes.md
 git commit -m "docs: a recording of less and mdmost on the same document
 
 Two acts on one file. First `less`, where a wide table is pipes and dashes and
