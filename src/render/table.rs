@@ -13,9 +13,10 @@
 //!    cells with no special case at all;
 //! 5. draw rounded borders and honour the GFM per-column alignment;
 //! 6. size each row to its tallest cell, top-aligning the shorter ones;
-//! 7. put a blank row between the body rows when any of them wraps, carrying the zebra
-//!    stripe through it with a half block — see [`gap_row`], which is where that whole
-//!    rule and its trade-offs are written down.
+//! 7. put a blank row between the body rows when any of them is crowded — because it
+//!    wraps, or because one of its cells is too long to read as a label — carrying the
+//!    zebra stripe through it with a half block; see [`gap_row`], which is where that
+//!    whole rule and its trade-offs are written down.
 
 use crate::canvas::{BorderSet, Canvas, Cell, CutMark, Rule, Side};
 use crate::doc::{Node, NodeKind, TableInfo};
@@ -27,6 +28,20 @@ use super::{Ctx, RenderOptions, block, inline};
 
 /// Columns consumed by one column's chrome: its left border and the two pad spaces.
 const COLUMN_CHROME: usize = 3;
+
+/// The drawn width, in display columns, at which one body cell makes a table crowded.
+///
+/// Roughly where a cell stops being a *label* and starts being a *sentence*. Up to about
+/// thirty columns a cell is a name, a number or a short phrase, and the eye takes it in
+/// as one token: the rows are told apart by their content and need no help. Past it the
+/// cell is prose that has to be read left to right, and three of those stacked edge to
+/// edge are the same slab the row gap exists to break up — see [`gap_row`], which is
+/// where the whole spacing rule is written down.
+///
+/// A count of display columns, not of `char`s or bytes, because it is a statement about
+/// how far the eye travels: sixteen CJK glyphs are thirty-two columns of reading and
+/// count as such.
+const CROWDED_CELL: usize = 30;
 
 /// Upper half block: shades the top half of a row gap, joining it to the row above.
 const UPPER_HALF: char = '\u{2580}';
@@ -154,10 +169,12 @@ fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Layout {
         ctx.base,
     );
     let drawn = draw_rows(&rows, &widths, info, inner);
-    // Air between the rows only when the rows need it — see [`gap_row`].
+    // Air between the rows only when the rows need it — see [`gap_row`]. Crowding comes
+    // in two shapes and either one earns the gap: a row too tall to show where it ends,
+    // or a cell too long to read as a label.
     let spaced = drawn
         .iter()
-        .any(|row| !row.header && row.canvas.height() > 1);
+        .any(|row| !row.header && (row.canvas.height() > 1 || row.widest > CROWDED_CELL));
     let mut gaps = Vec::new();
     for (index, row) in drawn.iter().enumerate() {
         out.append(&row.canvas, ctx.base);
@@ -207,11 +224,18 @@ fn lay_out(node: &Node, info: &TableInfo, width: u16, ctx: Ctx<'_>) -> Layout {
     }
 }
 
-/// One drawn table row: its canvas, and the two facts the spacing rule needs about it.
+/// One drawn table row: its canvas, and the facts the spacing rule needs about it.
 struct Drawn {
     header: bool,
     /// Whether the zebra put the stripe on this row.
     banded: bool,
+    /// The drawn width of the row's widest cell, in display columns.
+    ///
+    /// The *content's* width, not the column's: a short cell in a column that a longer
+    /// one negotiated wide is still a short cell, and padding is not something the reader
+    /// has to read. Measured off the drawn canvas for the same reason the height is —
+    /// see [`gap_row`].
+    widest: usize,
     canvas: Canvas,
 }
 
@@ -228,10 +252,12 @@ fn draw_rows(rows: &[Row<'_>], widths: &[usize], info: &TableInfo, ctx: Ctx<'_>)
             if !row.header {
                 body_index += 1;
             }
+            let (canvas, widest) = render_row(row, widths, info, banded, ctx);
             Drawn {
                 header: row.header,
                 banded,
-                canvas: render_row(row, widths, info, banded, ctx),
+                widest,
+                canvas,
             }
         })
         .collect()
@@ -260,30 +286,41 @@ pub fn is_row_gap(cells: &[Cell], stripe: Option<Color>) -> bool {
 ///
 /// # When there is a gap at all
 ///
-/// **A table is spaced exactly when at least one of its body rows is taller than one
-/// line at the current width**, and then *every* pair of adjacent body rows gets a gap.
-/// Rows that each fit on one line already show their own boundaries — the next row
-/// starts where the last one stopped — and air between them would only make the table
-/// taller. As soon as one row wraps, that cue is gone: six content lines packed edge to
-/// edge read as one block of prose, and `pager` beginning directly under `canvas of
-/// styled cells` says nothing about where the row boundary is.
+/// **A table is spaced exactly when at least one of its body rows is crowded at the
+/// current width**, and then *every* pair of adjacent body rows gets a gap. A row is
+/// crowded when either of two things is true of it:
 ///
-/// Per *table*, not per row: spacing only the neighbours of a tall row gives ragged gaps
-/// that track row length rather than structure, which is worse than either extreme. The
-/// height that decides it is the drawn one, so a cell containing a list, a code block or
-/// a nested table counts as readily as a wrapped sentence — the criterion is exactly the
-/// crowding the reader sees, and it cannot fall behind as block kinds are added.
+/// * **it is taller than one line.** Rows that each fit on one line show their own
+///   boundaries — the next row starts where the last one stopped. As soon as one wraps,
+///   that cue is gone: six content lines packed edge to edge read as one block of prose,
+///   and `pager` beginning directly under `canvas of styled cells` says nothing about
+///   where the row boundary is.
+/// * **one of its cells is wider than [`CROWDED_CELL`] display columns.** Height was
+///   once the whole rule, on the argument that a one-line row shows its own boundary.
+///   That holds for a *short* cell. A forty-column cell at a wide measure never wraps and
+///   so never earned any air, yet three of them stacked are exactly the slab of prose the
+///   first case is about — the reader is reading sentences, and the row boundary is once
+///   again only wherever a cell happened to stop. Length is crowding too.
+///
+/// Per *table*, not per row: spacing only the neighbours of a crowded row gives ragged
+/// gaps that track row length rather than structure, which is worse than either extreme.
+/// Both measurements are taken off the *drawn* row, so a cell containing a list, a code
+/// block or a nested table counts as readily as a wrapped sentence — the criterion is
+/// exactly the crowding the reader sees, and it cannot fall behind as block kinds are
+/// added. The width is the cell's content, not its column: padding is not reading.
 ///
 /// Only *body* rows are measured and only body rows are separated. A header is already
 /// fenced off from the body by its own `├───┼───┤` rule, which does this job better than
-/// a gap could, so a header that wraps cannot blur a boundary and does not earn one; and
-/// a gap laid against that rule, or against the top or bottom border, would be padding
-/// rather than structure. Nothing is inserted between two header rows either.
+/// a gap could, so a header that wraps or runs long cannot blur a boundary and does not
+/// earn one; and a gap laid against that rule, or against the top or bottom border, would
+/// be padding rather than structure. Nothing is inserted between two header rows either.
 ///
-/// The decision is width-dependent by construction — the same table is dense at 120
-/// columns and spaced at 60 — which is intended, because narrow is precisely when the
-/// rows wrap and look cramped. It is taken here, during layout, at a known width, never
-/// at parse time (design spec §3); the render cache is keyed on width, so a resize
+/// The decision is width-dependent by construction — a table of short cells that wrap at
+/// 60 columns is dense at 120 — which is intended, because narrow is precisely when rows
+/// wrap and look cramped. The length case does not undo that: it catches the tables the
+/// width case cannot see, the ones whose cells are long enough to stay long however much
+/// room they are given. The decision is taken here, during layout, at a known width,
+/// never at parse time (design spec §3); the render cache is keyed on width, so a resize
 /// re-renders and re-decides.
 ///
 /// # Which half is shaded
@@ -316,12 +353,11 @@ pub fn is_row_gap(cells: &[Cell], stripe: Option<Color>) -> bool {
 ///
 /// They are drawn in the gap as they are on any other row. Left out, every vertical rule
 /// in the table would have a row-high hole in it and the box would stop reading as a
-/// table — a far worse defect than the one this trades against, which is that the
-/// separator's cell is page background and so notches the band by one column at each
-/// rule. The notch is half a row high at most and sits in decoration;
-/// `a_striped_row_is_shaded_from_border_to_border` is about the *content* rows, where
-/// the stripe is a background and the hole was full height, and that property is
-/// untouched.
+/// table. They are drawn on the *page* background, which is what every rule in the table
+/// is drawn on since the stripe was pulled back out of them — see the note in
+/// [`render_row`]. So the band is notched by one column at each rule, in the gap and on
+/// the content rows alike, and that is the point: the rules are the frame the shading
+/// stops at, not holes in it.
 fn gap_row(widths: &[usize], full: u16, above: bool, below: bool, ctx: Ctx<'_>) -> Canvas {
     let shade = match (above, below) {
         (true, false) => Some(UPPER_HALF),
@@ -348,12 +384,12 @@ fn gap_row(widths: &[usize], full: u16, above: bool, below: bool, ctx: Ctx<'_>) 
             },
         );
     }
-    // The rules take the gap's own background and keep the border's own attributes,
-    // exactly as in `render_row`. On a gap the background is the page's, because the
-    // shading here is a foreground — see "The column separators" above for what that
-    // costs and why it is still the right trade.
+    // The rules take the *unstriped* background and keep the border's own attributes,
+    // exactly as in `render_row` — `ctx.base` rather than `fill`, so the both-striped
+    // gap, which does carry the stripe as a background, still stops it at its rules like
+    // every other row does. See "The column separators" above.
     let separator = Style {
-        bg: fill.bg,
+        bg: ctx.base.bg,
         ..ctx.theme.table.border
     };
     let mut col = 0usize;
@@ -392,32 +428,42 @@ fn border_row(
 }
 
 /// Renders one table row: every cell, then the vertical borders between them.
+///
+/// Returns the row alongside the drawn width of its widest cell, which is one of the two
+/// things the spacing rule asks about a row (see [`Drawn::widest`]).
 fn render_row(
     row: &Row<'_>,
     widths: &[usize],
     info: &TableInfo,
     banded: bool,
     ctx: Ctx<'_>,
-) -> Canvas {
+) -> (Canvas, usize) {
     let theme = ctx.theme;
     let mut style = if row.header {
         theme.table.header
     } else {
         theme.table.cell
     };
-    if banded {
-        style = style.patch(theme.table.row_alt);
-    }
-    // The vertical rules belong to the row they divide, so they take the row's own
-    // background. `theme.table.border` carries the *page* background, and painting it
-    // straight onto a striped row punched a one-column hole in the stripe at every
-    // separator: the band read as two separate shaded boxes rather than one row, and
-    // in the light theme as two selected cells (visual review, finding 5). Attributes
-    // stay the border's own, so a header row's bold does not leak onto its rules.
+    // The vertical rules take the row's background but **not its stripe**, so the
+    // separator style is taken before the band is applied. A rule runs the whole height
+    // of the box and has to read as one object; the zebra is a property of a row's
+    // *content*, and running it through the frame made the same divider change colour
+    // from line to line — most visibly on a wrapped row, where the half-block gap below
+    // it (see [`gap_row`]) leaves its own rule on the page background either way.
+    // Attributes stay the border's own, so a header row's bold does not leak onto its
+    // rules.
+    //
+    // **Changed 2026-08-10**, reversing visual review finding 5, which read the
+    // page-coloured rule as a one-column hole punched in the stripe. That reading holds
+    // only if the stripe is taken to be a single band spanning the row; it is one shaded
+    // cell per column, and the rules are the frame between them, not gaps in a band.
     let separator = Style {
         bg: style.bg,
         ..theme.table.border
     };
+    if banded {
+        style = style.patch(theme.table.row_alt);
+    }
     let cells: Vec<Canvas> = widths
         .iter()
         .enumerate()
@@ -434,6 +480,7 @@ fn render_row(
         .collect();
 
     let height = cells.iter().map(Canvas::height).max().unwrap_or(0).max(1);
+    let widest = cells.iter().map(drawn_width).max().unwrap_or(0);
     let total = widths.iter().sum::<usize>() + COLUMN_CHROME * widths.len() + 1;
     let full = u16::try_from(total).unwrap_or(u16::MAX);
     let mut out = Canvas::new(full, height, style);
@@ -456,7 +503,19 @@ fn render_row(
         &BorderSet::ROUNDED.vertical.to_string(),
         separator,
     );
-    out
+    (out, widest)
+}
+
+/// How much of a drawn cell the reader actually has to read, in display columns.
+///
+/// The widest of its lines with the trailing fill discounted: a cell is padded out to its
+/// column, and blank space is not reading. A centred or right-aligned cell keeps its
+/// leading offset, because that offset is how far the eye travels before the text starts.
+fn drawn_width(cell: &Canvas) -> usize {
+    (0..cell.height())
+        .map(|row| display_width(cell.row_text(row).trim_end()))
+        .max()
+        .unwrap_or(0)
 }
 
 /// The alignment declared for a column, defaulting to left.

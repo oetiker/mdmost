@@ -40,9 +40,11 @@ pub struct Palette {
     /// The most-used foreground in the application: every table frame, every code
     /// fence and the thematic break are drawn in it. WCAG's floor for meaningful
     /// non-text graphics is 3:1, and this colour must clear it against
-    /// [`Palette::bg`] *and* [`Palette::surface`] — a table's own vertical rules sit
-    /// on the striped row's surface, not on the page. `tests/theme_contrast.rs`
-    /// pins that floor for the built-ins and for any palette a config file defines.
+    /// [`Palette::bg`] *and* [`Palette::surface`]. Everything drawn in it sits on the
+    /// page today — a table's vertical rules keep the page background even where they
+    /// cross a striped row — but a border is the one ink that has to survive either
+    /// ground, so both are pinned. `tests/theme_contrast.rs` holds that floor for the
+    /// built-ins and for any palette a config file defines.
     pub border: Color,
     /// Primary accent.
     pub accent: Color,

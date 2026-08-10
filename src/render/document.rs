@@ -159,19 +159,17 @@ pub fn render_document(
 ///
 /// # Placement
 ///
-/// Everything shares one centre line. A block laid out at the cap takes the cap's own
-/// indent whatever it happens to draw — centring a two-word paragraph or a short heading
-/// on *itself* would set the document ragged — and a block that took the full width is
-/// centred on what it actually drew. The two are the same arithmetic and agree exactly
-/// at an extent of one cap, so a table slightly wider than the measure sits slightly
-/// wider than the prose rather than jumping to the left margin. A block that fills the
-/// body, or overflows it, is left where it is, at the margin.
+/// **Everything shares one left edge.** The cap limits a block's *width* and does nothing
+/// else: narrow content stops early on the right, wide content runs past the measure.
+/// Nothing is centred, and there are no exceptions — not the title banner, not a heading
+/// rule, not a diagram. [`placed`] is where that is done, and where the argument for it
+/// against the centred layout this replaced is written down.
 ///
-/// This is also what keeps [`scroll_reach`] seeing what it expects: rows that fit stay
-/// well inside the render width and get an offset of zero. A pinned prefix needs nothing
-/// from the placement — it is published by the renderer and translated by the indent
-/// itself ([`pinned_prefix`], [`Canvas::indent`]) — but note that [`placed`] centres a
-/// capped block by *indenting* it, which is exactly why that has to be true.
+/// A capped block is still cropped to what it occupies, which is what keeps
+/// [`scroll_reach`] seeing what it expects: rows that fit stay well inside the render
+/// width and get an offset of zero. A pinned prefix needs nothing from the placement —
+/// it is published by the renderer and translated by the document margin itself
+/// ([`pinned_prefix`], [`Canvas::indent`]).
 #[derive(Debug, Clone, Copy)]
 struct Measure {
     /// The whole body between the margins.
@@ -209,24 +207,6 @@ fn is_exempt(node: &Node) -> bool {
     }
 }
 
-/// Whether a block arrives already placed within the width it was laid out at.
-///
-/// Every other block draws from its left edge, which is what lets [`placed`] position it
-/// by indenting. A Mermaid drawing does not: `mermaid::chrome::compose` centres the plot
-/// inside the width it is given, as the last step of every family's `draw`, so the block
-/// comes back with its own left offset baked in. Indenting it again adds the two offsets
-/// together — the drawing drifted right by exactly the cap's indent, which is invisible
-/// on a terminal narrow enough that nothing is capped, and grows with the terminal.
-///
-/// Leaving it alone is right rather than merely harmless: the drawing is centred in the
-/// full body, and the capped prose is centred in the full body, so the two already share
-/// the centre line [`Measure`] promises. A fence that failed and came back as a source
-/// dump is full-width and would be left alone by [`placed`] anyway.
-fn places_itself(node: &Node) -> bool {
-    matches!(&node.kind, NodeKind::CodeBlock { language, .. }
-        if crate::render::code::is_mermaid(language.as_deref()))
-}
-
 /// Renders one block at the width its kind earns, and places it in the body.
 fn render_placed(
     node: &Node,
@@ -238,10 +218,8 @@ fn render_placed(
     fill: crate::theme::Style,
 ) -> Canvas {
     // Nothing to place: with no cap the body is the full width, and every block was laid
-    // out at it. A block that places itself is laid out at the full width too, and is
-    // already where it belongs — see `places_itself`, which only says yes to blocks that
-    // `is_exempt` also says yes to.
-    if !measure.is_capped() || places_itself(node) {
+    // out at it.
+    if !measure.is_capped() {
         return render_widened(node, measure.full, theme, options, numbers, clip);
     }
     let canvas = if is_exempt(node) {
@@ -259,10 +237,10 @@ fn render_placed(
     placed(canvas, measure, fill)
 }
 
-/// Places an already-drawn block in the body, centring it under the cap.
+/// Places an already-drawn block in the body: at the left margin, cropped to what it drew.
 ///
 /// Split out of [`render_placed`] so the title banner — which is drawn by the renderer
-/// rather than here — is centred by exactly the same arithmetic as every other block.
+/// rather than here — is placed by exactly the same arithmetic as every other block.
 fn placed(mut canvas: Canvas, measure: Measure, fill: crate::theme::Style) -> Canvas {
     if !measure.is_capped() {
         return canvas;
@@ -273,12 +251,10 @@ fn placed(mut canvas: Canvas, measure: Measure, fill: crate::theme::Style) -> Ca
         .map(|row| row_extent(row))
         .max()
         .unwrap_or(0);
-    // A block laid out at the cap keeps the cap's own indent, whatever it happens to
-    // draw: centring a short heading or a two-word paragraph on itself would set the
-    // document ragged. A block that took the full width is centred on what it actually
-    // drew instead, which is the same arithmetic — at an extent of exactly the cap the
-    // two agree — and which keeps a table that is wider than the measure but narrower
-    // than the terminal on the same centre line as the prose above it.
+    // How much of the body this block occupies. A block laid out at the cap is credited
+    // with the cap whatever it happens to draw, so a two-word paragraph does not report
+    // itself as two words wide; a block that took the full width is credited with what
+    // it actually drew.
     let occupied = if extent > measure.prose {
         extent
     } else {
@@ -287,12 +263,22 @@ fn placed(mut canvas: Canvas, measure: Measure, fill: crate::theme::Style) -> Ca
     if occupied >= measure.full {
         return canvas;
     }
-    // Cropping before the indent keeps the block from carrying the columns of padding
-    // it was laid out with past the right margin, which would put every row's extent
-    // past the render width and hand the whole document to `scroll_reach` as one
-    // over-wide run.
+    // And that is the whole of the placement: **every block starts at the same left
+    // margin**, so what the cap does is shorten a line, never move it. This used to
+    // centre the block in the body, which reads well in a document that is nothing but
+    // prose and falls apart in any other: each block is centred against its own width,
+    // so a heading, a table, a fence and a diagram on one page came to rest on four
+    // different left edges (19, 8, 1 and 37 columns, measured at a width of 110) and the
+    // margin staircased as the reader scrolled. A single left edge is what makes a mixed
+    // document scannable — the eye returns to one place — and the content that will not
+    // fit sticks out to the right, where nobody is looking for the start of a line.
+    //
+    // Cropping is still needed, and for the reason it always was: without it a block
+    // carries the columns of padding it was laid out with past the right margin, which
+    // puts every row's extent past the render width and hands the whole document to
+    // `scroll_reach` as one over-wide run.
     canvas.truncate_width(occupied, fill);
-    canvas.indent((measure.full - occupied) / 2, 0, fill)
+    canvas
 }
 
 /// How much wider than the viewport a diagram must want before it is granted the width.

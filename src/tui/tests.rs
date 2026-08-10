@@ -77,10 +77,13 @@ fn the_body_cap_reaches_the_render_through_the_pager() {
     );
     app.resize(120, 12);
     let row = app.canvas().row_text(0);
-    let indent = row.len() - row.trim_start().len();
+    // The cap shortens the line; it does not move it. So the wire is visible in where
+    // the paragraph *stops*, not in where it starts — it starts at the margin, as
+    // everything does. Without the cap this row would run most of the 120 columns.
+    let width = row.trim_end().len();
     assert!(
-        indent > 30,
-        "the paragraph was not capped and centred: {indent} columns of indent\n{row}"
+        (30..=42).contains(&width),
+        "the paragraph was not capped to 40 columns: {width} columns of text\n{row}"
     );
 }
 
@@ -236,9 +239,14 @@ fn there_is_a_horizontal_offset_only_when_something_is_over_wide() {
     );
     assert_eq!(app.hscroll_max(), 0);
 
-    // Force a render wider than the viewport and the offset becomes real.
+    // Something that really is wider than the viewport, and the offset becomes real. It
+    // has to be *ink* that is over-wide, not just a wide render: since every block
+    // anchors at the left margin, forcing `--width 200` on this prose only pads the
+    // right-hand side with blanks, and `scroll_reach` rightly refuses to scroll to
+    // whitespace. A code line is the standard way to be genuinely too wide.
+    let over_wide = format!("{SAMPLE}\n```text\n{}\n```\n", "x".repeat(300));
     let mut wide = App::new(
-        Doc::parse(SAMPLE),
+        Doc::parse(&over_wide),
         Config::default(),
         AppOptions {
             config_path: None,

@@ -1,10 +1,14 @@
 //! A cap on the width of the prose body, with a dispensation for what cannot reflow.
 //!
 //! Design spec §3.2. Prose past a hundred-odd columns is hard to read — the eye loses
-//! the start of the next line — so the body is capped and centred on a wide terminal.
-//! Tables and diagrams are exempt outright; everything else escalates to the full width
-//! the moment the cap would cut it short. These tests pin the rule, both halves of it,
-//! and pin that the horizontal-scroll machinery still sees what it expects.
+//! the start of the next line — so the body is capped on a wide terminal. Tables and
+//! diagrams are exempt outright; everything else escalates to the full width the moment
+//! the cap would cut it short.
+//!
+//! The cap is a limit on a block's *width*, and nothing else. Every block starts at the
+//! same left margin: narrow content stops early on the right, wide content runs past it.
+//! These tests pin both halves of that, and pin that the horizontal-scroll machinery
+//! still sees what it expects.
 
 use mdmost::canvas::Canvas;
 use mdmost::doc::Doc;
@@ -64,28 +68,68 @@ before it comes back, and a line that runs the whole width of a very wide termin
 makes that return journey hard enough that readers lose their place between one line \
 and the next, which is why every serious reader of long-form text caps it somewhere.";
 
+/// The margin every block starts at: `render::DOCUMENT_MARGIN`.
+const MARGIN: usize = 1;
+
 #[test]
-fn prose_is_centred_when_the_terminal_is_wider_than_the_cap() {
+fn capped_prose_starts_at_the_margin_and_stops_early() {
     let canvas = paged(PROSE, WIDE, Some(CAP));
-    let margin = 1; // render::DOCUMENT_MARGIN
-    let body = WIDE - 2 * margin;
-    let pad = (body - CAP) / 2;
-    let expected = usize::from(margin + pad);
     let indent = indent_of(&canvas, 0).expect("the paragraph draws something");
     assert_eq!(
         indent,
-        expected,
-        "prose should be centred at column {expected}, not {indent}:\n{}",
+        MARGIN,
+        "capped prose should start at the margin, not at column {indent}:\n{}",
         canvas.row_text(0)
     );
-    // Centred means indented on *both* sides: nothing may reach the right margin.
+    // The cap is still doing its job: it shortens the line, it does not move it.
     for row in 0..canvas.height() {
         assert!(
-            extent_of(&canvas, row) <= expected + usize::from(CAP),
+            extent_of(&canvas, row) <= MARGIN + usize::from(CAP),
             "row {row} runs past the capped body:\n{}",
             canvas.row_text(row)
         );
     }
+    let longest = (0..canvas.height())
+        .map(|row| extent_of(&canvas, row))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        longest > MARGIN + usize::from(CAP) / 2,
+        "the fixture must actually fill the measure: longest row {longest}"
+    );
+}
+
+/// The rule the owner asked for, in one assertion: one left edge for the whole document.
+///
+/// Before this, each block was centred against its own width, so a document of mixed
+/// content staircased — measured at 110 columns, a heading began at 19, a table at 8, a
+/// code fence at 1 and a diagram at 37. Four left edges on one page, and which one a
+/// block got depended on how wide it happened to draw. The centring only ever held
+/// together in a document made purely of prose.
+#[test]
+fn every_block_starts_at_the_same_left_margin() {
+    let markdown = format!(
+        "## A heading\n\n{PROSE}\n\n{WIDE_TABLE}\n{}\n{DIAGRAM}",
+        long_code(150)
+    );
+    let canvas = paged(&markdown, WIDE, Some(CAP));
+    let mut seen = 0usize;
+    for row in 0..canvas.height() {
+        let Some(indent) = indent_of(&canvas, row) else {
+            continue;
+        };
+        seen += 1;
+        assert_eq!(
+            indent,
+            MARGIN,
+            "row {row} starts at column {indent}, not at the margin:\n{}",
+            canvas.row_text(row)
+        );
+    }
+    assert!(
+        seen > 20,
+        "too little was drawn to be evidence: {seen} rows"
+    );
 }
 
 #[test]
@@ -128,41 +172,42 @@ fn a_wide_table_takes_the_full_terminal_width() {
         drawn(&uncapped),
         "a table must be laid out exactly as it would be with no cap at all"
     );
-    // The prose beside it is still capped and still centred.
-    assert_eq!(
-        indent_of(&canvas, 0),
-        Some(usize::from(1 + (198 - CAP) / 2))
-    );
+    // The prose beside it is still capped, and starts where the table starts.
+    assert_eq!(indent_of(&canvas, 0), Some(MARGIN));
 }
 
 #[test]
-fn a_table_wider_than_the_cap_shares_the_prose_centre_line() {
+fn a_table_wider_than_the_cap_shares_the_prose_left_edge_and_runs_past_it() {
     let markdown = format!("{PROSE}\n\n{WIDE_TABLE}");
     let canvas = paged(&markdown, WIDE, Some(CAP));
     let row = (0..canvas.height())
         .find(|row| canvas.row_text(*row).contains("body_width"))
         .expect("the table is drawn");
-    let left = indent_of(&canvas, row).expect("the table draws something");
-    let right = usize::from(WIDE) - extent_of(&canvas, row);
-    assert!(
-        left.abs_diff(right) <= 1,
-        "the table is not centred: {left} columns left, {right} right\n{}",
+    assert_eq!(
+        indent_of(&canvas, row),
+        indent_of(&canvas, 0),
+        "the table and the prose must share one left edge:\n{}",
         canvas.row_text(row)
     );
-    // And it is wider than the prose above it, not narrower.
-    assert!(left < indent_of(&canvas, 0).expect("prose"));
+    // Being wider than the measure now shows on the right, where the reader is not
+    // looking for the start of a line.
+    assert!(
+        extent_of(&canvas, row) > MARGIN + usize::from(CAP),
+        "the table should stick out to the right:\n{}",
+        canvas.row_text(row)
+    );
 }
 
 #[test]
-fn a_narrow_table_sits_with_the_prose_rather_than_at_the_far_left() {
+fn a_narrow_table_sits_with_the_prose() {
     let markdown = format!("{PROSE}\n\n| a | b |\n|---|---|\n| 1 | 2 |\n");
     let canvas = paged(&markdown, WIDE, Some(CAP));
     let prose = indent_of(&canvas, 0).expect("the paragraph draws something");
     let table = indent_of_row_with(&canvas, "│ a");
     assert_eq!(
-        table,
-        prose,
-        "a table that fits the measure should be aligned with it:\n{}",
+        (table, prose),
+        (MARGIN, MARGIN),
+        "a narrow table should start at the margin, with the prose:\n{}",
         canvas.plain_text()
     );
 }
@@ -190,9 +235,10 @@ fn a_short_code_block_stays_with_the_prose() {
     let canvas = paged(&long_code(20), WIDE, Some(CAP));
     let prose = indent_of(&canvas, 0).expect("the paragraph draws something");
     let code = indent_of_row_with(&canvas, "xxxxx");
-    assert!(
-        code >= prose,
-        "a short code block should not break out to the left margin: {code} < {prose}\n{}",
+    assert_eq!(
+        (code, prose),
+        (MARGIN, MARGIN),
+        "a short code block belongs on the prose's left edge:\n{}",
         canvas.plain_text()
     );
     for row in 0..canvas.height() {
@@ -250,33 +296,63 @@ fn a_wide_block_inside_a_quote_still_reaches_the_full_terminal() {
 const DIAGRAM: &str =
     "```mermaid\nflowchart LR\n    A[Start] --> B[Read]\n    B --> C[Draw]\n```\n";
 
-/// A diagram sits on the document's centre line, not to the right of it.
+/// A diagram starts on the prose's left edge, at every width.
 ///
-/// `mermaid::chrome::compose` centres a drawing inside the width it is laid out at, so
-/// unlike prose, a table or a code frame, a diagram block arrives at [`placed`] already
-/// placed. `placed` used to centre it a second time, and the two offsets added: on a
-/// 100-column terminal the art sat 13 columns right of where it belonged, which is
-/// exactly the indent the cap gives the prose. Below the cap nothing was capped, nothing
-/// was placed twice, and the bug was invisible — which is why this checks a wide
-/// terminal against a narrow one rather than eyeballing one width.
+/// A drawing was placed twice over: the Mermaid renderers centre a finished plot inside
+/// the width they are handed, and the document then centred the block again. Both are
+/// gone — a diagram anchors left like everything else, and the surplus it does not use
+/// is on its right. The width sweep is kept from the version of this test that checked
+/// the centring, because a placement bug that cancels out at one width is exactly the
+/// kind that hid here before: the double offset was invisible below the cap.
 #[test]
-fn a_diagram_is_centred_on_the_same_line_as_the_prose() {
+fn a_diagram_starts_on_the_prose_left_edge_at_every_width() {
     for width in [80u16, 100, 120, 160] {
         let canvas = paged(&format!("{PROSE}\n\n{DIAGRAM}"), width, Some(CAP));
         let art = (0..canvas.height())
             .find(|row| canvas.row_text(*row).contains("Start"))
             .expect("the diagram is drawn");
         let left = indent_of(&canvas, art).expect("the art row draws something");
-        let right = extent_of(&canvas, art);
-        // The centre of the ink, doubled, against the centre of the terminal, doubled —
-        // so an odd surplus does not have to be rounded the same way in both.
-        let art_centre = left + right;
-        let terminal_centre = usize::from(width);
-        assert!(
-            art_centre.abs_diff(terminal_centre) <= 2,
-            "at width {width} the diagram spans {left}..{right}, off centre by {}:\n{}",
-            (art_centre as isize - terminal_centre as isize) / 2,
+        assert_eq!(
+            left,
+            MARGIN,
+            "at width {width} the diagram starts at column {left}, not at the margin:\n{}",
             canvas.row_text(art)
         );
     }
+}
+
+/// A titled diagram keeps its title over its own drawing.
+///
+/// The block moves left as one piece; how the art is composed *inside* it is not the
+/// document's business. A title centred over the plot is part of the drawing, and it
+/// would be nonsense for it to stay centred on a width the plot no longer occupies.
+#[test]
+fn a_diagram_title_stays_over_the_drawing_it_titles() {
+    // A sequence diagram, because it has a natural width: a pie chart sizes its bars to
+    // whatever budget it is handed, so it could not tell a centred title from a
+    // left-anchored one.
+    let markdown =
+        "```mermaid\nsequenceDiagram\n    title Handshake\n    A->>B: hello\n    B->>A: hi\n```\n";
+    let canvas = paged(markdown, WIDE, Some(CAP));
+    let title = (0..canvas.height())
+        .find(|row| canvas.row_text(*row).contains("Handshake"))
+        .expect("the title is drawn");
+    let art = (title + 1..canvas.height())
+        .find(|row| indent_of(&canvas, *row).is_some())
+        .expect("the plot is drawn");
+    let centre = |row: usize| indent_of(&canvas, row).unwrap_or(0) + extent_of(&canvas, row);
+    assert!(
+        centre(title).abs_diff(centre(art)) <= 2,
+        "the title is not over the plot: title {}..{}, plot {}..{}\n{}",
+        indent_of(&canvas, title).unwrap_or(0),
+        extent_of(&canvas, title),
+        indent_of(&canvas, art).unwrap_or(0),
+        extent_of(&canvas, art),
+        canvas.plain_text()
+    );
+    assert!(
+        extent_of(&canvas, art) < usize::from(WIDE) / 2,
+        "the plot should not be padded across the terminal:\n{}",
+        canvas.plain_text()
+    );
 }

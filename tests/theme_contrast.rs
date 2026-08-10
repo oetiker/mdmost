@@ -91,8 +91,10 @@ fn at_least(theme: &str, what: &str, ink: Color, ground: Color, floor: f32) {
 /// ink on screen. It measured 1.79:1 (dark) and 1.77:1 (light), which is not a muted
 /// border, it is a border the reader has to take on trust.
 ///
-/// Both grounds matter. A code fence sits on the page, but a table's *vertical* rules
-/// sit on the striped row's surface, and the surface is the harder of the two.
+/// Both grounds are pinned, though only the page is drawn on today: a table's vertical
+/// rules used to sit on the striped row's surface and now keep the page background even
+/// there (see `render::table::render_row`). The surface is the harder of the two, and a
+/// border is the one ink a theme may reasonably move onto either, so the floor stays.
 #[test]
 fn structural_borders_clear_the_non_text_contrast_floor() {
     for theme in themes() {
@@ -143,6 +145,45 @@ fn code_punctuation_clears_the_text_contrast_floor() {
             "code punctuation on the code surface",
             fg("punctuation", theme.code.punctuation),
             theme.palette.surface,
+            TEXT_FLOOR,
+        );
+    }
+}
+
+/// Inline code is a hue with nothing behind it, so the page is what it has to clear.
+///
+/// It used to carry `surface` as a background and was measured against that. Dropping
+/// the background — it was indistinguishable from the zebra stripe, so a `` `span` ``
+/// inside a table read as a torn-off piece of banding — moves the pairing that matters
+/// onto the page, and onto the stripe wherever a table puts it there. Measured when this
+/// was written: 7.59:1 (dark) and 6.06:1 (light) on the page, 7.02:1 and 5.41:1 on the
+/// stripe, against 7.02:1 and 5.41:1 for the old surface pairing. Both grounds are
+/// asserted, because both are grounds inline code actually appears on.
+#[test]
+fn inline_code_clears_the_text_contrast_floor() {
+    for theme in themes() {
+        let name = &theme.name;
+        let ink = fg("inline code", theme.text.code);
+        assert_eq!(
+            theme.text.code.bg, None,
+            "{name}: inline code must not carry a background of its own"
+        );
+        at_least(
+            name,
+            "inline code on the page",
+            ink,
+            theme.palette.bg,
+            TEXT_FLOOR,
+        );
+        at_least(
+            name,
+            "inline code on a striped table row",
+            ink,
+            theme
+                .table
+                .row_alt
+                .bg
+                .unwrap_or_else(|| panic!("{name}: the stripe needs a background")),
             TEXT_FLOOR,
         );
     }

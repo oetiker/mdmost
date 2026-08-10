@@ -2,6 +2,6 @@
 source: tests/mermaid_seq_render.rs
 expression: canvas.plain_text()
 ---
-                                  Nothing here                                  
+      Nothing here                                                              
                                                                                 
-                            (empty sequence diagram)
+(empty sequence diagram)
