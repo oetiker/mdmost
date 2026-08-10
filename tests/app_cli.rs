@@ -84,12 +84,14 @@ fn render_once_works_headlessly_and_honours_the_width() {
         ]);
         assert!(output.status.success(), "exit status for width {width}");
         let text = String::from_utf8(output.stdout).expect("output should be UTF-8");
-        // The document's lone `#` is set as a FIGlet banner, so the title arrives as
-        // art rather than as the word; the `##` below it is ordinary text either way.
+        // The FIGlet title banner is opt-in, so the default run draws the lone `#` as an
+        // ordinary heading — the word itself, not art.
         assert!(text.contains("Section"), "the heading should appear");
         assert!(
-            text.lines().next().is_some_and(|line| line.contains('_')),
-            "the title banner should be drawn at width {width}: {text}"
+            text.lines()
+                .next()
+                .is_some_and(|line| line.contains("Title")),
+            "the title should be drawn as text at width {width}: {text}"
         );
         for line in text.lines() {
             assert!(

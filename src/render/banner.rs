@@ -67,7 +67,7 @@ const FIRST: u32 = 0x20;
 /// a length check rather than a large allocation.
 const MAX_TITLE_CHARS: usize = 200;
 
-/// One character of the title, and the columns its art occupies.
+/// One character of the title, and the cells its art occupies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Letter {
     /// The character's index in the title.
@@ -76,12 +76,23 @@ pub(crate) struct Letter {
     pub col: u16,
     /// How many columns its art occupies.
     pub cols: u16,
+    /// The first row of the band the character was drawn in.
+    ///
+    /// A title too wide for its measure is wrapped between words, and each band is a
+    /// line of art. Without this a search hit on a word in the second band would light
+    /// up the same columns in the first.
+    pub row: u16,
+    /// How many rows that band occupies.
+    pub rows: u16,
 }
 
 /// A laid-out banner: the rows to draw, and where each character of the title landed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Banner {
     /// The rows of art, all the same length, with no all-blank row at either end.
+    ///
+    /// A wrapped title contributes one band of rows per line, stacked in reading order
+    /// with no blank row between them — `figlet` sets wrapped lines the same way.
     pub rows: Vec<String>,
     /// Where each character of the title was drawn.
     pub letters: Vec<Letter>,
@@ -105,23 +116,181 @@ impl Banner {
 /// `None` is not a failure: it is the renderer being told to draw an ordinary heading
 /// instead. Every character must be printable ASCII, and the finished art must fit the
 /// budget without truncation.
+///
+/// A title wider than the budget is **wrapped between words** and set as several bands
+/// of art, each centred on the widest, rather than declined — the choice between art
+/// and text should not turn on whether the words happen to fit one line. Only a single
+/// word too wide to draw still declines: there is nowhere to break it, and truncated
+/// art is worse than an honest heading.
 pub(crate) fn layout(text: &str, budget: usize) -> Option<Banner> {
     let text = text.trim();
     if text.is_empty() || budget == 0 || text.chars().count() > MAX_TITLE_CHARS {
         return None;
     }
+    let mut bands: Vec<Banner> = Vec::new();
+    for line in wrap(text, budget)? {
+        bands.push(line_banner(&line.text, &line.origins, budget)?);
+    }
+    stack(bands)
+}
+
+/// One wrapped line: the text to draw, and the title-character index behind each of its
+/// characters.
+struct Line {
+    text: String,
+    /// Indexed by character of `text`, giving that character's index in the whole title.
+    origins: Vec<usize>,
+}
+
+/// Greedily wraps `text` between words so that every line's art fits `budget`.
+///
+/// Returns `None` when a single word cannot be drawn in the budget, which is the one
+/// case wrapping cannot rescue.
+fn wrap(text: &str, budget: usize) -> Option<Vec<Line>> {
+    let mut lines: Vec<Line> = Vec::new();
+    let mut current: Option<Line> = None;
+    for (start, word) in words(text) {
+        let candidate = match &current {
+            Some(line) => {
+                let mut text = line.text.clone();
+                let mut origins = line.origins.clone();
+                text.push(' ');
+                // The space between two words stands for the whitespace that separated
+                // them in the title; pointing it at that character keeps every index in
+                // this table a real position in the title.
+                origins.push(start.saturating_sub(1));
+                push_word(&mut text, &mut origins, start, &word);
+                Line { text, origins }
+            }
+            None => {
+                let mut text = String::new();
+                let mut origins = Vec::new();
+                push_word(&mut text, &mut origins, start, &word);
+                Line { text, origins }
+            }
+        };
+        if fits(&candidate.text, budget) {
+            current = Some(candidate);
+            continue;
+        }
+        // The candidate is too wide. Break before this word — unless it is the only
+        // thing on the line, in which case no break can help it and `?` declines.
+        lines.push(current.take()?);
+        let mut text = String::new();
+        let mut origins = Vec::new();
+        push_word(&mut text, &mut origins, start, &word);
+        if !fits(&text, budget) {
+            return None;
+        }
+        current = Some(Line { text, origins });
+    }
+    lines.extend(current);
+    (!lines.is_empty()).then_some(lines)
+}
+
+/// Appends `word`, whose first character is at `start` in the title, to a line.
+fn push_word(text: &mut String, origins: &mut Vec<usize>, start: usize, word: &str) {
+    for (offset, ch) in word.chars().enumerate() {
+        text.push(ch);
+        origins.push(start + offset);
+    }
+}
+
+/// Whether one line's art fits the budget.
+fn fits(text: &str, budget: usize) -> bool {
+    line_width(text).is_some_and(|width| width <= budget)
+}
+
+/// The width one line of art would occupy, or `None` if a character has no art.
+fn line_width(text: &str) -> Option<usize> {
+    let mut rows: Vec<Vec<char>> = vec![Vec::new(); HEIGHT];
+    for ch in text.chars() {
+        merge(&mut rows, glyph(ch)?);
+    }
+    Some(trimmed_width(&rows))
+}
+
+/// The title's words, each with the character index it starts at.
+fn words(text: &str) -> Vec<(usize, String)> {
+    let mut out: Vec<(usize, String)> = Vec::new();
+    let mut start = None;
+    let mut word = String::new();
+    for (index, ch) in text.chars().enumerate() {
+        if ch.is_whitespace() {
+            if let Some(at) = start.take() {
+                out.push((at, std::mem::take(&mut word)));
+            }
+        } else {
+            start.get_or_insert(index);
+            word.push(ch);
+        }
+    }
+    if let Some(at) = start {
+        out.push((at, word));
+    }
+    out
+}
+
+/// Lays one line out, numbering its letters by their place in the whole title.
+fn line_banner(text: &str, origins: &[usize], budget: usize) -> Option<Banner> {
     let mut rows: Vec<Vec<char>> = vec![Vec::new(); HEIGHT];
     let mut letters = Vec::new();
     for (index, ch) in text.chars().enumerate() {
         let art = glyph(ch)?;
         let (col, cols) = merge(&mut rows, art);
         letters.push(Letter {
-            index,
+            index: origins.get(index).copied().unwrap_or(index),
             col: u16::try_from(col).ok()?,
             cols: u16::try_from(cols).ok()?,
+            // Filled in by `stack`, which is what knows where this band landed.
+            row: 0,
+            rows: 0,
         });
     }
     finish(rows, letters, budget)
+}
+
+/// Stacks the bands of a wrapped title into one banner, centring each on the widest.
+fn stack(bands: Vec<Banner>) -> Option<Banner> {
+    let width = bands.iter().map(band_width).max()?;
+    let mut rows: Vec<String> = Vec::new();
+    let mut letters: Vec<Letter> = Vec::new();
+    for band in bands {
+        let indent = (width - band_width(&band)) / 2;
+        let first = u16::try_from(rows.len()).ok()?;
+        let height = u16::try_from(band.rows.len()).ok()?;
+        for mut letter in band.letters {
+            letter.col = letter.col.checked_add(u16::try_from(indent).ok()?)?;
+            letter.row = first;
+            letter.rows = height;
+            letters.push(letter);
+        }
+        for row in band.rows {
+            let mut padded = " ".repeat(indent);
+            padded.push_str(&row);
+            let trailing = width - indent - row.chars().count();
+            padded.push_str(&" ".repeat(trailing));
+            rows.push(padded);
+        }
+    }
+    (!rows.is_empty()).then_some(Banner { rows, letters })
+}
+
+/// The width of one band's art.
+fn band_width(band: &Banner) -> usize {
+    band.rows.first().map_or(0, |row| row.chars().count())
+}
+
+/// The width of a laid-out grid, ignoring the blanks each row is padded with.
+fn trimmed_width(rows: &[Vec<char>]) -> usize {
+    rows.iter()
+        .map(|row| {
+            row.iter()
+                .rposition(|c| *c != ' ' && *c != HARDBLANK)
+                .map_or(0, |index| index + 1)
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 /// Turns the laid-out character grid into a [`Banner`], or declines it.
@@ -328,11 +497,17 @@ pub(crate) fn render_title(node: &Node, id: &str, width: u16, ctx: Ctx<'_>) -> O
         row: 0,
     });
     // Row-major, so the first segment of a hit is on the banner's top row and jumping
-    // to a match lands where a reader would look for it.
+    // to a match lands where a reader would look for it. A letter is highlighted only
+    // across the band it was drawn in: a wrapped title has several, and lighting up the
+    // same columns in every one would mark words the hit never touched.
     let trimmed_offset = text.len() - text.trim_start().len();
     let trimmed: Vec<char> = text.trim().chars().collect();
     for row in 0..out.height() {
         for letter in &banner.letters {
+            let band = usize::from(letter.row)..usize::from(letter.row) + usize::from(letter.rows);
+            if !band.contains(&row) {
+                continue;
+            }
             let Some(start) = origin_of(&origins, &text, trimmed_offset, letter.index) else {
                 continue;
             };

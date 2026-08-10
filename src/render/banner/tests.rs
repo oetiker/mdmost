@@ -107,11 +107,68 @@ fn declines_a_title_it_cannot_draw() {
 /// ordinary heading. A 40-column terminal is the case that matters.
 #[test]
 fn declines_a_banner_wider_than_the_budget() {
+    // A phrase is wrapped rather than declined; only an unbreakable run declines.
     let wide = "A Title Too Long For A Narrow Pane";
-    assert!(layout(wide, 40).is_none());
+    assert!(layout(wide, 40).is_some(), "a phrase wraps to fit");
+    assert!(layout("Antidisestablishmentarianism", 40).is_none());
     assert!(layout("mdmost", 29).is_some(), "exactly 29 columns fits");
     assert!(layout("mdmost", 28).is_none(), "one column short declines");
     assert!(layout("mdmost", 0).is_none());
+}
+
+/// A title too wide for the measure is wrapped between words rather than declined.
+///
+/// `figlet` wraps at its own `-w` width for the same reason: a title set in art is a
+/// different thing from a title set in text, and the choice between them should not be
+/// made by whether the words happen to fit on one line.
+#[test]
+fn a_long_title_wraps_between_words() {
+    let banner = layout("mdmost torture test", 72).expect("wraps into 72 columns");
+    // Two bands of art, so more rows than the tallest single line can produce.
+    assert!(
+        banner.rows.len() > HEIGHT,
+        "expected two bands, got {} rows:\n{}",
+        banner.rows.len(),
+        banner.rows.join("\n")
+    );
+    let width = banner.rows[0].chars().count();
+    assert!(width <= 72, "wrapped art is still {width} columns wide");
+    for row in &banner.rows {
+        assert_eq!(row.chars().count(), width, "rows must be equal length");
+    }
+}
+
+/// The bands are stacked in order and every letter names the one it was drawn in, which
+/// is what keeps a search highlight off the other lines.
+#[test]
+fn a_wrapped_letter_names_its_own_band() {
+    let banner = layout("mdmost torture test", 72).expect("wraps into 72 columns");
+    let first = banner.letters.first().expect("the title has letters");
+    let last = banner.letters.last().expect("the title has letters");
+    assert_eq!(first.row, 0, "the first letter is in the top band");
+    assert!(
+        last.row > 0,
+        "the last letter should have been pushed to a later band"
+    );
+    for letter in &banner.letters {
+        assert!(letter.rows > 0, "a letter occupies at least one row");
+        assert!(
+            usize::from(letter.row) + usize::from(letter.rows) <= banner.rows.len(),
+            "band runs past the art"
+        );
+        assert!(
+            usize::from(letter.col) + usize::from(letter.cols) <= banner.rows[0].chars().count(),
+            "letter runs past the art"
+        );
+    }
+}
+
+/// Wrapping is between words, so a single word that cannot fit is still declined —
+/// there is nowhere to break it, and a truncated title is worse than a plain heading.
+#[test]
+fn a_single_word_too_wide_is_still_declined() {
+    assert!(layout("supercalifragilisticexpialidocious", 40).is_none());
+    assert!(layout("mdmost", 28).is_none());
 }
 
 /// The rows carry no blank line at either edge, so the banner occupies exactly the

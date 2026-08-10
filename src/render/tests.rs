@@ -17,13 +17,11 @@ use crate::tui::icons::is_private_use;
 /// [`icons_change_the_glyphs_but_never_the_layout`] covers the other setting.
 const PLAIN: RenderOptions = RenderOptions::new(false, false);
 
-/// The same, with the lone-`#` title banner declined.
+/// The same, with the lone-`#` title banner asked for.
 ///
-/// Used by the tests whose subject is an ordinary heading: a one-heading document is
-/// the shortest way to write those, and it is also exactly the document that gets a
-/// banner. [`a_lone_top_level_heading_is_drawn_as_a_banner`] and its neighbours cover
-/// the banner itself.
-const NO_BANNER: RenderOptions = PLAIN.with_title_banner(false);
+/// The banner is opt-in, so the tests whose subject *is* the banner have to say so;
+/// every other test wants the default, where a lone `#` heading is drawn as a heading.
+const BANNER: RenderOptions = PLAIN.with_title_banner(true);
 
 /// Renders `markdown` at `width` with the plain glyph set, checking the invariants.
 fn render(markdown: &str, width: u16) -> Canvas {
@@ -86,6 +84,14 @@ fn body_rows(canvas: &Canvas) -> Vec<String> {
 /// The rows that contain any text at all.
 fn lines(markdown: &str, width: u16) -> Vec<String> {
     rows(markdown, width)
+        .into_iter()
+        .filter(|row| !row.is_empty())
+        .collect()
+}
+
+/// The same, with explicit options — for the tests whose subject is an option.
+fn lines_with(markdown: &str, width: u16, options: &RenderOptions) -> Vec<String> {
+    body_rows(&render_body(markdown, width, options))
         .into_iter()
         .filter(|row| !row.is_empty())
         .collect()
@@ -225,7 +231,7 @@ fn html_never_reaches_the_canvas() {
 fn headings_are_anchored_and_underlined_by_level() {
     for (level, ruled) in [(1u8, true), (2, true), (3, true), (5, true), (6, false)] {
         let markdown = format!("{} Title\n", "#".repeat(usize::from(level)));
-        let canvas = render_with(&markdown, 20, &NO_BANNER);
+        let canvas = render_with(&markdown, 20, &PLAIN);
         let first = canvas.row_text(0);
         assert_eq!(first.trim_end(), " Title", "level {level}: {first:?}");
         assert_eq!(canvas.anchors().len(), 1);
@@ -243,7 +249,7 @@ fn heading_levels_use_distinct_rules() {
     let rules: Vec<Option<char>> = (1..=6)
         .map(|level| {
             let markdown = format!("{} T\n", "#".repeat(level));
-            let drawn = body_rows(&render_with(&markdown, 12, &NO_BANNER));
+            let drawn = body_rows(&render_with(&markdown, 12, &PLAIN));
             drawn.get(1).and_then(|rule| rule.chars().next())
         })
         .collect();
@@ -265,7 +271,7 @@ fn heading_text_wraps_at_the_margin() {
 fn anchors_are_recorded_for_every_heading_in_order() {
     // Without the banner: `a_lone_top_level_heading_is_drawn_as_a_banner` asserts that
     // a banner keeps its anchor, and this test is about the ordering of all of them.
-    let canvas = render_with("# One\n\ntext\n\n## Two\n\n## Two\n", 30, &NO_BANNER);
+    let canvas = render_with("# One\n\ntext\n\n## Two\n\n## Two\n", 30, &PLAIN);
     let ids: Vec<&str> = canvas
         .anchors()
         .iter()
@@ -288,7 +294,7 @@ fn anchors_are_recorded_for_every_heading_in_order() {
 /// The document's own title, and only that, is set in the `FIGlet` font.
 #[test]
 fn a_lone_top_level_heading_is_drawn_as_a_banner() {
-    let canvas = render("# Title\n\nbody\n", 40);
+    let canvas = render_with("# Title\n\nbody\n", 40, &BANNER);
     let drawn = body_rows(&canvas);
     assert_eq!(
         drawn[..5],
@@ -341,15 +347,17 @@ fn a_late_top_level_heading_gets_no_banner() {
 }
 
 /// Too wide to draw is answered with the ordinary heading, never with truncated art.
+///
+/// Since a long title is wrapped between words, "too wide" now means a single word that
+/// will not fit — there is nothing left to break.
 #[test]
 fn a_title_banner_gives_way_to_a_plain_heading_when_it_will_not_fit() {
-    for (width, first) in [
-        (20u16, "A Title Nobody Could"),
-        (30, "A Title Nobody Could Fit"),
-        (40, "A Title Nobody Could Fit"),
-    ] {
-        let drawn = lines("# A Title Nobody Could Fit\n\nbody\n", width);
-        assert_eq!(drawn[0], first, "at width {width}: {drawn:?}");
+    for width in [20u16, 30, 40] {
+        let drawn = lines("# Unbreakableantidisestablishmentarianism\n\nbody\n", width);
+        assert!(
+            drawn[0].starts_with("Unbreakable"),
+            "at width {width} the heading should be plain text: {drawn:?}"
+        );
     }
     // And a title the font cannot draw at all: no banner at any width.
     let drawn = lines("# Übersicht\n\nbody\n", 100);
@@ -359,7 +367,7 @@ fn a_title_banner_gives_way_to_a_plain_heading_when_it_will_not_fit() {
 /// The banner is a render option like any other, so it can be turned off.
 #[test]
 fn the_title_banner_can_be_switched_off() {
-    let drawn = body_rows(&render_with("# Title\n\nbody\n", 40, &NO_BANNER));
+    let drawn = body_rows(&render_with("# Title\n\nbody\n", 40, &PLAIN));
     assert_eq!(drawn[0], "Title");
 }
 
@@ -386,7 +394,7 @@ fn a_deeply_nested_document_numbers_its_sections() {
 #[test]
 fn a_titled_document_numbers_from_the_second_level() {
     let markdown = "# Title\n\n## First\n\n### Deep\n\n#### Deeper\n\n## Second\n";
-    let drawn = body_rows(&render_with(markdown, 40, &NO_BANNER))
+    let drawn = body_rows(&render_with(markdown, 40, &PLAIN))
         .into_iter()
         .filter(|row| !row.is_empty())
         .collect::<Vec<_>>();
@@ -401,7 +409,7 @@ fn a_titled_document_numbers_from_the_second_level() {
 #[test]
 fn a_banner_title_is_not_numbered() {
     let markdown = "# Title\n\n## First\n\n### Deep\n\n#### Deeper\n";
-    let drawn = lines(markdown, 40);
+    let drawn = lines_with(markdown, 40, &BANNER);
     // The banner is art, drawn from the title's own text and nothing else: no row of
     // it carries a number, and the numbering below it is what it would be anyway.
     let art = &drawn[..4];
@@ -421,7 +429,7 @@ fn a_flat_document_is_not_numbered() {
     assert!(!drawn.iter().any(|row| row.starts_with("1")), "{drawn:?}");
     // And a titled document with only two levels under the title is flat as well: the
     // title is not a section, so it cannot make the document deep.
-    let titled = body_rows(&render_with("# T\n\n## A\n\n### B\n", 40, &NO_BANNER));
+    let titled = body_rows(&render_with("# T\n\n## A\n\n### B\n", 40, &PLAIN));
     assert!(titled.contains(&"A".to_string()), "{titled:?}");
 }
 

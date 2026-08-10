@@ -75,14 +75,18 @@ pub struct Config {
     pub line_numbers: bool,
     /// Whether a document titled by a lone `#` heading opens with a `FIGlet` banner.
     ///
-    /// On by default: it only ever applies to a document whose first block is its one
-    /// and only level-1 heading, and it declines itself when the art will not fit the
-    /// pane, so the reader who wants no banners at all is the one this key is for.
+    /// **Off by default**, and deliberately so: a banner is a decoration the reader did
+    /// not ask for, applied to somebody else's document. A title set in art is a strong
+    /// opinion about how a document should open, and a default is the wrong place to
+    /// hold one — so this is the key you turn *on*, not the one you turn off. Turned on
+    /// it applies only where it fits: the document's first block must be its one and
+    /// only level-1 heading, and a title too wide for the measure is wrapped between
+    /// words, declining only when a single word will not fit.
     pub title_banner: bool,
     /// Whether a deeply nested document gets section numbers (design spec §9.3).
     ///
-    /// On by default, on the same reasoning as `title_banner`: the owner asked for the
-    /// feature, and it applies itself only where it earns its keep — a document has to
+    /// On by default, unlike `title_banner`: numbering is navigation rather than
+    /// decoration, and it applies itself only where it earns its keep — a document has to
     /// use three or more distinct heading levels below its title before a single digit
     /// is drawn, so the flat documents most people read are untouched. What the key is
     /// for is the reader who would rather see the author's headings and nothing else,
@@ -133,7 +137,7 @@ impl Default for Config {
             theme: "dark".to_string(),
             icons: None,
             line_numbers: false,
-            title_banner: true,
+            title_banner: false,
             section_numbers: true,
             toc_open: false,
             toc_width: DEFAULT_TOC_WIDTH,

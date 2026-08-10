@@ -494,12 +494,20 @@ smushing — no crate, no font files at runtime. Both conditions matter: a refer
 with a `#` per chapter must not become a wall of banners, and a `#` that arrives after
 the prose is a section title rather than the document's.
 
-It degrades to the ordinary heading, never to broken art: a title outside printable ASCII
-(CJK, emoji, accented Latin) has no glyphs; a banner wider than the pane is declined
-rather than truncated, wrapped or scrolled, which is what makes a 40-column terminal
-safe; and `title_banner = false` declines it always. The banner keeps the heading's TOC
-anchor and carries one search span per character per row, so the title is still jumped to
-and still found by search.
+**It is off by default** — `title_banner = true` asks for it. Art in place of somebody
+else's title is a decoration applied to a document the reader did not write, and a
+default is the wrong place to hold that opinion.
+
+Turned on, it degrades to the ordinary heading, never to broken art: a title outside
+printable ASCII (CJK, emoji, accented Latin) has no glyphs, and a single word too wide
+for the measure is declined rather than truncated or scrolled, which is what makes a
+40-column terminal safe. A title that is merely *long* is **wrapped between words** into
+as many bands of art as it needs, each centred on the widest — the choice between art
+and text should not turn on whether the words happen to fit one line, and at a body cap
+of 72 columns almost no real title would. The banner keeps the heading's TOC anchor and
+carries one search span per character per row *of that character's own band*, so the
+title is still jumped to and still found by search, and a hit in the second line does
+not light up the first.
 
 ### 9.3 A deeply nested document is given section numbers
 
@@ -560,11 +568,12 @@ line wraps under its own first word, not under the digits. A number that would l
 fewer than eight columns for the text is dropped for that heading — at twenty columns a
 `1.1.1.1.1.1 ` prefix is no longer an aid — and nothing is ever truncated to make room.
 
-*Configuration.* `section_numbers = true` by default, alongside `title_banner` and for
-the same reasons: it is what the owner asked for, and it costs nothing on a document
-that does not qualify. The key is for the reader who wants the author's headings and
-nothing else. Like `title_banner` it has no command-line flag of its own, since it is a
-property of how documents are typeset rather than of this invocation.
+*Configuration.* `section_numbers = true` by default — unlike `title_banner`, which is
+opt-in. Numbering is an orientation aid rather than a decoration, it is what the owner
+asked for, and it costs nothing on a document that does not qualify. The key is for the
+reader who wants the author's headings and nothing else. Like `title_banner` it has no
+command-line flag of its own, since it is a property of how documents are typeset rather
+than of this invocation.
 
 *Where it is computed.* Once per render, over the whole document, by `render_document`
 and by the pager's `tui::wide::render_scrollable` — never at parse time (§3), and never

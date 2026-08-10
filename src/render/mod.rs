@@ -82,10 +82,11 @@ pub struct RenderOptions {
     pub line_numbers: bool,
     /// Whether a document titled by a lone `#` heading gets a `FIGlet` banner (§9).
     ///
-    /// On by default. It costs nothing on a document that does not qualify — the
-    /// condition is "exactly one level-1 heading, and it is the first block" — and
-    /// declines itself whenever the art would not fit, so the setting exists for the
-    /// reader who does not want banners at all rather than as a safety valve.
+    /// **Off by default**: art in place of somebody else's title is a decoration the
+    /// reader has to opt into (`title_banner = true`). Turned on, it costs nothing on a
+    /// document that does not qualify — the condition is "exactly one level-1 heading,
+    /// and it is the first block" — and a title too wide for the measure is wrapped
+    /// between words rather than declined.
     pub title_banner: bool,
     /// Whether a deeply nested document gets section numbers in front of its headings
     /// (§9.3).
@@ -102,7 +103,7 @@ impl RenderOptions {
         Self {
             icons,
             line_numbers,
-            title_banner: true,
+            title_banner: false,
             section_numbers: true,
         }
     }

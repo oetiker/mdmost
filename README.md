@@ -8,10 +8,14 @@ and negotiated column widths, fenced code is syntax-highlighted, and Mermaid dia
 are laid out as box art rather than shown as source. Resize the terminal and everything
 reflows, because rendering is a pure function of `(document, width, theme, options)`.
 
-Heading levels are told apart by the rule underneath them — heavy, light, then dashed —
-and a document whose first block is its one and only `#` heading opens with that title
-set in the FIGlet *Small* font, falling back to an ordinary heading whenever the art
-would not fit or the title is not plain ASCII (`title_banner = false` turns it off).
+Heading levels are told apart by the rule underneath them — heavy, light, then dashed.
+
+Set `title_banner = true` and a document whose first block is its one and only `#`
+heading opens with that title in the FIGlet *Small* font, wrapped between words over as
+many lines as it needs and centred. It is **off by default**: art in place of someone
+else's title is a decoration, and a default is the wrong place to hold that opinion.
+Turned on, it still declines — and draws an ordinary heading — when the title is not
+plain ASCII, or when a single word is too wide for the measure to break.
 
 A document that nests three or more section levels also gets **section numbers** — `1`,
 `1.1`, `1.1.1` — in front of its headings and in the contents pane, drawn in a quiet
@@ -273,7 +277,7 @@ binding costs you that binding and nothing else.
 theme        = "dark"    # name of a built-in or a [themes.*] table
 icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to detect
 line_numbers = false     # line-number gutter in fenced code blocks
-title_banner = true      # set a document's lone `#` heading as a FIGlet banner
+title_banner = false     # off; true sets a lone `#` title as a wrapped FIGlet banner
 section_numbers = true   # number headings when a document nests three levels or more
 mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies source
 scroll_step  = 3         # document lines per mouse-wheel notch
