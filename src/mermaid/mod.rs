@@ -7,6 +7,7 @@
 
 pub mod ast;
 pub(crate) mod chrome;
+pub(crate) mod entity;
 pub mod gantt;
 pub mod layout;
 pub mod parse;

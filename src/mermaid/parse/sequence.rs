@@ -16,6 +16,8 @@ use crate::mermaid::ast::{
     ParticipantKind, SequenceBlock, SequenceDiagram, SequenceItem,
 };
 
+use crate::mermaid::entity;
+
 use super::intern;
 use super::lex::{self, Nesting, SrcLine};
 
@@ -74,7 +76,8 @@ impl Builder {
                 return Ok(());
             }
             "title" => {
-                self.title = Some(lex::unquote(rest.trim_start_matches(':').trim()).to_string());
+                let title = lex::unquote(rest.trim_start_matches(':').trim());
+                self.title = Some(entity::decode(title).into_owned());
                 return Ok(());
             }
             "participant" | "actor" => return self.declare(word, rest, line),
