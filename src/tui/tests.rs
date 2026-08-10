@@ -3640,3 +3640,255 @@ fn a_librarys_complaints_are_held_back_and_then_reported() {
     // Nothing is swallowed once there is no screen to protect.
     assert!(super::stderr::Capture::start().finish().is_empty());
 }
+
+/// A document with both controls in it: a fenced block and a top-level table.
+const BUTTONS: &str = "\
+# Buttons
+
+```rust
+let a = 1;
+```
+
+| Name | Since |
+| --- | ---: |
+| Ada | 1843 |
+";
+
+/// A table too wide for any viewport this suite uses, so its button is off to the right.
+const BUTTON_TABLE: &str = "\
+# Wide
+
+| AlphaColumnOne | BetaColumnTwoLonger | GammaColumnThreeWider | Ocelot |
+| --- | --- | --- | --- |
+| 1 | 2 | 3 | 4 |
+";
+
+/// The viewport cell the `[` of a drawn `[copy]` sits in, counting from `skip` in.
+///
+/// Read off the *painted frame*, not off the hotspot list: a hit test proved against
+/// the very positions it is reading from would pass on a build that draws the label
+/// somewhere else entirely. This is the reader's own information — where they can see
+/// the control — and it is the coordinate their pointer arrives in.
+fn painted_button(app: &mut App, width: u16, height: u16, skip: usize) -> (u16, u16) {
+    let rows = framed(app, width, height);
+    let mut seen = 0;
+    for (y, line) in rows.iter().enumerate() {
+        if let Some(at) = line.find(crate::render::button::LABEL) {
+            if seen == skip {
+                let x = crate::text::display_width(&line[..at]);
+                return (
+                    u16::try_from(x).expect("a viewport column"),
+                    u16::try_from(y).expect("a viewport row"),
+                );
+            }
+            seen += 1;
+        }
+    }
+    panic!("no [copy] label {skip} on the screen: {rows:?}");
+}
+
+#[test]
+fn the_button_appears_only_once_the_mouse_has_been_captured() {
+    // The gate design spec §4 asks for, from the pager's end. `RenderOptions` is part
+    // of the render cache key, so the flag has to reach it: the canvas drawn before the
+    // mouse was granted would otherwise be served for the rest of the session.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    assert!(
+        !app.canvas()
+            .plain_text()
+            .contains(crate::render::button::LABEL),
+        "no button until the mouse is real"
+    );
+    app.set_copy_button(true);
+    assert!(
+        app.canvas()
+            .plain_text()
+            .contains(crate::render::button::LABEL),
+        "and one once it is"
+    );
+    app.set_copy_button(false);
+    assert!(
+        !app.canvas()
+            .plain_text()
+            .contains(crate::render::button::LABEL),
+        "a terminal that lost the mouse loses the button with it"
+    );
+}
+
+#[test]
+fn a_press_on_the_code_button_copies_the_block_and_starts_no_drag() {
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert!(
+        app.press_hotspot(x, y),
+        "the label the reader sees is a control"
+    );
+    assert!(
+        app.selection().is_none(),
+        "a press on a control is not the start of a drag"
+    );
+    let copy = app.take_hotspot_copy().expect("a payload");
+    assert_eq!(copy.text, "let a = 1;\n");
+    assert!(copy.html.is_none(), "code has no second flavour");
+    assert_eq!(copy.what, super::clipboard::Copied::Code);
+}
+
+#[test]
+fn a_press_beside_the_button_is_a_drag_like_any_other() {
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    for x in [x - 1, x + 6] {
+        assert!(
+            !app.press_hotspot(x, y),
+            "the columns either side of the label are frame, not control"
+        );
+        app.begin_selection(x, y);
+        assert!(app.selection().is_some(), "so they still begin a selection");
+    }
+}
+
+#[test]
+fn a_press_on_the_table_button_copies_a_grid_and_says_it_was_a_table() {
+    // The status bar never lies: the same control on a table has to report `Table`, or
+    // a reader is told they copied code and pastes a spreadsheet.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 1);
+    assert!(app.press_hotspot(x, y), "the table's label is a control");
+    let copy = app.take_hotspot_copy().expect("a payload");
+    assert_eq!(copy.text, "Name\tSince\nAda\t1843\n");
+    assert!(copy.html.is_some(), "a table offers the richer flavour too");
+    assert_eq!(copy.what, super::clipboard::Copied::Table);
+}
+
+#[test]
+fn the_button_is_still_under_the_pointer_once_the_document_has_scrolled() {
+    // The press goes through the same translation a drag does, and at rest that
+    // translation is the identity — so only a scrolled document can tell the two apart.
+    // Vertically here, horizontally in the test below.
+    let mut app = pager_at(BUTTONS, 60, 8);
+    app.set_copy_button(true);
+    app.act(Action::LineDown);
+    app.act(Action::LineDown);
+    assert_eq!(app.scroll(), 2, "the document must have moved");
+    let (x, y) = painted_button(&mut app, 60, 8, 0);
+    assert!(
+        app.press_hotspot(x, y),
+        "the control moved up the screen with the block it belongs to"
+    );
+    assert_eq!(
+        app.take_hotspot_copy().map(|copy| copy.text),
+        Some("let a = 1;\n".to_string())
+    );
+}
+
+#[test]
+fn the_button_of_an_over_wide_table_is_pressable_once_it_is_scrolled_into_view() {
+    // A table can be wider than the viewport, and then its button rides off the right
+    // edge with the rest of the top rule — the cost design spec §6 records and accepts.
+    // What must not also be true is that scrolling to it produces a label that does not
+    // answer, so this presses it where the reader can see it.
+    let mut app = pager_at(BUTTON_TABLE, 50, 12);
+    app.set_copy_button(true);
+    assert!(app.hscroll_max() > 0, "the probe table must be over-wide");
+    while app.hscroll() < app.hscroll_max() {
+        app.act(Action::ScrollRight);
+    }
+    let (x, y) = painted_button(&mut app, 50, 12, 0);
+    assert!(
+        app.press_hotspot(x, y),
+        "the control answers at the column it is drawn in, scrolled or not"
+    );
+    assert_eq!(
+        app.take_hotspot_copy().map(|copy| copy.what),
+        Some(super::clipboard::Copied::Table)
+    );
+}
+
+#[test]
+fn a_button_clipped_off_the_canvas_cannot_be_pressed_anywhere() {
+    // A block too wide even for `render::document`'s widening cap is clipped, and the
+    // hotspot survives at a column the clipped canvas no longer has while the label is
+    // drawn nowhere. That is an invisible control if any press can name that column, so
+    // this sweeps every cell of the block at every horizontal offset there is.
+    let columns = 300;
+    let head: String = (0..columns).map(|i| format!("| C{i:04} ")).collect();
+    let rule: String = (0..columns).map(|_| "| --- ".to_string()).collect();
+    let body: String = (0..columns).map(|i| format!("| v{i:04} ")).collect();
+    let mut app = pager_at(&format!("{head}|\n{rule}|\n{body}|\n"), 80, 12);
+    app.set_copy_button(true);
+    assert!(
+        !app.canvas()
+            .plain_text()
+            .contains(crate::render::button::LABEL),
+        "the premise: the label was clipped away, so nothing is drawn to press"
+    );
+    assert_eq!(
+        app.canvas().hotspots().len(),
+        1,
+        "and the premise's other half: the hotspot outlived it"
+    );
+    loop {
+        for y in 0..11 {
+            for x in 0..80 {
+                assert!(
+                    !app.press_hotspot(x, y),
+                    "a control nobody can see answered a press at {x},{y} \
+                     with the document scrolled to column {}",
+                    app.hscroll()
+                );
+            }
+        }
+        if app.hscroll() >= app.hscroll_max() {
+            break;
+        }
+        app.act(Action::ScrollRight);
+    }
+}
+
+#[test]
+fn the_flash_expires_without_anything_scheduling_it() {
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.flash_copied(0, 30);
+    assert!(app.copied_flash().is_some());
+    std::thread::sleep(std::time::Duration::from_millis(
+        super::app::FLASH_FOR.saturating_add(50),
+    ));
+    assert!(
+        app.copied_flash().is_none(),
+        "the label goes back to [copy] on the next redraw and no earlier"
+    );
+}
+
+#[test]
+fn the_flash_is_painted_over_the_button_that_was_pressed() {
+    // The whole point of the nine reserved columns: `[copied]` is longer than `[copy]`
+    // and has to fit without a re-render, because a render may not depend on the clock.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert!(app.press_hotspot(x, y));
+    let copy = app.take_hotspot_copy().expect("a payload");
+    app.flash_copied(copy.row, copy.col);
+    let rows = framed(&mut app, 60, 20);
+    assert!(
+        rows.iter()
+            .any(|line| line.contains(crate::render::button::FLASH)),
+        "the block that was copied says so: {rows:?}"
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|line| line.contains(crate::render::button::LABEL))
+            .count(),
+        1,
+        "the table keeps its [copy] and the code block does not show both: {rows:?}"
+    );
+    // The frame it was painted into is untouched on either side of the reserved region.
+    assert!(
+        rows[usize::from(y)].contains("[copied]─╮"),
+        "the corner survives the overwrite: {:?}",
+        rows[usize::from(y)]
+    );
+}

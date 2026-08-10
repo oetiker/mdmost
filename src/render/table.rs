@@ -75,16 +75,6 @@ pub(crate) fn render_table_node(node: &Node, info: &TableInfo, width: u16, ctx: 
     // Before the clip, so the button belongs to the *table's* top-right corner rather
     // than to whatever column the viewport happens to cut at. A table wider than the
     // viewport therefore carries its button off screen with its right edge, which is the
-    // cost design spec §6 records and accepts in exchange for the control being in one
-    // place across the whole pager.
-    //
-    // The top rule has no label of its own, so nothing but the left corner is in the way.
-    // A nested table is blitted into a row it shares and would lose its hotspot while
-    // keeping its drawn label — a control that does nothing — so only a top-level table
-    // is offered one, and the label and the hotspot are decided here together.
-    // Before the clip, so the button belongs to the *table's* top-right corner rather
-    // than to whatever column the viewport happens to cut at. A table wider than the
-    // viewport therefore carries its button off screen with its right edge, which is the
     // cost design spec §6 records and accepts in exchange for the control sitting in one
     // place across the whole pager.
     //

@@ -18,7 +18,6 @@ use crate::theme::Style;
 pub(crate) const LABEL: &str = "[copy]";
 
 /// What it says just after a copy. Drawn by `tui::draw`, never by a renderer.
-#[expect(dead_code, reason = "consumed by the tui::draw flash in a later task")]
 pub(crate) const FLASH: &str = "[copied]";
 
 /// Inner columns reserved at the right of a top edge.

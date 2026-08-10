@@ -79,6 +79,17 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let hscroll = Offsets::new(app, doc_area.width);
     blit(buffer, doc_area, app.rendered(), scroll, &hscroll, base);
     edge_markers(buffer, doc_area, app.rendered(), scroll, &hscroll, &marks);
+    // Under the search wash and the selection, which say where the reader's attention
+    // is; the flash only says what their last click did.
+    copied_flash(
+        buffer,
+        doc_area,
+        app.rendered(),
+        scroll,
+        &hscroll,
+        base,
+        app.copied_flash(),
+    );
     highlight_matches(buffer, doc_area, app, scroll, &hscroll);
     // Over the search wash, not under it: the selection is the thing the reader's hand
     // is on right now, and a match underneath it is still legible as an orange cell one
@@ -320,6 +331,56 @@ fn blit(
             } else {
                 target.set_symbol(cell.text());
             }
+        }
+    }
+}
+
+/// Paints `[copied]` over the button at canvas `(row, col)`, when there is one.
+///
+/// Nine columns were reserved at render time (`render::button::REGION`) precisely so
+/// this fits without a re-render: rendering is a pure function of `(AST, width, theme,
+/// options)`, and "this block was copied 300 ms ago" is pager state that must not enter
+/// it. `col` is the label's first column and the reserved region starts two to the left
+/// of it, which is where the longer word begins.
+///
+/// Every column goes through the same [`Offsets`] as [`blit`], so the flash lands on the
+/// cells the label was drawn in whatever the row is scrolled to, and columns that are
+/// off screen — behind the pinned prefix, past the rail, or on a row that is not on
+/// screen at all — are simply not painted.
+fn copied_flash(
+    buffer: &mut Buffer,
+    area: Rect,
+    canvas: &Canvas,
+    top: usize,
+    left: &Offsets<'_>,
+    base: Style,
+    at: Option<(usize, u16)>,
+) {
+    let Some((row, col)) = at else { return };
+    let Some(y) = row.checked_sub(top).and_then(|y| u16::try_from(y).ok()) else {
+        return;
+    };
+    let Some(cells) = canvas.row(row).filter(|_| y < area.height) else {
+        return;
+    };
+    // The label's own style, so the flash arrives in the frame's colour rather than in
+    // whatever a bare write would leave it.
+    let style = term_style(
+        cells
+            .get(usize::from(col))
+            .map_or(base, |cell| base.patch(cell.style())),
+    );
+    let start = col.saturating_sub(2);
+    for (index, ch) in crate::render::button::FLASH.bytes().enumerate() {
+        let Some(column) = u16::try_from(index).ok().map(|index| start + index) else {
+            break;
+        };
+        let Some(x) = left.x_of(row, column).filter(|x| *x < left.content()) else {
+            continue;
+        };
+        if let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) {
+            target.set_style(style);
+            target.set_symbol(char::from(ch).encode_utf8(&mut [0u8; 4]));
         }
     }
 }
