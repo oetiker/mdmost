@@ -4,6 +4,10 @@
 
 ### New
 
+- Prebuilt binaries for Linux (static musl, x86_64 and aarch64), macOS (Intel and
+  Apple silicon) and Windows, with `.deb` and `.rpm` packages, a Homebrew tap in this
+  repository, and publication to crates.io.
+
 ### Changed
 
 ### Fixed

@@ -1483,10 +1483,12 @@ Windows check `Finished`.
 - [ ] **Step 2: Confirm no stale names survive**
 
 ```bash
-grep -rin "mdless\|mdmst" --exclude-dir=.git --exclude-dir=target . | wc -l
+grep -rin "mdless\|mdmst" src/ tests/ assets/ man/ README.md Cargo.toml Cargo.lock CHANGES.md LICENSE-MIT .github/ | wc -l
 ```
 
-Expected: `0`.
+Expected: `0`. Scoped to the shipping surface, not the whole tree: `docs/` deliberately
+records the rename (design notes, the controller handoff, this plan) and a check that
+can only pass by deleting the history it documents is a badly specified check.
 
 - [ ] **Step 3: Confirm the packages still build after every change**
 
