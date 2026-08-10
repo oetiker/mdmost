@@ -101,6 +101,86 @@ fn render_once_works_headlessly_and_honours_the_width() {
     let _ = std::fs::remove_file(path);
 }
 
+/// A document whose prose is far wider than any cap, and whose table is wider than the
+/// terminal it will be rendered at.
+const WIDE: &str = "\
+# Wide
+
+Prose that runs on and on and on, long enough that a cap of forty columns has something \
+to bite on and long enough that no cap at all leaves it running the full width of a very \
+wide terminal indeed, which is the whole complaint.
+
+| Component | Responsibility | Input | Output | Notes |
+| --- | --- | --- | --- | --- |
+| `render` | tree to canvas at a width | `Doc`, width, theme | `Canvas` | a pure function, no I/O at all |
+";
+
+/// Writes `source` to a scratch file and returns its path.
+fn file_with(name: &str, source: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!("mdmost-{name}-{}.md", std::process::id()));
+    std::fs::write(&path, source).expect("the temporary file should be writable");
+    path
+}
+
+/// `--body-width` is not a pager-only setting: a dump is the same layout as a frame.
+///
+/// It was, once. `--render-once` called the uncapped renderer directly, so the flag was
+/// accepted and then discarded, and `mdmost doc.md | cat` disagreed with the pager about
+/// where the prose sat.
+#[test]
+fn render_once_honours_the_body_width_cap() {
+    let path = file_with("bodycap", WIDE);
+    let output = run(&[
+        "--render-once",
+        "--width",
+        "120",
+        "--body-width",
+        "40",
+        "--no-icons",
+        &path.display().to_string(),
+    ]);
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).expect("output should be UTF-8");
+    let prose: Vec<&str> = text
+        .lines()
+        .filter(|line| line.contains("Prose that runs") || line.contains("complaint"))
+        .collect();
+    assert!(!prose.is_empty(), "the prose should be drawn: {text}");
+    for line in &prose {
+        assert!(
+            mdmost::text::display_width(line.trim()) <= 40,
+            "prose past the cap: {line:?}"
+        );
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+/// Content that cannot be reflowed is laid out at the width it needs, in a dump exactly
+/// as in the pager: squeezing a table into the terminal wraps every cell, which is not a
+/// smaller table but a mangled one.
+#[test]
+fn render_once_lays_wide_content_out_at_its_natural_width() {
+    let path = file_with("widetable", WIDE);
+    let output = run(&[
+        "--render-once",
+        "--width",
+        "60",
+        "--no-icons",
+        &path.display().to_string(),
+    ]);
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).expect("output should be UTF-8");
+    let table = text
+        .lines()
+        .find(|line| line.contains("Responsibility"))
+        .expect("the table header should be drawn");
+    assert!(
+        mdmost::text::display_width(table) > 60,
+        "the table should reach past the render width: {table:?}"
+    );
+    let _ = std::fs::remove_file(path);
+}
+
 #[test]
 fn render_once_is_deterministic() {
     let path = sample_file("determinism");

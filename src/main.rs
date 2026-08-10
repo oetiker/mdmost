@@ -53,7 +53,7 @@ struct Cli {
     /// Cap the prose body at this many columns and centre it in the terminal.
     ///
     /// Only prose is capped: tables and diagrams keep the full terminal width, and a
-    /// code block takes it as soon as the cap would cut a line short. Defaults to 100;
+    /// code block takes it as soon as the cap would cut a line short. Defaults to 72;
     /// pass 0, or --no-body-width, for no cap at all.
     #[arg(long, value_name = "N")]
     body_width: Option<u16>,
@@ -316,7 +316,13 @@ fn render_once(
             FALLBACK_WIDTH
         }
     });
-    let canvas = mdmost::render::render_document(doc, width.max(1), &theme, options);
+    // The same layout the pager draws, not a second one: `render_scrollable` is what
+    // applies the body-width cap and what lays unreflowable content out at the width it
+    // needs. Calling `render_document` here instead meant `--body-width` was accepted
+    // and then quietly dropped on this path, and that a table too wide for `--width`
+    // came out with every cell wrapped rather than at its natural width.
+    let canvas =
+        mdmost::tui::wide::render_scrollable(doc, width.max(1), config.body_width, &theme, options);
 
     let stdout = io::stdout();
     let mut out = stdout.lock();
