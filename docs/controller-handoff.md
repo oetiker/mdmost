@@ -12,9 +12,10 @@
 
 Handoff commit: the last commit touching this file — `git log -1 -- docs/controller-handoff.md`
 Date: 2026-08-10   Reason: context budget
-Worktree / branch: main checkout @ `main`. **The directory is still
-`/home/oetiker/checkouts/mdless`** — the project was renamed twice this session
-and the checkout was deliberately not moved (§7.1).
+Worktree / branch: main checkout @ `main`. The directory is
+`/home/oetiker/checkouts/mdmost`, moved from `…/mdless` on 2026-08-10 together
+with its Claude state directory (§7.1). Transcripts written before that date name
+the old path.
 Trunk at time of writing: `main` @ `3820aec` — **reader: if trunk has moved, §2
 is provisionally stale; if trunk now contains this branch's HEAD, this file is a
 tombstone** (`git merge-base --is-ancestor HEAD main`). At that commit: 930 tests
@@ -230,20 +231,27 @@ New or changed:
 
 ## 7. Open questions / pending decisions
 
-1. **The checkout directory is still `/home/oetiker/checkouts/mdless`.** Offered
-   and not answered. Harmless, but every path in a transcript will look wrong.
-2. **The goldens question (§3.1) is genuinely open** — the owner interrupted the
-   question rather than answering it, so re-ask it plainly with the 375-line
-   number and the three options.
-3. **`--render-once` now calls into `src/tui/wide.rs`,** which means the binary's
-   dump path depends on a module named `tui`. The "`render` must not depend on
-   `tui`" constraint is not violated (the dependency runs the other way, from
-   `main`), but the *naming* now lies: `render_scrollable` is the document
-   renderer, not a pager detail. Moving it into `render/` is the tidy answer and
-   was not done — it is a bigger refactor than the fix warranted, and it would
-   touch `tests/body_width.rs`.
-4. **Nobody has ever run mdmost on Windows** (§4.5). It compiles; the mouse, the
-   clipboard, and the alternate screen are unexercised there.
+1. ~~The checkout directory~~ **Settled 2026-08-10.** Moved to
+   `/home/oetiker/checkouts/mdmost`. The owner's reason for holding off was that
+   Claude keys its per-project state on the absolute path, so
+   `~/.claude/projects/-home-oetiker-checkouts-mdless/` was renamed to
+   `…-mdmost` in the same step, carrying the 29 session transcripts and the
+   `memory/` directory with it.
+2. ~~The goldens question~~ **Settled 2026-08-10.** Answered "regenerate against
+   the real path and drop the code", and done: the goldens go through
+   `render::document::render_document` at the shipped body cap, and the flat
+   primitive is crate-private as `render::render_flat`. See §2.
+3. ~~`--render-once` calls into `src/tui/wide.rs`~~ **Settled 2026-08-10.** The
+   tidy answer named here was taken: the module is `src/render/document.rs` and
+   the function is `render::document::render_document`. `tests/body_width.rs` was
+   touched, as predicted.
+4. **Nobody has ever run mdmost on Windows** (§4.5), and as of 2026-08-10 it does
+   not even compile there: `cargo check --target x86_64-pc-windows-msvc` fails on
+   `SIGHUP` at `src/tui/term.rs:188`. **The previous handoff claimed this gate was
+   clean at `3820aec`; it was not** — the one-line `#[cfg(unix)]` is Task 1 of the
+   publishing plan and has never been applied. Treat the other three gates'
+   provenance with the same suspicion. The mouse, the clipboard and the alternate
+   screen are unexercised there regardless.
 5. **The banner fixture is self-referential on this machine** (§4.2).
 6. Carried forward and still open: `fc-list` as the macOS icon probe is untested
    there; nested diagrams are never widened while nested tables are; Nerd Fonts
