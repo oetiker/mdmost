@@ -276,7 +276,16 @@ fn code_area(
     // them, so the byte offset below has to be measured against this text instead —
     // measuring against the expanded line landed `source_end` past the end of the
     // line, into whatever source bytes followed it, on any code containing a tab.
-    let raw = crate::doc::literal_lines(literal);
+    //
+    // Skipped entirely when `origins` is empty: nothing below ever indexes `raw` in
+    // that case, so splitting `literal` would be a `Vec` allocation a ten-thousand-line
+    // fragment (or a construction site with no mapping at all) would pay for and never
+    // use.
+    let raw = if origins.is_empty() {
+        Vec::new()
+    } else {
+        crate::doc::literal_lines(literal)
+    };
     for (row, line) in lines.iter().enumerate() {
         if gutter > 0 {
             let number = format!("{:>digits$} ", row + 1, digits = digits);
