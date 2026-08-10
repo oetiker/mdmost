@@ -245,3 +245,38 @@ fn a_wide_block_inside_a_quote_still_reaches_the_full_terminal() {
         canvas.row_text(row)
     );
 }
+
+/// A small flowchart: narrower than any cap here, so its placement is all that shows.
+const DIAGRAM: &str =
+    "```mermaid\nflowchart LR\n    A[Start] --> B[Read]\n    B --> C[Draw]\n```\n";
+
+/// A diagram sits on the document's centre line, not to the right of it.
+///
+/// `mermaid::chrome::compose` centres a drawing inside the width it is laid out at, so
+/// unlike prose, a table or a code frame, a diagram block arrives at [`placed`] already
+/// placed. `placed` used to centre it a second time, and the two offsets added: on a
+/// 100-column terminal the art sat 13 columns right of where it belonged, which is
+/// exactly the indent the cap gives the prose. Below the cap nothing was capped, nothing
+/// was placed twice, and the bug was invisible — which is why this checks a wide
+/// terminal against a narrow one rather than eyeballing one width.
+#[test]
+fn a_diagram_is_centred_on_the_same_line_as_the_prose() {
+    for width in [80u16, 100, 120, 160] {
+        let canvas = paged(&format!("{PROSE}\n\n{DIAGRAM}"), width, Some(CAP));
+        let art = (0..canvas.height())
+            .find(|row| canvas.row_text(*row).contains("Start"))
+            .expect("the diagram is drawn");
+        let left = indent_of(&canvas, art).expect("the art row draws something");
+        let right = extent_of(&canvas, art);
+        // The centre of the ink, doubled, against the centre of the terminal, doubled —
+        // so an odd surplus does not have to be rounded the same way in both.
+        let art_centre = left + right;
+        let terminal_centre = usize::from(width);
+        assert!(
+            art_centre.abs_diff(terminal_centre) <= 2,
+            "at width {width} the diagram spans {left}..{right}, off centre by {}:\n{}",
+            (art_centre as isize - terminal_centre as isize) / 2,
+            canvas.row_text(art)
+        );
+    }
+}

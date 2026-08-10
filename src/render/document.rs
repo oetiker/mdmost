@@ -209,6 +209,24 @@ fn is_exempt(node: &Node) -> bool {
     }
 }
 
+/// Whether a block arrives already placed within the width it was laid out at.
+///
+/// Every other block draws from its left edge, which is what lets [`placed`] position it
+/// by indenting. A Mermaid drawing does not: `mermaid::chrome::compose` centres the plot
+/// inside the width it is given, as the last step of every family's `draw`, so the block
+/// comes back with its own left offset baked in. Indenting it again adds the two offsets
+/// together — the drawing drifted right by exactly the cap's indent, which is invisible
+/// on a terminal narrow enough that nothing is capped, and grows with the terminal.
+///
+/// Leaving it alone is right rather than merely harmless: the drawing is centred in the
+/// full body, and the capped prose is centred in the full body, so the two already share
+/// the centre line [`Measure`] promises. A fence that failed and came back as a source
+/// dump is full-width and would be left alone by [`placed`] anyway.
+fn places_itself(node: &Node) -> bool {
+    matches!(&node.kind, NodeKind::CodeBlock { language, .. }
+        if crate::render::code::is_mermaid(language.as_deref()))
+}
+
 /// Renders one block at the width its kind earns, and places it in the body.
 fn render_placed(
     node: &Node,
@@ -219,11 +237,14 @@ fn render_placed(
     clip: &ClipTest,
     fill: crate::theme::Style,
 ) -> Canvas {
-    if !measure.is_capped() {
+    // Nothing to place: with no cap the body is the full width, and every block was laid
+    // out at it. A block that places itself is laid out at the full width too, and is
+    // already where it belongs — see `places_itself`, which only says yes to blocks that
+    // `is_exempt` also says yes to.
+    if !measure.is_capped() || places_itself(node) {
         return render_widened(node, measure.full, theme, options, numbers, clip);
     }
-    let exempt = is_exempt(node);
-    let canvas = if exempt {
+    let canvas = if is_exempt(node) {
         render_widened(node, measure.full, theme, options, numbers, clip)
     } else {
         let capped = render_block_numbered(node, measure.prose, theme, options, numbers);
