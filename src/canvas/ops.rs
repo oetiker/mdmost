@@ -103,7 +103,7 @@ impl Canvas {
     /// different kind of wrong.
     ///
     /// **Callers that own a clipped-block detector must keep the marker reachable.**
-    /// `tui::wide::ClipTest` decides whether to re-render a block wider by looking for
+    /// `render::document::ClipTest` decides whether to re-render a block wider by looking for
     /// the marker, so a caller that answered anything but [`CutMark::Marker`] for
     /// *every* row would produce a clipped canvas carrying no marker at all and silently
     /// lose horizontal scrolling. Sparing a table's rules and row gaps is safe: a box

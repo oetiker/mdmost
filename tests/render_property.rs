@@ -3,7 +3,12 @@
 //! Three properties are asserted for every input at every width:
 //!
 //! 1. rendering never panics;
-//! 2. every rendered line is exactly `width` display columns;
+//! 2. the canvas is a rectangle at least `width` columns wide — every row exactly as
+//!    wide as the canvas. It is not exactly `width` because a block that cannot reflow
+//!    (a table with more columns than fit, a long code line) is laid out at the width it
+//!    needs, and that surplus is what the horizontal scroll keys reach. The rectangle is
+//!    the load-bearing half: the viewport blits slices and scrolls every row of a run by
+//!    the same amount, so a short row would tear;
 //! 3. rendering is deterministic — the same `(document, width, theme, options)`
 //!    always produces the same canvas, which is what makes the render cache safe to
 //!    drop.
@@ -32,21 +37,22 @@ fn check(markdown: &str, width: u16) {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     for options in OPTION_SETS {
-        let canvas = render_document(&doc, width, &theme, &options);
+        let canvas = render_document(&doc, width, None, &theme, &options);
 
-        assert_eq!(canvas.width(), width);
+        assert!(canvas.width() >= width);
         canvas.check_invariants().unwrap_or_else(|problem| {
             panic!("canvas contract violated at width {width} with {options:?}: {problem}")
         });
+        let canvas_width = usize::from(canvas.width());
         for row in 0..canvas.height() {
             assert_eq!(
                 display_width(&canvas.row_text(row)),
-                usize::from(width),
-                "row {row} at width {width} with {options:?} is not exactly {width} columns"
+                canvas_width,
+                "row {row} at width {width} with {options:?} is not exactly {canvas_width} columns"
             );
         }
 
-        let again = render_document(&doc, width, &theme, &options);
+        let again = render_document(&doc, width, None, &theme, &options);
         assert_eq!(
             canvas, again,
             "rendering is not deterministic at {width} with {options:?}"
@@ -128,8 +134,8 @@ fn both_built_in_themes_produce_identically_shaped_output() {
     let doc = Doc::parse(markdown);
     for width in [40u16, 80, 120] {
         let options = RenderOptions::default();
-        let dark = render_document(&doc, width, &Theme::default_dark(), &options);
-        let light = render_document(&doc, width, &Theme::default_light(), &options);
+        let dark = render_document(&doc, width, None, &Theme::default_dark(), &options);
+        let light = render_document(&doc, width, None, &Theme::default_light(), &options);
         assert_eq!(
             dark.plain_text(),
             light.plain_text(),
@@ -152,11 +158,17 @@ fn turning_icons_off_never_changes_the_layout() {
     let theme = Theme::default_dark();
     for width in 4..=120u16 {
         for line_numbers in [false, true] {
-            let fancy =
-                render_document(&doc, width, &theme, &RenderOptions::new(true, line_numbers));
+            let fancy = render_document(
+                &doc,
+                width,
+                None,
+                &theme,
+                &RenderOptions::new(true, line_numbers),
+            );
             let plain = render_document(
                 &doc,
                 width,
+                None,
                 &theme,
                 &RenderOptions::new(false, line_numbers),
             );

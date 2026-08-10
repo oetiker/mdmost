@@ -316,13 +316,13 @@ fn render_once(
             FALLBACK_WIDTH
         }
     });
-    // The same layout the pager draws, not a second one: `render_scrollable` is what
-    // applies the body-width cap and what lays unreflowable content out at the width it
-    // needs. Calling `render_document` here instead meant `--body-width` was accepted
-    // and then quietly dropped on this path, and that a table too wide for `--width`
-    // came out with every cell wrapped rather than at its natural width.
+    // The same layout the pager draws, because there is only one to draw: `render_document`
+    // applies the body-width cap and lays unreflowable content out at the width it needs.
+    // There was briefly a second, flat renderer that this path called instead, and with it
+    // `--body-width` was accepted and then quietly dropped here, while a table too wide for
+    // `--width` came out with every cell wrapped rather than at its natural width.
     let canvas =
-        mdmost::tui::wide::render_scrollable(doc, width.max(1), config.body_width, &theme, options);
+        mdmost::render::render_document(doc, width.max(1), config.body_width, &theme, options);
 
     let stdout = io::stdout();
     let mut out = stdout.lock();

@@ -20,7 +20,7 @@ use super::inline::{HTML_MARKER, render_inline};
 use super::{Ctx, MAX_TABLE_DEPTH, RenderOptions, code, inline, table};
 
 /// The vertical bar drawn to the left of a block quote.
-const QUOTE_BAR: &str = "▌";
+pub(crate) const QUOTE_BAR: &str = "▌";
 
 /// The rule drawn beneath a heading, by level; `None` where a level draws none.
 ///
@@ -66,7 +66,7 @@ pub fn render_block(node: &Node, width: u16, theme: &Theme, options: &RenderOpti
 ///
 /// The same as [`render_block`] except that a heading in `numbers` is drawn with its
 /// number in front of it. This is what a caller assembling the top level block by block
-/// — the pager's [`crate::tui::wide::render_scrollable`] — needs: the numbering is a
+/// — the pager's [`crate::render::render_document`] — needs: the numbering is a
 /// property of the whole document, so it is computed there, once, and handed down.
 pub fn render_block_numbered(
     node: &Node,

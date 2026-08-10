@@ -243,7 +243,7 @@ fn draw_rows(rows: &[Row<'_>], widths: &[usize], info: &TableInfo, ctx: Ctx<'_>)
 ///
 /// Read off the finished canvas rather than handed down, because by the time the *pager*
 /// has to decide what a viewport edge cuts through, the drawn document is all it has —
-/// the same seam `tui::wide` reads extents and gutters through. The signal is a half
+/// the same seam `render::document` reads extents and gutters through. The signal is a half
 /// block painted in the stripe colour **as a foreground**, which nothing else in a
 /// document produces: the shading is the only place `table.row_alt`'s colour is ever a
 /// foreground, and matching the glyph alone would catch a document that merely contains

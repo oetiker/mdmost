@@ -54,7 +54,7 @@ fn pager(source: &str) -> App {
 
 #[test]
 fn the_body_cap_reaches_the_render_through_the_pager() {
-    // The cap lives in the configuration and is applied by `wide::render_scrollable`;
+    // The cap lives in the configuration and is applied by `render::render_document`;
     // this is the wire between them, which nothing else in this module would notice
     // was cut. A paragraph long enough to fill any width, at a viewport far wider
     // than the cap.
@@ -881,7 +881,7 @@ fn the_pager_keeps_the_document_margin_the_renderer_promises() {
     );
     let doc = Doc::parse(markdown);
     let width = 60;
-    let canvas = super::wide::render_scrollable(
+    let canvas = crate::render::render_document(
         &doc,
         width,
         None,
@@ -911,11 +911,15 @@ fn the_pager_keeps_the_document_margin_the_renderer_promises() {
 
 #[test]
 fn the_overflow_marker_matches_the_renderer() {
-    // `super::wide` cannot see `render::code`'s private constant, so it keeps its own
-    // copy. If the renderer ever changes the glyph, widening silently stops working;
-    // this is the tripwire.
+    // `ClipTest` decides whether to re-render a block wider by looking for this glyph in
+    // what came back. It used to be a second copy of `render::code`'s constant, kept
+    // because the widening lived under `tui` and could not see it, and this test pinned
+    // the two together; the module lives in `render` now and uses the original, so what
+    // is left to guard is the other half — that the renderer still *draws* the glyph the
+    // clip test hunts for. Change how clipping is marked and widening silently stops
+    // working, with nothing else failing near the change.
     let doc = Doc::parse("```text\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n```\n");
-    let canvas = crate::render::render_document(
+    let canvas = crate::render::render_flat(
         &doc,
         20,
         &crate::theme::Theme::default_dark(),
@@ -923,20 +927,20 @@ fn the_overflow_marker_matches_the_renderer() {
     );
     let text = canvas.plain_text();
     assert!(
-        text.contains(super::wide::OVERFLOW_MARKER),
+        text.contains(crate::render::document::OVERFLOW_MARKER),
         "the renderer still marks clipped content with {:?}: {text}",
-        super::wide::OVERFLOW_MARKER
+        crate::render::document::OVERFLOW_MARKER
     );
 }
 
 #[test]
 fn the_quote_bar_matches_the_renderer() {
-    // The other private constant `super::wide` keeps a copy of. If the renderer ever
-    // changes the glyph, a quote's separator rows stop reading as blank, the quote
-    // becomes one run again, and a wide block inside it silently drags the quoted prose
-    // off the screen — with no test failing anywhere near the change.
+    // The other former copy; see `the_overflow_marker_matches_the_renderer`. If the
+    // renderer ever changes this glyph, a quote's separator rows stop reading as blank,
+    // the quote becomes one run again, and a wide block inside it silently drags the
+    // quoted prose off the screen — with no test failing anywhere near the change.
     let doc = Doc::parse("> before\n>\n> after\n");
-    let canvas = crate::render::render_document(
+    let canvas = crate::render::render_flat(
         &doc,
         20,
         &crate::theme::Theme::default_dark(),
@@ -951,7 +955,7 @@ fn the_quote_bar_matches_the_renderer() {
         .expect("a quote has a row between its two paragraphs");
     assert_eq!(
         separator.trim(),
-        super::wide::QUOTE_BAR,
+        crate::render::document::QUOTE_BAR,
         "the row separating a quote's parts draws the bar and nothing else"
     );
 }
@@ -966,13 +970,13 @@ fn the_gutter_rule_matches_the_renderer() {
     // which is the only thing that keeps the two honest.
     let doc = Doc::parse("```javascript\nfirst\nsecond\n```\n");
     let theme = crate::theme::Theme::default_dark();
-    let canvas = crate::render::render_document(
+    let canvas = crate::render::render_flat(
         &doc,
         40,
         &theme,
         &crate::render::RenderOptions::new(false, true),
     );
-    let pinned = super::wide::pinned_prefix(&canvas);
+    let pinned = crate::render::document::pinned_prefix(&canvas);
     let text = canvas.plain_text();
     assert!(
         text.contains("1 │ first"),
@@ -1093,7 +1097,7 @@ fn scrollable(markdown: &str, width: u16) -> (crate::canvas::Canvas, crate::them
     let doc = Doc::parse(markdown);
     let theme = crate::theme::Theme::default_dark();
     let options = crate::render::RenderOptions::new(false, false);
-    let canvas = super::wide::render_scrollable(&doc, width, None, &theme, &options);
+    let canvas = crate::render::render_document(&doc, width, None, &theme, &options);
     (canvas, theme)
 }
 
@@ -1108,8 +1112,8 @@ fn edge_column(
     let frames = [theme.code.frame, theme.table.border];
     // The real per-row reach, so this test cannot disagree with the pager about which
     // rows move: a row that has nowhere to go is not cut, and must not be marked.
-    let reach = super::wide::scroll_reach(canvas, width);
-    let pinned = super::wide::pinned_prefix(canvas);
+    let reach = crate::render::document::scroll_reach(canvas, width);
+    let pinned = crate::render::document::pinned_prefix(canvas);
     let offsets = super::draw::Offsets::scrolled_to(&reach, &pinned, left, width);
     let rows = painted(width, height, |buffer, area| {
         super::draw::edge_markers(
@@ -1672,7 +1676,7 @@ fn scrolling_sideways_moves_only_the_over_wide_blocks() {
 /// `ZEBRA` late in it that only a scrolled reader ever sees.
 ///
 /// The table below it is over-wide too, so the two blocks merge into one scrolling run
-/// ([`super::wide::scroll_reach`]) — which is exactly the case that must *not* pin the
+/// ([`crate::render::document::scroll_reach`]) — which is exactly the case that must *not* pin the
 /// table's first columns along with the fence's gutter. `Ocelot` is the token only a
 /// scrolled reader reaches, and unlike code, table cells carry search spans.
 const NUMBERED_WIDE: &str = "\
@@ -2043,14 +2047,14 @@ fn an_unnumbered_fence_pins_nothing_however_its_code_is_coloured() {
     // is one theme tweak or one `--width` away from not masking it.
     let doc = Doc::parse("```rust\nlet a = 1 + 2;\n```\n");
     let theme = crate::theme::Theme::default_dark();
-    let canvas = crate::render::render_document(
+    let canvas = crate::render::render_flat(
         &doc,
         40,
         &theme,
         // Line numbers *off*: this block has no gutter, so nothing may be pinned.
         &crate::render::RenderOptions::new(false, false),
     );
-    let pinned = super::wide::pinned_prefix(&canvas);
+    let pinned = crate::render::document::pinned_prefix(&canvas);
     assert!(
         pinned.iter().all(|&prefix| prefix == 0),
         "a fence with no gutter pins nothing: {pinned:?}\n{}",
@@ -2090,7 +2094,7 @@ fn a_numbered_fence_in_a_table_cell_pins_nothing() {
         "the cell really does draw a numbered gutter:\n{}",
         canvas.plain_text()
     );
-    let pinned = super::wide::pinned_prefix(&canvas);
+    let pinned = crate::render::document::pinned_prefix(&canvas);
     assert!(
         pinned.iter().all(|&prefix| prefix == 0),
         "nothing inside a table cell pins the row it shares: {pinned:?}\n{}",
@@ -2363,7 +2367,7 @@ const WIDE_FENCE: &str = concat!(
 fn layouts_for(markdown: &str, width: u16) -> (crate::canvas::Canvas, usize) {
     let doc = Doc::parse(markdown);
     crate::render::bridge::counting_layouts(|| {
-        super::wide::render_scrollable(
+        crate::render::render_document(
             &doc,
             width,
             None,
@@ -2805,7 +2809,7 @@ fn only_the_rows_whose_content_is_cut_are_marked_as_cut() {
 
 #[test]
 fn scrolling_is_still_per_run_while_marking_is_per_row() {
-    // The tension named in `wide::scroll_reach`: rows scroll as a *run* so a ragged block
+    // The tension named in `render::document::scroll_reach`: rows scroll as a *run* so a ragged block
     // does not shear, and the marking must become per row without touching that. A block
     // whose rows are of three different lengths moves as one piece — and says, row by
     // row, which of those rows still has something past the edge.

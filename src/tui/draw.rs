@@ -138,17 +138,17 @@ pub fn draw_splash(frame: &mut Frame<'_>, app: &App) {
 /// The horizontal offset is a single number the reader moves with `←`/`→`, but applying
 /// it to every row drags the whole page sideways for the sake of one wide block. A row
 /// is therefore moved only as far as it has anywhere to go — see
-/// [`super::wide::scroll_reach`] for what "anywhere" means and why it is a property of
+/// [`crate::render::document::scroll_reach`] for what "anywhere" means and why it is a property of
 /// a run of rows rather than of one row.
 ///
 /// A row may also keep a *prefix* out of the offset altogether: a code block's
 /// line-number gutter stays welded to the left edge while its long lines scroll
-/// underneath it. See [`super::wide::pinned_prefix`]. Everything a row start is needed
+/// underneath it. See [`crate::render::document::pinned_prefix`]. Everything a row start is needed
 /// for goes through [`Offsets::column`] or its inverse [`Offsets::x_of`], so no painter
 /// can hold a different opinion about which canvas column a viewport column shows.
 ///
 /// The document's own margin — [`crate::render::DOCUMENT_MARGIN`], applied by
-/// [`super::wide::render_scrollable`] exactly as the renderer applies it — is held out of
+/// [`crate::render::render_document`] exactly as the renderer applies it — is held out of
 /// the scroll on *every* row, for the same reason a gutter is. It is one blank column on
 /// each side, and it is where the edge markers are painted: a marker drawn inside the
 /// document's own columns can only be drawn over something, and a pager that silently
@@ -194,7 +194,7 @@ impl<'a> Offsets<'a> {
             viewport,
             // Read from the viewport rather than passed in, so a test cannot hand the
             // painters a rail the pager would not have given them. `render::margins` is
-            // the same function `render_scrollable` insets the canvas with.
+            // the same function `render_document` insets the canvas with.
             margin: crate::render::margins(viewport),
         }
     }
@@ -362,7 +362,7 @@ pub(super) struct Marks<'a> {
 /// draws: its own wall, exactly where the renderer would have drawn it, which is what
 /// `--render-once` shows. A chevron is kept for the rows where content really is cut —
 /// [`hidden_wall`] is the test, and it is the row's own cells that answer it, not the run
-/// the row scrolls with. Scrolling stays per run ([`super::wide::scroll_reach`]); only the
+/// the row scrolls with. Scrolling stays per run ([`crate::render::document::scroll_reach`]); only the
 /// marking is per row. They were never the same question.
 ///
 /// A table's row gap is marked on neither edge. It is shading between two rows and

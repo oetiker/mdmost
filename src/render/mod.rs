@@ -26,7 +26,8 @@
 //!
 //! let doc = Doc::parse("# Title\n\nHello.\n");
 //! let options = RenderOptions::default();
-//! let canvas = render_document(&doc, 20, &Theme::default_dark(), &options);
+//! // `None` for the body cap: no ceiling on the prose measure beyond the width itself.
+//! let canvas = render_document(&doc, 20, None, &Theme::default_dark(), &options);
 //! assert_eq!(canvas.width(), 20);
 //! assert_eq!(canvas.anchors()[0].id, "title");
 //! // Column 0 is the document gutter, so nothing is ever written there.
@@ -38,6 +39,7 @@ pub mod block;
 pub(crate) mod bridge;
 pub(crate) mod code;
 mod diagram;
+pub mod document;
 pub(crate) mod glyphs;
 pub mod inline;
 pub mod table;
@@ -54,6 +56,7 @@ use glyphs::Glyphs;
 
 pub use block::{render_block, render_block_numbered, render_blocks};
 pub(crate) use diagram::{Limits, diagram};
+pub use document::render_document;
 pub use inline::wrap;
 pub use table::render_table;
 
@@ -232,7 +235,18 @@ impl<'a> Ctx<'a> {
     }
 }
 
-/// Renders a whole document at `width` columns.
+/// Lays the whole document out flat at exactly `width` columns.
+///
+/// This is the layout primitive, not the renderer users meet: it reflows everything to
+/// the width it is given, so a table that cannot fit comes out with its cells wrapped
+/// rather than laid out wide and scrolled to. [`render_document`] is the entry point
+/// every user-facing path goes through, and the only caller here is its fallback for a
+/// document with bare inline content at the top level.
+///
+/// It stays crate-private on purpose. When it was public, tests reached for it as "the
+/// document renderer" and the goldens ended up pinning 375 lines of layout that no user
+/// could ever see, because the two renderers had quietly diverged and the suite was
+/// standing on the wrong side of the disagreement.
 ///
 /// The returned canvas is exactly `width` columns wide on every row and carries:
 ///
@@ -252,7 +266,7 @@ impl<'a> Ctx<'a> {
 /// edge or to the scrollbar next to it. The inset is applied once, here, rather than
 /// by every block renderer: block renderers still receive a plain width budget and
 /// still return a canvas exactly that wide.
-pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
+pub(crate) fn render_flat(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
     // Computed once, here, from the whole document — never at parse time (design spec
     // §3), and never per block, which could not answer the question anyway.
     let numbers = Numbering::enabled(doc, options.section_numbers);
@@ -293,7 +307,7 @@ pub fn render_document(doc: &Doc, width: u16, theme: &Theme, options: &RenderOpt
 /// change of typeface, not a different kind of thing on the page.
 ///
 /// Both document-level entry points call this — [`render_document`] and the pager's
-/// [`crate::tui::wide::render_scrollable`], which assembles the top level block by
+/// [`crate::render::render_document`], which assembles the top level block by
 /// block and would otherwise silently not have the feature.
 pub(crate) fn title_banner(
     doc: &Doc,

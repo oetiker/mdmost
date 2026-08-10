@@ -32,7 +32,7 @@ fn render(markdown: &str, width: u16) -> Canvas {
 fn render_with(markdown: &str, width: u16, options: &RenderOptions) -> Canvas {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
-    let canvas = render_document(&doc, width, &theme, options);
+    let canvas = render_flat(&doc, width, &theme, options);
     assert_eq!(canvas.width(), width, "canvas must be exactly {width} wide");
     canvas
         .check_invariants()
@@ -1028,7 +1028,7 @@ fn a_clipped_table_closes_its_rules_and_marks_only_its_content() {
 #[test]
 fn a_clipped_code_block_of_box_art_still_carries_the_marker() {
     // The pager decides whether to re-render a block wider by hunting for the overflow
-    // marker (`tui::wide::ClipTest`). A fence whose *content* is box art — this
+    // marker (`render::document::ClipTest`). A fence whose *content* is box art — this
     // project's own documentation is full of it — must therefore keep its chevrons: a
     // clip that closed those lines into corners instead would leave the block unmarked
     // and switch its horizontal scrolling off in silence.
@@ -1062,7 +1062,7 @@ fn a_table_narrower_than_its_minimums_is_clipped_with_a_marker() {
 
 #[test]
 fn re_rendering_a_clipped_table_wider_reveals_the_columns_it_lost() {
-    // This is the contract `tui::wide::render_scrollable` relies on for horizontal
+    // This is the contract `render::render_document` relies on for horizontal
     // scrolling: it re-renders an over-wide *block* at a larger budget, and the table
     // renderer must reveal the columns it had clipped when given one. Widening is the
     // viewport's job precisely because it applies to every block, not just tables —
@@ -1423,7 +1423,7 @@ fn the_default_options_are_icons_on_and_line_numbers_off() {
 fn search_spans_map_source_offsets_onto_the_canvas() {
     let source = "hello brave world\n";
     let doc = Doc::parse(source);
-    let canvas = render_document(&doc, 40, &Theme::default_dark(), &PLAIN);
+    let canvas = render_flat(&doc, 40, &Theme::default_dark(), &PLAIN);
     // Unwrapped, the whole run is one contiguous mapping.
     assert_eq!(canvas.spans().len(), 1);
     let span = canvas.spans()[0];
@@ -1438,7 +1438,7 @@ fn search_spans_map_source_offsets_onto_the_canvas() {
 fn a_wrap_splits_the_mapping_at_the_line_break() {
     let source = "hello brave world\n";
     let doc = Doc::parse(source);
-    let canvas = render_document(
+    let canvas = render_flat(
         &doc,
         11 + 2 * DOCUMENT_MARGIN,
         &Theme::default_dark(),
@@ -1472,7 +1472,7 @@ fn search_spans_follow_content_into_lists_quotes_and_cells() {
         "**needle**\n",
     ] {
         let doc = Doc::parse(markdown);
-        let canvas = render_document(&doc, 30, &Theme::default_dark(), &PLAIN);
+        let canvas = render_flat(&doc, 30, &Theme::default_dark(), &PLAIN);
         let span = canvas
             .spans()
             .iter()
@@ -1489,8 +1489,8 @@ fn rendering_is_deterministic() {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     for width in [13u16, 40, 80] {
-        let first = render_document(&doc, width, &theme, &PLAIN);
-        let second = render_document(&doc, width, &theme, &PLAIN);
+        let first = render_flat(&doc, width, &theme, &PLAIN);
+        let second = render_flat(&doc, width, &theme, &PLAIN);
         assert_eq!(first, second, "width {width} is not deterministic");
     }
 }
@@ -1517,7 +1517,7 @@ fn render_block_and_render_blocks_agree_with_the_document_renderer() {
     let markdown = "# Title\n\nbody text\n\n# Another\n";
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
-    let whole = render_document(&doc, 30 + 2 * DOCUMENT_MARGIN, &theme, &PLAIN);
+    let whole = render_flat(&doc, 30 + 2 * DOCUMENT_MARGIN, &theme, &PLAIN);
     let parts = render_blocks(&doc.root().children, 30, &theme, &PLAIN);
     assert_eq!(
         body_rows(&whole),
@@ -1563,7 +1563,7 @@ fn every_row_keeps_a_margin_on_both_sides() {
     let doc = Doc::parse(MARGIN_FIXTURE);
     let theme = Theme::default_dark();
     for width in [20u16, 40, 60, 80, 100, 120] {
-        let canvas = render_document(&doc, width, &theme, &PLAIN);
+        let canvas = render_flat(&doc, width, &theme, &PLAIN);
         let margin = usize::from(DOCUMENT_MARGIN);
         for row in 0..canvas.height() {
             let text = canvas.row_text(row);
@@ -1857,7 +1857,7 @@ fn a_cluster_wider_than_a_cell_is_charged_the_columns_it_draws() {
     // own text and drags every following span with it.
     let source = "\u{17000}\u{1a57} tail\n";
     let doc = Doc::parse(source);
-    let canvas = render_document(&doc, 30, &Theme::default_dark(), &PLAIN);
+    let canvas = render_flat(&doc, 30, &Theme::default_dark(), &PLAIN);
     canvas.check_invariants().expect("contract holds");
     for span in canvas.spans() {
         let text = &source[span.source_start..span.source_end];

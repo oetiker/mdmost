@@ -14,6 +14,7 @@ fn lines(source: &str, width: u16) -> Vec<String> {
     let canvas = render_document(
         &doc,
         width,
+        None,
         &Theme::default_dark(),
         &RenderOptions::new(false, false),
     );
@@ -173,8 +174,10 @@ fn plain_text_renders_at_every_width_without_breaking_the_canvas_contract() {
     let theme = Theme::default_dark();
     let options = RenderOptions::new(false, false);
     for width in 1..=120u16 {
-        let canvas = render_document(&doc, width, &theme, &options);
-        assert_eq!(canvas.width(), width);
+        let canvas = render_document(&doc, width, None, &theme, &options);
+        // At least, not exactly: a stream with a line too long to reflow is laid out at
+        // the width it needs and reached with the horizontal scroll keys.
+        assert!(canvas.width() >= width);
         canvas
             .check_invariants()
             .unwrap_or_else(|problem| panic!("width {width}: {problem}"));

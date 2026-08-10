@@ -34,7 +34,6 @@ pub mod icons;
 pub mod select;
 pub mod stderr;
 mod term;
-pub mod wide;
 
 #[cfg(test)]
 mod tests;

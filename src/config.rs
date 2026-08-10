@@ -119,7 +119,7 @@ pub struct Config {
     ///
     /// `None` means no cap: the body uses the whole terminal, as it always did.
     /// Otherwise prose is laid out at this many columns and centred, while blocks that
-    /// cannot be reflowed take the full width — see [`crate::tui::wide`], which owns
+    /// cannot be reflowed take the full width — see [`crate::render::document`], which owns
     /// the rule and is the only place it is applied.
     ///
     /// Not to be confused with `--width`, which changes the width the document is

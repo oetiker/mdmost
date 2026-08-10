@@ -1,4 +1,11 @@
-//! Rendering the document so that over-wide blocks stay reachable.
+//! The document renderer: the one entry point every user-facing path goes through.
+//!
+//! The pager and `--render-once` both call [`render_document`], so what is piped is what
+//! is paged. There used to be a second document renderer next to this one — the flat,
+//! exactly-`width` primitive that is now [`super::render_flat`] — and having two of them
+//! cost a release's worth of quiet bugs: `--body-width` accepted and silently dropped on
+//! the pipe path, and a golden suite pinning layout no user could see. The primitive is
+//! crate-private now, and this is the only thing that calls it.
 //!
 //! Design spec §7.3 and §8 both promise the same thing: a table whose minimum widths
 //! exceed the terminal, and a code line longer than the terminal, become *horizontally
@@ -12,16 +19,16 @@
 //! viewport width; the ones that come back clipped are re-rendered at the width they
 //! actually want. [`Canvas::append`] then stacks the parts, padding the narrow ones, and
 //! translates their anchors and search spans, so the result obeys the canvas contract
-//! exactly as a plain [`render_document`] would.
+//! exactly as a flat [`super::render_flat`] would.
 //!
 //! A Mermaid fence is the exception to "clipped" being the signal, and to matching
-//! [`render_document`] block for block. It never comes back clipped — a diagram that
+//! [`super::render_flat`] block for block. It never comes back clipped — a diagram that
 //! does not fit comes back as a *dump of its own source*, which fits fine — so it is
 //! asked first, through [`crate::render::diagram`], and it is asked under a policy that
 //! refuses to mince labels ([`Fit::ROOMY`](crate::mermaid::Fit::ROOMY)). A fence the
-//! piped renderer squeezes into the viewport may therefore be drawn wide here instead.
+//! flat renderer squeezes into the viewport may therefore be drawn wide here instead.
 //! That is the one deliberate difference; everything else in a document with nothing
-//! over-wide comes out byte-identical to [`render_document`] — including its side
+//! over-wide comes out byte-identical to [`super::render_flat`] — including its side
 //! margins, which are applied here for the same reason and in the same place. That claim
 //! used to be false in exactly one other respect, and being false only about the margins
 //! is what made it survive: the pager looked right until you noticed nothing had a
@@ -30,21 +37,20 @@
 use crate::canvas::{Canvas, Cell};
 use crate::doc::{Doc, Node, NodeKind};
 use crate::numbering::Numbering;
-use crate::render::{Limits, RenderOptions, margins, render_block_numbered, render_document};
+use crate::render::{Limits, RenderOptions, margins, render_block_numbered, render_flat};
 use crate::theme::Theme;
 
 /// The glyph the renderers paint in a row's last column when content is cut off.
 ///
-/// Duplicated from `render::code` on purpose: that constant is private to a private
-/// module, and reaching into the renderer would couple the pager to its internals.
-/// [`super::tests::overflow_marker_matches_the_renderer`] pins the two together.
-pub const OVERFLOW_MARKER: &str = "\u{203a}";
+/// This used to be a copy, kept because the module lived under `tui` and reaching into
+/// the renderer would have coupled the pager to its internals — with a tripwire test
+/// pinning the copy to the original. Living in `render` now, it is the original.
+pub(crate) use super::code::OVERFLOW_MARKER;
 
 /// The bar a block quote paints down its left edge, on every row it owns.
 ///
-/// Duplicated from `render::block` for the same reason as [`OVERFLOW_MARKER`], and
-/// pinned to it by [`super::tests::the_quote_bar_matches_the_renderer`].
-pub const QUOTE_BAR: &str = "\u{258c}";
+/// The other former copy; see [`OVERFLOW_MARKER`].
+pub(crate) use super::block::QUOTE_BAR;
 
 /// The widest a single block is ever grown to.
 ///
@@ -58,7 +64,7 @@ const MAX_BLOCK_WIDTH: u16 = 2048;
 /// The returned canvas is at least `width` columns wide and may be wider; the surplus
 /// is what the horizontal scroll keys reach, as far as it is drawn in — see
 /// [`scroll_reach`], which measures that and is what moves each row.
-pub fn render_scrollable(
+pub fn render_document(
     doc: &Doc,
     width: u16,
     body_width: Option<u16>,
@@ -72,11 +78,11 @@ pub fn render_scrollable(
     // and this per-block assembly would not — so hand those documents back to the
     // renderer whole rather than laying them out differently here.
     if blocks.iter().any(is_inline) {
-        return render_document(doc, width, theme, options);
+        return render_flat(doc, width, theme, options);
     }
 
     let fill = theme.base();
-    // The margin is applied here, over the assembled body, exactly as `render_document`
+    // The margin is applied here, over the assembled body, exactly as `render_flat`
     // applies it over `render_sequence` — assembling blocks ourselves means inheriting
     // that job too, and for a long time we did not: every line in the pager sat welded
     // to the scrollbar while the piped renderer was correctly inset.
@@ -359,7 +365,7 @@ fn render_widened(
 /// graph engine reads a node's rules rather than being told about them:
 ///
 /// * Consecutive non-blank rows belong to one run and share the run's widest extent.
-///   [`render_scrollable`] separates top-level blocks with a blank row, so a run is
+///   [`render_document`] separates top-level blocks with a blank row, so a run is
 ///   normally exactly one block. A row drawing nothing but block-prefix decoration
 ///   counts as blank — see [`row_extent`], and without that a block quote is a single
 ///   run and one wide fence inside it drags every quoted sentence off the screen.

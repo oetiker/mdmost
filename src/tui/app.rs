@@ -410,7 +410,7 @@ impl App {
 
     /// How far each row of the rendered document may be scrolled sideways.
     ///
-    /// One entry per canvas row; see [`super::wide::scroll_reach`]. The viewport uses
+    /// One entry per canvas row; see [`crate::render::document::scroll_reach`]. The viewport uses
     /// it to leave rows that fit at column 0 while an over-wide block scrolls.
     pub fn reach(&self) -> &[u16] {
         self.cache.reach()
@@ -418,7 +418,7 @@ impl App {
 
     /// How many leading columns of each row the horizontal offset must leave alone.
     ///
-    /// One entry per canvas row; see [`super::wide::pinned_prefix`]. This is what keeps
+    /// One entry per canvas row; see [`crate::render::document::pinned_prefix`]. This is what keeps
     /// a code block's line-number gutter on screen while its long lines scroll under it.
     pub fn pinned(&self) -> &[u16] {
         self.cache.pinned()
@@ -699,7 +699,7 @@ impl App {
             &self.theme,
             options,
             || {
-                super::wide::render_scrollable(
+                crate::render::render_document(
                     &self.doc,
                     width,
                     self.config.body_width,

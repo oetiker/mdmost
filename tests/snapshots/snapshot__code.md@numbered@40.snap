@@ -2,125 +2,125 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- Feature exerciser — code               
- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
-                                        
- Fences, indented code, the line-number 
- gutter and the horizontal-scroll path. 
- This fixture is also rendered once     
- with line_numbers on, so the gutter    
- has a golden of its own.               
-                                        
- A fence with a language                
- ────────────────────────────────────── 
-                                        
- ╭───┬ rust ──────────────────────────╮ 
- │ 1 │ /// Doc comment.               │ 
- │ 2 │ fn main() {                    │ 
- │ 3 │     let greeting = "hello";    │ 
- │ 4 │     println!("{greeting}, wor› │ 
- │ 5 │ }                              │ 
- ╰───┴────────────────────────────────╯ 
-                                        
- A fence with a language the            
- highlighter does not know              
- ────────────────────────────────────── 
-                                        
- ╭───┬ brainfuck ─────────────────────╮ 
- │ 1 │ ++++++++[>++++[>++>+++>+++>+<› │ 
- ╰───┴────────────────────────────────╯ 
-                                        
- A fence with no language at all        
- ────────────────────────────────────── 
-                                        
- ╭───┬────────────────────────────────╮ 
- │ 1 │ no language tag at all         │ 
- │ 2 │     indentation inside must b› │ 
- ╰───┴────────────────────────────────╯ 
-                                        
- An empty fence                         
- ────────────────────────────────────── 
-                                        
- ╭───┬────────────────────────────────╮ 
- ╰───┴────────────────────────────────╯ 
-                                        
- A tilde fence with an info string      
- carrying attributes                    
- ────────────────────────────────────── 
-                                        
- ╭───┬ python ────────────────────────╮ 
- │ 1 │ def f(x):                      │ 
- │ 2 │     return x * 2               │ 
- ╰───┴────────────────────────────────╯ 
-                                        
- Indented code, four spaces             
- ────────────────────────────────────── 
-                                        
- ╭───┬────────────────────────────────╮ 
- │ 1 │ indented code block            │ 
- │ 2 │     with deeper indentation    │ 
- │ 3 │ and a tab   inside it          │ 
- ╰───┴────────────────────────────────╯ 
-                                        
- A line far too wide for any pane       
- ────────────────────────────────────── 
-                                        
- ╭───┬ rust ──────────────────────────╮ 
- │ 1 │ fn wide() { let _ = "a single› │ 
- ╰───┴────────────────────────────────╯ 
-                                        
- Box-drawing art inside a fence         
- ────────────────────────────────────── 
-                                        
- ╭───┬────────────────────────────────╮ 
- │ 1 │  ╭──────────┬───────────┬────› │ 
- │ 2 │  │ Language │ Extension │ Hig› │ 
- │ 3 │  ├──────────┼───────────┼────› │ 
- │ 4 │  │ Rust     │    .rs    │    › │ 
- │ 5 │  │ Python   │    .py    │    › │ 
- │ 6 │  ╰──────────┴───────────┴────› │ 
- ╰───┴────────────────────────────────╯ 
-                                        
- Double-width and emoji inside a fence  
- ────────────────────────────────────── 
-                                        
- ╭───┬ text ──────────────────────────╮ 
- │ 1 │ 日本語 = "wide"                │ 
- │ 2 │ emoji  = "👩‍💻🇨🇭"                │ 
- │ 3 │ khmer  = "�  "                 │ 
- ╰───┴────────────────────────────────╯ 
-                                        
- Enough lines that the gutter changes   
- width                                  
- ────────────────────────────────────── 
-                                        
- ╭────┬ python ───────────────────────╮ 
- │  1 │ a = 1                         │ 
- │  2 │ b = 2                         │ 
- │  3 │ c = 3                         │ 
- │  4 │ d = 4                         │ 
- │  5 │ e = 5                         │ 
- │  6 │ f = 6                         │ 
- │  7 │ g = 7                         │ 
- │  8 │ h = 8                         │ 
- │  9 │ i = 9                         │ 
- │ 10 │ j = 10                        │ 
- │ 11 │ k = 11                        │ 
- ╰────┴───────────────────────────────╯ 
-                                        
- A fence nested in a quote in a list    
- ────────────────────────────────────── 
-                                        
- * ▌ ╭───┬ sh ────────────────────────╮ 
-   ▌ │ 1 │ echo nested                │ 
-   ▌ ╰───┴────────────────────────────╯ 
-                                        
- Inline code next to a fence            
- ────────────────────────────────────── 
-                                        
- A paragraph mentioning cargo test      
- immediately before a fence:            
-                                        
- ╭───┬ sh ────────────────────────────╮ 
- │ 1 │ cargo test                     │ 
+ Feature exerciser — code                                                                                                                                                                                                       
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ Fences, indented code, the line-number                                                                                                                                                                                         
+ gutter and the horizontal-scroll path.                                                                                                                                                                                         
+ This fixture is also rendered once                                                                                                                                                                                             
+ with line_numbers on, so the gutter                                                                                                                                                                                            
+ has a golden of its own.                                                                                                                                                                                                       
+                                                                                                                                                                                                                                
+ A fence with a language                                                                                                                                                                                                        
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ ╭───┬ rust ──────────────────────────────╮                                                                                                                                                                                     
+ │ 1 │ /// Doc comment.                   │                                                                                                                                                                                     
+ │ 2 │ fn main() {                        │                                                                                                                                                                                     
+ │ 3 │     let greeting = "hello";        │                                                                                                                                                                                     
+ │ 4 │     println!("{greeting}, world"); │                                                                                                                                                                                     
+ │ 5 │ }                                  │                                                                                                                                                                                     
+ ╰───┴────────────────────────────────────╯                                                                                                                                                                                     
+                                                                                                                                                                                                                                
+ A fence with a language the                                                                                                                                                                                                    
+ highlighter does not know                                                                                                                                                                                                      
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ ╭───┬ brainfuck ────────────────────────────────────────╮                                                                                                                                                                      
+ │ 1 │ ++++++++[>++++[>++>+++>+++>+<<<<-]>+>+>->>+[<]<-] │                                                                                                                                                                      
+ ╰───┴───────────────────────────────────────────────────╯                                                                                                                                                                      
+                                                                                                                                                                                                                                
+ A fence with no language at all                                                                                                                                                                                                
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ ╭───┬──────────────────────────────────────────╮                                                                                                                                                                               
+ │ 1 │ no language tag at all                   │                                                                                                                                                                               
+ │ 2 │     indentation inside must be preserved │                                                                                                                                                                               
+ ╰───┴──────────────────────────────────────────╯                                                                                                                                                                               
+                                                                                                                                                                                                                                
+ An empty fence                                                                                                                                                                                                                 
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ ╭───┬────────────────────────────────╮                                                                                                                                                                                         
+ ╰───┴────────────────────────────────╯                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ A tilde fence with an info string                                                                                                                                                                                              
+ carrying attributes                                                                                                                                                                                                            
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ ╭───┬ python ────────────────────────╮                                                                                                                                                                                         
+ │ 1 │ def f(x):                      │                                                                                                                                                                                         
+ │ 2 │     return x * 2               │                                                                                                                                                                                         
+ ╰───┴────────────────────────────────╯                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ Indented code, four spaces                                                                                                                                                                                                     
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ ╭───┬────────────────────────────────╮                                                                                                                                                                                         
+ │ 1 │ indented code block            │                                                                                                                                                                                         
+ │ 2 │     with deeper indentation    │                                                                                                                                                                                         
+ │ 3 │ and a tab   inside it          │                                                                                                                                                                                         
+ ╰───┴────────────────────────────────╯                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ A line far too wide for any pane                                                                                                                                                                                               
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ ╭───┬ rust ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
+ │ 1 │ fn wide() { let _ = "a single line of source that is far wider than one hundred and twenty columns and must therefore be reachable by scrolling right rather than being wrapped, folded or truncated into nonsense"; } │ 
+ ╰───┴────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ 
+                                                                                                                                                                                                                                
+ Box-drawing art inside a fence                                                                                                                                                                                                 
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ ╭───┬─────────────────────────────────────────╮                                                                                                                                                                                
+ │ 1 │  ╭──────────┬───────────┬─────────────╮ │                                                                                                                                                                                
+ │ 2 │  │ Language │ Extension │ Highlighted │ │                                                                                                                                                                                
+ │ 3 │  ├──────────┼───────────┼─────────────┤ │                                                                                                                                                                                
+ │ 4 │  │ Rust     │    .rs    │         yes │ │                                                                                                                                                                                
+ │ 5 │  │ Python   │    .py    │         yes │ │                                                                                                                                                                                
+ │ 6 │  ╰──────────┴───────────┴─────────────╯ │                                                                                                                                                                                
+ ╰───┴─────────────────────────────────────────╯                                                                                                                                                                                
+                                                                                                                                                                                                                                
+ Double-width and emoji inside a fence                                                                                                                                                                                          
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ ╭───┬ text ──────────────────────────╮                                                                                                                                                                                         
+ │ 1 │ 日本語 = "wide"                │                                                                                                                                                                                         
+ │ 2 │ emoji  = "👩‍💻🇨🇭"                │                                                                                                                                                                                         
+ │ 3 │ khmer  = "�  "                 │                                                                                                                                                                                         
+ ╰───┴────────────────────────────────╯                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ Enough lines that the gutter changes                                                                                                                                                                                           
+ width                                                                                                                                                                                                                          
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ ╭────┬ python ───────────────────────╮                                                                                                                                                                                         
+ │  1 │ a = 1                         │                                                                                                                                                                                         
+ │  2 │ b = 2                         │                                                                                                                                                                                         
+ │  3 │ c = 3                         │                                                                                                                                                                                         
+ │  4 │ d = 4                         │                                                                                                                                                                                         
+ │  5 │ e = 5                         │                                                                                                                                                                                         
+ │  6 │ f = 6                         │                                                                                                                                                                                         
+ │  7 │ g = 7                         │                                                                                                                                                                                         
+ │  8 │ h = 8                         │                                                                                                                                                                                         
+ │  9 │ i = 9                         │                                                                                                                                                                                         
+ │ 10 │ j = 10                        │                                                                                                                                                                                         
+ │ 11 │ k = 11                        │                                                                                                                                                                                         
+ ╰────┴───────────────────────────────╯                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ A fence nested in a quote in a list                                                                                                                                                                                            
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ * ▌ ╭───┬ sh ────────────────────────╮                                                                                                                                                                                         
+   ▌ │ 1 │ echo nested                │                                                                                                                                                                                         
+   ▌ ╰───┴────────────────────────────╯                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ Inline code next to a fence                                                                                                                                                                                                    
+ ──────────────────────────────────────                                                                                                                                                                                         
+                                                                                                                                                                                                                                
+ A paragraph mentioning cargo test                                                                                                                                                                                              
+ immediately before a fence:                                                                                                                                                                                                    
+                                                                                                                                                                                                                                
+ ╭───┬ sh ────────────────────────────╮                                                                                                                                                                                         
+ │ 1 │ cargo test                     │                                                                                                                                                                                         
  ╰───┴────────────────────────────────╯

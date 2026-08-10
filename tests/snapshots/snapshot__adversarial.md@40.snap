@@ -2,247 +2,247 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- mdmost torture test                    
- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
-                                        
- A paragraph with emphasis, strong,     
- strikethrough, inline code, a link     
- (https://example.com) and an autolink  
- https://example.org/very/long/path/tha 
- t/will/not/fit/in/forty/columns.       
-                                        
- Mixed scripts                          
- ────────────────────────────────────── 
-                                        
- 日本語のテキストと English             
- が混ざった段落です。مرحبا بالعالم —    
- नमस्ते दुनिया. Emoji: 👩‍💻 🇨🇭 👍🏽 and a      
- combining sequence: café (decomposed)  
- and café (precomposed). A cluster      
- wider than a terminal cell: 𗀀ᩗ (a     
- Tangut base plus a spacing Tai Tham    
- mark: one grapheme, three columns) and 
- a zero-width space: a​b.                
-                                        
- An unbreakable-token stress case:      
- supercalifragilisticexpialidociousanti 
- disestablishmentarianism               
-                                        
- Lists                                  
- ────────────────────────────────────── 
-                                        
- *    level one                         
-                                        
-      > level two with a longer line    
-        that has to wrap somewhere      
-        sensible                        
-                                        
-        + level three                   
-          1. ordered inside unordered   
-          2. second                     
-                                        
- [x]  a finished task                   
-                                        
- [ ]  an unfinished task                
-                                        
- Table with Markdown inside cells       
- ────────────────────────────────────── 
-                                        
- ╭──────────────┬────────┬────────────╮ 
- │ Left         │ Centre │      Right │ 
- ├──────────────┼────────┼────────────┤ 
- │ em           │  code  │          1 │ 
- │▄▄▄▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄▄│ 
- │ a list:      │  bold  │ 1234567890 │ 
- │ not html     │ and a  │            │ 
- │              │  link  │            │ 
- │▀▀▀▀▀▀▀▀▀▀▀▀▀▀│▀▀▀▀▀▀▀▀│▀▀▀▀▀▀▀▀▀▀▀▀│ 
- │ 日本語のセル │   👩‍💻   │         -1 │ 
- ╰──────────────┴────────┴────────────╯ 
-                                        
- Nested table                           
- ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
-                                        
- ╭────────────────────────────────────╮ 
- │ outer                              │ 
- ├────────────────────────────────────┤ 
- │ a cell containing another table is │ 
- │ legal in this renderer because     │ 
- │ cells recurse                      │ 
- ╰────────────────────────────────────╯ 
-                                        
- Degenerate tables                      
- ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
-                                        
- ╭───╮                                  
- │   │                                  
- ├───┤                                  
- │   │                                  
- ╰───╯                                  
-                                        
- Wider than the page                    
- ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌ 
-                                        
- ╭───────────┬────────────────┬───────╮ 
- │ Component │ Responsibility │ Owners› 
- ├───────────┼────────────────┼───────┤ 
- │ renderer  │ turns a tree   │ core  › 
- │           │ into a canvas  │       › 
- │▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄ 
- │ pager     │ scrolls the    │ tui   › 
- │           │ canvas         │       › 
- ╰───────────┴────────────────┴───────╯ 
-                                        
- Code                                   
- ────────────────────────────────────── 
-                                        
- ╭ rust ──────────────────────────────╮ 
- │ fn main() {                        │ 
- │     // A deliberately long line t› │ 
- │     println!("{}", "x".repeat(200› │ 
- │ }                                  │ 
- ╰────────────────────────────────────╯ 
-                                        
- ╭────────────────────────────────────╮ 
- │ no language tag at all             │ 
- ╰────────────────────────────────────╯ 
-                                        
- Mermaid                                
- ────────────────────────────────────── 
-                                        
-                ┌───────┐               
-                │ Start │               
-                └─┬───┬─┘               
-                  │   ▲                 
-                  ╰─╮ │                 
-                    ├─╯                 
-                    │no                 
-                    ▼                   
-               ╱────┴───╲               
-              │ Decision │              
-               ╲────┬───╱               
-                    │yes                
-                    ▼                   
-                ╭──────╮                
-                ( Done )                
-                ╰──────╯                
-                                        
- ╭ mermaid ───────────────────────────╮ 
- │ this is not valid mermaid at all   │ 
- ╰ not a diagram type — mdmost draws… ╯ 
-                                        
- HTML is not supported                  
- ────────────────────────────────────── 
-                                        
- ⟨html⟩                                 
-                                        
- Inline ⟨html⟩ html is dropped too.     
-                                        
- Quotes and rules                       
- ────────────────────────────────────── 
-                                        
- ▌ A block quote spanning two lines.    
- ▌                                      
- ▌ ▌ and a nested one.                  
-                                        
-       ────────────◈─────────────       
-                                        
- Images and footnotes                   
- ────────────────────────────────────── 
-                                        
- ╭ image ─────────────────────────────╮ 
- │ alt text for a picture             │ 
- │ picture.png                        │ 
- ╰────────────────────────────────────╯ 
-                                        
- A statement needing a source[1].       
-                                        
- Duplicate heading                      
- ────────────────────────────────────── 
-                                        
- Duplicate heading                      
- ────────────────────────────────────── 
-                                        
- Every diagram family through the       
- document path                          
- ────────────────────────────────────── 
-                                        
- Each family is deliberately small:     
- these goldens exist to prove a diagram 
- survives margins, block spacing and a  
- 40-column budget, and a diff nobody    
- can read would be rubber-stamped       
- rather than reviewed.                  
-                                        
-            ╭─────╮  ╭─────╮            
-            │ Ana │  │ Bo  │            
-            ╰─────╯  ╰─────╯            
-               ┆        ┆               
-               ┆  ping  ┆               
-               ┆────────▶               
-               ┆  pong  ┆               
-               ◀╌╌╌╌╌╌╌╌┆               
-               ┆        ┆               
-            ╭─────╮  ╭─────╮            
-            │ Ana │  │ Bo  │            
-            ╰─────╯  ╰─────╯            
-                                        
-            ┌──────────────┐            
-            │    Shape     │            
-            ├──────────────┤            
-            │ +area(): f64 │            
-            └───────┬──────┘            
-                    △                   
-               ┌────┴───┐               
-               │ Circle │               
-               └────────┘               
-                                        
-              ┌────────┐                
-              │ AUTHOR │                
-              └────┬───┘                
-                   ┼                    
-                   ┼                    
-                   │writes              
-                   ○                    
-                   ∧                    
-               ┌──────┐                 
-               │ BOOK │                 
-               └──────┘                 
-                                        
-                   ●                    
-                   ▼                    
-               ╭──────╮                 
-               │ Idle │                 
-               ╰───┬──╯                 
-                   │start               
-                   ▼                    
-               ╭──────╮                 
-               │ Busy │                 
-               ╰───┬──╯                 
-                   ▼                    
-                   ◉                    
-                                        
-                 Effort                 
-                                        
- ● Build   ████████████████████   62.5% 
- ● Design  ████████████           37.5% 
-   ──────────────────────────────────   
-   Total                         100.0% 
-                                        
-                  Plan                  
-                                        
-              2026-01-01     2026-01-08 
-             ├──┬────────────────────┬┤ 
-             │                          
- Work        │                          
-   design    │  █████████               
-   build     │           ████████████   
-                                        
- A single-node graph is a degenerate    
- case worth pinning.                    
-                                        
-           ┌───────────────┐            
-           │ Just one node │            
-           └───────────────┘            
-                                        
+ mdmost torture test                                                                                            
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━                                                                         
+                                                                                                                
+ A paragraph with emphasis, strong,                                                                             
+ strikethrough, inline code, a link                                                                             
+ (https://example.com) and an autolink                                                                          
+ https://example.org/very/long/path/tha                                                                         
+ t/will/not/fit/in/forty/columns.                                                                               
+                                                                                                                
+ Mixed scripts                                                                                                  
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+ 日本語のテキストと English                                                                                     
+ が混ざった段落です。مرحبا بالعالم —                                                                            
+ नमस्ते दुनिया. Emoji: 👩‍💻 🇨🇭 👍🏽 and a                                                                              
+ combining sequence: café (decomposed)                                                                          
+ and café (precomposed). A cluster                                                                              
+ wider than a terminal cell: 𗀀ᩗ (a                                                                             
+ Tangut base plus a spacing Tai Tham                                                                            
+ mark: one grapheme, three columns) and                                                                         
+ a zero-width space: a​b.                                                                                        
+                                                                                                                
+ An unbreakable-token stress case:                                                                              
+ supercalifragilisticexpialidociousanti                                                                         
+ disestablishmentarianism                                                                                       
+                                                                                                                
+ Lists                                                                                                          
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+ *    level one                                                                                                 
+                                                                                                                
+      > level two with a longer line                                                                            
+        that has to wrap somewhere                                                                              
+        sensible                                                                                                
+                                                                                                                
+        + level three                                                                                           
+          1. ordered inside unordered                                                                           
+          2. second                                                                                             
+                                                                                                                
+ [x]  a finished task                                                                                           
+                                                                                                                
+ [ ]  an unfinished task                                                                                        
+                                                                                                                
+ Table with Markdown inside cells                                                                               
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+ ╭──────────────┬────────┬────────────╮                                                                         
+ │ Left         │ Centre │      Right │                                                                         
+ ├──────────────┼────────┼────────────┤                                                                         
+ │ em           │  code  │          1 │                                                                         
+ │▄▄▄▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄▄│                                                                         
+ │ a list:      │  bold  │ 1234567890 │                                                                         
+ │ not html     │ and a  │            │                                                                         
+ │              │  link  │            │                                                                         
+ │▀▀▀▀▀▀▀▀▀▀▀▀▀▀│▀▀▀▀▀▀▀▀│▀▀▀▀▀▀▀▀▀▀▀▀│                                                                         
+ │ 日本語のセル │   👩‍💻   │         -1 │                                                                         
+ ╰──────────────┴────────┴────────────╯                                                                         
+                                                                                                                
+ Nested table                                                                                                   
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                                                         
+                                                                                                                
+ ╭────────────────────────────────────╮                                                                         
+ │ outer                              │                                                                         
+ ├────────────────────────────────────┤                                                                         
+ │ a cell containing another table is │                                                                         
+ │ legal in this renderer because     │                                                                         
+ │ cells recurse                      │                                                                         
+ ╰────────────────────────────────────╯                                                                         
+                                                                                                                
+ Degenerate tables                                                                                              
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                                                         
+                                                                                                                
+ ╭───╮                                                                                                          
+ │   │                                                                                                          
+ ├───┤                                                                                                          
+ │   │                                                                                                          
+ ╰───╯                                                                                                          
+                                                                                                                
+ Wider than the page                                                                                            
+ ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                                                         
+                                                                                                                
+ ╭───────────┬────────────────┬───────────┬────────┬────────────┬───────┬─────────╮                             
+ │ Component │ Responsibility │ Ownership │ Status │ Milestones │ Since │ Tickets │                             
+ ├───────────┼────────────────┼───────────┼────────┼────────────┼───────┼─────────┤                             
+ │ renderer  │ turns a tree   │ core      │ green  │ two        │ 2024  │ 17      │                             
+ │           │ into a canvas  │           │        │            │       │         │                             
+ │▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄▄▄▄│▄▄▄▄▄▄▄│▄▄▄▄▄▄▄▄▄│                             
+ │ pager     │ scrolls the    │ tui       │ amber  │ one        │ 2025  │ 4       │                             
+ │           │ canvas         │           │        │            │       │         │                             
+ ╰───────────┴────────────────┴───────────┴────────┴────────────┴───────┴─────────╯                             
+                                                                                                                
+ Code                                                                                                           
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+ ╭ rust ──────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
+ │ fn main() {                                                                                                │ 
+ │     // A deliberately long line that must scroll horizontally rather than wrap, per design spec section 8. │ 
+ │     println!("{}", "x".repeat(200));                                                                       │ 
+ │ }                                                                                                          │ 
+ ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ 
+                                                                                                                
+ ╭────────────────────────────────────╮                                                                         
+ │ no language tag at all             │                                                                         
+ ╰────────────────────────────────────╯                                                                         
+                                                                                                                
+ Mermaid                                                                                                        
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+                ┌───────┐                                                                                       
+                │ Start │                                                                                       
+                └─┬───┬─┘                                                                                       
+                  │   ▲                                                                                         
+                  ╰─╮ │                                                                                         
+                    ├─╯                                                                                         
+                    │no                                                                                         
+                    ▼                                                                                           
+               ╱────┴───╲                                                                                       
+              │ Decision │                                                                                      
+               ╲────┬───╱                                                                                       
+                    │yes                                                                                        
+                    ▼                                                                                           
+                ╭──────╮                                                                                        
+                ( Done )                                                                                        
+                ╰──────╯                                                                                        
+                                                                                                                
+ ╭ mermaid ───────────────────────────╮                                                                         
+ │ this is not valid mermaid at all   │                                                                         
+ ╰ not a diagram type — mdmost draws… ╯                                                                         
+                                                                                                                
+ HTML is not supported                                                                                          
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+ ⟨html⟩                                                                                                         
+                                                                                                                
+ Inline ⟨html⟩ html is dropped too.                                                                             
+                                                                                                                
+ Quotes and rules                                                                                               
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+ ▌ A block quote spanning two lines.                                                                            
+ ▌                                                                                                              
+ ▌ ▌ and a nested one.                                                                                          
+                                                                                                                
+       ────────────◈─────────────                                                                               
+                                                                                                                
+ Images and footnotes                                                                                           
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+ ╭ image ─────────────────────────────╮                                                                         
+ │ alt text for a picture             │                                                                         
+ │ picture.png                        │                                                                         
+ ╰────────────────────────────────────╯                                                                         
+                                                                                                                
+ A statement needing a source[1].                                                                               
+                                                                                                                
+ Duplicate heading                                                                                              
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+ Duplicate heading                                                                                              
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+ Every diagram family through the                                                                               
+ document path                                                                                                  
+ ──────────────────────────────────────                                                                         
+                                                                                                                
+ Each family is deliberately small:                                                                             
+ these goldens exist to prove a diagram                                                                         
+ survives margins, block spacing and a                                                                          
+ 40-column budget, and a diff nobody                                                                            
+ can read would be rubber-stamped                                                                               
+ rather than reviewed.                                                                                          
+                                                                                                                
+            ╭─────╮  ╭─────╮                                                                                    
+            │ Ana │  │ Bo  │                                                                                    
+            ╰─────╯  ╰─────╯                                                                                    
+               ┆        ┆                                                                                       
+               ┆  ping  ┆                                                                                       
+               ┆────────▶                                                                                       
+               ┆  pong  ┆                                                                                       
+               ◀╌╌╌╌╌╌╌╌┆                                                                                       
+               ┆        ┆                                                                                       
+            ╭─────╮  ╭─────╮                                                                                    
+            │ Ana │  │ Bo  │                                                                                    
+            ╰─────╯  ╰─────╯                                                                                    
+                                                                                                                
+            ┌──────────────┐                                                                                    
+            │    Shape     │                                                                                    
+            ├──────────────┤                                                                                    
+            │ +area(): f64 │                                                                                    
+            └───────┬──────┘                                                                                    
+                    △                                                                                           
+               ┌────┴───┐                                                                                       
+               │ Circle │                                                                                       
+               └────────┘                                                                                       
+                                                                                                                
+              ┌────────┐                                                                                        
+              │ AUTHOR │                                                                                        
+              └────┬───┘                                                                                        
+                   ┼                                                                                            
+                   ┼                                                                                            
+                   │writes                                                                                      
+                   ○                                                                                            
+                   ∧                                                                                            
+               ┌──────┐                                                                                         
+               │ BOOK │                                                                                         
+               └──────┘                                                                                         
+                                                                                                                
+                   ●                                                                                            
+                   ▼                                                                                            
+               ╭──────╮                                                                                         
+               │ Idle │                                                                                         
+               ╰───┬──╯                                                                                         
+                   │start                                                                                       
+                   ▼                                                                                            
+               ╭──────╮                                                                                         
+               │ Busy │                                                                                         
+               ╰───┬──╯                                                                                         
+                   ▼                                                                                            
+                   ◉                                                                                            
+                                                                                                                
+                 Effort                                                                                         
+                                                                                                                
+ ● Build   ████████████████████   62.5%                                                                         
+ ● Design  ████████████           37.5%                                                                         
+   ──────────────────────────────────                                                                           
+   Total                         100.0%                                                                         
+                                                                                                                
+                  Plan                                                                                          
+                                                                                                                
+              2026-01-01     2026-01-08                                                                         
+             ├──┬────────────────────┬┤                                                                         
+             │                                                                                                  
+ Work        │                                                                                                  
+   design    │  █████████                                                                                       
+   build     │           ████████████                                                                           
+                                                                                                                
+ A single-node graph is a degenerate                                                                            
+ case worth pinning.                                                                                            
+                                                                                                                
+           ┌───────────────┐                                                                                    
+           │ Just one node │                                                                                    
+           └───────────────┘                                                                                    
+                                                                                                                
  [1] The footnote body.

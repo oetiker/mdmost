@@ -2,271 +2,294 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- Feature exerciser — Mermaid            
- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
-                                        
- All seven families, each exercising    
- the syntax the README claims to        
- support, each small enough that its    
- box art can be read as a diff. Wide    
- and degenerate cases are at the end.   
-                                        
- flowchart — shapes and edge kinds      
- ────────────────────────────────────── 
-                                        
-                              ┌──────┐  
-                              │ rect │  
-                              └─┬──┬─┘  
-                         ╭──────╯ ╭╯    
-                         ▼        │     
-                     ╭───────╮    │     
-                     │ round │    │     
-                     ╰───┬───╯    │     
-                         ▼        │     
-                    ╭─────────╮   │     
-                    ( stadium )   │     
-                    ╰────┬────╯   │     
-                         ▼        │     
-                     ╱───────╲    │     
-                    │ rhombus │   │     
-                     ╲───┬───╱    │     
-         ╭───────────────┤        │     
-         │yes            │no      │     
-         ▼               ▼        │     
-  ╭────────────╮  ┌─┬────────┬─┐  │     
-  ((  circle  ))  │ │ subrou │ │  │     
-  ╰────────────╯  │ │  tine  │ │  │     
-                  └─┴─────┬──┴─┘  │     
-                          ┊       │     
-                          ▼       │     
-                    ╭──────────╮  │     
-                    ├──────────┤  │     
-                    │ cylinder │  │     
-                    ├──────────┤  │     
-                    ╰─────────┳╯  │     
-                              ┗━━┓╰╮    
-                                 ┃ │    
-                                 ▼ │    
-                               ┌───┴─┐  
-                               │ end │  
-                               └─────┘  
-                                        
- flowchart — left to right, with a      
- subgraph                               
- ────────────────────────────────────── 
-                                        
- ╭ mermaid ───────────────────────────╮ 
- │ flowchart LR                       │ 
- │   subgraph Outer                   │ 
- │     A[one] --> B[two]              │ 
- │     subgraph Inner                 │ 
- │       C[three]                     │ 
- │     end                            │ 
- │     B --> C                        │ 
- │   end                              │ 
- │   C --> D[four]                    │ 
- ╰ needs 45 columns to draw — this b… ╯ 
-                                        
- sequenceDiagram — arrows, notes and    
- blocks                                 
- ────────────────────────────────────── 
-                                        
- ╭ mermaid ───────────────────────────╮ 
- │ sequenceDiagram                    │ 
- │   participant A as Ana             │ 
- │   actor B as Bo                    │ 
- │   A->>B: solid open                │ 
- │   B-->>A: dashed open              │ 
- │   A-x B: solid cross               │ 
- │   A->>A: a self message            │ 
- │   activate B                       │ 
- │   Note over A,B: a note over both  │ 
- │   Note right of B: a note on one › │ 
- │   alt happy path                   │ 
- │     B->>A: ok                      │ 
- │   else sad path                    │ 
- │     B->>A: not ok                  │ 
- │   end                              │ 
- │   loop three times                 │ 
- │     A->>B: again                   │ 
- │   end                              │ 
- │   deactivate B                     │ 
- ╰ needs 39 columns to draw — this b… ╯ 
-                                        
- classDiagram — compartments,           
- visibility, stereotypes, relations     
- ────────────────────────────────────── 
-                                        
- ╭ mermaid ───────────────────────────╮ 
- │ classDiagram                       │ 
- │   class Shape {                    │ 
- │     <<interface>>                  │ 
- │     +String name                   │ 
- │     #int sides                     │ 
- │     -bool secret                   │ 
- │     +area()* f64                   │ 
- │     +create()$ Shape               │ 
- │   }                                │ 
- │   class Circle~T~ {                │ 
- │     +f64 radius                    │ 
- │   }                                │ 
- │   Shape <|-- Circle                │ 
- │   Circle *-- Point                 │ 
- │   Circle o-- Style                 │ 
- │   Circle --> "1" Canvas            │ 
- │   Circle ..> Helper                │ 
- │   Circle ..|> Drawable             │ 
- ╰ needs 39 columns to draw — this b… ╯ 
-                                        
- erDiagram — attributes, keys,          
- cardinalities                          
- ────────────────────────────────────── 
-                                        
- ┌────────────────────────────────────┐ 
- │               AUTHOR               │ 
- ├────────────────────────────────────┤ 
- │ int     id     PK                  │ 
- │ string  name       "the display n… │ 
- │ string  email  UK                  │ 
- └──────────────────┬─────────────────┘ 
-                    ┼                   
-                    ┼                   
-                    │writes             
-                    ○                   
-                    ∧                   
-         ┌────────────────────┐         
-         │        BOOK        │         
-         ├────────────────────┤         
-         │ int  isbn       PK │         
-         │ int  author_id  FK │         
-         └──────────┬─────────┘         
-                    ∨                   
-                    ○                   
-                    │printed by         
-                    ┼                   
-                    ┼                   
-              ┌───────────┐             
-              │ PUBLISHER │             
-              └───────────┘             
-                                        
- stateDiagram-v2 — composites, choice,  
- fork, notes                            
- ────────────────────────────────────── 
-                                        
-                       ●                
-                       ▼                
-                   ╭──────╮             
-                   │ Idle │             
-                   ╰─┬─┬─┬╯             
-                     ┊ │ ▲              
-       ╭┄┄┄┄┄┄┄┄┄┄┄┄┄╯╭╯ ╰───────╮      
-       ┊              │start     │more  
-       ┊              │          │      
-       ┊              │          │      
-       ┊       ╭ Busy ┼╌╌╌╌╌╌╌╮  │      
-       ┊       ╎      ▼       ╎  │      
-       ┊       ╎      ●       ╎  │      
-       ┊       ╎      ▼       ╎  │      
-       ┊       ╎ ╭─────────╮  ╎  │      
-       ┊       ╎ │ Working │  ╎  │      
-  ╭────┴────╮  ╎ ╰──┬───┬──╯  ╎  │      
-  │ nothing │  ╎    │   ▲     ╎  │      
-  │  to do  │  ╎    │block    ╎  │      
-  ╰─────────╯  ╎    │   │wake ╎  │      
-               ╎    ▼   │     ╎  │      
-               ╎ ╭──────┴──╮  ╎  │      
-               ╎ │ Waiting │  ╎  │      
-               ╎ ╰────┬────╯  ╎  │      
-               ╎      │       ╎  │      
-               ╰╌╌╌╌╌╌┼╌╌╌╌╌╌╌╯  │      
-                      ╰──────────┤      
-                                 │more  
-                                 ▼      
-                                ╱╲      
-                               ╱  ╲     
-                               ╲  ╱     
-                                ╲╱      
-                                 │done  
-                                 ▼      
-                                 ◉      
-                                        
- pie                                    
- ────────────────────────────────────── 
-                                        
-            Effort by stage             
-                                        
- ● Build   ███████████████   45.4%    5 
- ● Design  █████████         27.3%    3 
- ● Review  ██████            18.2%    2 
- ● Ship    ███                9.1%    1 
-   ──────────────────────────────────   
-   Total                    100.0%   11 
-                                        
- gantt — sections, tags, dependencies   
- ────────────────────────────────────── 
-                                        
-              Release plan              
-                                        
-                 01-01        01-08     
-                ├──┬────────────┬─────┤ 
-                │                       
- Design         │                       
-   sketch       │  █████                
-   review       │       ████            
-                │                       
- Build          │                       
-   implement    │           █████████   
-   ship         │                    ◆  
-                                        
-                 █ done   █ active      
-                                        
- Directives and comments are parsed and 
- ignored                                
- ────────────────────────────────────── 
-                                        
-         ┌───────────────────┐          
-         │ after a directive │          
-         └─────────┬─────────┘          
-                   ▼                    
-           ┌───────────────┐            
-           │ and a comment │            
-           └───────────────┘            
-                                        
- Wider than eighty columns              
- ────────────────────────────────────── 
-                                        
- ╭ mermaid ───────────────────────────╮ 
- │ flowchart LR                       │ 
- │   Ingest[Ingest the source] --> P› │ 
- ╰ needs 47 columns to draw — this b… ╯ 
-                                        
- Degenerate — a single node             
- ────────────────────────────────────── 
-                                        
-           ┌───────────────┐            
-           │ Just one node │            
-           └───────────────┘            
-                                        
- Degenerate — an empty diagram          
- ────────────────────────────────────── 
-                                        
- ╭ mermaid ───────────────────────────╮ 
- │ flowchart TD                       │ 
- ╰ line 1: flowchart has no nodes ────╯ 
-                                        
- Not a supported diagram at all         
- ────────────────────────────────────── 
-                                        
- ╭ mermaid ───────────────────────────╮ 
- │ journey                            │ 
- │   title My working day             │ 
- │   section Go to work               │ 
- │     Make tea: 5: Me                │ 
- ╰ not a diagram type — mdmost draws… ╯ 
-                                        
- Not valid mermaid at all               
- ────────────────────────────────────── 
-                                        
- ╭ mermaid ───────────────────────────╮ 
- │ this is not valid mermaid at all   │ 
+ Feature exerciser — Mermaid                                                  
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━                                       
+                                                                              
+ All seven families, each exercising                                          
+ the syntax the README claims to                                              
+ support, each small enough that its                                          
+ box art can be read as a diff. Wide                                          
+ and degenerate cases are at the end.                                         
+                                                                              
+ flowchart — shapes and edge kinds                                            
+ ──────────────────────────────────────                                       
+                                                                              
+                               ┌──────┐                                       
+                               │ rect │                                       
+                               └─┬──┬─┘                                       
+                         ╭───────╯ ╭╯                                         
+                         ▼         │                                          
+                     ╭───────╮     │                                          
+                     │ round │     │                                          
+                     ╰───┬───╯     │                                          
+                         ▼         │                                          
+                    ╭─────────╮    │                                          
+                    ( stadium )    │                                          
+                    ╰────┬────╯    │                                          
+                         ▼         │                                          
+                     ╱───────╲     │                                          
+                    │ rhombus │    │                                          
+                     ╲───┬───╱     │                                          
+        ╭────────────────┤         │                                          
+        │yes             │no       │                                          
+        ▼                ▼         │                                          
+ ╭────────────╮  ┌─┬──────────┬─┐  │                                          
+ ((  circle  ))  │ │ subrouti │ │  │                                          
+ ╰────────────╯  │ │    ne    │ │  │                                          
+                 └─┴───────┬──┴─┘  │                                          
+                           ┊       │                                          
+                           ▼       │                                          
+                     ╭──────────╮  │                                          
+                     ├──────────┤  │                                          
+                     │ cylinder │  │                                          
+                     ├──────────┤  │                                          
+                     ╰─────────┳╯  │                                          
+                               ┗━━┓╰╮                                         
+                                  ┃ │                                         
+                                  ▼ │                                         
+                                ┌───┴─┐                                       
+                                │ end │                                       
+                                └─────┘                                       
+                                                                              
+ flowchart — left to right, with a                                            
+ subgraph                                                                     
+ ──────────────────────────────────────                                       
+                                                                              
+ ╭ Outer ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╮                                        
+ ╎                                   ╎                                        
+ ╎                     ╭ Inner ╌╌╌╌╮ ╎                                        
+ ╎                     ╎           ╎ ╎                                        
+ ╎ ┌─────┐   ┌─────┐   ╎ ┌───────┐ ╎ ╎   ┌──────┐                             
+ ╎ │ one ├──▶│ two ├───┼▶│ three ├─┼─┼──▶│ four │                             
+ ╎ └─────┘   └─────┘   ╎ └───────┘ ╎ ╎   └──────┘                             
+ ╎                     ╎           ╎ ╎                                        
+ ╎                     ╰╌╌╌╌╌╌╌╌╌╌╌╯ ╎                                        
+ ╎                                   ╎                                        
+ ╰╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╯                                        
+                                                                              
+ sequenceDiagram — arrows, notes and                                          
+ blocks                                                                       
+ ──────────────────────────────────────                                       
+                                                                              
+ ╭─────╮                ◯                                                     
+ │ Ana │               ╱│╲                                                    
+ ╰─────╯               Bo                                                     
+    ┆                   ┆                                                     
+    ┆     solid o…      ┆                                                     
+    ┆───────────────────▶                                                     
+    ┆     dashed …      ┆                                                     
+    ◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┆                                                     
+    ┆     solid c…      ┆                                                     
+    ┆───────────────────✗                                                     
+    ┆──╮                ┆                                                     
+    ┆  │ a self …       ┆                                                     
+    ┆◀─╯                ┆                                                     
+   ╭─────────────────────╮                                                    
+   │ a note              │                                                    
+   │ over                │                                                    
+   │ both                │                                                    
+   ╰─────────────────────╯                                                    
+    ┆                   ┃ ╭────────╮                                          
+    ┆                   ┃ │ a note │                                          
+    ┆                   ┃ │ on one │                                          
+    ┆                   ┃ │ side   │                                          
+    ┆                   ┃ ╰────────╯                                          
+  ╭─ alt [happy p…] ───────────────────╮                                      
+  │ ┆        ok         ┃              │                                      
+  │ ◀───────────────────┃              │                                      
+  ├╌ else [sad path] ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤                                      
+  │ ┆      not ok       ┃              │                                      
+  │ ◀───────────────────┃              │                                      
+  ╰────────────────────────────────────╯                                      
+  ╭─ loop [three t…] ──────────────────╮                                      
+  │ ┆       again       ┃              │                                      
+  │ ┆───────────────────▶              │                                      
+  ╰────────────────────────────────────╯                                      
+    ┆                   ┆                                                     
+ ╭─────╮                ◯                                                     
+ │ Ana │               ╱│╲                                                    
+ ╰─────╯               Bo                                                     
+                                                                              
+ classDiagram — compartments,                                                 
+ visibility, stereotypes, relations                                           
+ ──────────────────────────────────────                                       
+                                                                              
+                 ┌────────────────┐                                           
+                 │ <<interface>>  │                                           
+                 │     Shape      │                                           
+                 ├────────────────┤                                           
+                 │ +name: String  │                                           
+                 │ #sides: int    │                                           
+                 │ -secret: bool  │                                           
+                 ├────────────────┤                                           
+                 │ +area(): * f64 │                                           
+                 │ +create(): $ … │                                           
+                 └────────┬───────┘                                           
+                          △                                                   
+                  ┌───────┴──────┐                                            
+                  │  Circle<T>   │                                            
+                  ├──────────────┤                                            
+                  │ +radius: f64 │                                            
+                  └─┬──┬──┬─┬──┬─┘                                            
+                    ◇  ◆  │ ┊  ┊                                              
+     ╭──────────────┼──╯  │ ╰┄┄┼┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄╮                            
+     │            ╭─╯     │    ╰┄╮               ┊                            
+     │            │       │      ┊               ┊                            
+     │            │       │1     ┊               ┊                            
+     │            │       ▼      ▼               ▽                            
+ ┌───┴───┐ ┌──────┴┐ ┌────────┐ ┌────────┐ ┌──────────┐                       
+ │ Point │ │ Style │ │ Canvas │ │ Helper │ │ Drawable │                       
+ └───────┘ └───────┘ └────────┘ └────────┘ └──────────┘                       
+                                                                              
+ erDiagram — attributes, keys,                                                
+ cardinalities                                                                
+ ──────────────────────────────────────                                       
+                                                                              
+ ┌────────────────────────────────────┐                                       
+ │               AUTHOR               │                                       
+ ├────────────────────────────────────┤                                       
+ │ int     id     PK                  │                                       
+ │ string  name       "the display n… │                                       
+ │ string  email  UK                  │                                       
+ └──────────────────┬─────────────────┘                                       
+                    ┼                                                         
+                    ┼                                                         
+                    │writes                                                   
+                    ○                                                         
+                    ∧                                                         
+         ┌────────────────────┐                                               
+         │        BOOK        │                                               
+         ├────────────────────┤                                               
+         │ int  isbn       PK │                                               
+         │ int  author_id  FK │                                               
+         └──────────┬─────────┘                                               
+                    ∨                                                         
+                    ○                                                         
+                    │printed by                                               
+                    ┼                                                         
+                    ┼                                                         
+              ┌───────────┐                                                   
+              │ PUBLISHER │                                                   
+              └───────────┘                                                   
+                                                                              
+ stateDiagram-v2 — composites, choice,                                        
+ fork, notes                                                                  
+ ──────────────────────────────────────                                       
+                                                                              
+                        ●                                                     
+                        ▼                                                     
+                    ╭──────╮                                                  
+                    │ Idle │                                                  
+                    ╰─┬─┬─┬╯                                                  
+                      ┊ │ ▲                                                   
+        ╭┄┄┄┄┄┄┄┄┄┄┄┄┄╯╭╯ ╰──────╮                                            
+        ┊              │start    │more                                        
+        ┊              │         │                                            
+        ┊              │         │                                            
+        ┊       ╭ Busy ┼╌╌╌╌╌╌╌╮ │                                            
+        ┊       ╎      ▼       ╎ │                                            
+        ┊       ╎      ●       ╎ │                                            
+        ┊       ╎      ▼       ╎ │                                            
+        ┊       ╎ ╭─────────╮  ╎ │                                            
+        ┊       ╎ │ Working │  ╎ │                                            
+ ╭──────┴─────╮ ╎ ╰──┬───┬──╯  ╎ │                                            
+ │ nothing to │ ╎    │   ▲     ╎ │                                            
+ │     do     │ ╎    │block    ╎ │                                            
+ ╰────────────╯ ╎    │   │wake ╎ │                                            
+                ╎    ▼   │     ╎ │                                            
+                ╎ ╭──────┴──╮  ╎ │                                            
+                ╎ │ Waiting │  ╎ │                                            
+                ╎ ╰────┬────╯  ╎ │                                            
+                ╎      │       ╎ │                                            
+                ╰╌╌╌╌╌╌┼╌╌╌╌╌╌╌╯ │                                            
+                       ╰─────────┤                                            
+                                 │more                                        
+                                 ▼                                            
+                                ╱╲                                            
+                               ╱  ╲                                           
+                               ╲  ╱                                           
+                                ╲╱                                            
+                                 │done                                        
+                                 ▼                                            
+                                 ◉                                            
+                                                                              
+ pie                                                                          
+ ──────────────────────────────────────                                       
+                                                                              
+            Effort by stage                                                   
+                                                                              
+ ● Build   ███████████████   45.4%    5                                       
+ ● Design  █████████         27.3%    3                                       
+ ● Review  ██████            18.2%    2                                       
+ ● Ship    ███                9.1%    1                                       
+   ──────────────────────────────────                                         
+   Total                    100.0%   11                                       
+                                                                              
+ gantt — sections, tags, dependencies                                         
+ ──────────────────────────────────────                                       
+                                                                              
+              Release plan                                                    
+                                                                              
+                 01-01        01-08                                           
+                ├──┬────────────┬─────┤                                       
+                │                                                             
+ Design         │                                                             
+   sketch       │  █████                                                      
+   review       │       ████                                                  
+                │                                                             
+ Build          │                                                             
+   implement    │           █████████                                         
+   ship         │                    ◆                                        
+                                                                              
+                 █ done   █ active                                            
+                                                                              
+ Directives and comments are parsed and                                       
+ ignored                                                                      
+ ──────────────────────────────────────                                       
+                                                                              
+         ┌───────────────────┐                                                
+         │ after a directive │                                                
+         └─────────┬─────────┘                                                
+                   ▼                                                          
+           ┌───────────────┐                                                  
+           │ and a comment │                                                  
+           └───────────────┘                                                  
+                                                                              
+ Wider than eighty columns                                                    
+ ──────────────────────────────────────                                       
+                                                                              
+ ┌────────────┐   ┌──────────┐   ┌───────────┐   ┌──────────┐   ┌───────────┐ 
+ │ Ingest the │   │ Parse to │   │ Negotiate │   │ Draw the │   │ Paint the │ 
+ │   source   ├──▶│  an AST  ├──▶│  widths   ├──▶│  canvas  ├──▶│ viewport  │ 
+ └────────────┘   └──────────┘   └───────────┘   └──────────┘   └───────────┘ 
+                                                                              
+ Degenerate — a single node                                                   
+ ──────────────────────────────────────                                       
+                                                                              
+           ┌───────────────┐                                                  
+           │ Just one node │                                                  
+           └───────────────┘                                                  
+                                                                              
+ Degenerate — an empty diagram                                                
+ ──────────────────────────────────────                                       
+                                                                              
+ ╭ mermaid ───────────────────────────╮                                       
+ │ flowchart TD                       │                                       
+ ╰ line 1: flowchart has no nodes ────╯                                       
+                                                                              
+ Not a supported diagram at all                                               
+ ──────────────────────────────────────                                       
+                                                                              
+ ╭ mermaid ───────────────────────────╮                                       
+ │ journey                            │                                       
+ │   title My working day             │                                       
+ │   section Go to work               │                                       
+ │     Make tea: 5: Me                │                                       
+ ╰ not a diagram type — mdmost draws… ╯                                       
+                                                                              
+ Not valid mermaid at all                                                     
+ ──────────────────────────────────────                                       
+                                                                              
+ ╭ mermaid ───────────────────────────╮                                       
+ │ this is not valid mermaid at all   │                                       
  ╰ not a diagram type — mdmost draws… ╯

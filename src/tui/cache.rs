@@ -84,8 +84,8 @@ impl RenderCache {
         self.canvas = render();
         // Derived here rather than in the viewport because both are properties of the
         // render — a scan of every cell, which would otherwise happen on every frame.
-        self.reach = super::wide::scroll_reach(&self.canvas, width);
-        self.pinned = super::wide::pinned_prefix(&self.canvas);
+        self.reach = crate::render::document::scroll_reach(&self.canvas, width);
+        self.pinned = crate::render::document::pinned_prefix(&self.canvas);
         self.max_reach = self.reach.iter().copied().max().unwrap_or(0);
         self.key = Some(CacheKey {
             version,
@@ -104,14 +104,14 @@ impl RenderCache {
 
     /// How far each row of the cached canvas may be scrolled sideways.
     ///
-    /// See [`super::wide::scroll_reach`]; one entry per canvas row.
+    /// See [`crate::render::document::scroll_reach`]; one entry per canvas row.
     pub fn reach(&self) -> &[u16] {
         &self.reach
     }
 
     /// How many leading columns of each row stay put while the rest scrolls.
     ///
-    /// See [`super::wide::pinned_prefix`]; one entry per canvas row.
+    /// See [`crate::render::document::pinned_prefix`]; one entry per canvas row.
     pub fn pinned(&self) -> &[u16] {
         &self.pinned
     }

@@ -8,9 +8,9 @@
 
 use mdmost::canvas::Canvas;
 use mdmost::doc::Doc;
+use mdmost::render::document::scroll_reach;
 use mdmost::render::{RenderOptions, render_document};
 use mdmost::theme::Theme;
-use mdmost::tui::wide::{render_scrollable, scroll_reach};
 
 /// No Nerd Font glyphs, no line numbers: the layout is the subject here.
 const PLAIN: RenderOptions = RenderOptions::new(false, false);
@@ -21,9 +21,9 @@ const WIDE: u16 = 200;
 /// The cap every test here uses.
 const CAP: u16 = 100;
 
-/// The document rendered the way the pager renders it.
+/// The document rendered the way the pager renders it — which is the only way there is.
 fn paged(markdown: &str, width: u16, cap: Option<u16>) -> Canvas {
-    render_scrollable(
+    render_document(
         &Doc::parse(markdown),
         width,
         cap,
@@ -97,9 +97,6 @@ fn a_cap_wider_than_the_terminal_changes_nothing() {
         uncapped.plain_text(),
         "a cap of {CAP} must not touch an 80-column terminal"
     );
-    // And an uncapped render is still exactly what the piped renderer produces.
-    let piped = render_document(&Doc::parse(PROSE), 80, &Theme::default_dark(), &PLAIN);
-    assert_eq!(uncapped.plain_text(), piped.plain_text());
 }
 
 /// A table whose natural width is far past any body cap.

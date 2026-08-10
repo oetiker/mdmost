@@ -2,168 +2,179 @@
 source: tests/snapshot.rs
 expression: canvas.plain_text()
 ---
- Feature exerciser — lists                                                                                              
- ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
+                        Feature exerciser — lists                                                                       
+                        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━                        
                                                                                                                         
- Every list shape the parser can produce, so bullets, numbering, indentation and the tight/loose distinction can all be 
- compared on one screen.                                                                                                
+                        Every list shape the parser can produce, so bullets, numbering,                                 
+                        indentation and the tight/loose distinction can all be compared on one                          
+                        screen.                                                                                         
                                                                                                                         
- Unordered, tight                                                                                                       
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        Unordered, tight                                                                                
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- * one                                                                                                                  
- * two                                                                                                                  
- * three                                                                                                                
+                        * one                                                                                           
+                        * two                                                                                           
+                        * three                                                                                         
                                                                                                                         
- Unordered, loose                                                                                                       
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        Unordered, loose                                                                                
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- * one                                                                                                                  
+                        * one                                                                                           
                                                                                                                         
- * two                                                                                                                  
+                        * two                                                                                           
                                                                                                                         
- * three                                                                                                                
+                        * three                                                                                         
                                                                                                                         
- Marker spellings                                                                                                       
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        Marker spellings                                                                                
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- * dash                                                                                                                 
+                        * dash                                                                                          
                                                                                                                         
- * star                                                                                                                 
+                        * star                                                                                          
                                                                                                                         
- * plus                                                                                                                 
+                        * plus                                                                                          
                                                                                                                         
- Ordered, tight                                                                                                         
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        Ordered, tight                                                                                  
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- 1. first                                                                                                               
- 2. second                                                                                                              
- 3. third                                                                                                               
+                        1. first                                                                                        
+                        2. second                                                                                       
+                        3. third                                                                                        
                                                                                                                         
- Ordered, loose, starting elsewhere                                                                                     
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        Ordered, loose, starting elsewhere                                                              
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- 7. seventh                                                                                                             
+                        7. seventh                                                                                      
                                                                                                                         
- 8. eighth                                                                                                              
+                        8. eighth                                                                                       
                                                                                                                         
- 9. ninth                                                                                                               
+                        9. ninth                                                                                        
                                                                                                                         
- Ordered with a wide number                                                                                             
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        Ordered with a wide number                                                                      
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
-  98. ninety-eight                                                                                                      
-  99. ninety-nine                                                                                                       
- 100. one hundred, where the marker grows a column and the text must stay aligned                                       
- 101. one hundred and one                                                                                               
+                         98. ninety-eight                                                                               
                                                                                                                         
- Ordered with the other delimiter                                                                                       
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                         99. ninety-nine                                                                                
                                                                                                                         
- 1. parenthesis form                                                                                                    
- 2. second                                                                                                              
+                        100. one hundred, where the marker grows a column and the text must stay                        
+                             aligned                                                                                    
                                                                                                                         
- Items that wrap                                                                                                        
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        101. one hundred and one                                                                        
                                                                                                                         
- * A list item long enough that it must wrap even at one hundred and twenty columns, so the continuation lines can be   
-   checked for hanging indentation against the bullet that introduced them.                                             
+                        Ordered with the other delimiter                                                                
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- * A short one after it.                                                                                                
+                        1. parenthesis form                                                                             
+                        2. second                                                                                       
                                                                                                                         
- 1. An ordered item that also wraps, so the hanging indent under a numeric marker can be compared with the one under a  
-    bullet — they should agree.                                                                                         
+                        Items that wrap                                                                                 
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- 2. Short.                                                                                                              
+                        * A list item long enough that it must wrap even at one hundred and                             
+                          twenty columns, so the continuation lines can be checked for hanging                          
+                          indentation against the bullet that introduced them.                                          
                                                                                                                         
- Nested five deep                                                                                                       
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        * A short one after it.                                                                         
                                                                                                                         
- * level one                                                                                                            
+                        1. An ordered item that also wraps, so the hanging indent under a                               
+                           numeric marker can be compared with the one under a bullet — they                            
+                           should agree.                                                                                
                                                                                                                         
-   > level two                                                                                                          
+                        2. Short.                                                                                       
                                                                                                                         
-     + level three                                                                                                      
+                        Nested five deep                                                                                
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
-       - level four                                                                                                     
-         * level five, and this one wraps as well so the deepest indentation can be seen against a forty column pane    
+                        * level one                                                                                     
                                                                                                                         
-       - back to four                                                                                                   
+                          > level two                                                                                   
                                                                                                                         
-   > back to two                                                                                                        
+                            + level three                                                                               
                                                                                                                         
- * back to one                                                                                                          
+                              - level four                                                                              
                                                                                                                         
- Ordered inside unordered inside ordered                                                                                
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                                * level five, and this one wraps as well so the deepest                                 
+                                  indentation can be seen against a forty column pane                                   
                                                                                                                         
- 1. ordered one                                                                                                         
+                              - back to four                                                                            
                                                                                                                         
-    > unordered inside                                                                                                  
-      1. ordered inside that                                                                                            
-      2. and a sibling                                                                                                  
+                          > back to two                                                                                 
                                                                                                                         
-    > another unordered                                                                                                 
+                        * back to one                                                                                   
                                                                                                                         
- 2. ordered two                                                                                                         
+                        Ordered inside unordered inside ordered                                                         
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- Task lists                                                                                                             
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        1. ordered one                                                                                  
                                                                                                                         
- [x]  a finished task                                                                                                   
+                           > unordered inside                                                                           
+                             1. ordered inside that                                                                     
+                             2. and a sibling                                                                           
                                                                                                                         
- [ ]  an unfinished task                                                                                                
+                           > another unordered                                                                          
                                                                                                                         
- [x]  a finished task with a capital marker                                                                             
+                        2. ordered two                                                                                  
                                                                                                                         
- [ ]  a task long enough to wrap so the checkbox column can be checked against the continuation indent                  
+                        Task lists                                                                                      
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- *    a plain item mixed into a task list                                                                               
-      [ ]  a nested unfinished task                                                                                     
-      [x]  a nested finished task                                                                                       
+                        [x]  a finished task                                                                            
                                                                                                                         
- Ordered task list                                                                                                      
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        [ ]  an unfinished task                                                                         
                                                                                                                         
- 1. [x]  a finished numbered task                                                                                       
- 2. [ ]  an unfinished numbered task                                                                                    
+                        [x]  a finished task with a capital marker                                                      
                                                                                                                         
- Items containing other blocks                                                                                          
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        [ ]  a task long enough to wrap so the checkbox column can be checked                           
+                             against the continuation indent                                                            
                                                                                                                         
- * An item with a paragraph.                                                                                            
+                        *    a plain item mixed into a task list                                                        
+                             [ ]  a nested unfinished task                                                              
+                             [x]  a nested finished task                                                                
                                                                                                                         
-   And a second paragraph inside the same item.                                                                         
+                        Ordered task list                                                                               
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- * An item with a quote:                                                                                                
+                        1. [x]  a finished numbered task                                                                
+                        2. [ ]  an unfinished numbered task                                                             
                                                                                                                         
-   ▌ quoted inside a list item                                                                                          
+                        Items containing other blocks                                                                   
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- * An item with code:                                                                                                   
+                        * An item with a paragraph.                                                                     
                                                                                                                         
-   ╭ rust ────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ 
-   │ fn in_a_list() {}                                                                                                │ 
-   ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ 
+                          And a second paragraph inside the same item.                                                  
                                                                                                                         
- * An item with a table:                                                                                                
+                        * An item with a quote:                                                                         
                                                                                                                         
-   ╭───┬───╮                                                                                                            
-   │ a │ b │                                                                                                            
-   ├───┼───┤                                                                                                            
-   │ 1 │ 2 │                                                                                                            
-   ╰───┴───╯                                                                                                            
+                          ▌ quoted inside a list item                                                                   
                                                                                                                         
- * An item with a nested diagram, which the pager deliberately does not widen:                                          
+                        * An item with code:                                                                            
+                                                                                                                        
+                          ╭ rust ──────────────────────────────────────────────────────────────╮                        
+                          │ fn in_a_list() {}                                                  │                        
+                          ╰────────────────────────────────────────────────────────────────────╯                        
+                                                                                                                        
+                        * An item with a table:                                                                         
+                                                                                                                        
+                          ╭───┬───╮                                                                                     
+                          │ a │ b │                                                                                     
+                          ├───┼───┤                                                                                     
+                          │ 1 │ 2 │                                                                                     
+                          ╰───┴───╯                                                                                     
+                                                                                                                        
+                        * An item with a nested diagram, which the pager deliberately does not                          
+                          widen:                                                                                        
                                                                                                                         
                                            ┌───────────┐   ┌─────────────────┐                                          
                                            │ In a list ├──▶│ Still in a list │                                          
                                            └───────────┘   └─────────────────┘                                          
                                                                                                                         
- Degenerate                                                                                                             
- ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+                        Degenerate                                                                                      
+                        ────────────────────────────────────────────────────────────────────────                        
                                                                                                                         
- *                                                                                                                      
- * an empty item precedes this one                                                                                      
+                        *                                                                                               
+                        * an empty item precedes this one                                                               
                                                                                                                         
- 1.                                                                                                                     
- 2. an empty ordered item precedes this one
+                        1.                                                                                              
+                        2. an empty ordered item precedes this one

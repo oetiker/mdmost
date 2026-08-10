@@ -1,6 +1,6 @@
 //! Wide diagrams are laid out wide and scrolled to, rather than dumped as source.
 //!
-//! The pager may make a block wider than the viewport (`tui::wide`), so a diagram that
+//! The pager may make a block wider than the viewport (`render::document`), so a diagram that
 //! does not fit has a better answer available than a dump of its own Mermaid source.
 //! These tests pin which diagrams get that answer, which ones deliberately do not, and
 //! that the numbers everybody is told are true.
@@ -9,9 +9,9 @@ use mdmost::canvas::Canvas;
 use mdmost::doc::Doc;
 use mdmost::error::MermaidError;
 use mdmost::mermaid::{Fit, render_mermaid, render_mermaid_with};
+use mdmost::render::document::scroll_reach;
 use mdmost::render::{RenderOptions, render_document};
 use mdmost::theme::Theme;
-use mdmost::tui::wide::{render_scrollable, scroll_reach};
 
 /// A chart that exhausts the fit ladder at every terminal width a reader has.
 ///
@@ -32,9 +32,9 @@ fn document(source: &str) -> Doc {
     ))
 }
 
-/// The document rendered the way the pager renders it.
+/// The document rendered the way the pager renders it — which is the only way there is.
 fn paged(source: &str, width: u16) -> Canvas {
-    render_scrollable(
+    render_document(
         &document(source),
         width,
         None,
@@ -143,17 +143,12 @@ fn the_pager_refuses_a_squeeze_the_pipe_accepts() {
     );
 }
 
-#[test]
-fn the_piped_renderer_keeps_the_word_breaking_rungs() {
-    // `--render-once` has nothing to scroll: a squeezed drawing beats a source dump.
-    let canvas = render_document(&document(SEVEN), 80, &Theme::default_dark(), &PLAIN);
-    assert_eq!(canvas.width(), 80);
-    let text = canvas.plain_text();
-    assert!(
-        !text.contains("flowchart LR"),
-        "the piped path should still degrade rather than dump:\n{text}"
-    );
-}
+// There used to be a `the_piped_renderer_keeps_the_word_breaking_rungs` here, asserting
+// that a pipe squeezes this chart rather than dumping its source. It was written when
+// `--render-once` had a renderer of its own; that renderer is gone, the pipe draws what
+// the pager draws, and a chart too wide for the terminal is now laid out wide on both
+// paths by the owner's explicit choice. The widened outcome is pinned above, through
+// `paged`, which is the same call `--render-once` makes.
 
 #[test]
 fn the_caption_names_a_width_that_actually_draws() {

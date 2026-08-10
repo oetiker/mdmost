@@ -14,7 +14,7 @@ A Mermaid diagram that will not fit degrades through the layout engine's fit
 ladder; when the ladder is exhausted the block falls back to a dump of its own
 Mermaid source (`docs/qa/visual-review-3.md` §1).
 
-In the pager this is worse than it sounds. `tui::wide::render_scrollable`
+In the pager this is worse than it sounds. `render::document::render_document`
 widens any block that comes back clipped, so **for the too-narrow case** the
 machinery to show the whole thing is aimed at the source dump: the reader
 side-scrolls through raw Mermaid. (For a *syntax error* the same behaviour is
@@ -134,10 +134,13 @@ pub(crate) fn diagram(
 Returning the canvas is what makes the fitting case free (finding D): at
 `at == width` the caller uses it as `narrow` instead of re-rendering.
 
-`Limits` is passed in, not read from `tui::wide`: the seam lives in `render`,
-and `render` must not depend on `tui` (`MAX_BLOCK_WIDTH` is private to
-`tui::wide` and the dependency runs the other way). The caller owns the policy;
-`render` owns the question.
+`Limits` is passed in, not read from `render::document`: the caller owns the
+policy, `render::diagram` owns the question. When this was written the argument
+was also a module-boundary one — the widening lived in `tui::wide` and `render`
+must not depend on `tui`. That half lapsed on 2026-08-10, when the widening
+became the one document renderer and moved into `render::document`; the
+separation of policy from question is why the seam still looks like this.
+`MAX_BLOCK_WIDTH` remains private to `render::document`.
 
 The `None` cases are load-bearing. A syntax error, an unsupported family and an
 internal error keep dumping source at viewport width. **Only
@@ -182,7 +185,7 @@ handoff so the next reader does not re-derive it as a regression.
 
 ### The plug-in point
 
-`tui::wide::render_widened` gains one branch in front of its existing clip
+`render::document::render_widened` gains one branch in front of its existing clip
 hunt, using the returned canvas rather than re-rendering. Nothing downstream
 changes: `Canvas::append` pads narrower parts, anchors and search spans are
 translated through `blit`/`merge_metadata`, `hscroll_max` picks up the surplus,
@@ -198,12 +201,18 @@ answer. This applies to the piped path and to a diagram that exceeds the cap.
 
 - A diagram that fits draws exactly as now, with no scrolling and **no extra
   layout** (finding D).
-- Piped `--render-once` goes through `render_document`, not `render_scrollable`:
+- ~~Piped `--render-once` goes through `render_document`, not `render_scrollable`:
   it degrades — including through the word-breaking rungs — and then dumps
-  source. There is nothing to scroll in a pipe.
+  source. There is nothing to scroll in a pipe.~~
+  **Superseded 2026-08-10.** This was true when written and is no longer. The
+  pipe having a renderer of its own is exactly the bug `d57b580` fixed — it also
+  meant `--body-width` was silently dropped there — and the two renderers have
+  since been collapsed into one, `render::document::render_document`. A pipe now
+  emits what the pager draws, including lines wider than `--width`, which the
+  owner chose deliberately over an exact-width guarantee.
 - Syntax errors, unsupported families and internal errors: source dump plus
   caption.
-- The document margin applies as it now does in `render_scrollable`.
+- The document margin applies as it now does in `render::document::render_document`.
 
 ## Out of scope, stated explicitly
 
@@ -229,7 +238,7 @@ Every behavioural test proved red before its fix (design spec §13; this repo ha
 passed tests both with and without their fix more than once).
 
 1. **The headline case.** A chart that *still* exhausts the ladder after 1a —
-   not the seven-node chart, which now draws from ~59. `render_scrollable`
+   not the seven-node chart, which now draws from ~59. `render_document`
    returns a canvas wider than the viewport whose plain text is box art and does
    not contain `flowchart LR`.
 2. **The guard.** A syntax-error fence and an unrecognised-family fence still

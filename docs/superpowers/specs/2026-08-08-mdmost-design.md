@@ -196,7 +196,7 @@ below), so what it changes is the thing it is aimed at.
 the width the whole document is rendered at, tables and code included, and its surplus is
 reached by scrolling. `--body-width` caps only the prose *within* whatever that width is.
 
-**Where it lives.** The rule is applied in `tui::wide::render_scrollable` and nowhere
+**Where it lives.** The rule is applied in `render::document::render_document` and nowhere
 else, because that is the only renderer that assembles the document block by block and so
 the only one that can give one block a different width than its neighbour. It is
 therefore a property of the pager, not of `render_document`: `--render-once` produces a
@@ -576,7 +576,7 @@ command-line flag of its own, since it is a property of how documents are typese
 than of this invocation.
 
 *Where it is computed.* Once per render, over the whole document, by `render_document`
-and by the pager's `tui::wide::render_scrollable` — never at parse time (§3), and never
+and by the pager's `render::document::render_document` — never at parse time (§3), and never
 in a block renderer, which can see a heading's level but not whether it is the only `#`
 in the document. Section numbering and the title banner are the two decisions that need
 the whole document in view, and they are taken side by side for that reason.

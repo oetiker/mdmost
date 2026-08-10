@@ -8,14 +8,19 @@
 //! * accepted snapshots live in `tests/snapshots/` and are reviewed with
 //!   `cargo insta review` (or accepted wholesale with `INSTA_UPDATE=always cargo test`).
 //!
-//! `render_at` calls the real document renderer, so the accepted snapshots are golden
-//! *layout*: a change to margins, table sizing, quote gutters or code padding shows up
-//! here as a reviewable diff over the whole adversarial corpus (design spec §13.2) —
-//! nested tables, Markdown inside cells, deep lists and mixed scripts included.
+//! `render_at` goes through the same entry point the pager and `--render-once` do, at
+//! the shipped body-width default, so the accepted snapshots are golden *layout as a
+//! user sees it*: a change to margins, table sizing, quote gutters, code padding or the
+//! body cap shows up here as a reviewable diff over the whole adversarial corpus (design
+//! spec §13.2) — nested tables, Markdown inside cells, deep lists and mixed scripts
+//! included. They were regenerated against this path once before, when the goldens were
+//! still taken through a layout primitive no user-facing path called any more and 375
+//! lines of them described output nobody could see.
 
 use std::path::Path;
 
 use mdmost::canvas::Canvas;
+use mdmost::config::DEFAULT_BODY_WIDTH;
 use mdmost::doc::{Doc, NodeKind};
 use mdmost::render::{RenderOptions, render_document};
 use mdmost::theme::Theme;
@@ -25,6 +30,11 @@ use mdmost::theme::Theme;
 /// Plain glyphs, because a Nerd Font code point in a golden file is unreadable and
 /// `render_property` already proves the two sets share a layout.
 const OPTIONS: RenderOptions = RenderOptions::new(false, false);
+
+/// The body cap the snapshots are taken under: the one a user gets without configuring
+/// anything. Pinning the default means a change to it is reviewable here rather than
+/// invisible, which is the whole point of rendering these through the real path.
+const BODY: Option<u16> = Some(DEFAULT_BODY_WIDTH);
 
 /// The widths every fixture is rendered at.
 const WIDTHS: [u16; 3] = [40, 80, 120];
@@ -115,9 +125,13 @@ fn elide(text: &str) -> String {
 }
 
 /// Renders a document at `width` with the real renderer, checking the contract.
+///
+/// The canvas is *at least* `width` wide, not exactly: a block too wide to reflow — a
+/// table with more columns than the terminal has room for — is laid out at the width it
+/// wants and reached with the horizontal scroll keys rather than mangled to fit.
 fn render_at(doc: &Doc, width: u16, theme: &Theme) -> Canvas {
-    let canvas = render_document(doc, width, theme, &OPTIONS);
-    assert_eq!(canvas.width(), width);
+    let canvas = render_document(doc, width, BODY, theme, &OPTIONS);
+    assert!(canvas.width() >= width);
     canvas
         .check_invariants()
         .unwrap_or_else(|problem| panic!("canvas invariant violated at width {width}: {problem}"));
@@ -152,7 +166,7 @@ fn the_line_number_gutter_is_stable() {
     let theme = Theme::default_dark();
     let doc = Doc::parse(&fixture("code.md"));
     for width in WIDTHS {
-        let canvas = render_document(&doc, width, &theme, &NUMBERED);
+        let canvas = render_document(&doc, width, BODY, &theme, &NUMBERED);
         canvas.check_invariants().unwrap_or_else(|problem| {
             panic!("canvas invariant violated at width {width}: {problem}")
         });
@@ -182,8 +196,15 @@ fn the_theme_never_changes_the_layout() {
     }
 }
 
+/// Two renders of the same document agree, and the canvas is a rectangle.
+///
+/// The rectangle is the load-bearing half: the viewport blits slices of this canvas and
+/// the horizontal scroll moves every row by the same amount, so a short row would show
+/// as a torn edge. It is checked against the canvas's own width rather than the
+/// requested one, because a block that cannot reflow is allowed to make the canvas wider
+/// than the terminal — that surplus is what the scroll reaches.
 #[test]
-fn rendering_is_idempotent_and_width_exact() {
+fn rendering_is_idempotent_and_rectangular() {
     let theme = Theme::default_dark();
     for name in all_fixtures() {
         let doc = Doc::parse(&fixture(name));
@@ -191,11 +212,12 @@ fn rendering_is_idempotent_and_width_exact() {
             let first = render_at(&doc, width, &theme);
             let second = render_at(&doc, width, &theme);
             pretty_assertions::assert_eq!(first.plain_text(), second.plain_text());
+            let canvas_width = usize::from(first.width());
             for row in 0..first.height() {
                 assert_eq!(
                     mdmost::text::display_width(&first.row_text(row)),
-                    usize::from(width),
-                    "{name}: row {row} at width {width} is not exactly {width} columns"
+                    canvas_width,
+                    "{name}: row {row} at width {width} is not exactly {canvas_width} columns"
                 );
             }
         }
