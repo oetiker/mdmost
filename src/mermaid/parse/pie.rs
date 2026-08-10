@@ -6,6 +6,7 @@
 
 use crate::error::MermaidError;
 use crate::mermaid::ast::{PieChart, PieSlice};
+use crate::mermaid::entity;
 
 use super::lex::{self, Nesting, SrcLine};
 
@@ -50,7 +51,7 @@ fn statement(chart: &mut PieChart, text: &str, line: usize) -> Result<(), Mermai
         return statement(chart, rest, line);
     }
     if let Some(rest) = lex::strip_keyword(text, "title") {
-        chart.title = Some(lex::unquote(rest).to_string());
+        chart.title = Some(entity::decode(lex::unquote(rest)).into_owned());
         return Ok(());
     }
     let Some((label, value)) = lex::split_once_top_level(text, ':', Nesting::Ignore) else {
@@ -69,7 +70,7 @@ fn statement(chart: &mut PieChart, text: &str, line: usize) -> Result<(), Mermai
         ));
     }
     chart.slices.push(PieSlice {
-        label: lex::unquote(label).to_string(),
+        label: entity::decode(lex::unquote(label)).into_owned(),
         value,
     });
     Ok(())

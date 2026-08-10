@@ -14,6 +14,7 @@
 
 use crate::error::MermaidError;
 use crate::mermaid::ast::{GanttChart, GanttSection, GanttTask, TaskProgress};
+use crate::mermaid::entity;
 
 use super::date;
 use super::lex::{self, Nesting, SrcLine};
@@ -75,7 +76,7 @@ impl Builder {
             "excludes" | "includes" | "todaymarker" | "tickinterval" | "weekday"
             | "inclusiveenddates" | "topaxis" | "displaymode" => return Ok(()),
             "title" => {
-                self.title = Some(lex::unquote(rest).to_string());
+                self.title = Some(entity::decode(lex::unquote(rest)).into_owned());
                 return Ok(());
             }
             "dateformat" => {
@@ -87,7 +88,7 @@ impl Builder {
                 return Ok(());
             }
             "section" => {
-                let title = lex::unquote(rest).trim().to_string();
+                let title = entity::decode(lex::unquote(rest).trim()).into_owned();
                 if title.is_empty() {
                     return Err(lex::syntax(line, "section has no name".to_string()));
                 }
@@ -143,7 +144,7 @@ impl Builder {
         }
         if let Some(section) = self.sections.last_mut() {
             section.tasks.push(GanttTask {
-                name: lex::unquote(name).to_string(),
+                name: entity::decode(lex::unquote(name)).into_owned(),
                 id: spec.id,
                 progress: spec.progress,
                 critical: spec.critical,
