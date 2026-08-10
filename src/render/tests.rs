@@ -2364,6 +2364,29 @@ fn the_button_never_overwrites_the_language_label() {
 }
 
 #[test]
+fn the_button_yields_to_the_gutter_junction() {
+    // A wide, three-digit gutter (500 numbered lines) pushes `join_gutter`'s `┬` far
+    // enough right — and, because the label and the junction want the same columns,
+    // pushes the relocated `rust` label with it (`╭─────┬ rust ──...─╮`) — that at a
+    // canvas width of 26 (frame width 24, after the one-column document margin on each
+    // side) `top_edge_occupied` reports the top edge occupied past the point
+    // `button::place` needs two spare columns beyond, so the button is dropped rather
+    // than drawn over the junction or the label. One column narrower and it stays
+    // dropped; two columns wider (width 28) it fits cleanly, so 26 is the exact seam
+    // where only the junction protection — not mere width — is what drops it.
+    let options = RenderOptions::new(false, true).with_copy_button(true);
+    let markdown = format!("```rust\n{}```\n", "x\n".repeat(500));
+    let canvas = render_with(&markdown, 26, &options);
+    let top = canvas.row_text(0);
+    assert!(!top.contains("[copy]"), "the junction survives: {top:?}");
+    assert!(
+        canvas.hotspots().is_empty(),
+        "a dropped button leaves no hotspot: {:?}",
+        canvas.hotspots()
+    );
+}
+
+#[test]
 fn a_failed_mermaid_block_offers_its_source() {
     // The fence degraded to a highlighted code block showing Mermaid source, and that
     // source is exactly what a reader who just saw the failure caption wants.
@@ -2377,13 +2400,24 @@ fn a_failed_mermaid_block_offers_its_source() {
 
 #[test]
 fn a_code_block_in_a_table_cell_shows_no_button() {
-    let markdown = "| a |\n| --- |\n| `x` |\n";
-    let canvas = render_with(markdown, 40, &BUTTONS);
-    for row in 0..canvas.height() {
-        assert!(
-            !canvas.row_text(row).contains("[copy]")
-                || canvas.hotspots().iter().any(|s| s.row == row),
-            "row {row} draws a label with no hotspot behind it"
-        );
-    }
+    // GFM table cells are single-line and inline-only — a fence cannot open and close
+    // inside one, so there is no markdown source that puts a `NodeKind::CodeBlock`
+    // under a `NodeKind::TableCell`. `table_with_cell` (used by
+    // `a_list_inside_a_cell_keeps_its_markers` and
+    // `a_nested_table_inside_a_cell_is_rendered_as_a_table` above) splices an
+    // independently parsed block into a cell's children, which is the only way to reach
+    // this shape and is already this file's precedent for it.
+    let table = table_with_cell("```rust\nlet value = 1234567890;\n```\n");
+    let canvas = render_block(&table, 80, &Theme::default_dark(), &BUTTONS);
+    canvas.check_invariants().expect("contract holds");
+    let text = canvas.plain_text();
+    assert!(
+        !text.contains("[copy]"),
+        "a code block inside a table cell must draw no button: {text}"
+    );
+    assert!(
+        canvas.hotspots().is_empty(),
+        "a code block inside a table cell must record no hotspot: {:?}",
+        canvas.hotspots()
+    );
 }
