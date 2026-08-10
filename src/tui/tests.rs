@@ -3102,18 +3102,40 @@ fn a_partial_drag_returns_the_covered_source_verbatim() {
 }
 
 #[test]
-fn a_drag_over_a_code_block_falls_back_to_what_is_drawn() {
+fn a_drag_over_a_code_block_reports_it_as_source() {
     let mut app = pager(MARKUP);
     let canvas = app.canvas().clone();
-    // Code blocks carry no search spans — only `render::inline` records them — so there
-    // is nothing to invert and the rendered cells are the answer. For code that is the
-    // source, modulo the frame.
+    // `render::code::code_area` now records one search span per drawn code line
+    // (design spec §3), so a drag over a code line is no longer a spanless fallback to
+    // the rendered cells: it inverts back onto the document source, the same as prose.
     let extract = drag_over(&canvas, MARKUP, "fn main() {}");
     assert_eq!(extract.text, "fn main() {}");
     assert!(
-        !extract.from_source,
-        "the pager must not claim this came from the source map"
+        extract.from_source,
+        "code now has provenance and must be reported as source"
     );
+}
+
+#[test]
+fn a_selection_over_code_yields_markdown_source() {
+    let markdown = "```rust\nlet a = 1;\n```\n";
+    let extract = extract_over_code(markdown);
+    assert!(
+        extract.from_source,
+        "code now has provenance and must be reported as source"
+    );
+    assert!(
+        extract.text.contains("let a = 1;"),
+        "got {:?}",
+        extract.text
+    );
+}
+
+/// Renders `markdown`, drags across the drawn `let a = 1;` code line, and extracts.
+fn extract_over_code(markdown: &str) -> select::Extract {
+    let mut app = pager(markdown);
+    let canvas = app.canvas().clone();
+    drag_over(&canvas, markdown, "let a = 1;")
 }
 
 #[test]
@@ -3137,16 +3159,21 @@ fn a_drag_across_a_code_fence_takes_the_fence_from_the_source() {
 }
 
 /// Pins the limitation `select`'s module docs admit to, so it stays a decision.
+///
+/// A code fence carries spans now (design spec §3), so it can no longer stand in for
+/// "content the renderer never mapped" — a drawn Mermaid diagram still can, since it is
+/// box art with no source span of its own.
 #[test]
 fn a_drag_ending_inside_spanless_content_stops_at_the_last_mapped_byte() {
-    let mut app = pager(MARKUP);
+    let markdown = "- item one\n\n```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n";
+    let mut app = pager(markdown);
     let canvas = app.canvas().clone();
     let (top, col, _) = drawn(&canvas, "item one");
-    let (code, _, _) = drawn(&canvas, "fn main() {}");
+    let (diagram, _, _) = drawn(&canvas, "Read");
     let extract = select::extract(
         &canvas,
-        MARKUP,
-        drag(Pos::new(top, col), Pos::new(code, 40)),
+        markdown,
+        drag(Pos::new(top, col), Pos::new(diagram, 40)),
     )
     .expect("covered");
     assert_eq!(

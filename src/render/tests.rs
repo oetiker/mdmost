@@ -2126,3 +2126,62 @@ fn a_cut_gap_row_is_not_marked_as_having_more_to_the_right() {
         );
     }
 }
+
+#[test]
+fn a_code_line_carries_a_span_back_to_the_source() {
+    let markdown = "```rust\nlet a = 1;\n```\n";
+    let canvas = render(markdown, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| &markdown[s.source_start..s.source_end] == "let a = 1;")
+        .expect("the code line maps back to the source");
+    assert_eq!(
+        canvas.row_text(span.row)[..]
+            .chars()
+            .skip(usize::from(span.col))
+            .take(usize::from(span.cols))
+            .collect::<String>(),
+        "let a = 1;"
+    );
+}
+
+#[test]
+fn a_clipped_code_line_spans_only_the_drawn_columns() {
+    // The frame, its padding and the overflow marker leave far less than the line needs.
+    let markdown = "```\nabcdefghijklmnopqrstuvwxyz\n```\n";
+    let canvas = render(markdown, 14);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].starts_with('a'))
+        .expect("a span for the clipped line");
+    let text = &markdown[s_range(span)];
+    assert!(
+        text.len() < "abcdefghijklmnopqrstuvwxyz".len(),
+        "the span must stop where the drawing stopped, got {text:?}"
+    );
+    assert!(
+        !text.contains('z'),
+        "the clipped tail is not on screen and must not be spanned"
+    );
+}
+
+/// The byte range of a span, as a `Range`, for slicing the source in assertions.
+fn s_range(span: &crate::canvas::SearchSpan) -> std::ops::Range<usize> {
+    span.source_start..span.source_end
+}
+
+#[test]
+fn the_line_number_gutter_carries_no_span() {
+    let options = RenderOptions::new(false, true);
+    let markdown = "```\nlet a = 1;\n```\n";
+    let canvas = render_with(markdown, 40, &options);
+    for span in canvas.spans() {
+        let text = &markdown[s_range(span)];
+        assert!(
+            !text.trim().is_empty() && !text.chars().all(|c| c.is_ascii_digit()),
+            "a gutter number is not in the document: {text:?}"
+        );
+    }
+}

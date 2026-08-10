@@ -31,10 +31,11 @@
 //! `tui::tests::the_gutter_rule_matches_the_renderer` pins the published column to the
 //! layout drawn here.
 
-use crate::canvas::{BorderSet, Canvas};
+use crate::canvas::{BorderSet, Canvas, SearchSpan};
+use crate::doc::SourceSpan;
 use crate::error::MermaidError;
 use crate::mermaid::Fit;
-use crate::text::{Line, Span, display_width};
+use crate::text::{Line, Span, display_width, graphemes};
 
 use super::{Ctx, bridge};
 
@@ -65,16 +66,17 @@ pub(crate) fn render_code_block(
     language: Option<&str>,
     literal: &str,
     fenced: bool,
+    origins: &[SourceSpan],
     width: u16,
     ctx: Ctx<'_>,
 ) -> Canvas {
     if is_mermaid(language) {
         return match bridge::mermaid(literal, width, ctx.theme, Fit::COMPACT) {
             Ok(canvas) => diagram_block(canvas, width, ctx),
-            Err(error) => fallback(literal, &error, width, ctx),
+            Err(error) => fallback(literal, &error, origins, width, ctx),
         };
     }
-    framed_code(language, literal, fenced, width, ctx)
+    framed_code(language, literal, fenced, origins, width, ctx)
 }
 
 /// A drawn diagram as a block of the document: the canvas, padded to the block width.
@@ -92,6 +94,7 @@ fn framed_code(
     language: Option<&str>,
     literal: &str,
     fenced: bool,
+    origins: &[SourceSpan],
     width: u16,
     ctx: Ctx<'_>,
 ) -> Canvas {
@@ -100,7 +103,7 @@ fn framed_code(
     // Below four columns there is no room for a frame plus content; the code is shown
     // bare rather than as a box with nothing inside it.
     if width < 4 {
-        return code_area(&lines, width, false, ctx);
+        return code_area(&lines, origins, width, false, ctx);
     }
     // The frame takes two columns and the interior padding one more on each side, so
     // code sits inside its box the way a table cell sits inside its column.
@@ -110,7 +113,7 @@ fn framed_code(
         0
     };
     let area_width = width - 2 - 2 * padding;
-    let area = code_area(&lines, area_width, ctx.options.line_numbers, ctx);
+    let area = code_area(&lines, origins, area_width, ctx.options.line_numbers, ctx);
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
     let inner = area.indent(padding, padding, theme.code.background);
     let title = fenced
@@ -237,7 +240,13 @@ fn title(language: &str, ctx: Ctx<'_>) -> Line {
 ///
 /// When `numbered` is set and there is room for it, a gutter of right-aligned line
 /// numbers is drawn first and the code is clipped to what remains.
-fn code_area(lines: &[Line], width: u16, numbered: bool, ctx: Ctx<'_>) -> Canvas {
+fn code_area(
+    lines: &[Line],
+    origins: &[SourceSpan],
+    width: u16,
+    numbered: bool,
+    ctx: Ctx<'_>,
+) -> Canvas {
     let theme = ctx.theme;
     let budget = usize::from(width);
     let digits = digit_count(lines.len());
@@ -258,6 +267,27 @@ fn code_area(lines: &[Line], width: u16, numbered: bool, ctx: Ctx<'_>) -> Canvas
             out.write_str(row, digits + 1, GUTTER_RULE, theme.code.frame);
         }
         out.write_line(row, gutter, line, theme.code.background);
+        // The gutter is chrome and is not in the document, so the span starts where the
+        // code does. `origins` is empty for a block rendered without a mapping — a
+        // fragment, or a construction site that has none — and then this block behaves
+        // exactly as it did before spans existed.
+        if let Some(origin) = origins.get(row).filter(|o| !o.is_empty()) {
+            // How many columns of this line survive the clip below. When the block is
+            // clipped, the last column carries the overflow marker and is not code.
+            let room = budget
+                .saturating_sub(gutter)
+                .saturating_sub(usize::from(natural > budget) * display_width(OVERFLOW_MARKER));
+            let drawn = line.width().min(room);
+            if drawn > 0 {
+                out.add_span(SearchSpan {
+                    source_start: origin.start,
+                    source_end: origin.start + bytes_for_columns(&line.text(), drawn),
+                    row,
+                    col: u16::try_from(gutter).unwrap_or(u16::MAX),
+                    cols: u16::try_from(drawn).unwrap_or(u16::MAX),
+                });
+            }
+        }
     }
     // The gutter sits left of the clip point, so the clip below cuts code and never
     // numbers. The pager pins the same columns against its own horizontal offset; see
@@ -266,6 +296,25 @@ fn code_area(lines: &[Line], width: u16, numbered: bool, ctx: Ctx<'_>) -> Canvas
     out.clip_with_marker(width, OVERFLOW_MARKER, theme.code.overflow_marker);
     out.resize_width(width, theme.code.background);
     out
+}
+
+/// How many bytes of `text` the first `columns` display columns occupy.
+///
+/// Grapheme-wise, and for the reason `tui::select::byte_at_column` gives in the other
+/// direction: a double-width cluster is two columns and one boundary, so counting bytes
+/// or `char`s would land inside it and cut a span mid-character.
+fn bytes_for_columns(text: &str, columns: usize) -> usize {
+    let mut used = 0usize;
+    let mut offset = 0usize;
+    for cluster in graphemes(text) {
+        let width = display_width(cluster);
+        if used + width > columns {
+            break;
+        }
+        used += width;
+        offset += cluster.len();
+    }
+    offset
 }
 
 /// How many columns the line-number gutter `NNN │ ` occupies, zero when there is none.
@@ -293,11 +342,17 @@ fn digit_count(lines: usize) -> usize {
 ///
 /// The frame's top edge already names the language, so the caption says what happened,
 /// not what the block is.
-fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Canvas {
+fn fallback(
+    literal: &str,
+    error: &MermaidError,
+    origins: &[SourceSpan],
+    width: u16,
+    ctx: Ctx<'_>,
+) -> Canvas {
     let theme = ctx.theme;
     let lines = bridge::highlight(Some(MERMAID), literal, theme);
     if width < 4 {
-        return code_area(&lines, width, false, ctx);
+        return code_area(&lines, origins, width, false, ctx);
     }
     let padding = if width > 2 + 2 * CODE_PADDING {
         CODE_PADDING
@@ -305,7 +360,7 @@ fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Ca
         0
     };
     let area_width = width - 2 - 2 * padding;
-    let inner = code_area(&lines, area_width, ctx.options.line_numbers, ctx).indent(
+    let inner = code_area(&lines, origins, area_width, ctx.options.line_numbers, ctx).indent(
         padding,
         padding,
         theme.code.background,
