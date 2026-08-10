@@ -20,6 +20,7 @@
 //! | [`canvas`] | The `Canvas` contract: cells, composition, framing |
 //! | [`theme`] | Palette and semantic style lookup, built-in themes |
 //! | [`render`] | Inline, block and table renderers |
+//! | [`export`] | A table `Node` as a clipboard payload: TSV, and an HTML upgrade |
 //! | [`highlight`] | Fenced code highlighting |
 //! | [`mermaid`] | Mermaid parsing and Unicode-art layout |
 //! | [`numbering`] | Section numbers for a deeply nested document |
@@ -47,6 +48,7 @@ pub mod canvas;
 pub mod config;
 pub mod doc;
 pub mod error;
+pub mod export;
 pub mod highlight;
 pub mod mermaid;
 pub mod nerdfont;

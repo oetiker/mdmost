@@ -1130,10 +1130,24 @@ fn declared_alignment_reaches_the_cells() {
 
 #[test]
 fn text_is_escaped() {
-    let html = html_of("| a |\n| --- |\n| <script>x</script> & \"q\" |\n");
-    assert!(!html.contains("<script>"), "got {html}");
-    assert!(html.contains("&lt;script&gt;"), "got {html}");
+    // A `<` the parser did not read as a tag stays in the text, and must not be able to
+    // open one in the payload.
+    let html = html_of("| a |\n| --- |\n| 1 < 2 & \"q\" |\n");
+    assert!(html.contains("1 &lt; 2"), "got {html}");
     assert!(html.contains("&amp;"), "got {html}");
+    assert!(html.contains("&quot;q&quot;"), "got {html}");
+}
+
+// Corrected during execution: the plan originally fed `<script>x</script>` to this test
+// and expected `&lt;script&gt;`. The parser turns raw HTML into `SkippedHtml`, which
+// contributes nothing, so the tag is dropped rather than escaped -- and dropping is the
+// right answer, because the reader never saw the tag either.
+#[test]
+fn raw_html_in_a_cell_reaches_the_clipboard_as_nothing() {
+    let html = html_of("| a |\n| --- |\n| <script>x</script> |\n");
+    assert!(!html.contains("<script"), "no live tag: {html}");
+    assert!(!html.contains("script"), "not even escaped: {html}");
+    assert!(html.contains("<td>x</td>"), "the text survives: {html}");
 }
 
 #[test]
@@ -1290,11 +1304,10 @@ fn inline(node: &Node, out: &mut String) {
 /// trying to name every scheme that is not.
 fn is_safe_url(url: &str) -> bool {
     let lower = url.trim().to_ascii_lowercase();
-    lower.starts_with("http://")
-        || lower.starts_with("https://")
-        || lower.starts_with("mailto:")
-        // A relative or anchor link has no scheme to abuse.
-        || (!lower.contains(':') && !lower.is_empty())
+    // Corrected during execution: the plan also allowed a relative target, which the
+    // design's "only http, https and mailto" does not. The design wins -- a relative
+    // target would resolve against whatever document the paste lands in.
+    lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("mailto:")
 }
 
 /// Appends `text` with the four characters that would otherwise be markup escaped.
@@ -1319,7 +1332,7 @@ Note the `r#"">"#` above closes the attribute and the tag; check it compiles and
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --jobs 4 --lib export`
-Expected: PASS — thirteen tests in total for the module.
+Expected: PASS — fourteen tests in total for the module.
 
 - [ ] **Step 5: Run the gates and commit**
 

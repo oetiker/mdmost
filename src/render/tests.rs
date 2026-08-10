@@ -23,6 +23,9 @@ const PLAIN: RenderOptions = RenderOptions::new(false, false);
 /// every other test wants the default, where a lone `#` heading is drawn as a heading.
 const BANNER: RenderOptions = PLAIN.with_title_banner(true);
 
+/// Options with the copy button asked for; it is off by default like the banner.
+const BUTTONS: RenderOptions = PLAIN.with_copy_button(true);
+
 /// Renders `markdown` at `width` with the plain glyph set, checking the invariants.
 fn render(markdown: &str, width: u16) -> Canvas {
     render_with(markdown, width, &PLAIN)
@@ -2285,4 +2288,296 @@ fn a_cut_gap_row_is_not_marked_as_having_more_to_the_right() {
             out[gap]
         );
     }
+}
+
+#[test]
+fn a_code_line_carries_a_span_back_to_the_source() {
+    let markdown = "```rust\nlet a = 1;\n```\n";
+    let canvas = render(markdown, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| &markdown[s.source_start..s.source_end] == "let a = 1;")
+        .expect("the code line maps back to the source");
+    assert_eq!(
+        canvas.row_text(span.row)[..]
+            .chars()
+            .skip(usize::from(span.col))
+            .take(usize::from(span.cols))
+            .collect::<String>(),
+        "let a = 1;"
+    );
+}
+
+#[test]
+fn a_clipped_code_line_spans_only_the_drawn_columns() {
+    // The frame, its padding and the overflow marker leave far less than the line needs.
+    let markdown = "```\nabcdefghijklmnopqrstuvwxyz\n```\n";
+    let canvas = render(markdown, 14);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].starts_with('a'))
+        .expect("a span for the clipped line");
+    let text = &markdown[s_range(span)];
+    assert!(
+        text.len() < "abcdefghijklmnopqrstuvwxyz".len(),
+        "the span must stop where the drawing stopped, got {text:?}"
+    );
+    assert!(
+        !text.contains('z'),
+        "the clipped tail is not on screen and must not be spanned"
+    );
+}
+
+/// The byte range of a span, as a `Range`, for slicing the source in assertions.
+fn s_range(span: &crate::canvas::SearchSpan) -> std::ops::Range<usize> {
+    span.source_start..span.source_end
+}
+
+#[test]
+fn the_line_number_gutter_carries_no_span() {
+    let options = RenderOptions::new(false, true);
+    let markdown = "```\nlet a = 1;\n```\n";
+    let canvas = render_with(markdown, 40, &options);
+    let mut saw_a_span = false;
+    for span in canvas.spans() {
+        let text = &markdown[s_range(span)];
+        assert!(
+            !text.trim().is_empty() && !text.chars().all(|c| c.is_ascii_digit()),
+            "a gutter number is not in the document: {text:?}"
+        );
+        // The text check alone is vacuous: a span starting at column 0, covering both
+        // the gutter and the code, would still slice `"let a = 1;"` out of the source —
+        // the gutter's own cells carry no bytes of their own to leak into that check.
+        // Design §3 is a claim about *columns*, so assert one directly: with a single
+        // line this block's gutter is `digit_count(1) + 3 == 4` columns wide
+        // (`code::gutter_width`), and a span starting inside it would prove the rule
+        // broken even though the text happened to read back correctly.
+        assert!(
+            span.col >= 4,
+            "span at column {} starts inside the gutter, not the code",
+            span.col
+        );
+        saw_a_span = true;
+    }
+    assert!(saw_a_span, "the code line must have produced a span at all");
+}
+
+#[test]
+fn a_tab_in_the_code_maps_to_its_source_byte_not_its_expanded_columns() {
+    // `bridge::highlight` expands the tab to spaces before this line ever reaches the
+    // canvas (`highlight::expand_tabs`); the source line is 13 bytes, its *drawn* text
+    // is 16 columns wide. Measuring `source_end` against the drawn text instead of the
+    // raw source line lands three bytes past the end of this line — into the newline
+    // and the closing fence.
+    let markdown = "```\n\tfn main() {}\n```\n";
+    let canvas = render(markdown, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].contains("fn main"))
+        .expect("a span for the tabbed line");
+    assert_eq!(
+        &markdown[s_range(span)],
+        "\tfn main() {}",
+        "the span must cover exactly this source line, tab included, and nothing past it"
+    );
+}
+
+#[test]
+fn a_row_that_exactly_fits_is_not_shortened_because_another_row_overflows() {
+    // The block's *widest* line drives `natural`, which used to also decide whether
+    // *every* row reserved a column for the overflow marker. A shorter row that lands
+    // exactly on the code budget is not clipped at all — `Canvas::clip_with_edges`
+    // marks a row only when it actually has a non-blank cell past the cut — so basing
+    // its span on the block-wide decision reported it one column and one byte short of
+    // what was actually drawn.
+    let short = "A".repeat(16);
+    let long = "B".repeat(26);
+    let markdown = format!("```\n{short}\n{long}\n```\n");
+    // `render_body` fixes the body budget at exactly `width`, so the frame's chrome
+    // (`code::chrome_width`, two border columns and one padding column each side) can
+    // be reasoned about directly: at a body width of 20 the code area is exactly 16
+    // columns, precisely `short`'s length.
+    let canvas = render_body(&markdown, 20, &PLAIN);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].starts_with('A'))
+        .expect("a span for the exactly-fitting row");
+    assert_eq!(
+        &markdown[s_range(span)],
+        short,
+        "the full row must be spanned, not one column short"
+    );
+    assert_eq!(usize::from(span.cols), 16);
+}
+
+#[test]
+fn a_crlf_authored_fence_maps_to_the_source_without_the_carriage_return() {
+    // comrak keeps a CRLF document's `\r` inside a code block's `literal`
+    // (`literal == "let needle = 1;\r\n"`), but `LineOffsets::line` strips it from the
+    // *source* line `doc::convert::code_lines` searches — so before that function
+    // stripped it too, `text.ends_with(line)` could never hold and every line of every
+    // code block in a CRLF document got no provenance at all. `doc::literal_lines`'s
+    // split and `bridge::highlight`'s both split only on `\n`, so the `\r` travels
+    // with the same line on both sides and the row alignment between `origins` and the
+    // drawn lines was never in question — only the byte match was broken.
+    let markdown = "```rust\r\nlet needle = 1;\r\n```\r\n";
+    let canvas = render(markdown, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].contains("needle"))
+        .expect("a CRLF-authored code line must still map to its source");
+    let text = &markdown[s_range(span)];
+    assert_eq!(text, "let needle = 1;");
+    assert!(
+        !text.contains('\r'),
+        "a copy must never carry the line's own carriage return: {text:?}"
+    );
+}
+
+#[test]
+fn a_crlf_fence_with_a_blank_line_still_maps_the_lines_around_it() {
+    // The blank-line branch of `code_lines` returns early, without advancing the
+    // search index, before ever reaching the `ends_with` match this fix repairs — so
+    // it needs its own coverage: a CRLF literal's blank line is `"\r"`, not `""`, and
+    // has to be recognised as empty *after* the `\r` is stripped, or every line after
+    // it searches from the wrong index.
+    let markdown = "```rust\r\nlet needle = 1;\r\n\r\nlet other = 2;\r\n```\r\n";
+    let canvas = render(markdown, 40);
+    let needle = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].contains("needle"))
+        .expect("the line before the blank line must map");
+    assert_eq!(&markdown[s_range(needle)], "let needle = 1;");
+    let other = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].contains("other"))
+        .expect("the line after the blank line must map");
+    assert_eq!(&markdown[s_range(other)], "let other = 2;");
+}
+
+#[test]
+fn a_clipped_tabbed_line_maps_to_the_tab_aware_source_position() {
+    // A full, unclipped tabbed line proves nothing about the *measurement*: the
+    // correct byte end for a full line is `origin.end`, and the clamp
+    // (`.min(origin.end)`) lands there regardless of whether the walk that fed it was
+    // tab-aware or not, as long as the (buggy) walk overshoots — which a tab-expanded
+    // walk always does. Clipping the line is what isolates the fix: the correct byte
+    // end is then strictly *less* than `origin.end`, so a walk measured against the
+    // wrong (expanded) text lands on a wrong-but-in-bounds offset that the clamp
+    // cannot catch.
+    let raw = format!("\t{}", "x".repeat(50));
+    let markdown = format!("```\n{raw}\n```\n");
+    let canvas = render(&markdown, 20);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].starts_with('\t'))
+        .expect("a span for the clipped tabbed line");
+    // 20 columns, minus the frame/padding chrome and the overflow marker, draws 13
+    // columns of code: the tab expands to 4 (TAB_WIDTH, starting at column 0) and 9
+    // more columns are plain `x`s — 10 raw bytes (the tab plus 9 `x`s), well short of
+    // `origin.end` (55), so nothing here is rescued by the clamp.
+    assert_eq!(&markdown[s_range(span)], "\txxxxxxxxx");
+}
+
+#[test]
+fn a_code_frame_offers_a_copy_button() {
+    let canvas = render_with("```rust\nlet a = 1;\n```\n", 40, &BUTTONS);
+    let top = canvas.row_text(0);
+    assert!(top.contains("[copy]"), "got {top:?}");
+    let spot = canvas.hotspots().first().expect("a hotspot");
+    assert_eq!(spot.row, 0);
+    assert_eq!(spot.cols, 6);
+    assert_eq!(spot.text, "let a = 1;\n");
+    assert_eq!(spot.html, None, "code has one flavour");
+}
+
+#[test]
+fn the_copy_button_is_off_by_default() {
+    let canvas = render("```rust\nlet a = 1;\n```\n", 40);
+    assert!(!canvas.row_text(0).contains("[copy]"));
+    assert!(canvas.hotspots().is_empty());
+}
+
+#[test]
+fn a_narrow_code_frame_drops_the_button_entirely() {
+    let canvas = render_with("```rust\nlet a = 1;\n```\n", 16, &BUTTONS);
+    assert!(!canvas.row_text(0).contains("[copy]"));
+    assert!(
+        canvas.hotspots().is_empty(),
+        "a label without a hotspot would be a control that does nothing"
+    );
+}
+
+#[test]
+fn the_button_never_overwrites_the_language_label() {
+    let canvas = render_with("```rust\nlet a = 1;\n```\n", 40, &BUTTONS);
+    let top = canvas.row_text(0);
+    assert!(top.contains("rust"), "the language label survives: {top:?}");
+}
+
+#[test]
+fn the_button_yields_to_the_gutter_junction() {
+    // A wide, three-digit gutter (500 numbered lines) pushes `join_gutter`'s `┬` far
+    // enough right — and, because the label and the junction want the same columns,
+    // pushes the relocated `rust` label with it (`╭─────┬ rust ──...─╮`) — that at a
+    // canvas width of 26 (frame width 24, after the one-column document margin on each
+    // side) `top_edge_occupied` reports the top edge occupied past the point
+    // `button::place` needs two spare columns beyond, so the button is dropped rather
+    // than drawn over the junction or the label. One column narrower and it stays
+    // dropped; two columns wider (width 28) it fits cleanly, so 26 is the exact seam
+    // where only the junction protection — not mere width — is what drops it.
+    let options = RenderOptions::new(false, true).with_copy_button(true);
+    let markdown = format!("```rust\n{}```\n", "x\n".repeat(500));
+    let canvas = render_with(&markdown, 26, &options);
+    let top = canvas.row_text(0);
+    assert!(!top.contains("[copy]"), "the junction survives: {top:?}");
+    assert!(
+        canvas.hotspots().is_empty(),
+        "a dropped button leaves no hotspot: {:?}",
+        canvas.hotspots()
+    );
+}
+
+#[test]
+fn a_failed_mermaid_block_offers_its_source() {
+    // The fence degraded to a highlighted code block showing Mermaid source, and that
+    // source is exactly what a reader who just saw the failure caption wants.
+    let canvas = render_with("```mermaid\nnot a diagram at all\n```\n", 40, &BUTTONS);
+    let spot = canvas
+        .hotspots()
+        .first()
+        .expect("a hotspot on the fallback");
+    assert_eq!(spot.text, "not a diagram at all\n");
+}
+
+#[test]
+fn a_code_block_in_a_table_cell_shows_no_button() {
+    // GFM table cells are single-line and inline-only — a fence cannot open and close
+    // inside one, so there is no markdown source that puts a `NodeKind::CodeBlock`
+    // under a `NodeKind::TableCell`. `table_with_cell` (used by
+    // `a_list_inside_a_cell_keeps_its_markers` and
+    // `a_nested_table_inside_a_cell_is_rendered_as_a_table` above) splices an
+    // independently parsed block into a cell's children, which is the only way to reach
+    // this shape and is already this file's precedent for it.
+    let table = table_with_cell("```rust\nlet value = 1234567890;\n```\n");
+    let canvas = render_block(&table, 80, &Theme::default_dark(), &BUTTONS);
+    canvas.check_invariants().expect("contract holds");
+    let text = canvas.plain_text();
+    assert!(
+        !text.contains("[copy]"),
+        "a code block inside a table cell must draw no button: {text}"
+    );
+    assert!(
+        canvas.hotspots().is_empty(),
+        "a code block inside a table cell must record no hotspot: {:?}",
+        canvas.hotspots()
+    );
 }

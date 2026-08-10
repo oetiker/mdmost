@@ -850,3 +850,42 @@ fn grid_border_row_matches_the_widths_it_was_given() {
     let expected: usize = widths.iter().map(|w| w + 2).sum::<usize>() + widths.len() + 1;
     assert_eq!(display_width(&row), expected);
 }
+
+/// A hotspot at a known place, for the propagation tests.
+fn marked(width: u16) -> Canvas {
+    let mut canvas = Canvas::new(width, 2, Style::default());
+    canvas.add_hotspot(Hotspot {
+        row: 0,
+        col: 3,
+        cols: 6,
+        text: "payload".to_string(),
+        html: None,
+    });
+    canvas
+}
+
+#[test]
+fn append_moves_a_hotspot_down() {
+    let mut top = Canvas::new(20, 3, Style::default());
+    top.append(&marked(20), Style::default());
+    let spot = &top.hotspots()[0];
+    assert_eq!((spot.row, spot.col), (3, 3));
+    assert_eq!(spot.text, "payload");
+}
+
+#[test]
+fn indent_moves_a_hotspot_right() {
+    let indented = marked(20).indent(2, 1, Style::default());
+    let spot = &indented.hotspots()[0];
+    assert_eq!((spot.row, spot.col), (0, 5));
+}
+
+#[test]
+fn blit_drops_a_hotspot() {
+    let mut host = Canvas::new(40, 4, Style::default());
+    host.blit(1, 5, &marked(20), Style::default());
+    assert!(
+        host.hotspots().is_empty(),
+        "a canvas placed into a row it shares cannot claim a control there"
+    );
+}

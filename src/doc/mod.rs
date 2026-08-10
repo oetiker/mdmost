@@ -67,6 +67,29 @@ impl SourceSpan {
     }
 }
 
+/// Splits a code block's `literal` into its lines, exactly as `NodeKind::CodeBlock`'s
+/// `lines` field is built against in `convert::code_lines`.
+///
+/// This is the one definition of "a line of `literal`" in the crate. Anything that
+/// indexes a per-line mapping by row — `convert::code_lines` itself, and
+/// `render::code`, which needs the raw (unexpanded) text of the line a `SourceSpan`
+/// names — must split the same way, or the two walks drift apart and index
+/// `n` in one no longer names the same line as index `n` in the other.
+///
+/// An empty literal has no lines, not one: `"".split('\n')` would otherwise yield a
+/// single phantom empty item, and a block with no lines must stay distinguishable from
+/// a block holding one blank line (literal `"\n"`).
+pub(crate) fn literal_lines(literal: &str) -> Vec<&str> {
+    if literal.is_empty() {
+        return Vec::new();
+    }
+    literal
+        .strip_suffix('\n')
+        .unwrap_or(literal)
+        .split('\n')
+        .collect()
+}
+
 /// How a list is numbered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListInfo {
@@ -125,6 +148,14 @@ pub enum NodeKind {
         literal: String,
         /// Whether the block was fenced (as opposed to indented).
         fenced: bool,
+        /// Where each line of `literal` came from in the document source.
+        ///
+        /// One entry per line of `literal`; an empty span for a line that is blank or
+        /// that could not be located. comrak strips the container prefix from every
+        /// line — four spaces, `> `, a list indent — so this cannot be recovered from
+        /// [`Node::source`] by arithmetic, and it is built in [`super::convert`] where
+        /// the source text is in hand.
+        lines: Vec<SourceSpan>,
     },
     /// A thematic break (`---`).
     ThematicBreak,

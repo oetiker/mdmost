@@ -38,25 +38,24 @@
 //! drag. What it may do is include the delimiters the reader could not have selected
 //! because they were never drawn.
 //!
-//! **3. Content with no spans falls back to what is on screen.** Spans are recorded
-//! only by the inline renderer, so a fenced code block, a Mermaid diagram and a table's
-//! frame carry none (a table *cell* is a nested inline render and does carry them). When
-//! a selection touches no span at all, the rendered text of the selected cells is
-//! returned instead, and [`Extract::from_source`] says so, so the status bar can too.
-//! For a code block that fallback *is* the source, modulo the frame and the line-number
-//! gutter, which is the best available answer; for a diagram it is the box art the
-//! reader is looking at, which is at least what they pointed at. A selection that
-//! reaches prose on *both* sides takes the hull path and picks up the fence source for
-//! free, delimiters included.
+//! **3. Content with no spans falls back to what is on screen.** Spans are recorded by
+//! the inline renderer and, per line, by `render::code::code_area` (design spec §3), so
+//! a Mermaid diagram and a table's frame carry none, but a fenced or indented code
+//! block does (a table *cell* is a nested inline render and does too). When a selection
+//! touches no span at all, the rendered text of the selected cells is returned instead,
+//! and [`Extract::from_source`] says so, so the status bar can too. For a diagram that
+//! fallback is the box art the reader is looking at, which is at least what they
+//! pointed at.
 //!
 //! The known limitation this leaves, stated plainly because a doc comment that hid it
 //! would be the defect class this project keeps catching in itself: a drag that starts
 //! in prose and *ends inside* spanless content copies only as far as the last byte the
-//! renderer mapped — the paragraph, not the half of the code block below it. There is
-//! no honest way to do better: the hull's far end is a source offset and the cells
-//! below it have none, so any guess would either over-copy the rest of the block or
-//! invent an offset. Ending the drag past the block, or inside it on both ends, both
-//! give the right answer.
+//! renderer mapped — the paragraph, not the half of the diagram below it (a code fence
+//! no longer demonstrates this: it carries spans now, so a drag ending inside one hits
+//! decision 1 instead). There is no honest way to do better: the hull's far end is a
+//! source offset and the cells below it have none, so any guess would either over-copy
+//! the rest of the block or invent an offset. Ending the drag past the block, or inside
+//! it on both ends, both give the right answer.
 //!
 //! **4. Coordinates are canvas coordinates, not viewport ones.** The selection is
 //! anchored to the document, so scrolling — vertically or horizontally — during a drag
