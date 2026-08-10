@@ -103,6 +103,34 @@ pub struct Pin {
     pub cols: u16,
 }
 
+/// A region of a row that is a control, and what clicking it copies.
+///
+/// The fourth metadata channel, and it exists for the reason the other three do: the
+/// pager needs to know something about a region that only the renderer which drew it can
+/// know. Here that these cells are a button, and what it puts on the clipboard.
+///
+/// The payload is text, not a source byte range, because the two are not the same
+/// answer: the source of a fence inside a block quote carries `> ` on every interior
+/// line, and copying that is not what the button promises.
+///
+/// Like [`Pin`], a hotspot is a claim about a region of one row, so it travels through
+/// [`Canvas::append`] and [`Canvas::indent`] and is dropped by [`Canvas::blit`] — a
+/// canvas placed at an arbitrary column of a row it shares with other content cannot
+/// claim that a control lives there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hotspot {
+    /// The row the control is drawn on.
+    pub row: usize,
+    /// The first column it occupies.
+    pub col: u16,
+    /// How many display columns it occupies.
+    pub cols: u16,
+    /// The plain-text payload. Always present: the only thing OSC 52 can carry.
+    pub text: String,
+    /// A richer flavour offered to a local clipboard only. `None` for a code block.
+    pub html: Option<String>,
+}
+
 /// A rectangle of styled cells, exactly [`Canvas::width`] columns wide on every row.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Canvas {
@@ -111,6 +139,7 @@ pub struct Canvas {
     anchors: Vec<Anchor>,
     spans: Vec<SearchSpan>,
     pins: Vec<Pin>,
+    hotspots: Vec<Hotspot>,
 }
 
 impl Canvas {
@@ -129,6 +158,7 @@ impl Canvas {
             anchors: Vec::new(),
             spans: Vec::new(),
             pins: Vec::new(),
+            hotspots: Vec::new(),
         }
     }
 
@@ -229,6 +259,16 @@ impl Canvas {
         if cols > 0 {
             self.pins.push(Pin { row, cols });
         }
+    }
+
+    /// The controls recorded in this canvas.
+    pub fn hotspots(&self) -> &[Hotspot] {
+        &self.hotspots
+    }
+
+    /// Records a control.
+    pub fn add_hotspot(&mut self, hotspot: Hotspot) {
+        self.hotspots.push(hotspot);
     }
 
     /// How many leading columns of each row are chrome; one entry per row.
