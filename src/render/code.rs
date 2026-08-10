@@ -37,7 +37,7 @@ use crate::error::MermaidError;
 use crate::mermaid::Fit;
 use crate::text::{Line, Span, display_width, graphemes};
 
-use super::{Ctx, bridge};
+use super::{Ctx, bridge, button};
 
 /// The info-string language that routes a fence to the Mermaid renderer.
 const MERMAID: &str = "mermaid";
@@ -135,7 +135,38 @@ fn framed_code(
     );
     join_gutter(&mut out, gutter, padding, title.as_ref(), ctx);
     pin_gutter(&mut out, gutter, padding, title.as_ref());
+    // The label and the junction have already taken what they need of the top edge; the
+    // button is the third occupant and the only optional one, so it is the one that
+    // yields. A block inside a table cell is blitted into a row it shares and would lose
+    // its hotspot while keeping its cells, so it is not offered one at all.
+    if ctx.options.copy_button && ctx.table_depth == 0 {
+        let occupied = top_edge_occupied(&out, title.as_ref());
+        button::place(
+            &mut out,
+            0,
+            occupied,
+            theme.code.frame,
+            literal.to_string(),
+            None,
+        );
+    }
     out
+}
+
+/// The first column of the top edge that nothing has claimed yet.
+///
+/// Read back off the drawn row for the same reason `pin_gutter` does it: the label's
+/// column depends on whether it collided with the gutter junction, and a second copy of
+/// that arithmetic is what would drift.
+fn top_edge_occupied(out: &Canvas, title: Option<&Line>) -> u16 {
+    let Some(title) = title else { return 1 };
+    let text = out.row_text(0);
+    let start = title
+        .spans
+        .first()
+        .and_then(|span| text.find(span.text.as_str()))
+        .map_or(2, |byte| display_width(&text[..byte]));
+    u16::try_from(start + title.width() + 1).unwrap_or(u16::MAX)
 }
 
 /// Publishes the columns of this block that are chrome, for the pager to hold still.
@@ -440,6 +471,20 @@ fn fallback(
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
     join_gutter(&mut out, gutter, padding, Some(&title), ctx);
     pin_gutter(&mut out, gutter, padding, Some(&title));
+    // The fallback is a highlighted code block showing Mermaid source — exactly what a
+    // reader who just saw the failure caption wants to copy — so it gets a button the
+    // same way any other framed code block does.
+    if ctx.options.copy_button && ctx.table_depth == 0 {
+        let occupied = top_edge_occupied(&out, Some(&title));
+        button::place(
+            &mut out,
+            0,
+            occupied,
+            theme.code.frame,
+            literal.to_string(),
+            None,
+        );
+    }
     out
 }
 

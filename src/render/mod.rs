@@ -37,6 +37,7 @@
 pub(crate) mod banner;
 pub mod block;
 pub(crate) mod bridge;
+pub(crate) mod button;
 pub(crate) mod code;
 mod diagram;
 pub mod document;
@@ -98,6 +99,12 @@ pub struct RenderOptions {
     /// rule is "three or more distinct numbered levels", so a flat document is
     /// unnumbered whatever this says. See [`crate::numbering`].
     pub section_numbers: bool,
+    /// Whether a code frame and a table offer a clickable `[copy]`.
+    ///
+    /// **Off by default**, and set by the pager only when mouse capture was actually
+    /// granted: a button nobody can click is worse than no button. `--render-once`
+    /// leaves it off, because a dump is text in a pipe.
+    pub copy_button: bool,
 }
 
 impl RenderOptions {
@@ -108,6 +115,7 @@ impl RenderOptions {
             line_numbers,
             title_banner: false,
             section_numbers: true,
+            copy_button: false,
         }
     }
 
@@ -125,6 +133,15 @@ impl RenderOptions {
     pub const fn with_section_numbers(self, section_numbers: bool) -> Self {
         Self {
             section_numbers,
+            ..self
+        }
+    }
+
+    /// The same options with the copy button turned on or off.
+    #[must_use]
+    pub const fn with_copy_button(self, copy_button: bool) -> Self {
+        Self {
+            copy_button,
             ..self
         }
     }

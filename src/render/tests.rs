@@ -23,6 +23,9 @@ const PLAIN: RenderOptions = RenderOptions::new(false, false);
 /// every other test wants the default, where a lone `#` heading is drawn as a heading.
 const BANNER: RenderOptions = PLAIN.with_title_banner(true);
 
+/// Options with the copy button asked for; it is off by default like the banner.
+const BUTTONS: RenderOptions = PLAIN.with_copy_button(true);
+
 /// Renders `markdown` at `width` with the plain glyph set, checking the invariants.
 fn render(markdown: &str, width: u16) -> Canvas {
     render_with(markdown, width, &PLAIN)
@@ -2322,4 +2325,65 @@ fn a_clipped_tabbed_line_maps_to_the_tab_aware_source_position() {
     // more columns are plain `x`s — 10 raw bytes (the tab plus 9 `x`s), well short of
     // `origin.end` (55), so nothing here is rescued by the clamp.
     assert_eq!(&markdown[s_range(span)], "\txxxxxxxxx");
+}
+
+#[test]
+fn a_code_frame_offers_a_copy_button() {
+    let canvas = render_with("```rust\nlet a = 1;\n```\n", 40, &BUTTONS);
+    let top = canvas.row_text(0);
+    assert!(top.contains("[copy]"), "got {top:?}");
+    let spot = canvas.hotspots().first().expect("a hotspot");
+    assert_eq!(spot.row, 0);
+    assert_eq!(spot.cols, 6);
+    assert_eq!(spot.text, "let a = 1;\n");
+    assert_eq!(spot.html, None, "code has one flavour");
+}
+
+#[test]
+fn the_copy_button_is_off_by_default() {
+    let canvas = render("```rust\nlet a = 1;\n```\n", 40);
+    assert!(!canvas.row_text(0).contains("[copy]"));
+    assert!(canvas.hotspots().is_empty());
+}
+
+#[test]
+fn a_narrow_code_frame_drops_the_button_entirely() {
+    let canvas = render_with("```rust\nlet a = 1;\n```\n", 16, &BUTTONS);
+    assert!(!canvas.row_text(0).contains("[copy]"));
+    assert!(
+        canvas.hotspots().is_empty(),
+        "a label without a hotspot would be a control that does nothing"
+    );
+}
+
+#[test]
+fn the_button_never_overwrites_the_language_label() {
+    let canvas = render_with("```rust\nlet a = 1;\n```\n", 40, &BUTTONS);
+    let top = canvas.row_text(0);
+    assert!(top.contains("rust"), "the language label survives: {top:?}");
+}
+
+#[test]
+fn a_failed_mermaid_block_offers_its_source() {
+    // The fence degraded to a highlighted code block showing Mermaid source, and that
+    // source is exactly what a reader who just saw the failure caption wants.
+    let canvas = render_with("```mermaid\nnot a diagram at all\n```\n", 40, &BUTTONS);
+    let spot = canvas
+        .hotspots()
+        .first()
+        .expect("a hotspot on the fallback");
+    assert_eq!(spot.text, "not a diagram at all\n");
+}
+
+#[test]
+fn a_code_block_in_a_table_cell_shows_no_button() {
+    let markdown = "| a |\n| --- |\n| `x` |\n";
+    let canvas = render_with(markdown, 40, &BUTTONS);
+    for row in 0..canvas.height() {
+        assert!(
+            !canvas.row_text(row).contains("[copy]")
+                || canvas.hotspots().iter().any(|s| s.row == row),
+            "row {row} draws a label with no hotspot behind it"
+        );
+    }
 }
