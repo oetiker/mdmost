@@ -2567,17 +2567,113 @@ fn a_code_block_in_a_table_cell_shows_no_button() {
     // `a_nested_table_inside_a_cell_is_rendered_as_a_table` above) splices an
     // independently parsed block into a cell's children, which is the only way to reach
     // this shape and is already this file's precedent for it.
+    //
+    // **Changed 2026-08-10:** the assertions used to be "nothing anywhere on this canvas
+    // says `[copy]`" and "this canvas has no hotspots at all". Once the enclosing table
+    // grew a button of its own, those held for the wrong reason and then stopped holding
+    // at all — they were never about the code block. They now name the one button that
+    // *should* be there and pin everything else on the code block itself.
     let table = table_with_cell("```rust\nlet value = 1234567890;\n```\n");
     let canvas = render_block(&table, 80, &Theme::default_dark(), &BUTTONS);
     canvas.check_invariants().expect("contract holds");
     let text = canvas.plain_text();
-    assert!(
-        !text.contains("[copy]"),
-        "a code block inside a table cell must draw no button: {text}"
+    assert_eq!(
+        text.matches("[copy]").count(),
+        1,
+        "the outer table's button is the only one drawn:\n{text}"
     );
     assert!(
+        canvas.row_text(0).contains("[copy]"),
+        "and it is in the outer table's top rule, not on the code frame:\n{text}"
+    );
+    let spots = canvas.hotspots();
+    assert_eq!(spots.len(), 1, "one button, one hotspot: {spots:?}");
+    assert!(
+        !spots[0].text.contains("let value"),
+        "a code block inside a table cell must record no hotspot of its own: {spots:?}"
+    );
+}
+
+#[test]
+fn a_table_offers_a_copy_button_with_both_flavours() {
+    let canvas = render_with(
+        "| name | role |\n| --- | --- |\n| ada | design |\n",
+        40,
+        &BUTTONS,
+    );
+    let top = canvas.row_text(0);
+    assert!(top.contains("[copy]"), "got {top:?}");
+    // Inside the table's own corner, not floating in the padding to its right. Counted
+    // in `char`s, because every box-drawing glyph is three bytes and one column, so a
+    // byte offset would run ahead of the true column by two per glyph to its left.
+    let chars: Vec<char> = top.chars().collect();
+    let corner = chars
+        .iter()
+        .position(|&c| c == '╮')
+        .expect("the top-right corner");
+    let bracket = chars.iter().position(|&c| c == '[').expect("the button");
+    assert!(
+        bracket < corner,
+        "the button belongs inside the table's own frame: {top:?}"
+    );
+    let spot = canvas.hotspots().first().expect("a hotspot");
+    assert_eq!(spot.row, 0, "the button is in the top rule");
+    assert_eq!(
+        usize::from(spot.col),
+        bracket,
+        "the hotspot covers the drawn label"
+    );
+    assert_eq!(spot.text, "name\trole\nada\tdesign\n");
+    assert!(
+        spot.html
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("<table>"),
+        "a table offers the richer flavour too: {:?}",
+        spot.html
+    );
+}
+
+#[test]
+fn a_table_button_is_off_by_default() {
+    let canvas = render("| name | role |\n| --- | --- |\n| ada | design |\n", 40);
+    assert!(!canvas.row_text(0).contains("[copy]"));
+    assert!(canvas.hotspots().is_empty());
+}
+
+#[test]
+fn a_narrow_table_drops_its_button() {
+    // The table negotiates nine columns for itself however wide the viewport is, and
+    // nine columns cannot hold `[copy]` beside its own corner. It is the *table's*
+    // width that decides this, not the terminal's.
+    let canvas = render_with("| a | b |\n| --- | --- |\n| 1 | 2 |\n", 40, &BUTTONS);
+    assert!(!canvas.row_text(0).contains("[copy]"));
+    assert!(
         canvas.hotspots().is_empty(),
-        "a code block inside a table cell must record no hotspot: {:?}",
+        "a label without a hotspot would be a control that does nothing: {:?}",
+        canvas.hotspots()
+    );
+}
+
+#[test]
+fn a_table_inside_a_table_cell_shows_no_button() {
+    // The inner table is blitted into a row it shares, so its hotspot is dropped while
+    // its drawn `[copy]` would survive — a label with nothing behind it. Only the
+    // top-level table is offered one, so exactly one button is drawn and exactly one
+    // hotspot backs it.
+    let table = table_with_cell("| inner column |\n|---|\n| y |\n");
+    let canvas = render_block(&table, 40, &Theme::default_dark(), &BUTTONS);
+    canvas.check_invariants().expect("contract holds");
+    let text = canvas.plain_text();
+    assert_eq!(
+        text.matches("[copy]").count(),
+        1,
+        "only the outer table draws a button:\n{text}"
+    );
+    assert_eq!(
+        canvas.hotspots().len(),
+        1,
+        "and exactly one hotspot backs it: {:?}",
         canvas.hotspots()
     );
 }
