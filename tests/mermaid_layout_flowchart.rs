@@ -55,6 +55,21 @@ fn render(chart: &Flowchart, width: u16) -> String {
     canvas.plain_text()
 }
 
+/// The column `needle` starts at, as a count of characters rather than of bytes.
+///
+/// Box-drawing glyphs are three bytes and one column wide, so a byte offset runs ahead
+/// of the column by two for every one to its left. Everything these tests look for is
+/// preceded only by spaces and box art, all of it one column per character.
+#[track_caller]
+fn column_of(text: &str, needle: &str) -> usize {
+    for line in text.lines() {
+        if let Some(at) = line.find(needle) {
+            return line[..at].chars().count();
+        }
+    }
+    panic!("`{needle}` is not in:\n{text}")
+}
+
 /// The classic decision flow, used to check all four directions.
 fn decision(direction: Direction) -> Flowchart {
     let nodes = vec![
@@ -375,6 +390,39 @@ fn a_labelled_edge_draws_its_label_once_whatever_its_rank_span() {
                 "a label on an edge spanning {span} rank(s) was drawn {count} times \
                  going {direction:?}:\n{text}"
             );
+        }
+    }
+}
+
+#[test]
+fn every_line_of_a_multi_line_edge_label_shares_one_left_origin() {
+    // A label is one block: whatever decides where it goes, all of its lines have to
+    // start in the same column. Asserted as equality between the lines rather than
+    // against fixed columns, so that a relayout moving the whole diagram cannot make
+    // the test lie. Three lines, because a two-line label would pass a fix that only
+    // brought the last line into place.
+    let nodes = vec![
+        node("A", "Source", NodeShape::Rect),
+        node("B", "Target", NodeShape::Rect),
+    ];
+    let edges = vec![FlowEdge {
+        label: Some(Label {
+            lines: vec!["alpha".into(), "bravo".into(), "charlie".into()],
+        }),
+        ..edge(0, 1)
+    }];
+    for direction in [Direction::TopToBottom, Direction::LeftToRight] {
+        for width in [60, 80, 100, 120] {
+            let text = render(&chart(direction, nodes.clone(), edges.clone()), width);
+            let first = column_of(&text, "alpha");
+            for line in ["bravo", "charlie"] {
+                assert_eq!(
+                    column_of(&text, line),
+                    first,
+                    "`{line}` is not under `alpha` at width {width} going \
+                     {direction:?}:\n{text}"
+                );
+            }
         }
     }
 }
