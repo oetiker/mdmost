@@ -349,28 +349,33 @@ fn a_long_edge_skips_a_rank() {
 }
 
 #[test]
-fn a_labelled_edge_that_skips_a_rank_draws_its_label_once() {
-    // The edge is cut into one segment per rank it crosses, but the label belongs to
-    // the edge, not to a segment: drawing it per segment paints it several times.
-    let nodes = vec![
-        node("A", "One", NodeShape::Rect),
-        node("B", "Two", NodeShape::Rect),
-        node("C", "Three", NodeShape::Rect),
-        node("D", "Four", NodeShape::Rect),
-    ];
-    let long = FlowEdge {
-        label: Some(Label::line("skip")),
-        ..edge(0, 3)
-    };
-    let edges = vec![edge(0, 1), edge(1, 2), edge(2, 3), long];
-    for direction in [Direction::TopToBottom, Direction::LeftToRight] {
-        let text = render(&chart(direction, nodes.clone(), edges.clone()), 70);
-        assert_eq!(
-            text.matches("skip").count(),
-            1,
-            "label drawn {} times going {direction:?}:\n{text}",
-            text.matches("skip").count()
-        );
+fn a_labelled_edge_draws_its_label_once_whatever_its_rank_span() {
+    // A long edge is cut into one segment per rank it crosses. The label belongs to the
+    // edge, not to a segment, so drawing it per segment paints one copy per rank — the
+    // count rises with the span, which is why every span from one upwards is checked
+    // here: a fix that only handled two ranks would pass a two-rank test and still be
+    // wrong.
+    for span in 1..=4usize {
+        // A chain `n0 → n1 → … → nSpan`, plus a `T` that jumps straight to the end.
+        // `T` ranks alongside `n0`, so its edge spans exactly `span` ranks.
+        let mut nodes: Vec<FlowNode> = (0..=span)
+            .map(|index| node(&format!("N{index}"), &format!("n{index}"), NodeShape::Rect))
+            .collect();
+        nodes.push(node("T", "tee", NodeShape::Rect));
+        let mut edges: Vec<FlowEdge> = (0..span).map(|index| edge(index, index + 1)).collect();
+        edges.push(FlowEdge {
+            label: Some(Label::line("skip")),
+            ..edge(span + 1, span)
+        });
+        for direction in [Direction::TopToBottom, Direction::LeftToRight] {
+            let text = render(&chart(direction, nodes.clone(), edges.clone()), 70);
+            let count = text.matches("skip").count();
+            assert_eq!(
+                count, 1,
+                "a label on an edge spanning {span} rank(s) was drawn {count} times \
+                 going {direction:?}:\n{text}"
+            );
+        }
     }
 }
 
