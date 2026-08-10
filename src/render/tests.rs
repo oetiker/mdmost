@@ -2081,6 +2081,73 @@ fn a_table_whose_rows_wrap_gets_air_between_them() {
     );
 }
 
+/// A table of one-line rows whose second column is far too long to read as a label.
+///
+/// Rendered wide enough that nothing wraps, so the height rule alone leaves it dense.
+const LONG_CELLS: &str = "\
+| part | does |
+| --- | --- |
+| renderer | turns the parsed document into a canvas |
+| pager | owns the viewport and the key bindings |
+| theme | every colour the renderer may reach for |
+";
+
+#[test]
+fn a_table_of_long_one_line_rows_gets_air_too() {
+    // Length is crowding just as much as height is. Three forty-column sentences stacked
+    // edge to edge are the same slab of prose the gap exists to break up, and at a wide
+    // measure they never wrap, so the height rule never noticed them.
+    let canvas = render(LONG_CELLS, 120);
+    let out = body_rows(&canvas);
+    assert!(
+        out.iter()
+            .any(|row| row.contains("turns the parsed document into a canvas")),
+        "the fixture must not wrap at this width: {out:#?}"
+    );
+    assert_eq!(
+        gap_rows(&canvas).len(),
+        2,
+        "three long body rows want two gaps: {out:#?}"
+    );
+}
+
+#[test]
+fn a_long_header_cell_alone_does_not_space_a_table() {
+    // Consistent with the height rule: a header is fenced off by its own `├───┼───┤` and
+    // does not earn a gap, however long it is.
+    let long = "x".repeat(40);
+    let markdown = format!("| {long} | b |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\n");
+    let canvas = render(&markdown, 120);
+    assert_eq!(
+        gap_rows(&canvas),
+        Vec::<usize>::new(),
+        "{:#?}",
+        body_rows(&canvas)
+    );
+}
+
+#[test]
+fn a_crowded_cell_is_measured_in_display_columns() {
+    // Sixteen double-width glyphs are 32 columns on screen and 16 `char`s. The rule is
+    // about what the reader sees, so they space the table; the same count of
+    // single-width glyphs does not.
+    let table = |cell: &str| format!("| a | b |\n| --- | --- |\n| {cell} | x |\n| y | z |\n");
+    let wide = render(&table(&"あ".repeat(16)), 120);
+    assert_eq!(
+        gap_rows(&wide).len(),
+        1,
+        "32 display columns must space the table: {:#?}",
+        body_rows(&wide)
+    );
+    let narrow = render(&table(&"a".repeat(16)), 120);
+    assert_eq!(
+        gap_rows(&narrow),
+        Vec::<usize>::new(),
+        "16 display columns must not: {:#?}",
+        body_rows(&narrow)
+    );
+}
+
 #[test]
 fn a_table_of_one_line_rows_stays_compact() {
     // Air between rows that need none is just a taller table.
