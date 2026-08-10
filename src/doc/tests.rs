@@ -335,3 +335,37 @@ fn a_fence_holding_a_fence_maps_the_inner_one() {
     let texts = code_line_texts("~~~\n```\n~~~\n");
     assert_eq!(texts, ["```"]);
 }
+
+#[test]
+fn an_empty_fenced_block_has_no_lines() {
+    // comrak gives an empty fenced block ("```\n```\n") the literal "" — zero lines,
+    // not one. `"".split('\n')` would otherwise yield a single phantom empty item.
+    let doc = Doc::parse("```\n```\n");
+    let block = find(doc.root(), &|n| {
+        matches!(n.kind, NodeKind::CodeBlock { .. })
+    })
+    .expect("a code block");
+    let NodeKind::CodeBlock { lines, literal, .. } = &block.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "", "sanity: comrak's literal for an empty block");
+    assert_eq!(lines.len(), 0, "an empty literal has zero lines, not one");
+}
+
+#[test]
+fn a_fenced_block_holding_one_blank_line_has_exactly_one_empty_span() {
+    // Distinct from the empty-block case above: here the literal is "\n" (one blank
+    // line), not "" (no lines at all). Both reduce to the same split-on-empty-string
+    // shape, so this and the previous test must be pinned down together.
+    let doc = Doc::parse("```\n\n```\n");
+    let block = find(doc.root(), &|n| {
+        matches!(n.kind, NodeKind::CodeBlock { .. })
+    })
+    .expect("a code block");
+    let NodeKind::CodeBlock { lines, literal, .. } = &block.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "\n", "sanity: comrak's literal for one blank line");
+    assert_eq!(lines.len(), 1, "one literal line, so one entry");
+    assert!(lines[0].is_empty(), "a blank line points at nothing");
+}

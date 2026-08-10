@@ -98,11 +98,22 @@ impl<'s> LineOffsets<'s> {
 /// no provenance is today's behaviour, whereas a *wrong* offset would put a search hit
 /// on the wrong cells and copy the wrong bytes.
 fn code_lines(offsets: &LineOffsets<'_>, span: SourceSpan, literal: &str) -> Vec<SourceSpan> {
+    // An empty literal (an empty fenced block) has zero lines, not one: `"".split('\n')`
+    // would otherwise yield a single phantom empty item, and a block with no lines must
+    // stay distinguishable from a block holding one blank line (literal `"\n"`).
+    if literal.is_empty() {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     let mut index = offsets.line_index(span.start);
     let last = offsets.line_index(span.end.saturating_sub(1));
     for line in literal.strip_suffix('\n').unwrap_or(literal).split('\n') {
         if line.is_empty() {
+            // A blank line pushes an empty span without advancing `index`, which widens
+            // the search window for the next line by one slot. That is safe: an empty
+            // source line can never satisfy `text.ends_with(line)` for a non-empty
+            // `line`, so it never produces a wrong match — only a wider, still-correct
+            // search. Left alone deliberately; do not "optimise" it into a bug.
             out.push(SourceSpan::default());
             continue;
         }
