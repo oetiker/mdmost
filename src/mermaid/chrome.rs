@@ -23,10 +23,23 @@ pub const EIGHTH_BLOCKS: [&str; 9] = ["", "▏", "▎", "▍", "▌", "▋", "�
 
 /// Composes a finished plot into a canvas exactly `width` columns wide.
 ///
-/// The optional `title` is centred above the plot and followed by a blank row; the
-/// plot itself is centred horizontally. This is the last step of every `draw`
-/// function, which is what makes "every row is exactly `width` columns" structurally
-/// true rather than a property each renderer has to remember.
+/// The optional `title` is centred above the plot and followed by a blank row. This is
+/// the last step of every `draw` function, which is what makes "every row is exactly
+/// `width` columns" structurally true rather than a property each renderer has to
+/// remember.
+///
+/// # Where the drawing sits
+///
+/// **Against the left edge, with the unused columns on the right.** It used to be centred
+/// in the width it was handed, which set it well to the right of the prose above it —
+/// every block in a document now starts at the same left margin, and a diagram is no
+/// exception (see `render::document::placed`).
+///
+/// The title is centred over *the drawing*, not over the budget: the two are one piece of
+/// art, and how a diagram composes itself is the diagram's own business. So the pair is
+/// laid out in the width the content needs and the surplus is added afterwards. A title
+/// wider than its plot widens that inner measure rather than being cut down to the plot,
+/// which is why the two are centred against each other rather than both set flush left.
 ///
 /// # Errors
 ///
@@ -45,17 +58,25 @@ pub fn compose(
         });
     }
     let base = theme.base();
-    let mut out = Canvas::empty(width);
-    if let Some(title) = title.map(str::trim).filter(|text| !text.is_empty()) {
+    let title = title.map(str::trim).filter(|text| !text.is_empty());
+    // The measure the art composes itself in: wide enough for the plot and for the title,
+    // and never wider than the budget, which is what the title is ellipsized against.
+    let inner = title
+        .map_or(0, |title| u16::try_from(display_width(title)).unwrap_or(0))
+        .max(body.width())
+        .min(width);
+    let mut out = Canvas::empty(inner);
+    if let Some(title) = title {
         out.push_text_ellipsized(title, Align::Center, theme.diagram.title);
         out.push_blank_row(base);
     }
     // `align_offset` saturates; the copy this replaced used a bare `width - body.width()`,
     // which panics whenever a body is wider than the frame it is being centred in.
     let left =
-        crate::canvas::align_offset(usize::from(width), usize::from(body.width()), Align::Center);
+        crate::canvas::align_offset(usize::from(inner), usize::from(body.width()), Align::Center);
     let top = out.height();
     out.blit(top, left, body, base);
+    out.resize_width(width, base);
     Ok(out)
 }
 

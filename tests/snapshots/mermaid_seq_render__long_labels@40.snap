@@ -2,17 +2,17 @@
 source: tests/mermaid_seq_render.rs
 expression: canvas.plain_text()
 ---
- ╭───────────────────────╮              
- │ A participant with a  │              
- │    very long name     │       ╭───╮  
- │        indeed         │       │ B │  
- ╰───────────────────────╯       ╰───╯  
-             ┆                     ┆    
-             ┆a message label tha… ┆    
-             ┆─────────────────────▶    
-             ┆                     ┆    
- ╭───────────────────────╮              
- │ A participant with a  │              
- │    very long name     │       ╭───╮  
- │        indeed         │       │ B │  
- ╰───────────────────────╯       ╰───╯
+╭───────────────────────╮               
+│ A participant with a  │               
+│    very long name     │       ╭───╮   
+│        indeed         │       │ B │   
+╰───────────────────────╯       ╰───╯   
+            ┆                     ┆     
+            ┆a message label tha… ┆     
+            ┆─────────────────────▶     
+            ┆                     ┆     
+╭───────────────────────╮               
+│ A participant with a  │               
+│    very long name     │       ╭───╮   
+│        indeed         │       │ B │   
+╰───────────────────────╯       ╰───╯

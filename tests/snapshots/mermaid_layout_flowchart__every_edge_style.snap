@@ -2,23 +2,23 @@
 source: tests/mermaid_layout_flowchart.rs
 expression: "render(&chart(Direction::TopToBottom, nodes, edges), 60)"
 ---
-                              ┌───────┐                     
-                              │ Solid │                     
-                              └─┬───┬─┘                     
-                             ╭──╯ ╭─╯                       
-                             ▼    │                         
-                     ┌────────┐   │                         
-                     │ Dotted │   │                         
-                     └────┬───┘   │                         
-                          ┊maybe  │                         
-                          ┊       │                         
-                          ▼       │                         
-                      ┌───────┐   │                         
-                      │ Thick │   │                         
-                      └──────┳┘   │                         
-                             ┗━━┓ ╰─╮                       
-                                ┃   │                       
-                                ▼   │                       
-                              ┌─────┴─┐                     
-                              │ Plain │                     
-                              └───────┘
+         ┌───────┐                                          
+         │ Solid │                                          
+         └─┬───┬─┘                                          
+        ╭──╯ ╭─╯                                            
+        ▼    │                                              
+┌────────┐   │                                              
+│ Dotted │   │                                              
+└────┬───┘   │                                              
+     ┊maybe  │                                              
+     ┊       │                                              
+     ▼       │                                              
+ ┌───────┐   │                                              
+ │ Thick │   │                                              
+ └──────┳┘   │                                              
+        ┗━━┓ ╰─╮                                            
+           ┃   │                                            
+           ▼   │                                            
+         ┌─────┴─┐                                          
+         │ Plain │                                          
+         └───────┘

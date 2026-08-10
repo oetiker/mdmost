@@ -2,6 +2,6 @@
 source: tests/mermaid_layout_state.rs
 expression: "render(&chart, 60)"
 ---
-                      ╭───╮     ╭───╮                       
-                  ●──▶│ A ├────▶│ B ├──▶◉                   
-                      ╰───╯next ╰───╯
+    ╭───╮     ╭───╮                                         
+●──▶│ A ├────▶│ B ├──▶◉                                     
+    ╰───╯next ╰───╯

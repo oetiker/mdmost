@@ -2,23 +2,23 @@
 source: tests/mermaid_seq_render.rs
 expression: canvas.plain_text()
 ---
-                              ╭───╮         ╭───╮                               
-                              │ A │         │ B │                               
-                              ╰───╯         ╰───╯                               
-                                ┆             ┆                                 
-                                ┆ solid open  ┆                                 
-                                ┆──────────────                                 
-                                ┆ dotted open ┆                                 
-                                ┆╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                 
-                                ┆ solid arrow ┆                                 
-                                ┆─────────────▶                                 
-                                ┆dotted arrow ┆                                 
-                                ┆╌╌╌╌╌╌╌╌╌╌╌╌╌▶                                 
-                                ┆ solid cross ┆                                 
-                                ┆─────────────✗                                 
-                                ┆dotted cross ┆                                 
-                                ┆╌╌╌╌╌╌╌╌╌╌╌╌╌✗                                 
-                                ┆             ┆                                 
-                              ╭───╮         ╭───╮                               
-                              │ A │         │ B │                               
-                              ╰───╯         ╰───╯
+╭───╮         ╭───╮                                                             
+│ A │         │ B │                                                             
+╰───╯         ╰───╯                                                             
+  ┆             ┆                                                               
+  ┆ solid open  ┆                                                               
+  ┆──────────────                                                               
+  ┆ dotted open ┆                                                               
+  ┆╌╌╌╌╌╌╌╌╌╌╌╌╌╌                                                               
+  ┆ solid arrow ┆                                                               
+  ┆─────────────▶                                                               
+  ┆dotted arrow ┆                                                               
+  ┆╌╌╌╌╌╌╌╌╌╌╌╌╌▶                                                               
+  ┆ solid cross ┆                                                               
+  ┆─────────────✗                                                               
+  ┆dotted cross ┆                                                               
+  ┆╌╌╌╌╌╌╌╌╌╌╌╌╌✗                                                               
+  ┆             ┆                                                               
+╭───╮         ╭───╮                                                             
+│ A │         │ B │                                                             
+╰───╯         ╰───╯

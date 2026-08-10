@@ -2,20 +2,20 @@
 source: tests/mermaid_layout_state.rs
 expression: "render(&chart, 60)"
 ---
-                             ●                              
-                             ▼                              
-                         ╭──────╮                           
-                         │ Idle │                           
-                         ╰───┬──╯                           
-                             │start                         
-                             ▼                              
-                        ╭─────────╮                         
-                        │ Working │                         
-                        ╰────┬────╯                         
-                             │finish                        
-                             ▼                              
-                         ╭──────╮                           
-                         │ Done │                           
-                         ╰───┬──╯                           
-                             ▼                              
-                             ◉
+     ●                                                      
+     ▼                                                      
+ ╭──────╮                                                   
+ │ Idle │                                                   
+ ╰───┬──╯                                                   
+     │start                                                 
+     ▼                                                      
+╭─────────╮                                                 
+│ Working │                                                 
+╰────┬────╯                                                 
+     │finish                                                
+     ▼                                                      
+ ╭──────╮                                                   
+ │ Done │                                                   
+ ╰───┬──╯                                                   
+     ▼                                                      
+     ◉

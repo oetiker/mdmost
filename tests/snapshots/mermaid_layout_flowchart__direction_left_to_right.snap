@@ -2,10 +2,10 @@
 source: tests/mermaid_layout_flowchart.rs
 expression: "render(&decision(Direction::LeftToRight), 90)"
 ---
-                                                ┌───────────┐                             
-                                           ╭───▶│ Handle it ├╮                            
-                                           │yes └───────────┘│                            
-                                           │                 │                            
-                  ╭───────╮    ╱─────────╲ │     ┌────────┐  │  ╭──────╮                  
-                  ( Start )──▶│ Is it OK? ├┴────▶│ Report ├──┴─▶( Done )                  
-                  ╰───────╯    ╲─────────╱  no   └────────┘     ╰──────╯
+                              ┌───────────┐                                               
+                         ╭───▶│ Handle it ├╮                                              
+                         │yes └───────────┘│                                              
+                         │                 │                                              
+╭───────╮    ╱─────────╲ │     ┌────────┐  │  ╭──────╮                                    
+( Start )──▶│ Is it OK? ├┴────▶│ Report ├──┴─▶( Done )                                    
+╰───────╯    ╲─────────╱  no   └────────┘     ╰──────╯
