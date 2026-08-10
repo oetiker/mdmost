@@ -183,6 +183,7 @@ fn code_blocks_expose_language_and_literal() {
         language,
         literal,
         fenced,
+        ..
     } = &block.kind
     else {
         unreachable!("matched above")
@@ -270,4 +271,67 @@ fn source_span_helpers() {
     assert_eq!(span.len(), 3);
     assert!(span.contains(4));
     assert!(!span.contains(5));
+}
+
+/// The `lines` of the first code block in `markdown`, as the text they point at.
+fn code_line_texts(markdown: &str) -> Vec<String> {
+    let doc = Doc::parse(markdown);
+    let block = find(doc.root(), &|n| {
+        matches!(n.kind, NodeKind::CodeBlock { .. })
+    })
+    .expect("a code block");
+    let NodeKind::CodeBlock { lines, .. } = &block.kind else {
+        unreachable!()
+    };
+    lines
+        .iter()
+        .map(|s| doc.source()[s.start..s.end].to_string())
+        .collect()
+}
+
+#[test]
+fn a_fenced_block_maps_each_line_to_its_source() {
+    let texts = code_line_texts("```rust\nlet a = 1;\nlet b = 2;\n```\n");
+    assert_eq!(texts, ["let a = 1;", "let b = 2;"]);
+}
+
+#[test]
+fn an_indented_block_maps_past_the_stripped_indent() {
+    let texts = code_line_texts("    let a = 1;\n    let b = 2;\n");
+    assert_eq!(texts, ["let a = 1;", "let b = 2;"]);
+}
+
+#[test]
+fn a_quoted_fence_maps_past_the_quote_marker() {
+    let texts = code_line_texts("> ```\n> let a = 1;\n> ```\n");
+    assert_eq!(texts, ["let a = 1;"]);
+}
+
+#[test]
+fn a_fence_in_a_list_item_maps_past_the_item_indent() {
+    let texts = code_line_texts("- item\n\n  ```\n  let a = 1;\n  ```\n");
+    assert_eq!(texts, ["let a = 1;"]);
+}
+
+#[test]
+fn a_blank_code_line_gets_an_empty_span() {
+    let doc = Doc::parse("```\na\n\nb\n```\n");
+    let block = find(doc.root(), &|n| {
+        matches!(n.kind, NodeKind::CodeBlock { .. })
+    })
+    .expect("a code block");
+    let NodeKind::CodeBlock { lines, .. } = &block.kind else {
+        unreachable!()
+    };
+    assert_eq!(lines.len(), 3, "one entry per literal line");
+    assert!(lines[1].is_empty(), "the blank line points at nothing");
+    assert_eq!(&doc.source()[lines[0].start..lines[0].end], "a");
+    assert_eq!(&doc.source()[lines[2].start..lines[2].end], "b");
+}
+
+#[test]
+fn a_fence_holding_a_fence_maps_the_inner_one() {
+    // The opening `~~~` must not be mistaken for the literal line "```".
+    let texts = code_line_texts("~~~\n```\n~~~\n");
+    assert_eq!(texts, ["```"]);
 }

@@ -23,14 +23,15 @@ pub(super) fn options<'a>() -> Options<'a> {
 }
 
 /// Converts a byte position table so `sourcepos` line/column pairs become byte offsets.
-struct LineOffsets {
+struct LineOffsets<'s> {
+    source: &'s str,
     /// Byte offset of the first byte of each line.
     starts: Vec<usize>,
     len: usize,
 }
 
-impl LineOffsets {
-    fn new(source: &str) -> Self {
+impl<'s> LineOffsets<'s> {
+    fn new(source: &'s str) -> Self {
         let mut starts = vec![0usize];
         starts.extend(
             source
@@ -40,6 +41,7 @@ impl LineOffsets {
                 .map(|(i, _)| i + 1),
         );
         Self {
+            source,
             starts,
             len: source.len(),
         }
@@ -64,6 +66,64 @@ impl LineOffsets {
         let end = self.offset(pos.end.line, pos.end.column + 1);
         SourceSpan::new(start, end)
     }
+
+    /// The 0-based index of the line containing `offset`.
+    fn line_index(&self, offset: usize) -> usize {
+        match self.starts.binary_search(&offset) {
+            Ok(index) => index,
+            Err(index) => index.saturating_sub(1),
+        }
+    }
+
+    /// The content of 0-based line `index`, without its line ending, and where it starts.
+    ///
+    /// A trailing `\r` is dropped so that a CRLF document matches like any other.
+    fn line(&self, index: usize) -> Option<(usize, &'s str)> {
+        let start = *self.starts.get(index)?;
+        let end = self
+            .starts
+            .get(index + 1)
+            .map_or(self.len, |next| next.saturating_sub(1));
+        let text = self.source.get(start..end)?;
+        Some((start, text.strip_suffix('\r').unwrap_or(text)))
+    }
+}
+
+/// Where each line of a code block's `literal` came from in the source.
+///
+/// Matched as a **suffix** of a source line, which is comrak's prefix-stripping run
+/// backwards: four spaces, `> ` and a list indent all fall out of the same rule without
+/// being special-cased, and the match is checked against the real text rather than
+/// assumed. A line that cannot be located gets an empty span and the walk carries on —
+/// no provenance is today's behaviour, whereas a *wrong* offset would put a search hit
+/// on the wrong cells and copy the wrong bytes.
+fn code_lines(offsets: &LineOffsets<'_>, span: SourceSpan, literal: &str) -> Vec<SourceSpan> {
+    let mut out = Vec::new();
+    let mut index = offsets.line_index(span.start);
+    let last = offsets.line_index(span.end.saturating_sub(1));
+    for line in literal.strip_suffix('\n').unwrap_or(literal).split('\n') {
+        if line.is_empty() {
+            out.push(SourceSpan::default());
+            continue;
+        }
+        let found = (index..=last).find_map(|at| {
+            let (start, text) = offsets.line(at)?;
+            text.ends_with(line).then(|| {
+                (
+                    at,
+                    SourceSpan::new(start + text.len() - line.len(), start + text.len()),
+                )
+            })
+        });
+        match found {
+            Some((at, found)) => {
+                index = at + 1;
+                out.push(found);
+            }
+            None => out.push(SourceSpan::default()),
+        }
+    }
+    out
 }
 
 /// Recursively converts a comrak node into an owned [`Node`].
@@ -127,7 +187,7 @@ fn apply_footnote_numbers(node: &mut Node, numbers: &HashMap<String, u32>) {
 
 fn convert<'a>(
     node: &'a AstNode<'a>,
-    offsets: &LineOffsets,
+    offsets: &LineOffsets<'_>,
     slugger: &mut Slugger,
     headings: &mut Vec<Heading>,
 ) -> Node {
@@ -166,6 +226,7 @@ fn convert<'a>(
             NodeKind::CodeBlock {
                 info,
                 language,
+                lines: code_lines(offsets, source, &code.literal),
                 literal: code.literal.clone(),
                 fenced: code.fenced,
             }

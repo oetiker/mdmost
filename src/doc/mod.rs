@@ -125,6 +125,14 @@ pub enum NodeKind {
         literal: String,
         /// Whether the block was fenced (as opposed to indented).
         fenced: bool,
+        /// Where each line of `literal` came from in the document source.
+        ///
+        /// One entry per line of `literal`; an empty span for a line that is blank or
+        /// that could not be located. comrak strips the container prefix from every
+        /// line — four spaces, `> `, a list indent — so this cannot be recovered from
+        /// [`Node::source`] by arithmetic, and it is built in [`super::convert`] where
+        /// the source text is in hand.
+        lines: Vec<SourceSpan>,
     },
     /// A thematic break (`---`).
     ThematicBreak,
