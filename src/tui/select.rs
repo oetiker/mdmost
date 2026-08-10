@@ -50,11 +50,12 @@
 //! The known limitation this leaves, stated plainly because a doc comment that hid it
 //! would be the defect class this project keeps catching in itself: a drag that starts
 //! in prose and *ends inside* spanless content copies only as far as the last byte the
-//! renderer mapped — the paragraph, not the half of the code block below it. There is
-//! no honest way to do better: the hull's far end is a source offset and the cells
-//! below it have none, so any guess would either over-copy the rest of the block or
-//! invent an offset. Ending the drag past the block, or inside it on both ends, both
-//! give the right answer.
+//! renderer mapped — the paragraph, not the half of the diagram below it (a code fence
+//! no longer demonstrates this: it carries spans now, so a drag ending inside one hits
+//! decision 1 instead). There is no honest way to do better: the hull's far end is a
+//! source offset and the cells below it have none, so any guess would either over-copy
+//! the rest of the block or invent an offset. Ending the drag past the block, or inside
+//! it on both ends, both give the right answer.
 //!
 //! **4. Coordinates are canvas coordinates, not viewport ones.** The selection is
 //! anchored to the document, so scrolling — vertically or horizontally — during a drag

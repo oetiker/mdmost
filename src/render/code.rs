@@ -103,7 +103,7 @@ fn framed_code(
     // Below four columns there is no room for a frame plus content; the code is shown
     // bare rather than as a box with nothing inside it.
     if width < 4 {
-        return code_area(&lines, origins, width, false, ctx);
+        return code_area(&lines, origins, literal, width, false, ctx);
     }
     // The frame takes two columns and the interior padding one more on each side, so
     // code sits inside its box the way a table cell sits inside its column.
@@ -113,7 +113,14 @@ fn framed_code(
         0
     };
     let area_width = width - 2 - 2 * padding;
-    let area = code_area(&lines, origins, area_width, ctx.options.line_numbers, ctx);
+    let area = code_area(
+        &lines,
+        origins,
+        literal,
+        area_width,
+        ctx.options.line_numbers,
+        ctx,
+    );
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
     let inner = area.indent(padding, padding, theme.code.background);
     let title = fenced
@@ -243,6 +250,7 @@ fn title(language: &str, ctx: Ctx<'_>) -> Line {
 fn code_area(
     lines: &[Line],
     origins: &[SourceSpan],
+    literal: &str,
     width: u16,
     numbered: bool,
     ctx: Ctx<'_>,
@@ -260,6 +268,15 @@ fn code_area(
         lines.len(),
         theme.code.background,
     );
+    // The raw (unexpanded) text of each line of `literal`, split exactly the way
+    // `NodeKind::CodeBlock.lines` was built, so `raw.get(row)` names the same line as
+    // `origins.get(row)`. `bridge::highlight`'s `lines` above have had tabs expanded to
+    // spaces (`highlight::expand_tabs`), which is a display concern; a `SearchSpan`
+    // points at document bytes, and a tab is one document byte, not `TAB_WIDTH` of
+    // them, so the byte offset below has to be measured against this text instead —
+    // measuring against the expanded line landed `source_end` past the end of the
+    // line, into whatever source bytes followed it, on any code containing a tab.
+    let raw = crate::doc::literal_lines(literal);
     for (row, line) in lines.iter().enumerate() {
         if gutter > 0 {
             let number = format!("{:>digits$} ", row + 1, digits = digits);
@@ -272,16 +289,29 @@ fn code_area(
         // fragment, or a construction site that has none — and then this block behaves
         // exactly as it did before spans existed.
         if let Some(origin) = origins.get(row).filter(|o| !o.is_empty()) {
-            // How many columns of this line survive the clip below. When the block is
-            // clipped, the last column carries the overflow marker and is not code.
-            let room = budget
-                .saturating_sub(gutter)
-                .saturating_sub(usize::from(natural > budget) * display_width(OVERFLOW_MARKER));
-            let drawn = line.width().min(room);
+            // Whether *this* row loses anything to the clip below is a per-row question
+            // — `Canvas::clip_with_edges` only marks a row that actually had a
+            // non-blank cell past `width`, and a code block's rows are rarely all the
+            // same length. Deciding it from the block's widest line (`natural`) instead
+            // used to report a row one column and one byte short of what was actually
+            // drawn, whenever a shorter row happened to fit exactly.
+            let code_budget = budget.saturating_sub(gutter);
+            let clipped = line.width() > code_budget;
+            let drawn = if clipped {
+                code_budget.saturating_sub(display_width(OVERFLOW_MARKER))
+            } else {
+                line.width()
+            };
             if drawn > 0 {
+                let text = raw.get(row).copied().unwrap_or_default();
+                // Belt and braces: even a correct walk below cannot exceed `origin`'s
+                // own bytes, but nothing else guarantees that structurally, and this is
+                // the one invariant — never span past the line the mapping named — that
+                // should hold by construction rather than by care.
+                let source_end = (origin.start + bytes_for_columns(text, drawn)).min(origin.end);
                 out.add_span(SearchSpan {
                     source_start: origin.start,
-                    source_end: origin.start + bytes_for_columns(&line.text(), drawn),
+                    source_end,
                     row,
                     col: u16::try_from(gutter).unwrap_or(u16::MAX),
                     cols: u16::try_from(drawn).unwrap_or(u16::MAX),
@@ -298,20 +328,34 @@ fn code_area(
     out
 }
 
-/// How many bytes of `text` the first `columns` display columns occupy.
+/// How many bytes of the raw (unexpanded) source line `text` the first `columns`
+/// **display** columns occupy.
 ///
-/// Grapheme-wise, and for the reason `tui::select::byte_at_column` gives in the other
-/// direction: a double-width cluster is two columns and one boundary, so counting bytes
-/// or `char`s would land inside it and cut a span mid-character.
+/// `text` is a line of `literal` as comrak handed it to us — tabs still tabs, nothing
+/// expanded — because that is what a `SearchSpan`'s byte range must measure against:
+/// the document, not `bridge::highlight`'s rendering of it. Tab stops are tracked the
+/// same way `highlight::expand_tabs` computes them when it built the *drawn* line, so
+/// the two walks land on the same column for the same byte even though one produces
+/// spaces and the other counts them.
+///
+/// Grapheme-wise otherwise, and for the reason `tui::select::byte_at_column` gives in
+/// the other direction: a double-width cluster is two columns and one boundary, so
+/// counting bytes or `char`s would land inside it and cut a span mid-character.
 fn bytes_for_columns(text: &str, columns: usize) -> usize {
     let mut used = 0usize;
     let mut offset = 0usize;
+    let mut column = 0usize;
     for cluster in graphemes(text) {
-        let width = display_width(cluster);
+        let width = if cluster == "\t" {
+            crate::highlight::TAB_WIDTH - (column % crate::highlight::TAB_WIDTH)
+        } else {
+            display_width(cluster)
+        };
         if used + width > columns {
             break;
         }
         used += width;
+        column += width;
         offset += cluster.len();
     }
     offset
@@ -352,7 +396,7 @@ fn fallback(
     let theme = ctx.theme;
     let lines = bridge::highlight(Some(MERMAID), literal, theme);
     if width < 4 {
-        return code_area(&lines, origins, width, false, ctx);
+        return code_area(&lines, origins, literal, width, false, ctx);
     }
     let padding = if width > 2 + 2 * CODE_PADDING {
         CODE_PADDING
@@ -360,11 +404,15 @@ fn fallback(
         0
     };
     let area_width = width - 2 - 2 * padding;
-    let inner = code_area(&lines, origins, area_width, ctx.options.line_numbers, ctx).indent(
-        padding,
-        padding,
-        theme.code.background,
-    );
+    let inner = code_area(
+        &lines,
+        origins,
+        literal,
+        area_width,
+        ctx.options.line_numbers,
+        ctx,
+    )
+    .indent(padding, padding, theme.code.background);
     let title = Line::styled(MERMAID, theme.code.language);
     // The bottom edge is as long as the block; a caption longer than that is elided
     // rather than hard-cut, so it never ends mid-word against the corner glyph.

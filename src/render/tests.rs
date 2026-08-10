@@ -2177,11 +2177,104 @@ fn the_line_number_gutter_carries_no_span() {
     let options = RenderOptions::new(false, true);
     let markdown = "```\nlet a = 1;\n```\n";
     let canvas = render_with(markdown, 40, &options);
+    let mut saw_a_span = false;
     for span in canvas.spans() {
         let text = &markdown[s_range(span)];
         assert!(
             !text.trim().is_empty() && !text.chars().all(|c| c.is_ascii_digit()),
             "a gutter number is not in the document: {text:?}"
         );
+        // The text check alone is vacuous: a span starting at column 0, covering both
+        // the gutter and the code, would still slice `"let a = 1;"` out of the source —
+        // the gutter's own cells carry no bytes of their own to leak into that check.
+        // Design §3 is a claim about *columns*, so assert one directly: with a single
+        // line this block's gutter is `digit_count(1) + 3 == 4` columns wide
+        // (`code::gutter_width`), and a span starting inside it would prove the rule
+        // broken even though the text happened to read back correctly.
+        assert!(
+            span.col >= 4,
+            "span at column {} starts inside the gutter, not the code",
+            span.col
+        );
+        saw_a_span = true;
+    }
+    assert!(saw_a_span, "the code line must have produced a span at all");
+}
+
+#[test]
+fn a_tab_in_the_code_maps_to_its_source_byte_not_its_expanded_columns() {
+    // `bridge::highlight` expands the tab to spaces before this line ever reaches the
+    // canvas (`highlight::expand_tabs`); the source line is 13 bytes, its *drawn* text
+    // is 16 columns wide. Measuring `source_end` against the drawn text instead of the
+    // raw source line lands three bytes past the end of this line — into the newline
+    // and the closing fence.
+    let markdown = "```\n\tfn main() {}\n```\n";
+    let canvas = render(markdown, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].contains("fn main"))
+        .expect("a span for the tabbed line");
+    assert_eq!(
+        &markdown[s_range(span)],
+        "\tfn main() {}",
+        "the span must cover exactly this source line, tab included, and nothing past it"
+    );
+}
+
+#[test]
+fn a_row_that_exactly_fits_is_not_shortened_because_another_row_overflows() {
+    // The block's *widest* line drives `natural`, which used to also decide whether
+    // *every* row reserved a column for the overflow marker. A shorter row that lands
+    // exactly on the code budget is not clipped at all — `Canvas::clip_with_edges`
+    // marks a row only when it actually has a non-blank cell past the cut — so basing
+    // its span on the block-wide decision reported it one column and one byte short of
+    // what was actually drawn.
+    let short = "A".repeat(16);
+    let long = "B".repeat(26);
+    let markdown = format!("```\n{short}\n{long}\n```\n");
+    // `render_body` fixes the body budget at exactly `width`, so the frame's chrome
+    // (`code::chrome_width`, two border columns and one padding column each side) can
+    // be reasoned about directly: at a body width of 20 the code area is exactly 16
+    // columns, precisely `short`'s length.
+    let canvas = render_body(&markdown, 20, &PLAIN);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].starts_with('A'))
+        .expect("a span for the exactly-fitting row");
+    assert_eq!(
+        &markdown[s_range(span)],
+        short,
+        "the full row must be spanned, not one column short"
+    );
+    assert_eq!(usize::from(span.cols), 16);
+}
+
+#[test]
+fn a_crlf_authored_fence_maps_correctly_if_it_maps_at_all() {
+    // comrak keeps CRLF's `\r` inside a code block's `literal`
+    // (`literal == "let needle = 1;\r\n"`), which `doc::convert::code_lines` cannot
+    // currently match against the `\r`-stripped source line `LineOffsets::line`
+    // searches — this line ends up with no provenance, the same safe "could not locate
+    // it" outcome any other unmatched line gets (empty `SourceSpan`, filtered out
+    // before a span is recorded).
+    //
+    // What this settles is the *row-alignment* question a review raised: does
+    // `bridge::highlight`'s per-line split still line up, row for row, with
+    // `origins` when a literal carries an extra byte per line that
+    // `doc::literal_lines`'s split also has to account for? It does — both split only
+    // on `\n`, so the `\r` travels with the same line on both sides — and rendering
+    // this must neither panic nor invent a span pointing at the wrong bytes. If a span
+    // for this line ever does appear (comrak's `\r` handling is not this task's to
+    // fix), it must be exactly the line, with no `\r` and no overrun into the fence.
+    let markdown = "```rust\r\nlet needle = 1;\r\n```\r\n";
+    let canvas = render(markdown, 40);
+    if let Some(span) = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].contains("needle"))
+    {
+        assert_eq!(&markdown[s_range(span)], "let needle = 1;");
     }
 }

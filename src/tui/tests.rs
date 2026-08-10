@@ -3138,6 +3138,23 @@ fn extract_over_code(markdown: &str) -> select::Extract {
     drag_over(&canvas, markdown, "let a = 1;")
 }
 
+/// Now that a code fence carries spans, every survivor in this file that exercises
+/// `extract` on a code block asserts `from_source == true` — the suite lost its only
+/// negative case for the flag. A drawn Mermaid diagram is still genuinely spanless (it
+/// is box art, not source text; design spec §3), so a drag wholly inside one pins the
+/// other half of the contract: `Extract::from_source` still says `false` for content
+/// that really has no mapping, rather than having drifted to always-true.
+#[test]
+fn a_drag_over_a_diagram_still_falls_back_to_what_is_drawn() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let extract = drag_over(&canvas, FITTING_FENCE, "Read");
+    assert!(
+        !extract.from_source,
+        "a drawn diagram has no source span; the pager must not claim it does"
+    );
+}
+
 #[test]
 fn a_drag_across_a_code_fence_takes_the_fence_from_the_source() {
     let mut app = pager(MARKUP);
