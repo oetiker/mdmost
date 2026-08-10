@@ -27,7 +27,7 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<Flowchart, MermaidError> {
 
     // `graph TD; A-->B` puts statements on the header line.
     let (_, after_keyword) = lex::split_word(header.text);
-    let mut statements = lex::split_top_level(after_keyword, ';', Nesting::Honour);
+    let mut statements = lex::split_statements(after_keyword);
     if let Some(first) = statements.first() {
         let (word, rest) = lex::split_word(first);
         if let Some(dir) = direction(word) {
@@ -44,7 +44,7 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<Flowchart, MermaidError> {
     }
 
     for line in body {
-        for statement in lex::split_top_level(line.text, ';', Nesting::Honour) {
+        for statement in lex::split_statements(line.text) {
             builder.statement(statement, line.number)?;
         }
     }

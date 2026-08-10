@@ -134,6 +134,36 @@ pub fn split_top_level(text: &str, sep: char, nesting: Nesting) -> Vec<&str> {
     parts
 }
 
+/// Splits a flowchart line into statements on `;`, keeping `|…|` labels intact.
+///
+/// A flowchart edge label is delimited by pipes rather than by brackets or quotes, so
+/// [`Scanner`] does not protect it: `A -->|Vec&lt;T&gt;| B` would otherwise be cut in
+/// half at the entity's semicolon. Only the flowchart family needs this — no other
+/// family writes a `|`-delimited label, and ER's crow's-foot operators use unpaired
+/// pipes that must not be mistaken for one.
+pub fn split_statements(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut scanner = Scanner::default();
+    let mut piped = false;
+    let mut start = 0;
+    for (at, ch) in text.char_indices() {
+        if !scanner.step(ch, Nesting::Honour) {
+            continue;
+        }
+        match ch {
+            '|' => piped = !piped,
+            ';' if !piped => {
+                parts.push(text[start..at].trim());
+                start = at + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(text[start..].trim());
+    parts.retain(|part| !part.is_empty());
+    parts
+}
+
 /// Splits `text` at the first top-level `sep`, returning the two trimmed halves.
 pub fn split_once_top_level(text: &str, sep: char, nesting: Nesting) -> Option<(&str, &str)> {
     let mut buf = [0u8; 4];

@@ -163,3 +163,61 @@ mod identifiers {
         assert_eq!(chart.nodes[0].label, Label::line("x < y"));
     }
 }
+
+mod edge_labels {
+    use super::*;
+
+    /// The label of the only edge in `src`.
+    #[track_caller]
+    fn edge_label(src: &str) -> String {
+        match ok(src) {
+            Diagram::Flowchart(chart) => match chart.edges.as_slice() {
+                [edge] => edge.label.as_ref().map(Label::text).unwrap_or_default(),
+                other => panic!("expected one edge, got {other:?}"),
+            },
+            other => panic!("expected a flowchart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_pipe_label_survives_the_semicolon_of_an_entity() {
+        // `;` separates statements, but not inside a `|…|` label — which is where an
+        // entity most often appears, because that is where generics get written.
+        assert_eq!(
+            edge_label("flowchart LR\n    A -->|Vec&lt;T&gt;| B\n"),
+            "Vec<T>"
+        );
+        assert_eq!(
+            edge_label("flowchart LR\n    A -->|a &amp; b| B\n"),
+            "a & b"
+        );
+    }
+
+    #[test]
+    fn a_pipe_label_may_contain_a_plain_semicolon() {
+        assert_eq!(
+            edge_label("flowchart LR\n    A -->|do this; then that| B\n"),
+            "do this; then that"
+        );
+    }
+
+    #[test]
+    fn a_semicolon_outside_a_pipe_label_still_separates_statements() {
+        let chart = match ok("flowchart LR\n    A -->|x| B; B --> C\n") {
+            Diagram::Flowchart(chart) => chart,
+            other => panic!("expected a flowchart, got {other:?}"),
+        };
+        assert_eq!(chart.edges.len(), 2);
+        assert_eq!(chart.nodes.len(), 3);
+    }
+
+    #[test]
+    fn a_semicolon_in_a_bracketed_node_label_is_not_a_pipe() {
+        let chart = match ok("flowchart LR\n    A[\"a|b\"] --> B; B --> C\n") {
+            Diagram::Flowchart(chart) => chart,
+            other => panic!("expected a flowchart, got {other:?}"),
+        };
+        assert_eq!(chart.nodes[0].label, Label::line("a|b"));
+        assert_eq!(chart.edges.len(), 2);
+    }
+}
