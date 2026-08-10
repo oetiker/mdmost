@@ -86,16 +86,41 @@ pub enum Delivery {
     Failed(String),
 }
 
+/// What was copied, for the status bar to name.
+///
+/// A type rather than a `bool` because there are now four answers and because the
+/// wording is the whole point: telling a reader they copied Markdown when they copied
+/// box art is the kind of lie this project keeps finding in its own doc comments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Copied {
+    /// A selection that mapped back to the document source.
+    Source,
+    /// A selection that did not, so the drawn cells were taken instead.
+    Rendered,
+    /// A whole code block, from its button.
+    Code,
+    /// A whole table, from its button.
+    Table,
+}
+
+impl Copied {
+    /// The noun the status bar uses.
+    fn what(self) -> &'static str {
+        match self {
+            Copied::Source => "Markdown source",
+            Copied::Rendered => "rendered text",
+            Copied::Code => "code",
+            Copied::Table => "table",
+        }
+    }
+}
+
 impl Delivery {
     /// How the status bar should report this, given the byte count.
     ///
     /// The wording is the whole point of the type: see the module docs.
-    pub fn message(&self, bytes: usize, from_source: bool) -> (String, bool) {
-        let what = if from_source {
-            "Markdown source"
-        } else {
-            "rendered text"
-        };
+    pub fn message(&self, bytes: usize, copied: Copied) -> (String, bool) {
+        let what = copied.what();
         match self {
             Delivery::Confirmed => (format!("copied {bytes} bytes of {what}"), false),
             Delivery::LocalOnly => (
@@ -123,7 +148,17 @@ const OSC52_LIMIT: usize = 96 * 1024;
 
 /// Puts `text` on the clipboard by the best route available.
 pub fn copy(text: &str) -> Delivery {
-    classify(write_osc52(text), local_clipboard(text))
+    copy_rich(text, None)
+}
+
+/// Copies `text`, offering `html` as a richer flavour where a local clipboard exists.
+///
+/// The asymmetry is not an oversight. OSC 52 is one escape sequence carrying one
+/// plain-text payload — it has no MIME flavours — and it is the route that survives SSH,
+/// which is why it is written first and unconditionally. The HTML is therefore an upgrade
+/// for a reader at a local display server, and **nobody ever receives less than `text`**.
+pub fn copy_rich(text: &str, html: Option<&str>) -> Delivery {
+    classify(write_osc52(text), local_clipboard(text, html))
 }
 
 /// What to claim, given what each route did.
@@ -168,8 +203,11 @@ fn write_osc52(text: &str) -> Result<(), String> {
 /// `None` means "not attempted", which is different from a failure and is reported
 /// differently: inside an SSH session there is no local clipboard worth writing to, and
 /// writing to the remote one would put the text somewhere the reader will never look.
+///
+/// `html` is the richer flavour, offered with `text` as its plain-text alternate so that
+/// an application which cannot read HTML still gets the payload every route carries.
 #[cfg(feature = "clipboard")]
-fn local_clipboard(text: &str) -> Option<Result<(), String>> {
+fn local_clipboard(text: &str, html: Option<&str>) -> Option<Result<(), String>> {
     if is_remote_session() {
         return None;
     }
@@ -180,11 +218,17 @@ fn local_clipboard(text: &str) -> Option<Result<(), String>> {
             Err(error) => return Some(Err(error.to_string())),
         }
     }
-    let result = held
-        .as_mut()
-        .expect("just filled in")
-        .set_text(text.to_string())
-        .map_err(|error| error.to_string());
+    let clipboard = held.as_mut().expect("just filled in");
+    let result = match html {
+        // `arboard` takes the alternate alongside the HTML, so both flavours land in one
+        // ownership of the selection; setting them in two calls would leave whichever
+        // went second as the only one on the clipboard.
+        Some(html) => clipboard
+            .set()
+            .html(html.to_string(), Some(text.to_string())),
+        None => clipboard.set_text(text.to_string()),
+    }
+    .map_err(|error| error.to_string());
     if result.is_ok() {
         *COPIED_AT.lock().unwrap_or_else(|error| error.into_inner()) =
             Some(std::time::Instant::now());
@@ -251,7 +295,7 @@ static COPIED_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mute
 
 /// Built without the `clipboard` feature: OSC 52 is the only route.
 #[cfg(not(feature = "clipboard"))]
-fn local_clipboard(_text: &str) -> Option<Result<(), String>> {
+fn local_clipboard(_text: &str, _html: Option<&str>) -> Option<Result<(), String>> {
     None
 }
 
@@ -305,7 +349,13 @@ pub(super) fn encode_for_test(bytes: &[u8]) -> String {
 /// that honours it — the suite quietly putting its fixtures on the reader's clipboard.
 #[cfg(test)]
 pub(super) fn local_for_test(text: &str) -> Option<Result<(), String>> {
-    local_clipboard(text)
+    local_clipboard(text, None)
+}
+
+/// The local half of a rich copy, likewise without the OSC 52 half.
+#[cfg(test)]
+pub(super) fn local_rich_for_test(text: &str, html: &str) -> Option<Result<(), String>> {
+    local_clipboard(text, Some(html))
 }
 
 /// The decision table of [`copy`], without its two side effects.
@@ -315,6 +365,18 @@ pub(super) fn classify_for_test(
     local: Option<Result<(), String>>,
 ) -> Delivery {
     classify(osc, local)
+}
+
+/// What another application would paste, plain-text flavour, from the held clipboard.
+///
+/// Only a test wants this: the pager writes clipboards and never reads them.
+#[cfg(all(test, feature = "clipboard"))]
+pub(super) fn paste_for_test() -> Result<String, String> {
+    let mut held = LOCAL.lock().unwrap_or_else(|error| error.into_inner());
+    held.as_mut()
+        .ok_or_else(|| "nothing held".to_string())?
+        .get_text()
+        .map_err(|error| error.to_string())
 }
 
 /// Whether a local clipboard is currently held open, which is what "copied" rests on.

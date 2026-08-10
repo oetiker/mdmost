@@ -233,3 +233,33 @@ fn clearing_the_location_keeps_the_source_matches() {
     assert_eq!(search.len(), 0);
     assert_eq!(search.source_hits().len(), 1);
 }
+
+/// Renders `markdown` and runs a located literal search over it, the way the pager
+/// does: render, then `Search::locate` against the canvas's own spans.
+fn hits_for(markdown: &str, query: &str) -> Vec<Hit> {
+    let doc = crate::doc::Doc::parse(markdown);
+    let theme = crate::theme::Theme::default_dark();
+    let options = crate::render::RenderOptions::default();
+    let canvas = crate::render::render_flat(&doc, 40, &theme, &options);
+    let mut search = Search::new(doc.source(), query, SearchMode::Literal).expect("valid pattern");
+    search.locate(doc.source(), canvas.spans());
+    search.hits().to_vec()
+}
+
+#[test]
+fn search_matches_inside_a_fenced_code_block() {
+    let markdown = "text\n\n```rust\nlet needle = 1;\n```\n";
+    let hits = hits_for(markdown, "needle");
+    assert_eq!(hits.len(), 1, "the fence is searchable");
+    assert!(
+        !hits[0].segments.is_empty(),
+        "and the hit has cells to draw"
+    );
+}
+
+#[test]
+fn search_matches_inside_a_quoted_fence() {
+    let markdown = "> ```\n> let needle = 1;\n> ```\n";
+    let hits = hits_for(markdown, "needle");
+    assert_eq!(hits.len(), 1);
+}

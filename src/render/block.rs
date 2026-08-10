@@ -189,8 +189,9 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
             language,
             literal,
             fenced,
+            lines,
             ..
-        } => code::render_code_block(language.as_deref(), literal, *fenced, width, ctx),
+        } => code::render_code_block(language.as_deref(), literal, *fenced, lines, width, ctx),
         NodeKind::ThematicBreak => rule(width, ctx),
         NodeKind::Table(info) if ctx.table_depth < MAX_TABLE_DEPTH => {
             table::render_table_node(node, info, width, ctx)

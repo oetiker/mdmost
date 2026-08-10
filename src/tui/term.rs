@@ -198,9 +198,13 @@ pub fn run(app: &mut App) -> io::Result<()> {
     let mut terminal = ratatui::try_init()?;
     // Asked for and refused is worth saying: silently having no mouse looks like the
     // configuration was ignored.
-    if app.config().mouse && execute!(io::stdout(), EnableMouseCapture).is_err() {
+    let mouse = app.config().mouse && execute!(io::stdout(), EnableMouseCapture).is_ok();
+    if app.config().mouse && !mouse {
         app.notify("this terminal refused mouse capture", true);
     }
+    // A button nobody can press is worse than no button, so the renderer is told what
+    // actually happened rather than what the configuration asked for (design spec §4).
+    app.set_copy_button(mouse);
     // Named, not `_guard`, because the order of what follows the loop matters and the
     // restoration has to be part of that order rather than a scope-end surprise.
     let guard = Restore;
@@ -346,7 +350,15 @@ fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16) {
         MouseEventKind::Down(MouseButton::Left) if app.focus() == Focus::Toc && !in_doc => {}
         MouseEventKind::Down(MouseButton::Left) if in_doc => {
             let (x, y) = local();
-            app.begin_selection(x, y);
+            // A control answers the press instead of starting a drag (design spec §5):
+            // pressing `[copy]` must never leave a selection behind it. One arm rather
+            // than two so the precedence is written down where it is read, and cannot be
+            // lost by someone reordering the match.
+            if app.press_hotspot(x, y) {
+                copy_hotspot(app);
+            } else {
+                app.begin_selection(x, y);
+            }
         }
         // A drag is reported even when the pointer has left the window, with the
         // coordinates clamped to it — which is exactly what makes the edge auto-scroll
@@ -372,7 +384,28 @@ fn copy_selection(app: &mut App) {
         return;
     };
     let delivery = super::clipboard::copy(&extract.text);
-    app.report_copy(extract.text.len(), extract.from_source, &delivery);
+    let copied = if extract.from_source {
+        super::clipboard::Copied::Source
+    } else {
+        super::clipboard::Copied::Rendered
+    };
+    app.report_copy(extract.text.len(), copied, &delivery);
+}
+
+/// Puts the payload a pressed copy button produced on the clipboard, and flashes it.
+///
+/// The same division of labour as [`copy_selection`]: [`App`] decided what the press
+/// meant and produced the bytes, and the I/O — which touches the terminal and the
+/// display server — happens out here.
+fn copy_hotspot(app: &mut App) {
+    let Some(copy) = app.take_hotspot_copy() else {
+        return;
+    };
+    let delivery = super::clipboard::copy_rich(&copy.text, copy.html.as_deref());
+    // The byte count is the plain payload's: it is what every reader receives, and a
+    // reader on a remote host never got the HTML at all.
+    app.report_copy(copy.text.len(), copy.what, &delivery);
+    app.flash_copied(copy.row, copy.col);
 }
 
 /// Converts a `crossterm` key event into the terminal-independent [`Key`].

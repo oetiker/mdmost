@@ -31,12 +31,13 @@
 //! `tui::tests::the_gutter_rule_matches_the_renderer` pins the published column to the
 //! layout drawn here.
 
-use crate::canvas::{BorderSet, Canvas};
+use crate::canvas::{BorderSet, Canvas, SearchSpan};
+use crate::doc::SourceSpan;
 use crate::error::MermaidError;
 use crate::mermaid::Fit;
-use crate::text::{Line, Span, display_width};
+use crate::text::{Line, Span, display_width, graphemes};
 
-use super::{Ctx, bridge};
+use super::{Ctx, bridge, button};
 
 /// The info-string language that routes a fence to the Mermaid renderer.
 const MERMAID: &str = "mermaid";
@@ -65,16 +66,17 @@ pub(crate) fn render_code_block(
     language: Option<&str>,
     literal: &str,
     fenced: bool,
+    origins: &[SourceSpan],
     width: u16,
     ctx: Ctx<'_>,
 ) -> Canvas {
     if is_mermaid(language) {
         return match bridge::mermaid(literal, width, ctx.theme, Fit::COMPACT) {
             Ok(canvas) => diagram_block(canvas, width, ctx),
-            Err(error) => fallback(literal, &error, width, ctx),
+            Err(error) => fallback(literal, &error, origins, width, ctx),
         };
     }
-    framed_code(language, literal, fenced, width, ctx)
+    framed_code(language, literal, fenced, origins, width, ctx)
 }
 
 /// A drawn diagram as a block of the document: the canvas, padded to the block width.
@@ -92,6 +94,7 @@ fn framed_code(
     language: Option<&str>,
     literal: &str,
     fenced: bool,
+    origins: &[SourceSpan],
     width: u16,
     ctx: Ctx<'_>,
 ) -> Canvas {
@@ -100,7 +103,7 @@ fn framed_code(
     // Below four columns there is no room for a frame plus content; the code is shown
     // bare rather than as a box with nothing inside it.
     if width < 4 {
-        return code_area(&lines, width, false, ctx);
+        return code_area(&lines, origins, literal, width, false, ctx);
     }
     // The frame takes two columns and the interior padding one more on each side, so
     // code sits inside its box the way a table cell sits inside its column.
@@ -110,7 +113,14 @@ fn framed_code(
         0
     };
     let area_width = width - 2 - 2 * padding;
-    let area = code_area(&lines, area_width, ctx.options.line_numbers, ctx);
+    let area = code_area(
+        &lines,
+        origins,
+        literal,
+        area_width,
+        ctx.options.line_numbers,
+        ctx,
+    );
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
     let inner = area.indent(padding, padding, theme.code.background);
     let title = fenced
@@ -125,7 +135,38 @@ fn framed_code(
     );
     join_gutter(&mut out, gutter, padding, title.as_ref(), ctx);
     pin_gutter(&mut out, gutter, padding, title.as_ref());
+    // The label and the junction have already taken what they need of the top edge; the
+    // button is the third occupant and the only optional one, so it is the one that
+    // yields. A block inside a table cell is blitted into a row it shares and would lose
+    // its hotspot while keeping its cells, so it is not offered one at all.
+    if ctx.options.copy_button && ctx.table_depth == 0 {
+        let occupied = top_edge_occupied(&out, title.as_ref());
+        button::place(
+            &mut out,
+            0,
+            occupied,
+            theme.code.frame,
+            literal.to_string(),
+            None,
+        );
+    }
     out
+}
+
+/// The first column of the top edge that nothing has claimed yet.
+///
+/// Read back off the drawn row for the same reason `pin_gutter` does it: the label's
+/// column depends on whether it collided with the gutter junction, and a second copy of
+/// that arithmetic is what would drift.
+fn top_edge_occupied(out: &Canvas, title: Option<&Line>) -> u16 {
+    let Some(title) = title else { return 1 };
+    let text = out.row_text(0);
+    let start = title
+        .spans
+        .first()
+        .and_then(|span| text.find(span.text.as_str()))
+        .map_or(2, |byte| display_width(&text[..byte]));
+    u16::try_from(start + title.width() + 1).unwrap_or(u16::MAX)
 }
 
 /// Publishes the columns of this block that are chrome, for the pager to hold still.
@@ -237,7 +278,14 @@ fn title(language: &str, ctx: Ctx<'_>) -> Line {
 ///
 /// When `numbered` is set and there is room for it, a gutter of right-aligned line
 /// numbers is drawn first and the code is clipped to what remains.
-fn code_area(lines: &[Line], width: u16, numbered: bool, ctx: Ctx<'_>) -> Canvas {
+fn code_area(
+    lines: &[Line],
+    origins: &[SourceSpan],
+    literal: &str,
+    width: u16,
+    numbered: bool,
+    ctx: Ctx<'_>,
+) -> Canvas {
     let theme = ctx.theme;
     let budget = usize::from(width);
     let digits = digit_count(lines.len());
@@ -251,6 +299,24 @@ fn code_area(lines: &[Line], width: u16, numbered: bool, ctx: Ctx<'_>) -> Canvas
         lines.len(),
         theme.code.background,
     );
+    // The raw (unexpanded) text of each line of `literal`, split exactly the way
+    // `NodeKind::CodeBlock.lines` was built, so `raw.get(row)` names the same line as
+    // `origins.get(row)`. `bridge::highlight`'s `lines` above have had tabs expanded to
+    // spaces (`highlight::expand_tabs`), which is a display concern; a `SearchSpan`
+    // points at document bytes, and a tab is one document byte, not `TAB_WIDTH` of
+    // them, so the byte offset below has to be measured against this text instead —
+    // measuring against the expanded line landed `source_end` past the end of the
+    // line, into whatever source bytes followed it, on any code containing a tab.
+    //
+    // Skipped entirely when `origins` is empty: nothing below ever indexes `raw` in
+    // that case, so splitting `literal` would be a `Vec` allocation a ten-thousand-line
+    // fragment (or a construction site with no mapping at all) would pay for and never
+    // use.
+    let raw = if origins.is_empty() {
+        Vec::new()
+    } else {
+        crate::doc::literal_lines(literal)
+    };
     for (row, line) in lines.iter().enumerate() {
         if gutter > 0 {
             let number = format!("{:>digits$} ", row + 1, digits = digits);
@@ -258,6 +324,40 @@ fn code_area(lines: &[Line], width: u16, numbered: bool, ctx: Ctx<'_>) -> Canvas
             out.write_str(row, digits + 1, GUTTER_RULE, theme.code.frame);
         }
         out.write_line(row, gutter, line, theme.code.background);
+        // The gutter is chrome and is not in the document, so the span starts where the
+        // code does. `origins` is empty for a block rendered without a mapping — a
+        // fragment, or a construction site that has none — and then this block behaves
+        // exactly as it did before spans existed.
+        if let Some(origin) = origins.get(row).filter(|o| !o.is_empty()) {
+            // Whether *this* row loses anything to the clip below is a per-row question
+            // — `Canvas::clip_with_edges` only marks a row that actually had a
+            // non-blank cell past `width`, and a code block's rows are rarely all the
+            // same length. Deciding it from the block's widest line (`natural`) instead
+            // used to report a row one column and one byte short of what was actually
+            // drawn, whenever a shorter row happened to fit exactly.
+            let code_budget = budget.saturating_sub(gutter);
+            let clipped = line.width() > code_budget;
+            let drawn = if clipped {
+                code_budget.saturating_sub(display_width(OVERFLOW_MARKER))
+            } else {
+                line.width()
+            };
+            if drawn > 0 {
+                let text = raw.get(row).copied().unwrap_or_default();
+                // Belt and braces: even a correct walk below cannot exceed `origin`'s
+                // own bytes, but nothing else guarantees that structurally, and this is
+                // the one invariant — never span past the line the mapping named — that
+                // should hold by construction rather than by care.
+                let source_end = (origin.start + bytes_for_columns(text, drawn)).min(origin.end);
+                out.add_span(SearchSpan {
+                    source_start: origin.start,
+                    source_end,
+                    row,
+                    col: u16::try_from(gutter).unwrap_or(u16::MAX),
+                    cols: u16::try_from(drawn).unwrap_or(u16::MAX),
+                });
+            }
+        }
     }
     // The gutter sits left of the clip point, so the clip below cuts code and never
     // numbers. The pager pins the same columns against its own horizontal offset; see
@@ -266,6 +366,39 @@ fn code_area(lines: &[Line], width: u16, numbered: bool, ctx: Ctx<'_>) -> Canvas
     out.clip_with_marker(width, OVERFLOW_MARKER, theme.code.overflow_marker);
     out.resize_width(width, theme.code.background);
     out
+}
+
+/// How many bytes of the raw (unexpanded) source line `text` the first `columns`
+/// **display** columns occupy.
+///
+/// `text` is a line of `literal` as comrak handed it to us — tabs still tabs, nothing
+/// expanded — because that is what a `SearchSpan`'s byte range must measure against:
+/// the document, not `bridge::highlight`'s rendering of it. Tab stops are tracked the
+/// same way `highlight::expand_tabs` computes them when it built the *drawn* line, so
+/// the two walks land on the same column for the same byte even though one produces
+/// spaces and the other counts them.
+///
+/// Grapheme-wise otherwise, and for the reason `tui::select::byte_at_column` gives in
+/// the other direction: a double-width cluster is two columns and one boundary, so
+/// counting bytes or `char`s would land inside it and cut a span mid-character.
+fn bytes_for_columns(text: &str, columns: usize) -> usize {
+    let mut used = 0usize;
+    let mut offset = 0usize;
+    let mut column = 0usize;
+    for cluster in graphemes(text) {
+        let width = if cluster == "\t" {
+            crate::highlight::TAB_WIDTH - (column % crate::highlight::TAB_WIDTH)
+        } else {
+            display_width(cluster)
+        };
+        if used + width > columns {
+            break;
+        }
+        used += width;
+        column += width;
+        offset += cluster.len();
+    }
+    offset
 }
 
 /// How many columns the line-number gutter `NNN │ ` occupies, zero when there is none.
@@ -293,11 +426,17 @@ fn digit_count(lines: usize) -> usize {
 ///
 /// The frame's top edge already names the language, so the caption says what happened,
 /// not what the block is.
-fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Canvas {
+fn fallback(
+    literal: &str,
+    error: &MermaidError,
+    origins: &[SourceSpan],
+    width: u16,
+    ctx: Ctx<'_>,
+) -> Canvas {
     let theme = ctx.theme;
     let lines = bridge::highlight(Some(MERMAID), literal, theme);
     if width < 4 {
-        return code_area(&lines, width, false, ctx);
+        return code_area(&lines, origins, literal, width, false, ctx);
     }
     let padding = if width > 2 + 2 * CODE_PADDING {
         CODE_PADDING
@@ -305,11 +444,15 @@ fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Ca
         0
     };
     let area_width = width - 2 - 2 * padding;
-    let inner = code_area(&lines, area_width, ctx.options.line_numbers, ctx).indent(
-        padding,
-        padding,
-        theme.code.background,
-    );
+    let inner = code_area(
+        &lines,
+        origins,
+        literal,
+        area_width,
+        ctx.options.line_numbers,
+        ctx,
+    )
+    .indent(padding, padding, theme.code.background);
     let title = Line::styled(MERMAID, theme.code.language);
     // The bottom edge is as long as the block; a caption longer than that is elided
     // rather than hard-cut, so it never ends mid-word against the corner glyph.
@@ -328,6 +471,20 @@ fn fallback(literal: &str, error: &MermaidError, width: u16, ctx: Ctx<'_>) -> Ca
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
     join_gutter(&mut out, gutter, padding, Some(&title), ctx);
     pin_gutter(&mut out, gutter, padding, Some(&title));
+    // The fallback is a highlighted code block showing Mermaid source — exactly what a
+    // reader who just saw the failure caption wants to copy — so it gets a button the
+    // same way any other framed code block does.
+    if ctx.options.copy_button && ctx.table_depth == 0 {
+        let occupied = top_edge_occupied(&out, Some(&title));
+        button::place(
+            &mut out,
+            0,
+            occupied,
+            theme.code.frame,
+            literal.to_string(),
+            None,
+        );
+    }
     out
 }
 

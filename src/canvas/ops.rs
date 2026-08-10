@@ -4,7 +4,7 @@
 //! from. Every one of them preserves the canvas contract described in
 //! [`crate::canvas`].
 
-use super::{Anchor, BorderSet, Canvas, Cell, Pin, SearchSpan};
+use super::{Anchor, BorderSet, Canvas, Cell, Hotspot, Pin, SearchSpan};
 use crate::error::CanvasError;
 use crate::text::{Align, Line, display_width};
 use crate::theme::Style;
@@ -262,11 +262,11 @@ impl Canvas {
     /// * Search spans are translated verbatim, including spans whose cells were
     ///   clipped at the right edge; consumers must clamp a span to the canvas width
     ///   before highlighting it.
-    /// * `src`'s [`Pin`]s are **dropped**. A pin is a claim about a row's first columns
-    ///   (see [`Pin`]), and a blit puts `src` somewhere on a row it may well share with
-    ///   other content — a table cell is the case that matters — where it has no standing
-    ///   to make one. The operations that do keep a pin are [`Canvas::append`] and
-    ///   [`Canvas::indent`], which move whole rows.
+    /// * `src`'s [`Pin`]s and [`Hotspot`]s are **dropped**. Both are claims about a whole
+    ///   row (see [`Pin`], [`Hotspot`]), and a blit puts `src` somewhere on a row it may
+    ///   well share with other content — a table cell is the case that matters — where it
+    ///   has no standing to make one. The operations that do keep them are
+    ///   [`Canvas::append`] and [`Canvas::indent`], which move whole rows.
     /// * Cells of `src` that are blank *and* carry no style still overwrite the
     ///   destination; use [`Canvas::blit_opaque`] semantics deliberately — a canvas is
     ///   a rectangle, not a sprite with transparency.
@@ -326,6 +326,22 @@ impl Canvas {
         }));
     }
 
+    /// Translates and merges `src`'s hotspots into `self`.
+    ///
+    /// Separate from [`Canvas::merge_metadata`] for the reason [`Canvas::merge_pins`] is:
+    /// a control belongs to a row a block owns outright, so it travels with the
+    /// operations that stack and inset whole rows and not with `blit`.
+    fn merge_hotspots(&mut self, src: &Canvas, top: usize, left: u16) {
+        self.hotspots
+            .extend(src.hotspots.iter().map(|spot| Hotspot {
+                row: spot.row + top,
+                col: spot.col.saturating_add(left),
+                cols: spot.cols,
+                text: spot.text.clone(),
+                html: spot.html.clone(),
+            }));
+    }
+
     /// Appends `other` below `self`.
     ///
     /// The result is as wide as the wider of the two; the narrower one is padded on
@@ -340,6 +356,7 @@ impl Canvas {
             .extend(other.rows.iter().map(|cells| pad_cells(cells, width, fill)));
         self.merge_metadata(other, top, 0);
         self.merge_pins(other, top, 0);
+        self.merge_hotspots(other, top, 0);
     }
 
     /// Stacks canvases vertically, in order.
@@ -395,6 +412,7 @@ impl Canvas {
         let mut out = Canvas::new(self.width + left + right, self.height(), fill);
         out.blit(0, usize::from(left), self, fill);
         out.merge_pins(self, 0, left);
+        out.merge_hotspots(self, 0, left);
         out
     }
 
@@ -433,6 +451,18 @@ impl Canvas {
             .map(|pin| Pin {
                 row: pin.row - start,
                 cols: pin.cols,
+            })
+            .collect();
+        out.hotspots = self
+            .hotspots
+            .iter()
+            .filter(|spot| (start..end).contains(&spot.row))
+            .map(|spot| Hotspot {
+                row: spot.row - start,
+                col: spot.col,
+                cols: spot.cols,
+                text: spot.text.clone(),
+                html: spot.html.clone(),
             })
             .collect();
         out

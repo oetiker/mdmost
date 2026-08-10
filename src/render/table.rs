@@ -72,6 +72,26 @@ pub(crate) fn render_table_node(node: &Node, info: &TableInfo, width: u16, ctx: 
     // of row are named from the layout rather than sniffed out of the finished canvas:
     // the renderer knows exactly which rows it drew, and a canvas full of box art inside
     // a table cell must not be mistaken for one.
+    // Before the clip, so the button belongs to the *table's* top-right corner rather
+    // than to whatever column the viewport happens to cut at. A table wider than the
+    // viewport therefore carries its button off screen with its right edge, which is the
+    // cost design spec §6 records and accepts in exchange for the control sitting in one
+    // place across the whole pager.
+    //
+    // The top rule has no label of its own, so nothing but the left corner is in the way.
+    // A nested table is blitted into a row it shares and would lose its hotspot while
+    // keeping its drawn label — a control that does nothing — so only a top-level table
+    // is offered one, and the label and the hotspot are decided here together.
+    if ctx.options.copy_button && ctx.table_depth == 0 {
+        super::button::place(
+            &mut canvas,
+            0,
+            1,
+            ctx.theme.table.border,
+            crate::export::table_tsv(node),
+            Some(crate::export::table_html(node)),
+        );
+    }
     let set = BorderSet::ROUNDED;
     canvas.clip_with_edges(
         width,

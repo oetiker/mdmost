@@ -301,9 +301,18 @@ a bold word, `**bold**`; over a link, `[text](url)`; across a code fence, the fe
 its content verbatim. A drag that reflows across several rows copies the source's own
 line breaks, not the renderer's. `Esc` clears the highlight.
 
-Two things are worth knowing. A selection over a fenced code block or a Mermaid diagram
-has no source map to invert — the renderer records one only for inline text — so it
-copies what is drawn instead, and the status bar says `rendered text` rather than
+A code frame and a table each carry a `[copy]` in the right of their top edge. Pressing
+it copies the **whole block** — the code exactly as it is written, the table as a grid of
+tab-separated cells that a spreadsheet splits into columns, with an HTML flavour offered
+alongside where the local clipboard takes one. The label reads `[copied]` for a moment
+and the status bar names what went out, `code` or `table`. There is no key for it and no
+setting: the buttons appear only when the mouse was actually captured, because a control
+nobody can press is worse than none. They are dropped where they would not fit, and a
+table wider than the terminal carries its button off to the right until you scroll to it.
+
+Two things are worth knowing. A selection over a Mermaid diagram has no source map to
+invert — the renderer records one for inline text and for code lines, not for box art —
+so it copies what is drawn instead, and the status bar says `rendered text` rather than
 `Markdown source`. And the copy goes out as OSC 52 first, which works over SSH but which
 the terminal never acknowledges: if that is the only route that ran, the status bar says
 `sent … (unconfirmed)` rather than `copied`. `tmux` needs `set -g set-clipboard on` to
@@ -326,7 +335,8 @@ icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to det
 line_numbers = false     # line-number gutter in fenced code blocks
 title_banner = false     # off; true sets a lone `#` title as a wrapped FIGlet banner
 section_numbers = true   # number headings when a document nests three levels or more
-mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies source
+mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies source,
+                         # and code frames and tables get a [copy] button
 scroll_step  = 3         # document lines per mouse-wheel notch
 body_width   = 72        # widest the prose body is laid out; 0 for no cap
 

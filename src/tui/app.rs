@@ -32,6 +32,13 @@ const MAX_COUNT_DIGITS: usize = 6;
 /// that genuinely have to be stepped — matches and headings.
 const MAX_REPEAT: usize = 10_000;
 
+/// How long the `[copied]` label stays up, in milliseconds.
+///
+/// The event loop redraws every poll interval whether or not anything happened, so the
+/// flash clears itself without any new timer: the next tick after the deadline draws
+/// the label back. Nothing here schedules a wake-up.
+pub const FLASH_FOR: u64 = 600;
+
 /// Whether `key` is a bare digit, and so part of a repeat count.
 fn is_count_digit(key: Key) -> bool {
     matches!(key.code, KeyCode::Char(ch) if ch.is_ascii_digit()) && key.mods.is_empty()
@@ -55,6 +62,26 @@ pub enum PromptKind {
     SearchBackward,
     /// A fuzzy filter over the table of contents.
     TocFilter,
+}
+
+/// What a press on a copy button produced, waiting for the event loop to deliver it.
+///
+/// The state machine touches no terminal and no display server (design spec §13), so it
+/// cannot copy: it takes the payload off the canvas and hands it over, exactly as
+/// [`Extract`] does for a finished drag. Keeping the decision here is also what lets a
+/// test press the button without taking ownership of anybody's desktop clipboard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HotspotCopy {
+    /// The canvas row the control was drawn on, for the flash.
+    pub row: usize,
+    /// The canvas column its label starts at, for the flash.
+    pub col: u16,
+    /// The plain payload, which every route carries.
+    pub text: String,
+    /// The richer flavour, offered only where a flavoured clipboard exists.
+    pub html: Option<String>,
+    /// Which noun the status bar owes the reader.
+    pub what: crate::tui::clipboard::Copied,
 }
 
 impl PromptKind {
@@ -181,6 +208,16 @@ pub struct App {
     /// so it cannot copy; it hands the text over and is told the outcome through
     /// [`App::report_copy`].
     pending_copy: Option<Extract>,
+    /// Whether the copy buttons may be drawn at all.
+    ///
+    /// Pager state rather than an [`AppOptions`] field, because it is not a setting
+    /// anybody chooses: [`super::term`] sets it from whether mouse capture was actually
+    /// granted, and a button nobody can click is worse than no button (design spec §4).
+    copy_button: bool,
+    /// The payload a press on a button produced, waiting for the event loop to copy it.
+    pending_hotspot: Option<HotspotCopy>,
+    /// The control showing its `[copied]` flash, and when it started.
+    copied_flash: Option<(usize, u16, std::time::Instant)>,
     quit: bool,
 }
 
@@ -238,6 +275,9 @@ impl App {
             search_mode: SearchMode::Literal,
             selection: None,
             pending_copy: None,
+            copy_button: false,
+            pending_hotspot: None,
+            copied_flash: None,
             quit: false,
         };
         app.refilter_toc();
@@ -278,6 +318,17 @@ impl App {
         RenderOptions::new(self.options.icons, self.config.line_numbers)
             .with_title_banner(self.config.title_banner)
             .with_section_numbers(self.config.section_numbers)
+            .with_copy_button(self.copy_button)
+    }
+
+    /// Turns the copy buttons on or off.
+    ///
+    /// Set from whether mouse capture was actually granted, not from what the
+    /// configuration asked for: the control is only drawn where a reader can press it.
+    /// No cache to invalidate by hand — [`RenderOptions`] is part of the render key, so
+    /// the canvas drawn without the buttons is dropped by the next render.
+    pub fn set_copy_button(&mut self, on: bool) {
+        self.copy_button = on;
     }
 
     /// Turns Nerd Font glyphs on or off, in the chrome and the document alike.
@@ -1592,10 +1643,91 @@ impl App {
     pub fn report_copy(
         &mut self,
         bytes: usize,
-        from_source: bool,
+        copied: crate::tui::clipboard::Copied,
         delivery: &crate::tui::clipboard::Delivery,
     ) {
-        let (text, is_error) = delivery.message(bytes, from_source);
+        let (text, is_error) = delivery.message(bytes, copied);
         self.notify(text, is_error);
+    }
+}
+
+/// The copy buttons. See `render::button` for what draws them and design spec §5 for
+/// what they carry.
+impl App {
+    /// The control under a pointer at document-area column `x`, row `y`, if any.
+    ///
+    /// The pointer goes through [`App::canvas_pos`] — the very translation
+    /// [`App::begin_selection`] uses, and nothing else — so a press and a drag can never
+    /// disagree about which cell is under the hand. A second opinion here would be a
+    /// button that answers one cell to the side of the one it is drawn in, on exactly
+    /// the rows where the arithmetic is hardest to check by eye.
+    ///
+    /// # A hotspot the viewport cut off
+    ///
+    /// A block too wide even for [`crate::render::document`]'s widening keeps its
+    /// hotspot at a column its clipped canvas no longer has, so the label is drawn
+    /// nowhere while the claim survives — an invisible control, if a press could ever
+    /// name that column. None can: the horizontal scroll only reaches as far as the
+    /// canvas is *drawn*, and `canvas_pos` clamps anything beyond it to the last cell
+    /// that exists, which is never inside a button — a button sits at least two columns
+    /// inside its own block's right edge. That is asserted by
+    /// [`super::tests::a_button_clipped_off_the_canvas_cannot_be_pressed_anywhere`],
+    /// which sweeps every cell at every offset for one.
+    fn hotspot_at(&self, x: u16, y: u16) -> Option<&crate::canvas::Hotspot> {
+        let pos = self.canvas_pos(x, y);
+        self.cache.canvas().hotspots().iter().find(|spot| {
+            spot.row == pos.row
+                && pos.col >= spot.col
+                && pos.col < spot.col.saturating_add(spot.cols)
+        })
+    }
+
+    /// Answers a press at document-area column `x`, row `y` if a control is there.
+    ///
+    /// Reports whether it was: a press the buttons did not claim is an ordinary press
+    /// and goes on to begin a drag, which is the precedence design spec §5 asks for —
+    /// clicking `[copy]` never starts a selection.
+    pub fn press_hotspot(&mut self, x: u16, y: u16) -> bool {
+        self.ensure_rendered();
+        let Some(spot) = self.hotspot_at(x, y) else {
+            return false;
+        };
+        // Code carries one flavour and a table two, and that is the whole difference
+        // between the two nouns the status bar has for them.
+        let what = if spot.html.is_some() {
+            crate::tui::clipboard::Copied::Table
+        } else {
+            crate::tui::clipboard::Copied::Code
+        };
+        self.pending_hotspot = Some(HotspotCopy {
+            row: spot.row,
+            col: spot.col,
+            text: spot.text.clone(),
+            html: spot.html.clone(),
+            what,
+        });
+        self.clear_notice();
+        true
+    }
+
+    /// Takes the payload a press produced, for the event loop to copy.
+    pub fn take_hotspot_copy(&mut self) -> Option<HotspotCopy> {
+        self.pending_hotspot.take()
+    }
+
+    /// Records that the control at canvas `(row, col)` was just used.
+    pub fn flash_copied(&mut self, row: usize, col: u16) {
+        self.copied_flash = Some((row, col, std::time::Instant::now()));
+    }
+
+    /// The control still showing its flash, if the flash has not expired.
+    ///
+    /// Read by [`super::draw`] on every frame; the event loop redraws on a timer
+    /// regardless, so the label comes back on the first tick past the deadline without
+    /// anything having been scheduled.
+    pub fn copied_flash(&self) -> Option<(usize, u16)> {
+        self.copied_flash
+            .filter(|(_, _, at)| at.elapsed() < std::time::Duration::from_millis(FLASH_FOR))
+            .map(|(row, col, _)| (row, col))
     }
 }

@@ -3110,17 +3110,56 @@ fn a_partial_drag_returns_the_covered_source_verbatim() {
 }
 
 #[test]
-fn a_drag_over_a_code_block_falls_back_to_what_is_drawn() {
+fn a_drag_over_a_code_block_reports_it_as_source() {
     let mut app = pager(MARKUP);
     let canvas = app.canvas().clone();
-    // Code blocks carry no search spans — only `render::inline` records them — so there
-    // is nothing to invert and the rendered cells are the answer. For code that is the
-    // source, modulo the frame.
+    // `render::code::code_area` now records one search span per drawn code line
+    // (design spec §3), so a drag over a code line is no longer a spanless fallback to
+    // the rendered cells: it inverts back onto the document source, the same as prose.
     let extract = drag_over(&canvas, MARKUP, "fn main() {}");
     assert_eq!(extract.text, "fn main() {}");
     assert!(
+        extract.from_source,
+        "code now has provenance and must be reported as source"
+    );
+}
+
+#[test]
+fn a_selection_over_code_yields_markdown_source() {
+    let markdown = "```rust\nlet a = 1;\n```\n";
+    let extract = extract_over_code(markdown);
+    assert!(
+        extract.from_source,
+        "code now has provenance and must be reported as source"
+    );
+    assert!(
+        extract.text.contains("let a = 1;"),
+        "got {:?}",
+        extract.text
+    );
+}
+
+/// Renders `markdown`, drags across the drawn `let a = 1;` code line, and extracts.
+fn extract_over_code(markdown: &str) -> select::Extract {
+    let mut app = pager(markdown);
+    let canvas = app.canvas().clone();
+    drag_over(&canvas, markdown, "let a = 1;")
+}
+
+/// Now that a code fence carries spans, every survivor in this file that exercises
+/// `extract` on a code block asserts `from_source == true` — the suite lost its only
+/// negative case for the flag. A drawn Mermaid diagram is still genuinely spanless (it
+/// is box art, not source text; design spec §3), so a drag wholly inside one pins the
+/// other half of the contract: `Extract::from_source` still says `false` for content
+/// that really has no mapping, rather than having drifted to always-true.
+#[test]
+fn a_drag_over_a_diagram_still_falls_back_to_what_is_drawn() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let extract = drag_over(&canvas, FITTING_FENCE, "Read");
+    assert!(
         !extract.from_source,
-        "the pager must not claim this came from the source map"
+        "a drawn diagram has no source span; the pager must not claim it does"
     );
 }
 
@@ -3145,16 +3184,21 @@ fn a_drag_across_a_code_fence_takes_the_fence_from_the_source() {
 }
 
 /// Pins the limitation `select`'s module docs admit to, so it stays a decision.
+///
+/// A code fence carries spans now (design spec §3), so it can no longer stand in for
+/// "content the renderer never mapped" — a drawn Mermaid diagram still can, since it is
+/// box art with no source span of its own.
 #[test]
 fn a_drag_ending_inside_spanless_content_stops_at_the_last_mapped_byte() {
-    let mut app = pager(MARKUP);
+    let markdown = "- item one\n\n```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n";
+    let mut app = pager(markdown);
     let canvas = app.canvas().clone();
     let (top, col, _) = drawn(&canvas, "item one");
-    let (code, _, _) = drawn(&canvas, "fn main() {}");
+    let (diagram, _, _) = drawn(&canvas, "Read");
     let extract = select::extract(
         &canvas,
-        MARKUP,
-        drag(Pos::new(top, col), Pos::new(code, 40)),
+        markdown,
+        drag(Pos::new(top, col), Pos::new(diagram, 40)),
     )
     .expect("covered");
     assert_eq!(
@@ -3394,19 +3438,38 @@ fn base64_matches_the_rfc_4648_vectors() {
 
 #[test]
 fn the_copy_report_claims_only_what_the_route_can_prove() {
-    use super::clipboard::Delivery;
+    use super::clipboard::{Copied, Delivery};
     assert_eq!(
-        Delivery::Confirmed.message(47, true),
+        Delivery::Confirmed.message(47, Copied::Source),
         ("copied 47 bytes of Markdown source".to_string(), false)
     );
-    let (text, is_error) = Delivery::Sent.message(47, false);
+    let (text, is_error) = Delivery::Sent.message(47, Copied::Rendered);
     assert!(
         text.contains("unconfirmed") && text.contains("rendered text"),
         "OSC 52 is fire-and-forget and the bar must not pretend otherwise: {text:?}"
     );
     assert!(!is_error);
-    let (text, is_error) = Delivery::Failed("no clipboard".to_string()).message(47, true);
+    let (text, is_error) = Delivery::Failed("no clipboard".to_string()).message(47, Copied::Source);
     assert!(is_error && text.contains("no clipboard"));
+}
+
+/// A button copies a whole table, which is neither the selection's Markdown source nor
+/// the drawn cells, and the bar has to be able to say so.
+#[test]
+fn a_table_copy_says_what_it_was() {
+    use super::clipboard::{Copied, Delivery};
+    let (text, is_error) = Delivery::Confirmed.message(47, Copied::Table);
+    assert_eq!(text, "copied 47 bytes of table");
+    assert!(!is_error);
+}
+
+/// And a code block's button says `code`, not `Markdown source`: a quoted fence's source
+/// carries the `> ` markers the button deliberately does not copy.
+#[test]
+fn a_code_copy_says_what_it_was() {
+    use super::clipboard::{Copied, Delivery};
+    let (text, _) = Delivery::Confirmed.message(12, Copied::Code);
+    assert_eq!(text, "copied 12 bytes of code");
 }
 
 /// An X11 or Wayland selection belongs to a process, so a copy that only the local
@@ -3415,8 +3478,8 @@ fn the_copy_report_claims_only_what_the_route_can_prove() {
 /// says what it knows: this one is held while the pager runs.
 #[test]
 fn the_copy_report_marks_a_copy_only_this_process_holds() {
-    use super::clipboard::Delivery;
-    let (text, is_error) = Delivery::LocalOnly.message(47, false);
+    use super::clipboard::{Copied, Delivery};
+    let (text, is_error) = Delivery::LocalOnly.message(47, Copied::Rendered);
     assert!(!is_error);
     assert!(
         text.starts_with("copied 47 bytes of rendered text"),
@@ -3430,7 +3493,7 @@ fn the_copy_report_marks_a_copy_only_this_process_holds() {
     // OSC 52 hands the bytes to a process that outlives us.
     assert!(
         !Delivery::Confirmed
-            .message(47, false)
+            .message(47, Copied::Rendered)
             .0
             .contains("while mdmost runs")
     );
@@ -3460,6 +3523,10 @@ fn the_delivery_is_decided_by_which_routes_worked() {
 /// passing silently.
 #[test]
 fn a_local_copy_stays_owned_until_it_is_released() {
+    #[cfg(feature = "clipboard")]
+    let _owned = DESKTOP_CLIPBOARD
+        .lock()
+        .unwrap_or_else(|it| it.into_inner());
     if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
         eprintln!("skipped: no display server to own a selection");
         return;
@@ -3494,6 +3561,57 @@ fn a_local_copy_stays_owned_until_it_is_released() {
     assert!(!super::clipboard::held_for_test());
 }
 
+/// The promise of a two-flavour copy is that it costs nobody anything: an application
+/// that reads HTML gets the richer flavour, and one that does not must still find the
+/// plain text there. Setting the two in separate calls would leave only the second, so
+/// this asserts the plain flavour survives an HTML copy.
+///
+/// Needs a display server, and clobbers the desktop clipboard when it has one. It
+/// reports why it skipped rather than passing silently.
+#[cfg(feature = "clipboard")]
+#[test]
+fn a_rich_copy_still_leaves_the_plain_text_for_whoever_cannot_read_html() {
+    let _owned = DESKTOP_CLIPBOARD
+        .lock()
+        .unwrap_or_else(|it| it.into_inner());
+    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        eprintln!("skipped: no display server to own a selection");
+        return;
+    }
+    // The capability probe, and the reason it is a *plain* copy: everything the skips
+    // below excuse — no clipboard attempted, a display server that will not take a
+    // selection or will not hand one back — is decided here, on a path this test is not
+    // about. Past that point the rich copy has no excuses left and every failure is a
+    // failure, which is what makes dropping the alternate show up as red rather than as
+    // a skipped test.
+    let Some(Ok(())) = super::clipboard::local_for_test("mdmost plain probe") else {
+        eprintln!(
+            "skipped: no local clipboard took a plain copy — a remote session, or a display server that would not have it"
+        );
+        return;
+    };
+    if let Err(why) = super::clipboard::paste_for_test() {
+        eprintln!("skipped: this display server does not hand a selection back: {why}");
+        return;
+    }
+    assert_eq!(
+        super::clipboard::local_rich_for_test("a\tb\n1\t2\n", "<table><tr><td>a</td></tr></table>"),
+        Some(Ok(())),
+        "the same handle that took a plain copy must take a rich one"
+    );
+    assert_eq!(
+        super::clipboard::paste_for_test(),
+        Ok("a\tb\n1\t2\n".to_string()),
+        "the HTML flavour must not have displaced the plain text every reader receives"
+    );
+    super::clipboard::release();
+}
+
+/// Serialises the tests that take the desktop selection. There is one clipboard per
+/// display server, so two of these running at once would read each other's copy.
+#[cfg(feature = "clipboard")]
+static DESKTOP_CLIPBOARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// A library writing to standard error must not reach the alternate screen, and must
 /// not be discarded either. Both halves are asserted: `arboard` picks between
 /// `eprintln!` and `log::warn!` depending on whether standard error is a terminal, so
@@ -3521,4 +3639,256 @@ fn a_librarys_complaints_are_held_back_and_then_reported() {
     );
     // Nothing is swallowed once there is no screen to protect.
     assert!(super::stderr::Capture::start().finish().is_empty());
+}
+
+/// A document with both controls in it: a fenced block and a top-level table.
+const BUTTONS: &str = "\
+# Buttons
+
+```rust
+let a = 1;
+```
+
+| Name | Since |
+| --- | ---: |
+| Ada | 1843 |
+";
+
+/// A table too wide for any viewport this suite uses, so its button is off to the right.
+const BUTTON_TABLE: &str = "\
+# Wide
+
+| AlphaColumnOne | BetaColumnTwoLonger | GammaColumnThreeWider | Ocelot |
+| --- | --- | --- | --- |
+| 1 | 2 | 3 | 4 |
+";
+
+/// The viewport cell the `[` of a drawn `[copy]` sits in, counting from `skip` in.
+///
+/// Read off the *painted frame*, not off the hotspot list: a hit test proved against
+/// the very positions it is reading from would pass on a build that draws the label
+/// somewhere else entirely. This is the reader's own information — where they can see
+/// the control — and it is the coordinate their pointer arrives in.
+fn painted_button(app: &mut App, width: u16, height: u16, skip: usize) -> (u16, u16) {
+    let rows = framed(app, width, height);
+    let mut seen = 0;
+    for (y, line) in rows.iter().enumerate() {
+        if let Some(at) = line.find(crate::render::button::LABEL) {
+            if seen == skip {
+                let x = crate::text::display_width(&line[..at]);
+                return (
+                    u16::try_from(x).expect("a viewport column"),
+                    u16::try_from(y).expect("a viewport row"),
+                );
+            }
+            seen += 1;
+        }
+    }
+    panic!("no [copy] label {skip} on the screen: {rows:?}");
+}
+
+#[test]
+fn the_button_appears_only_once_the_mouse_has_been_captured() {
+    // The gate design spec §4 asks for, from the pager's end. `RenderOptions` is part
+    // of the render cache key, so the flag has to reach it: the canvas drawn before the
+    // mouse was granted would otherwise be served for the rest of the session.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    assert!(
+        !app.canvas()
+            .plain_text()
+            .contains(crate::render::button::LABEL),
+        "no button until the mouse is real"
+    );
+    app.set_copy_button(true);
+    assert!(
+        app.canvas()
+            .plain_text()
+            .contains(crate::render::button::LABEL),
+        "and one once it is"
+    );
+    app.set_copy_button(false);
+    assert!(
+        !app.canvas()
+            .plain_text()
+            .contains(crate::render::button::LABEL),
+        "a terminal that lost the mouse loses the button with it"
+    );
+}
+
+#[test]
+fn a_press_on_the_code_button_copies_the_block_and_starts_no_drag() {
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert!(
+        app.press_hotspot(x, y),
+        "the label the reader sees is a control"
+    );
+    assert!(
+        app.selection().is_none(),
+        "a press on a control is not the start of a drag"
+    );
+    let copy = app.take_hotspot_copy().expect("a payload");
+    assert_eq!(copy.text, "let a = 1;\n");
+    assert!(copy.html.is_none(), "code has no second flavour");
+    assert_eq!(copy.what, super::clipboard::Copied::Code);
+}
+
+#[test]
+fn a_press_beside_the_button_is_a_drag_like_any_other() {
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    for x in [x - 1, x + 6] {
+        assert!(
+            !app.press_hotspot(x, y),
+            "the columns either side of the label are frame, not control"
+        );
+        app.begin_selection(x, y);
+        assert!(app.selection().is_some(), "so they still begin a selection");
+    }
+}
+
+#[test]
+fn a_press_on_the_table_button_copies_a_grid_and_says_it_was_a_table() {
+    // The status bar never lies: the same control on a table has to report `Table`, or
+    // a reader is told they copied code and pastes a spreadsheet.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 1);
+    assert!(app.press_hotspot(x, y), "the table's label is a control");
+    let copy = app.take_hotspot_copy().expect("a payload");
+    assert_eq!(copy.text, "Name\tSince\nAda\t1843\n");
+    assert!(copy.html.is_some(), "a table offers the richer flavour too");
+    assert_eq!(copy.what, super::clipboard::Copied::Table);
+}
+
+#[test]
+fn the_button_is_still_under_the_pointer_once_the_document_has_scrolled() {
+    // The press goes through the same translation a drag does, and at rest that
+    // translation is the identity — so only a scrolled document can tell the two apart.
+    // Vertically here, horizontally in the test below.
+    let mut app = pager_at(BUTTONS, 60, 8);
+    app.set_copy_button(true);
+    app.act(Action::LineDown);
+    app.act(Action::LineDown);
+    assert_eq!(app.scroll(), 2, "the document must have moved");
+    let (x, y) = painted_button(&mut app, 60, 8, 0);
+    assert!(
+        app.press_hotspot(x, y),
+        "the control moved up the screen with the block it belongs to"
+    );
+    assert_eq!(
+        app.take_hotspot_copy().map(|copy| copy.text),
+        Some("let a = 1;\n".to_string())
+    );
+}
+
+#[test]
+fn the_button_of_an_over_wide_table_is_pressable_once_it_is_scrolled_into_view() {
+    // A table can be wider than the viewport, and then its button rides off the right
+    // edge with the rest of the top rule — the cost design spec §6 records and accepts.
+    // What must not also be true is that scrolling to it produces a label that does not
+    // answer, so this presses it where the reader can see it.
+    let mut app = pager_at(BUTTON_TABLE, 50, 12);
+    app.set_copy_button(true);
+    assert!(app.hscroll_max() > 0, "the probe table must be over-wide");
+    while app.hscroll() < app.hscroll_max() {
+        app.act(Action::ScrollRight);
+    }
+    let (x, y) = painted_button(&mut app, 50, 12, 0);
+    assert!(
+        app.press_hotspot(x, y),
+        "the control answers at the column it is drawn in, scrolled or not"
+    );
+    assert_eq!(
+        app.take_hotspot_copy().map(|copy| copy.what),
+        Some(super::clipboard::Copied::Table)
+    );
+}
+
+#[test]
+fn a_button_clipped_off_the_canvas_cannot_be_pressed_anywhere() {
+    // A block too wide even for `render::document`'s widening cap is clipped, and the
+    // hotspot survives at a column the clipped canvas no longer has while the label is
+    // drawn nowhere. That is an invisible control if any press can name that column, so
+    // this sweeps every cell of the block at every horizontal offset there is.
+    let columns = 300;
+    let head: String = (0..columns).map(|i| format!("| C{i:04} ")).collect();
+    let rule: String = (0..columns).map(|_| "| --- ".to_string()).collect();
+    let body: String = (0..columns).map(|i| format!("| v{i:04} ")).collect();
+    let mut app = pager_at(&format!("{head}|\n{rule}|\n{body}|\n"), 80, 12);
+    app.set_copy_button(true);
+    assert!(
+        !app.canvas()
+            .plain_text()
+            .contains(crate::render::button::LABEL),
+        "the premise: the label was clipped away, so nothing is drawn to press"
+    );
+    assert_eq!(
+        app.canvas().hotspots().len(),
+        1,
+        "and the premise's other half: the hotspot outlived it"
+    );
+    loop {
+        for y in 0..11 {
+            for x in 0..80 {
+                assert!(
+                    !app.press_hotspot(x, y),
+                    "a control nobody can see answered a press at {x},{y} \
+                     with the document scrolled to column {}",
+                    app.hscroll()
+                );
+            }
+        }
+        if app.hscroll() >= app.hscroll_max() {
+            break;
+        }
+        app.act(Action::ScrollRight);
+    }
+}
+
+#[test]
+fn the_flash_expires_without_anything_scheduling_it() {
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.flash_copied(0, 30);
+    assert!(app.copied_flash().is_some());
+    std::thread::sleep(std::time::Duration::from_millis(
+        super::app::FLASH_FOR.saturating_add(50),
+    ));
+    assert!(
+        app.copied_flash().is_none(),
+        "the label goes back to [copy] on the next redraw and no earlier"
+    );
+}
+
+#[test]
+fn the_flash_is_painted_over_the_button_that_was_pressed() {
+    // The whole point of the nine reserved columns: `[copied]` is longer than `[copy]`
+    // and has to fit without a re-render, because a render may not depend on the clock.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert!(app.press_hotspot(x, y));
+    let copy = app.take_hotspot_copy().expect("a payload");
+    app.flash_copied(copy.row, copy.col);
+    let rows = framed(&mut app, 60, 20);
+    assert!(
+        rows.iter()
+            .any(|line| line.contains(crate::render::button::FLASH)),
+        "the block that was copied says so: {rows:?}"
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|line| line.contains(crate::render::button::LABEL))
+            .count(),
+        1,
+        "the table keeps its [copy] and the code block does not show both: {rows:?}"
+    );
+    // The frame it was painted into is untouched on either side of the reserved region.
+    assert!(
+        rows[usize::from(y)].contains("[copied]─╮"),
+        "the corner survives the overwrite: {:?}",
+        rows[usize::from(y)]
+    );
 }
