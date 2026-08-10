@@ -372,7 +372,12 @@ fn copy_selection(app: &mut App) {
         return;
     };
     let delivery = super::clipboard::copy(&extract.text);
-    app.report_copy(extract.text.len(), extract.from_source, &delivery);
+    let copied = if extract.from_source {
+        super::clipboard::Copied::Source
+    } else {
+        super::clipboard::Copied::Rendered
+    };
+    app.report_copy(extract.text.len(), copied, &delivery);
 }
 
 /// Converts a `crossterm` key event into the terminal-independent [`Key`].

@@ -3438,19 +3438,38 @@ fn base64_matches_the_rfc_4648_vectors() {
 
 #[test]
 fn the_copy_report_claims_only_what_the_route_can_prove() {
-    use super::clipboard::Delivery;
+    use super::clipboard::{Copied, Delivery};
     assert_eq!(
-        Delivery::Confirmed.message(47, true),
+        Delivery::Confirmed.message(47, Copied::Source),
         ("copied 47 bytes of Markdown source".to_string(), false)
     );
-    let (text, is_error) = Delivery::Sent.message(47, false);
+    let (text, is_error) = Delivery::Sent.message(47, Copied::Rendered);
     assert!(
         text.contains("unconfirmed") && text.contains("rendered text"),
         "OSC 52 is fire-and-forget and the bar must not pretend otherwise: {text:?}"
     );
     assert!(!is_error);
-    let (text, is_error) = Delivery::Failed("no clipboard".to_string()).message(47, true);
+    let (text, is_error) = Delivery::Failed("no clipboard".to_string()).message(47, Copied::Source);
     assert!(is_error && text.contains("no clipboard"));
+}
+
+/// A button copies a whole table, which is neither the selection's Markdown source nor
+/// the drawn cells, and the bar has to be able to say so.
+#[test]
+fn a_table_copy_says_what_it_was() {
+    use super::clipboard::{Copied, Delivery};
+    let (text, is_error) = Delivery::Confirmed.message(47, Copied::Table);
+    assert_eq!(text, "copied 47 bytes of table");
+    assert!(!is_error);
+}
+
+/// And a code block's button says `code`, not `Markdown source`: a quoted fence's source
+/// carries the `> ` markers the button deliberately does not copy.
+#[test]
+fn a_code_copy_says_what_it_was() {
+    use super::clipboard::{Copied, Delivery};
+    let (text, _) = Delivery::Confirmed.message(12, Copied::Code);
+    assert_eq!(text, "copied 12 bytes of code");
 }
 
 /// An X11 or Wayland selection belongs to a process, so a copy that only the local
@@ -3459,8 +3478,8 @@ fn the_copy_report_claims_only_what_the_route_can_prove() {
 /// says what it knows: this one is held while the pager runs.
 #[test]
 fn the_copy_report_marks_a_copy_only_this_process_holds() {
-    use super::clipboard::Delivery;
-    let (text, is_error) = Delivery::LocalOnly.message(47, false);
+    use super::clipboard::{Copied, Delivery};
+    let (text, is_error) = Delivery::LocalOnly.message(47, Copied::Rendered);
     assert!(!is_error);
     assert!(
         text.starts_with("copied 47 bytes of rendered text"),
@@ -3474,7 +3493,7 @@ fn the_copy_report_marks_a_copy_only_this_process_holds() {
     // OSC 52 hands the bytes to a process that outlives us.
     assert!(
         !Delivery::Confirmed
-            .message(47, false)
+            .message(47, Copied::Rendered)
             .0
             .contains("while mdmost runs")
     );
@@ -3504,6 +3523,10 @@ fn the_delivery_is_decided_by_which_routes_worked() {
 /// passing silently.
 #[test]
 fn a_local_copy_stays_owned_until_it_is_released() {
+    #[cfg(feature = "clipboard")]
+    let _owned = DESKTOP_CLIPBOARD
+        .lock()
+        .unwrap_or_else(|it| it.into_inner());
     if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
         eprintln!("skipped: no display server to own a selection");
         return;
@@ -3537,6 +3560,57 @@ fn a_local_copy_stays_owned_until_it_is_released() {
     super::clipboard::release();
     assert!(!super::clipboard::held_for_test());
 }
+
+/// The promise of a two-flavour copy is that it costs nobody anything: an application
+/// that reads HTML gets the richer flavour, and one that does not must still find the
+/// plain text there. Setting the two in separate calls would leave only the second, so
+/// this asserts the plain flavour survives an HTML copy.
+///
+/// Needs a display server, and clobbers the desktop clipboard when it has one. It
+/// reports why it skipped rather than passing silently.
+#[cfg(feature = "clipboard")]
+#[test]
+fn a_rich_copy_still_leaves_the_plain_text_for_whoever_cannot_read_html() {
+    let _owned = DESKTOP_CLIPBOARD
+        .lock()
+        .unwrap_or_else(|it| it.into_inner());
+    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        eprintln!("skipped: no display server to own a selection");
+        return;
+    }
+    // The capability probe, and the reason it is a *plain* copy: everything the skips
+    // below excuse — no clipboard attempted, a display server that will not take a
+    // selection or will not hand one back — is decided here, on a path this test is not
+    // about. Past that point the rich copy has no excuses left and every failure is a
+    // failure, which is what makes dropping the alternate show up as red rather than as
+    // a skipped test.
+    let Some(Ok(())) = super::clipboard::local_for_test("mdmost plain probe") else {
+        eprintln!(
+            "skipped: no local clipboard took a plain copy — a remote session, or a display server that would not have it"
+        );
+        return;
+    };
+    if let Err(why) = super::clipboard::paste_for_test() {
+        eprintln!("skipped: this display server does not hand a selection back: {why}");
+        return;
+    }
+    assert_eq!(
+        super::clipboard::local_rich_for_test("a\tb\n1\t2\n", "<table><tr><td>a</td></tr></table>"),
+        Some(Ok(())),
+        "the same handle that took a plain copy must take a rich one"
+    );
+    assert_eq!(
+        super::clipboard::paste_for_test(),
+        Ok("a\tb\n1\t2\n".to_string()),
+        "the HTML flavour must not have displaced the plain text every reader receives"
+    );
+    super::clipboard::release();
+}
+
+/// Serialises the tests that take the desktop selection. There is one clipboard per
+/// display server, so two of these running at once would read each other's copy.
+#[cfg(feature = "clipboard")]
+static DESKTOP_CLIPBOARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// A library writing to standard error must not reach the alternate screen, and must
 /// not be discarded either. Both halves are asserted: `arboard` picks between

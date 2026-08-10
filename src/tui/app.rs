@@ -1592,10 +1592,10 @@ impl App {
     pub fn report_copy(
         &mut self,
         bytes: usize,
-        from_source: bool,
+        copied: crate::tui::clipboard::Copied,
         delivery: &crate::tui::clipboard::Delivery,
     ) {
-        let (text, is_error) = delivery.message(bytes, from_source);
+        let (text, is_error) = delivery.message(bytes, copied);
         self.notify(text, is_error);
     }
 }
