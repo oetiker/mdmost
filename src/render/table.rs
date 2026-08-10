@@ -316,12 +316,11 @@ pub fn is_row_gap(cells: &[Cell], stripe: Option<Color>) -> bool {
 ///
 /// They are drawn in the gap as they are on any other row. Left out, every vertical rule
 /// in the table would have a row-high hole in it and the box would stop reading as a
-/// table — a far worse defect than the one this trades against, which is that the
-/// separator's cell is page background and so notches the band by one column at each
-/// rule. The notch is half a row high at most and sits in decoration;
-/// `a_striped_row_is_shaded_from_border_to_border` is about the *content* rows, where
-/// the stripe is a background and the hole was full height, and that property is
-/// untouched.
+/// table. They are drawn on the *page* background, which is what every rule in the table
+/// is drawn on since the stripe was pulled back out of them — see the note in
+/// [`render_row`]. So the band is notched by one column at each rule, in the gap and on
+/// the content rows alike, and that is the point: the rules are the frame the shading
+/// stops at, not holes in it.
 fn gap_row(widths: &[usize], full: u16, above: bool, below: bool, ctx: Ctx<'_>) -> Canvas {
     let shade = match (above, below) {
         (true, false) => Some(UPPER_HALF),
@@ -348,12 +347,12 @@ fn gap_row(widths: &[usize], full: u16, above: bool, below: bool, ctx: Ctx<'_>) 
             },
         );
     }
-    // The rules take the gap's own background and keep the border's own attributes,
-    // exactly as in `render_row`. On a gap the background is the page's, because the
-    // shading here is a foreground — see "The column separators" above for what that
-    // costs and why it is still the right trade.
+    // The rules take the *unstriped* background and keep the border's own attributes,
+    // exactly as in `render_row` — `ctx.base` rather than `fill`, so the both-striped
+    // gap, which does carry the stripe as a background, still stops it at its rules like
+    // every other row does. See "The column separators" above.
     let separator = Style {
-        bg: fill.bg,
+        bg: ctx.base.bg,
         ..ctx.theme.table.border
     };
     let mut col = 0usize;
@@ -405,19 +404,26 @@ fn render_row(
     } else {
         theme.table.cell
     };
-    if banded {
-        style = style.patch(theme.table.row_alt);
-    }
-    // The vertical rules belong to the row they divide, so they take the row's own
-    // background. `theme.table.border` carries the *page* background, and painting it
-    // straight onto a striped row punched a one-column hole in the stripe at every
-    // separator: the band read as two separate shaded boxes rather than one row, and
-    // in the light theme as two selected cells (visual review, finding 5). Attributes
-    // stay the border's own, so a header row's bold does not leak onto its rules.
+    // The vertical rules take the row's background but **not its stripe**, so the
+    // separator style is taken before the band is applied. A rule runs the whole height
+    // of the box and has to read as one object; the zebra is a property of a row's
+    // *content*, and running it through the frame made the same divider change colour
+    // from line to line — most visibly on a wrapped row, where the half-block gap below
+    // it (see [`gap_row`]) leaves its own rule on the page background either way.
+    // Attributes stay the border's own, so a header row's bold does not leak onto its
+    // rules.
+    //
+    // **Changed 2026-08-10**, reversing visual review finding 5, which read the
+    // page-coloured rule as a one-column hole punched in the stripe. That reading holds
+    // only if the stripe is taken to be a single band spanning the row; it is one shaded
+    // cell per column, and the rules are the frame between them, not gaps in a band.
     let separator = Style {
         bg: style.bg,
         ..theme.table.border
     };
+    if banded {
+        style = style.patch(theme.table.row_alt);
+    }
     let cells: Vec<Canvas> = widths
         .iter()
         .enumerate()

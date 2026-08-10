@@ -91,8 +91,10 @@ fn at_least(theme: &str, what: &str, ink: Color, ground: Color, floor: f32) {
 /// ink on screen. It measured 1.79:1 (dark) and 1.77:1 (light), which is not a muted
 /// border, it is a border the reader has to take on trust.
 ///
-/// Both grounds matter. A code fence sits on the page, but a table's *vertical* rules
-/// sit on the striped row's surface, and the surface is the harder of the two.
+/// Both grounds are pinned, though only the page is drawn on today: a table's vertical
+/// rules used to sit on the striped row's surface and now keep the page background even
+/// there (see `render::table::render_row`). The surface is the harder of the two, and a
+/// border is the one ink a theme may reasonably move onto either, so the floor stays.
 #[test]
 fn structural_borders_clear_the_non_text_contrast_floor() {
     for theme in themes() {

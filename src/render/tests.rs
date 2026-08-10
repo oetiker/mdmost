@@ -1886,11 +1886,14 @@ const STRIPED: &str = "\
 ";
 
 #[test]
-fn a_striped_row_is_shaded_from_border_to_border() {
-    // The stripe told the reader "these two rows go together" and the vertical rules
-    // punched a hole in it at every column boundary, because `table.border` carries
-    // the *page* background. A banded row rendered as two separate shaded boxes with
-    // an unshaded gap between them — in the light theme, as two selected cells.
+fn a_striped_row_shades_its_cells_and_stops_at_the_column_separators() {
+    // The stripe groups the *content* of a row, and the vertical rules are not content:
+    // they are the table's frame, and they run the full height of the box. A stripe
+    // painted through them crossed the frame — worst on a wrapped row, where the rule
+    // continues through the half-block gap that the stripe deliberately does not fill,
+    // so the same divider changed background twice in three lines. So the rule keeps the
+    // page background it is drawn in everywhere else, and the stripe fills each cell
+    // between the rules, unbroken.
     let theme = Theme::default_dark();
     let stripe = theme
         .table
@@ -1917,25 +1920,56 @@ fn a_striped_row_is_shaded_from_border_to_border() {
     let cells = canvas.row(banded[0]).expect("the striped row");
     let first = cells
         .iter()
-        .position(|cell| cell.style().bg == Some(stripe))
-        .expect("a striped cell");
+        .position(|cell| cell.text() == "\u{2502}")
+        .expect("the row's left border");
     let last = cells
         .iter()
-        .rposition(|cell| cell.style().bg == Some(stripe))
-        .expect("a striped cell");
+        .rposition(|cell| cell.text() == "\u{2502}")
+        .expect("the row's right border");
     let text: String = cells[first..=last].iter().map(|cell| cell.text()).collect();
     assert!(
-        text.contains('\u{2502}'),
-        "the span under test must actually contain a column separator: {text:?}"
+        text[3..text.len() - 3].contains('\u{2502}'),
+        "the span under test must contain an *inner* column separator: {text:?}"
     );
     for (offset, cell) in cells[first..=last].iter().enumerate() {
+        let (want, what) = if cell.text() == "\u{2502}" {
+            (page, "a column separator must not take the stripe")
+        } else {
+            (stripe, "the stripe must not break inside a cell")
+        };
         assert_eq!(
             cell.style().bg,
-            Some(stripe),
-            "column {} ({:?}) breaks the stripe in {text:?}",
+            Some(want),
+            "column {} ({:?}): {what}, in {text:?}",
             first + offset,
             cell.text()
         );
+    }
+}
+
+#[test]
+fn every_vertical_rule_of_a_table_is_drawn_on_the_same_ground() {
+    // A rule is one object running the height of the box, and it has to look like one.
+    // Tinting it per row is what made the stripe cross the frame; tinting it on the
+    // striped rows but not on the half-block gap between two wrapped ones would be
+    // worse still, because those three lines are adjacent and the seam is at eye level.
+    let theme = Theme::default_dark();
+    let page = theme.palette.bg;
+    let canvas = render(WRAPPING, 70);
+    assert!(
+        !gap_rows(&canvas).is_empty(),
+        "the fixture must wrap, so that a gap row is under test"
+    );
+    for row in 0..canvas.height() {
+        for (column, cell) in canvas.row(row).into_iter().flatten().enumerate() {
+            if cell.text() == "\u{2502}" {
+                assert_eq!(
+                    cell.style().bg,
+                    Some(page),
+                    "the rule at {row}:{column} is not on the page background"
+                );
+            }
+        }
     }
 }
 
