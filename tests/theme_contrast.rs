@@ -150,6 +150,45 @@ fn code_punctuation_clears_the_text_contrast_floor() {
     }
 }
 
+/// Inline code is a hue with nothing behind it, so the page is what it has to clear.
+///
+/// It used to carry `surface` as a background and was measured against that. Dropping
+/// the background — it was indistinguishable from the zebra stripe, so a `` `span` ``
+/// inside a table read as a torn-off piece of banding — moves the pairing that matters
+/// onto the page, and onto the stripe wherever a table puts it there. Measured when this
+/// was written: 7.59:1 (dark) and 6.06:1 (light) on the page, 7.02:1 and 5.41:1 on the
+/// stripe, against 7.02:1 and 5.41:1 for the old surface pairing. Both grounds are
+/// asserted, because both are grounds inline code actually appears on.
+#[test]
+fn inline_code_clears_the_text_contrast_floor() {
+    for theme in themes() {
+        let name = &theme.name;
+        let ink = fg("inline code", theme.text.code);
+        assert_eq!(
+            theme.text.code.bg, None,
+            "{name}: inline code must not carry a background of its own"
+        );
+        at_least(
+            name,
+            "inline code on the page",
+            ink,
+            theme.palette.bg,
+            TEXT_FLOOR,
+        );
+        at_least(
+            name,
+            "inline code on a striped table row",
+            ink,
+            theme
+                .table
+                .row_alt
+                .bg
+                .unwrap_or_else(|| panic!("{name}: the stripe needs a background")),
+            TEXT_FLOOR,
+        );
+    }
+}
+
 /// Body text and the theme's own page must not drift apart either.
 ///
 /// Cheap, and it is the assertion that would have caught a palette edit that fixed a

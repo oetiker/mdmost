@@ -138,7 +138,14 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             strikethrough: muted.strikethrough(),
             link: base.fg(p.blue).underline(),
             link_url: muted,
-            code: on_surface.fg(p.magenta),
+            // A hue and nothing else. Inline code used to be raised onto `surface` like
+            // a code block, but a run of words is not a block: the raised strip made a
+            // sentence lumpy, and `surface` is also what the table zebra stripes with,
+            // so a `` `span` `` in a table read as a torn-off piece of banding — inside
+            // a striped row it disappeared into one. The magenta is unmistakable on its
+            // own, and it now clears the 4.5:1 text floor against the page and the
+            // stripe both; `tests/theme_contrast.rs` pins that.
+            code: Style::new().fg(p.magenta),
             // A footnote reference is a link to elsewhere in the document, so it wears
             // the link hue rather than the heading accent.
             footnote_ref: base.fg(p.blue),

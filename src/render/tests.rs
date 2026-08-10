@@ -192,7 +192,16 @@ fn inline_markup_carries_the_theme_styles() {
         style_at(&canvas, 0, column("del")),
         theme.text.strikethrough
     );
-    assert_eq!(style_at(&canvas, 0, column("code")), theme.text.code);
+    // Inline code sets no background of its own, so what lands on the page is the body
+    // style wearing the code hue — which is exactly how it is applied.
+    assert_eq!(
+        style_at(&canvas, 0, column("code")),
+        theme.text.body.patch(theme.text.code)
+    );
+    assert_eq!(
+        theme.text.code.bg, None,
+        "inline code is a colour, not a box: it must not carry a background"
+    );
 }
 
 #[test]
@@ -1943,6 +1952,56 @@ fn a_striped_row_shades_its_cells_and_stops_at_the_column_separators() {
             "column {} ({:?}): {what}, in {text:?}",
             first + offset,
             cell.text()
+        );
+    }
+}
+
+/// A table whose second body row is striped and whose cells contain inline code.
+const STRIPED_CODE: &str = "\
+| part | does |
+| --- | --- |
+| `doc` | parse |
+| `render` | lay out |
+";
+
+#[test]
+fn inline_code_in_a_table_takes_the_ground_of_the_row_it_sits_on() {
+    // Inline code used to paint `surface` behind itself — the very colour the zebra
+    // stripes with. On a plain row that put a stray grey box mid-sentence that looked
+    // like a fragment of stripe; on a striped row it vanished into one. The hue alone
+    // marks code, so the background goes and the row's own ground shows through.
+    let theme = Theme::default_dark();
+    let page = theme.palette.bg;
+    let stripe = theme
+        .table
+        .row_alt
+        .bg
+        .expect("the stripe is defined as a background");
+    let code = theme.text.code.fg.expect("inline code has a foreground");
+    let canvas = render(STRIPED_CODE, 40);
+
+    let mut grounds = Vec::new();
+    for row in 0..canvas.height() {
+        for cell in canvas.row(row).into_iter().flatten() {
+            if cell.style().fg == Some(code) {
+                grounds.push((row, cell.style().bg));
+            }
+        }
+    }
+    assert_eq!(
+        grounds.len(),
+        "doc".len() + "render".len(),
+        "both code spans must be found: {grounds:?}"
+    );
+    let plain = grounds[0].0;
+    let banded = grounds[grounds.len() - 1].0;
+    assert_ne!(plain, banded, "the two spans must be on different rows");
+    for (row, ground) in grounds {
+        let want = if row == plain { page } else { stripe };
+        assert_eq!(
+            ground,
+            Some(want),
+            "inline code on row {row} does not take that row's ground"
         );
     }
 }
