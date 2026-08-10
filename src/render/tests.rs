@@ -2278,3 +2278,28 @@ fn a_crlf_authored_fence_maps_correctly_if_it_maps_at_all() {
         assert_eq!(&markdown[s_range(span)], "let needle = 1;");
     }
 }
+
+#[test]
+fn a_clipped_tabbed_line_maps_to_the_tab_aware_source_position() {
+    // A full, unclipped tabbed line proves nothing about the *measurement*: the
+    // correct byte end for a full line is `origin.end`, and the clamp
+    // (`.min(origin.end)`) lands there regardless of whether the walk that fed it was
+    // tab-aware or not, as long as the (buggy) walk overshoots — which a tab-expanded
+    // walk always does. Clipping the line is what isolates the fix: the correct byte
+    // end is then strictly *less* than `origin.end`, so a walk measured against the
+    // wrong (expanded) text lands on a wrong-but-in-bounds offset that the clamp
+    // cannot catch.
+    let raw = format!("\t{}", "x".repeat(50));
+    let markdown = format!("```\n{raw}\n```\n");
+    let canvas = render(&markdown, 20);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| markdown[s.source_start..s.source_end].starts_with('\t'))
+        .expect("a span for the clipped tabbed line");
+    // 20 columns, minus the frame/padding chrome and the overflow marker, draws 13
+    // columns of code: the tab expands to 4 (TAB_WIDTH, starting at column 0) and 9
+    // more columns are plain `x`s — 10 raw bytes (the tab plus 9 `x`s), well short of
+    // `origin.end` (55), so nothing here is rescued by the clamp.
+    assert_eq!(&markdown[s_range(span)], "\txxxxxxxxx");
+}
