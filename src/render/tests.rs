@@ -2708,3 +2708,154 @@ fn a_table_inside_a_table_cell_shows_no_button() {
         canvas.hotspots()
     );
 }
+
+/// The drawn cells a span claims, as text.
+///
+/// A span is a claim about *both* sides of the mapping — these document bytes are
+/// drawn at these cells — so a provenance test that checks only `source_start..
+/// source_end` proves half of it. Reading the cells back is the other half.
+fn span_cells(canvas: &Canvas, span: &crate::canvas::SearchSpan) -> String {
+    canvas
+        .row_text(span.row)
+        .chars()
+        .skip(usize::from(span.col))
+        .take(usize::from(span.cols))
+        .collect()
+}
+
+/// The span whose document bytes are exactly `text`, panicking when there is none.
+fn span_for<'a>(canvas: &'a Canvas, doc: &str, text: &str) -> &'a crate::canvas::SearchSpan {
+    canvas
+        .spans()
+        .iter()
+        .find(|s| doc.get(s.source_start..s.source_end) == Some(text))
+        .unwrap_or_else(|| {
+            panic!(
+                "no span covers {text:?}; spans map to {:?}",
+                canvas
+                    .spans()
+                    .iter()
+                    .map(|s| doc.get(s.source_start..s.source_end))
+                    .collect::<Vec<_>>()
+            )
+        })
+}
+
+#[test]
+fn a_flowchart_label_maps_back_to_the_document() {
+    let doc = "# Chart\n\n```mermaid\nflowchart LR\n  A[Parse] --> B[Layout]\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Parse");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Parse",
+        "the span must sit on the drawn label: {:?}",
+        canvas.row_text(span.row)
+    );
+}
+
+#[test]
+fn a_flowchart_label_maps_back_in_a_crlf_document() {
+    // comrak keeps the \r in a fenced literal; a mapping that measures against the
+    // stripped text lands every label one byte further left per preceding line.
+    let doc = "# Chart\r\n\r\n```mermaid\r\nflowchart LR\r\n  A[Parse] --> B[Layout]\r\n```\r\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Parse");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Parse",
+        "a CRLF document maps its labels too: {:?}",
+        canvas.row_text(span.row)
+    );
+}
+
+#[test]
+fn a_flowchart_indented_in_a_list_maps_back() {
+    // The list's two-column indent is stripped from the literal comrak hands over, so a
+    // block-relative offset used as a document offset lands two bytes left per line.
+    let doc = "- item\n\n  ```mermaid\n  flowchart LR\n    A[Parse] --> B[Layout]\n  ```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Parse");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Parse",
+        "the list's indent is not part of the mermaid source: {:?}",
+        canvas.row_text(span.row)
+    );
+}
+
+#[test]
+fn every_flowchart_label_span_names_its_own_drawn_text() {
+    // The whole mapping in one assertion: every span the diagram emits must have the
+    // document bytes it names drawn at the cells it claims. A span that is right about
+    // one label and wrong about the next passes the tests above and fails here.
+    let doc = "```mermaid\nflowchart LR\n  A[Parse] --> B[Layout]\n  B --> C[Draw]\n```\n";
+    let canvas = render(doc, 60);
+    let mapped: Vec<String> = canvas
+        .spans()
+        .iter()
+        .map(|s| span_cells(&canvas, s))
+        .collect();
+    assert_eq!(
+        mapped,
+        vec!["Parse", "Layout", "Draw"],
+        "every drawn label carries a span, in layout order"
+    );
+    for span in canvas.spans() {
+        assert_eq!(
+            doc.get(span.source_start..span.source_end),
+            Some(span_cells(&canvas, span).as_str()),
+            "span {span:?} names bytes other than the ones it draws"
+        );
+    }
+}
+
+#[test]
+fn a_multi_line_label_points_every_drawn_line_at_the_whole_label() {
+    // Design spec §2.2: a label is atomic. Two drawn lines, one source range, so
+    // touching either line selects the label's whole source text.
+    let doc = "```mermaid\nflowchart LR\n  A[One<br>Two] --> B[End]\n```\n";
+    let canvas = render(doc, 60);
+    let drawn: Vec<String> = canvas
+        .spans()
+        .iter()
+        .map(|s| span_cells(&canvas, s).trim().to_string())
+        .collect();
+    assert_eq!(drawn, vec!["One", "Two", "End"], "each line is drawn");
+    let ranges: Vec<(usize, usize)> = canvas
+        .spans()
+        .iter()
+        .take(2)
+        .map(|s| (s.source_start, s.source_end))
+        .collect();
+    assert_eq!(
+        ranges[0], ranges[1],
+        "both lines name the same source range"
+    );
+    assert_eq!(
+        doc.get(ranges[0].0..ranges[0].1),
+        Some("One<br>Two"),
+        "and that range is the label as written"
+    );
+}
+
+#[test]
+fn a_mermaid_block_with_no_mapping_emits_no_diagram_spans() {
+    // `origins` is empty for a block the document could not locate. A block-relative
+    // offset used as a document offset would then point into whatever text happens to
+    // sit at that byte, which is worse than no provenance at all.
+    let literal = "flowchart LR\n  A[Parse] --> B[Layout]\n";
+    let theme = Theme::default_dark();
+    let ctx = Ctx::new(&theme, &PLAIN);
+    let canvas = code::render_code_block(Some("mermaid"), literal, true, &[], 60, ctx);
+    assert!(
+        canvas.plain_text().contains("Parse"),
+        "the diagram still draws:\n{}",
+        canvas.plain_text()
+    );
+    assert!(
+        canvas.spans().is_empty(),
+        "but claims no document bytes: {:?}",
+        canvas.spans()
+    );
+}

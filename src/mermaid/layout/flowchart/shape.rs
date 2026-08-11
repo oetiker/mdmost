@@ -5,7 +5,7 @@
 //! border sits. Shapes the parser could not classify already arrive as
 //! [`NodeShape::Rect`], so there is no fallback to handle here.
 
-use crate::canvas::{BorderSet, Canvas};
+use crate::canvas::{BorderSet, Canvas, SearchSpan, align_offset};
 use crate::mermaid::ast::{Label, NodeShape};
 use crate::mermaid::layout::graph::PortPolicy;
 use crate::text::{Align, display_width, wrap_plain};
@@ -26,16 +26,32 @@ pub(super) fn draw(label: &Label, shape: NodeShape, budget: u16, theme: &Theme) 
         .unwrap_or(0)
         .max(1);
     let styles = theme.diagram;
-    let mut body = Canvas::new((text + 2 * PAD) as u16, lines.len(), theme.base());
+    let field = text + 2 * PAD;
+    let mut body = Canvas::new(field as u16, lines.len(), theme.base());
     for (row, line) in lines.iter().enumerate() {
-        body.write_field(
+        body.write_field(row, 0, field, line, Align::Center, styles.node_text);
+        // Where this drawn line came from in the Mermaid source. Every line of a label
+        // names the *whole* label: it is atomic to a selection (design spec §2.2),
+        // because `<br>` splitting and entity decoding have already happened and there
+        // is no byte mapping left to apportion the range across the pieces.
+        //
+        // An empty `source` is the contract's "synthesised, not from the source" — a
+        // label built by `Label::line` or one `lex::label_at` refused to place — and it
+        // must emit nothing rather than a span at byte zero of the document.
+        let drawn = display_width(line);
+        if label.source.is_empty() || drawn == 0 {
+            continue;
+        }
+        // `write_field` centres through `text::pad_to_width`, whose left pad is
+        // `slack / 2`; `align_offset` is the same rule, asked rather than re-derived.
+        let col = align_offset(field, drawn, Align::Center);
+        body.add_span(SearchSpan {
+            source_start: label.source.start,
+            source_end: label.source.end,
             row,
-            0,
-            text + 2 * PAD,
-            line,
-            Align::Center,
-            styles.node_text,
-        );
+            col: u16::try_from(col).unwrap_or(u16::MAX),
+            cols: u16::try_from(drawn).unwrap_or(u16::MAX),
+        });
     }
     match shape {
         NodeShape::Rect => body.framed(BorderSet::PLAIN, styles.node_border, None, theme.base()),
@@ -48,6 +64,30 @@ pub(super) fn draw(label: &Label, shape: NodeShape, budget: u16, theme: &Theme) 
         NodeShape::Rhombus => rhombus(&body, theme),
         NodeShape::Subroutine => subroutine(&body, theme),
         NodeShape::Cylinder => cylinder(&body, theme),
+    }
+}
+
+/// Moves `src`'s spans on `row` onto row `index`, column `left`, of `out`.
+///
+/// [`Canvas::blit`] translates spans for the shapes built from `framed` and `indent`.
+/// [`rhombus`] and [`cylinder`] cannot use it — they interleave rules between the rows
+/// they copy — so they copy cell by cell, and a span left behind by that loop is a
+/// label that silently loses its provenance in two shapes out of seven. Called from
+/// inside each copy loop with the loop's own `index`, so the two can never disagree
+/// about where the row landed.
+fn carry_spans(out: &mut Canvas, src: &Canvas, row: usize, index: usize, left: u16) {
+    let moved: Vec<SearchSpan> = src
+        .spans()
+        .iter()
+        .filter(|span| span.row == row)
+        .map(|span| SearchSpan {
+            row: index,
+            col: span.col.saturating_add(left),
+            ..*span
+        })
+        .collect();
+    for span in moved {
+        out.add_span(span);
     }
 }
 
@@ -121,6 +161,7 @@ fn rhombus(body: &Canvas, theme: &Theme) -> Canvas {
                 out.write_str(index, col + 1, cell.text(), cell.style());
             }
         }
+        carry_spans(&mut out, body, row, index, 1);
         out.write_str(index, width - 1, "│", styles.node_border);
     }
     out.push_text(&cap('╲', '╱'), Align::Left, styles.node_border);
@@ -169,6 +210,7 @@ fn cylinder(body: &Canvas, theme: &Theme) -> Canvas {
                 out.write_str(index, col, cell.text(), cell.style());
             }
         }
+        carry_spans(&mut out, &framed, row, index, 0);
         if row == 0 {
             let index = out.push_blank_row(theme.base());
             out.write_str(index, 0, &rule, styles.node_border);

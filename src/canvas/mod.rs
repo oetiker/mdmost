@@ -246,6 +246,21 @@ impl Canvas {
         self.spans.push(span);
     }
 
+    /// Replaces every span with what `map` returns for it, dropping the ones it maps to
+    /// `None`.
+    ///
+    /// The one channel a canvas can carry that is not a claim about its own cells: a
+    /// span's byte offsets belong to the document, and a canvas assembled from a
+    /// fragment of it — a Mermaid block's own text — has to have them rebased before it
+    /// joins the document (`render::code::diagram_block`). Dropping is part of the
+    /// contract, not a convenience: a span whose offsets cannot be rebased must leave,
+    /// because a *wrong* offset copies bytes from elsewhere in the document while a
+    /// missing one merely falls back to the drawn cells.
+    pub fn map_spans(&mut self, map: impl FnMut(&SearchSpan) -> Option<SearchSpan>) {
+        let spans = std::mem::take(&mut self.spans);
+        self.spans = spans.iter().filter_map(map).collect();
+    }
+
     /// The pinned chrome prefixes recorded in this canvas.
     pub fn pins(&self) -> &[Pin] {
         &self.pins

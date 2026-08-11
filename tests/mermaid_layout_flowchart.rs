@@ -487,3 +487,109 @@ fn a_hundred_nodes_still_fit_the_budget() {
         );
     }
 }
+
+/// A node whose label records that it came from bytes `at..at + label.len()`.
+fn placed_node(key: &str, label: &str, at: usize, shape: NodeShape) -> FlowNode {
+    FlowNode {
+        key: key.to_string(),
+        label: Label::parse_at(label, at),
+        shape,
+    }
+}
+
+/// The drawn cells a span claims, as text.
+fn span_cells(canvas: &mdmost::canvas::Canvas, span: &mdmost::canvas::SearchSpan) -> String {
+    canvas
+        .row_text(span.row)
+        .chars()
+        .skip(usize::from(span.col))
+        .take(usize::from(span.cols))
+        .collect()
+}
+
+#[test]
+fn every_node_shape_puts_its_label_span_on_the_drawn_text() {
+    // Seven shapes, seven chances to lose the span or to place it a column out. Two of
+    // them — the rhombus and the cylinder — copy their body cell by cell rather than
+    // through `blit`, so they carry no metadata unless they are made to.
+    let shapes = [
+        NodeShape::Rect,
+        NodeShape::Round,
+        NodeShape::Stadium,
+        NodeShape::Rhombus,
+        NodeShape::Circle,
+        NodeShape::Subroutine,
+        NodeShape::Cylinder,
+    ];
+    let theme = Theme::default_dark();
+    for shape in shapes {
+        let chart = chart(
+            Direction::LeftToRight,
+            vec![placed_node("A", "Parse", 17, shape)],
+            Vec::new(),
+        );
+        let canvas = flowchart::draw(&chart, 60, &theme).expect("one node fits");
+        let spans = canvas.spans();
+        assert_eq!(spans.len(), 1, "{shape:?} draws one label, so one span");
+        assert_eq!(
+            (spans[0].source_start, spans[0].source_end),
+            (17, 22),
+            "{shape:?} keeps the label's own source range"
+        );
+        assert_eq!(
+            span_cells(&canvas, &spans[0]),
+            "Parse",
+            "{shape:?} puts the span on the drawn label:\n{}",
+            canvas.plain_text()
+        );
+    }
+}
+
+#[test]
+fn a_label_with_no_source_range_emits_no_span() {
+    // An empty `Label::source` is the contract's "synthesised, not from the source" —
+    // what `Label::line` builds and what `lex::label_at` yields when it cannot place the
+    // text. Emitting a span for it would claim bytes `0..0` of the document.
+    let theme = Theme::default_dark();
+    let chart = chart(
+        Direction::LeftToRight,
+        vec![node("A", "Parse", NodeShape::Rect)],
+        Vec::new(),
+    );
+    let canvas = flowchart::draw(&chart, 60, &theme).expect("one node fits");
+    assert!(
+        canvas.plain_text().contains("Parse"),
+        "the label is still drawn:\n{}",
+        canvas.plain_text()
+    );
+    assert!(
+        canvas.spans().is_empty(),
+        "but claims no source bytes: {:?}",
+        canvas.spans()
+    );
+}
+
+#[test]
+fn a_multi_line_label_emits_one_span_per_drawn_line() {
+    // Design spec §2.2: the label is atomic, so both drawn lines name the whole range
+    // rather than the range being apportioned across them.
+    let theme = Theme::default_dark();
+    let chart = chart(
+        Direction::LeftToRight,
+        vec![placed_node("A", "One<br>Two", 30, NodeShape::Rect)],
+        Vec::new(),
+    );
+    let canvas = flowchart::draw(&chart, 60, &theme).expect("one node fits");
+    let spans = canvas.spans();
+    assert_eq!(spans.len(), 2, "two drawn lines, two spans");
+    assert_eq!(spans[0].row + 1, spans[1].row, "on consecutive rows");
+    for span in spans {
+        assert_eq!(
+            (span.source_start, span.source_end),
+            (30, 40),
+            "every line names the whole label"
+        );
+    }
+    assert_eq!(span_cells(&canvas, &spans[0]), "One");
+    assert_eq!(span_cells(&canvas, &spans[1]), "Two");
+}

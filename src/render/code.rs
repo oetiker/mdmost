@@ -72,21 +72,91 @@ pub(crate) fn render_code_block(
 ) -> Canvas {
     if is_mermaid(language) {
         return match bridge::mermaid(literal, width, ctx.theme, Fit::COMPACT) {
-            Ok(canvas) => diagram_block(canvas, width, ctx),
+            Ok(canvas) => diagram_block(canvas, width, literal, origins, ctx),
             Err(error) => fallback(literal, &error, origins, width, ctx),
         };
     }
     framed_code(language, literal, fenced, origins, width, ctx)
 }
 
-/// A drawn diagram as a block of the document: the canvas, padded to the block width.
+/// A drawn diagram as a block of the document: the canvas, padded to the block width,
+/// with its labels' spans rebased onto the document.
 ///
 /// Shared with [`super::diagram::diagram`], which builds the same block at a width the
 /// viewport does not have, so that the two cannot disagree about what a diagram block
-/// *is*.
-pub(crate) fn diagram_block(mut canvas: Canvas, width: u16, ctx: Ctx<'_>) -> Canvas {
+/// *is* — the rebasing included, which is why it happens here and not at either call
+/// site.
+pub(crate) fn diagram_block(
+    mut canvas: Canvas,
+    width: u16,
+    literal: &str,
+    origins: &[SourceSpan],
+    ctx: Ctx<'_>,
+) -> Canvas {
+    rebase_spans(&mut canvas, literal, origins);
     canvas.resize_width(width, ctx.base);
     canvas
+}
+
+/// Rewrites a diagram's spans from offsets into `literal` to offsets into the document.
+///
+/// A layout family emits a span at the offset its label had in the Mermaid block it was
+/// parsed from (`mermaid::ast::Label::source`). The document's spans are absolute, and
+/// the two differ by more than one constant: comrak strips a container prefix — four
+/// spaces, `> `, a list indent — from every line of the literal independently, so there
+/// is no single delta to add. `origins` already carries the answer per line, built by
+/// `doc::convert::code_lines`, which locates each line as a *suffix* of a source line;
+/// that is the same mapping `code_area` uses for a code block's own spans, and it is
+/// where both CRLF and the container indent have already been solved.
+///
+/// It is reused here rather than re-derived, but not by analogy: `code_area` maps a
+/// *row* to a line and needs no column arithmetic on the source side, whereas a label
+/// sits at an arbitrary byte offset inside its line. What transfers is `origins`
+/// itself; the offset-within-the-line walk below is this function's own.
+///
+/// Fails closed in every case it cannot answer — no mapping for the block, no origin
+/// for the line, an offset past the line's end — by dropping the span. A diagram with
+/// no provenance falls back to the drawn cells and says so (design spec §3.1); a
+/// diagram with *wrong* provenance copies bytes from somewhere else in the document.
+fn rebase_spans(canvas: &mut Canvas, literal: &str, origins: &[SourceSpan]) {
+    if canvas.spans().is_empty() {
+        return;
+    }
+    let lines = crate::doc::literal_lines(literal);
+    canvas.map_spans(|span| {
+        let start = document_offset(&lines, origins, span.source_start)?;
+        let end = document_offset(&lines, origins, span.source_end)?;
+        (start <= end).then_some(SearchSpan {
+            source_start: start,
+            source_end: end,
+            ..*span
+        })
+    });
+}
+
+/// The document offset of byte `at` of the Mermaid literal, if it has one.
+///
+/// `lines` is the literal split by [`crate::doc::literal_lines`] — the crate's one
+/// definition of "a line of `literal`", and the same split `origins` was built against,
+/// so index `n` names the same line in both. A line still carries its `\r` in a CRLF
+/// document (comrak keeps it in a fenced literal) while `origins` names the source
+/// bytes *without* it, which is why the guard below is against the origin's own end
+/// rather than against the line's length: an offset landing on the `\r` clamps to the
+/// end of the line it belongs to instead of pointing one byte past a range that has
+/// nothing to do with it.
+fn document_offset(lines: &[&str], origins: &[SourceSpan], at: usize) -> Option<usize> {
+    let mut base = 0usize;
+    for (row, line) in lines.iter().enumerate() {
+        let end = base + line.len();
+        if at <= end {
+            let origin = origins.get(row).filter(|origin| !origin.is_empty())?;
+            let offset = origin.start + (at - base);
+            return (offset <= origin.end).then_some(offset);
+        }
+        // The `\n` that `literal_lines` split on, and that the last line may not have.
+        base = end + 1;
+    }
+    None
 }
 
 /// Draws the framed, highlighted code block.

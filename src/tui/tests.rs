@@ -3148,19 +3148,97 @@ fn extract_over_code(markdown: &str) -> select::Extract {
 
 /// Now that a code fence carries spans, every survivor in this file that exercises
 /// `extract` on a code block asserts `from_source == true` — the suite lost its only
-/// negative case for the flag. A drawn Mermaid diagram is still genuinely spanless (it
-/// is box art, not source text; design spec §3), so a drag wholly inside one pins the
+/// negative case for the flag. A diagram's **box art** is still genuinely spanless (it
+/// is drawing, not source text; design spec §3.1), so a drag wholly inside it pins the
 /// other half of the contract: `Extract::from_source` still says `false` for content
 /// that really has no mapping, rather than having drifted to always-true.
+///
+/// A flowchart's *labels* do carry spans now, which is why the drag below is over the
+/// box's top edge rather than over `Read` — see
+/// [`a_drag_over_a_diagram_label_yields_the_mermaid_source`] for that half.
 #[test]
-fn a_drag_over_a_diagram_still_falls_back_to_what_is_drawn() {
+fn a_drag_over_a_diagrams_box_art_still_falls_back_to_what_is_drawn() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    // The row above the label is the top edge of both boxes: drawing, and nothing else.
+    let (label, _, _) = drawn(&canvas, "Read");
+    let edge = label - 1;
+    let extract = select::extract(
+        &canvas,
+        FITTING_FENCE,
+        drag(Pos::new(edge, 0), Pos::new(edge, 6)),
+    )
+    .expect("the drag covered drawn cells");
+    assert!(
+        !extract.from_source,
+        "box art has no source span; the pager must not claim it does, got {:?}",
+        extract.text
+    );
+}
+
+/// A diagram too wide for the viewport is laid out by `render::diagram` instead of by
+/// `render::code`, and that second path has to rebase its spans too — it is a separate
+/// call site, and handing it no mapping would lose every wide diagram's provenance
+/// while every test on the fitting path stayed green.
+#[test]
+fn a_widened_diagram_maps_its_labels_back_to_the_document() {
+    let mut app = pager(WIDE_FENCE);
+    let canvas = app.canvas().clone();
+    assert!(canvas.width() > 80, "this chart had to be widened");
+    // The label is wrapped onto two rows in this chart, and both rows name the whole
+    // label (design spec §2.2) — so what is *drawn* under each span is one word of it.
+    let drawn: Vec<String> = canvas
+        .spans()
+        .iter()
+        .filter(|s| WIDE_FENCE.get(s.source_start..s.source_end) == Some("Parse Markdown"))
+        .map(|s| {
+            canvas
+                .row_text(s.row)
+                .chars()
+                .skip(usize::from(s.col))
+                .take(usize::from(s.cols))
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        drawn,
+        vec!["Parse", "Markdown"],
+        "the spans sit on the drawn label of the widened diagram"
+    );
+}
+
+/// The other half: a label *is* source text, and a drag over one copies the Mermaid
+/// that produced it rather than the drawn box (design spec §3).
+#[test]
+fn a_drag_over_a_diagram_label_yields_the_mermaid_source() {
     let mut app = pager(FITTING_FENCE);
     let canvas = app.canvas().clone();
     let extract = drag_over(&canvas, FITTING_FENCE, "Read");
     assert!(
-        !extract.from_source,
-        "a drawn diagram has no source span; the pager must not claim it does"
+        extract.from_source,
+        "a flowchart label now has provenance, got {:?}",
+        extract.text
     );
+    // `extend_over_markup` then widens the hull over the bytes around it that were
+    // never drawn — `A[`, the arrow, the indent — exactly as a drag over `bold` picks
+    // up its `**`. The walk stops at the next *rendered* byte, which is the `Draw`
+    // label, so a one-box drag stops inside `B[`.
+    assert_eq!(
+        extract.text, "    A[Read] --> B[",
+        "the label's own bytes, widened over the Mermaid punctuation around them"
+    );
+    // Design spec §3: a drag from the first box to the last yields the Mermaid source
+    // between them.
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (_, to, cols) = drawn(&canvas, "Draw");
+    let across = select::extract(
+        &canvas,
+        FITTING_FENCE,
+        drag(Pos::new(row, from), Pos::new(row, to + cols - 1)),
+    )
+    .expect("the drag covered both boxes");
+    assert_eq!(across.text, "    A[Read] --> B[Draw]");
+    assert!(across.from_source);
 }
 
 #[test]
@@ -3185,20 +3263,20 @@ fn a_drag_across_a_code_fence_takes_the_fence_from_the_source() {
 
 /// Pins the limitation `select`'s module docs admit to, so it stays a decision.
 ///
-/// A code fence carries spans now (design spec §3), so it can no longer stand in for
-/// "content the renderer never mapped" — a drawn Mermaid diagram still can, since it is
-/// box art with no source span of its own.
+/// A code fence carries spans now (design spec §3), and so does a flowchart's label —
+/// a diagram's **box art** is what is left that the renderer never mapped, so the drag
+/// below ends on the boxes' top edge rather than on the row the labels are drawn on.
 #[test]
 fn a_drag_ending_inside_spanless_content_stops_at_the_last_mapped_byte() {
     let markdown = "- item one\n\n```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n";
     let mut app = pager(markdown);
     let canvas = app.canvas().clone();
     let (top, col, _) = drawn(&canvas, "item one");
-    let (diagram, _, _) = drawn(&canvas, "Read");
+    let (label, _, _) = drawn(&canvas, "Read");
     let extract = select::extract(
         &canvas,
         markdown,
-        drag(Pos::new(top, col), Pos::new(diagram, 40)),
+        drag(Pos::new(top, col), Pos::new(label - 1, 40)),
     )
     .expect("covered");
     assert_eq!(
@@ -4021,16 +4099,51 @@ fn a_drag_entirely_on_chrome_selects_nothing() {
     // `lo >= hi` alone is satisfied by *either* fallback landing on the same value as
     // the other, which is not what an inverted fallback actually does — it moves both
     // ends toward each other, and `usize` can never go negative, so `>=` alone cannot
-    // tell a single inverted fallback from a correct one. Pin the values themselves:
-    // this is the "either way lo >= hi" case the module doc warns about, and it must
-    // be an *empty* range (`lo == source.len()`, `hi == 0`), never the whole document.
+    // tell a single inverted fallback from a correct one. Pin the values themselves.
+    //
+    // `Bias::Start` no longer clamps to the document end here, and that is the point of
+    // the change that moved it: a flowchart's labels carry spans now, so the *next* text
+    // after this corner of box art is the `Parse` label, and §2.1 says an endpoint on
+    // chrome takes it. `Bias::End` still clamps, because nothing precedes row 0.
+    // `a_drag_on_chrome_with_no_spans_at_all_clamps_both_ways` keeps the clamp itself
+    // covered on a document that really has no spans.
+    let parse = canvas
+        .spans()
+        .iter()
+        .find(|s| doc.get(s.source_start..s.source_end) == Some("Parse"))
+        .expect("the Parse label carries a span");
     assert_eq!(
         lo,
+        Some(parse.source_start),
+        "the next text in document order is the first label"
+    );
+    assert_eq!(
+        hi,
+        Some(0),
+        "no span at/before the cell clamps to the document start"
+    );
+}
+
+#[test]
+fn a_drag_on_chrome_with_no_spans_at_all_clamps_both_ways() {
+    // A document whose rendering carries no spans anywhere, so both fallbacks have to
+    // clamp rather than find a neighbour: `Bias::Start` to the document end and
+    // `Bias::End` to its start. Inverted on purpose (see `Bias`), so the hull is empty
+    // and never the whole document — the one answer design spec §2 rules out.
+    let doc = "---\n";
+    let canvas = render(doc, 60);
+    assert!(
+        canvas.spans().is_empty(),
+        "a thematic break maps no text: {:?}",
+        canvas.spans()
+    );
+    assert_eq!(
+        select::offset_at(&canvas, doc, Pos { row: 0, col: 0 }, select::Bias::Start),
         Some(doc.len()),
         "no span at/after the cell clamps to the document end"
     );
     assert_eq!(
-        hi,
+        select::offset_at(&canvas, doc, Pos { row: 0, col: 1 }, select::Bias::End),
         Some(0),
         "no span at/before the cell clamps to the document start"
     );
