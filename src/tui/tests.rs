@@ -4061,3 +4061,97 @@ fn a_drag_across_a_table_selects_whole_cells_in_document_order() {
         "the hull crosses the source's row boundary: {text:?}"
     );
 }
+
+// --- The highlight is painted from the hull (design spec §2) ---------------------
+
+#[test]
+fn a_table_border_is_never_highlighted() {
+    let doc = "| a | b |\n| --- | --- |\n| one | two |\n";
+    let canvas = render(doc, 40);
+    let (one_row, one_col, _) = drawn(&canvas, "one");
+    let (two_row, two_col, two_cols) = drawn(&canvas, "two");
+    let sel = drag(
+        Pos::new(one_row, one_col),
+        Pos::new(two_row, two_col + two_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, one_row);
+    let row = canvas.row_text(one_row);
+    for range in &ranges {
+        for col in range.clone() {
+            let ch = row.chars().nth(usize::from(col)).unwrap_or(' ');
+            assert!(
+                !"│├┤┬┴┼╭╮╰╯─".contains(ch),
+                "chrome at column {col} is highlighted: {ch:?} in {row:?}"
+            );
+        }
+    }
+    assert!(!ranges.is_empty(), "the cells themselves are highlighted");
+}
+
+#[test]
+fn a_selection_confined_to_one_cell_does_not_wash_its_neighbour() {
+    // Both "one" and "two" carry spans on the same row, so a selection that covers
+    // the whole row cannot tell the clipping guard apart from its absence (every span
+    // on the row is inside the hull either way — a mutation that deletes the guard
+    // still passes `a_table_border_is_never_highlighted`). Confining the drag to just
+    // "one" is what actually exercises `span.source_end <= lo || span.source_start >=
+    // hi`: without it, "two" is a span on the same row too and would be washed along
+    // with it.
+    let doc = "| a | b |\n| --- | --- |\n| one | two |\n";
+    let canvas = render(doc, 40);
+    let (one_row, one_col, one_cols) = drawn(&canvas, "one");
+    let (two_row, two_col, _) = drawn(&canvas, "two");
+    assert_eq!(
+        one_row, two_row,
+        "fixture assumption: both cells on one row"
+    );
+    let sel = drag(
+        Pos::new(one_row, one_col),
+        Pos::new(one_row, one_col + one_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, one_row);
+    assert!(!ranges.is_empty(), "\"one\" itself must be highlighted");
+    for range in &ranges {
+        assert!(
+            range.end <= two_col,
+            "the wash reaches into \"two\" at column {two_col}: {ranges:?}"
+        );
+    }
+}
+
+#[test]
+fn the_highlight_stops_at_the_end_of_the_text() {
+    let doc = "short line\n";
+    let canvas = render(doc, 60);
+    let (row, col, cols) = drawn(&canvas, "short line");
+    let sel = drag(Pos::new(row, col), Pos::new(row, 59));
+    let ranges = select::highlighted_columns(&canvas, doc, sel, row);
+    let last = ranges.iter().map(|r| r.end).max().expect("a range");
+    assert_eq!(last, col + cols, "the wash must not run to the pane edge");
+}
+
+#[test]
+fn the_highlight_never_reaches_a_column_contiguous_next_span() {
+    // A carried-over minor from Task 2: the far-endpoint probe can overshoot into a
+    // column-contiguous next span, so dragging `bold` in `**bold**text` yields a hull
+    // of "bold**" (the closing delimiter comes along, harmlessly, for the clipboard).
+    // For the wash the same overshoot would be visible: it must not paint into
+    // "text", which sits immediately after "**" with no gap between them on screen.
+    let doc = "**bold**text\n";
+    let canvas = render(doc, 40);
+    let (row, bold_col, bold_cols) = drawn(&canvas, "bold");
+    let sel = drag(
+        Pos::new(row, bold_col),
+        Pos::new(row, bold_col + bold_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, row);
+    let (text_row, text_col, _) = drawn(&canvas, "text");
+    assert_eq!(text_row, row, "fixture assumption: both on one row");
+    for range in &ranges {
+        assert!(
+            range.end <= text_col,
+            "the wash reaches into \"text\" at column {}: {ranges:?}",
+            text_col
+        );
+    }
+}

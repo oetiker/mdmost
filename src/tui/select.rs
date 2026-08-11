@@ -154,6 +154,13 @@ impl Selection {
     /// runs from the anchor to the end of the row, the last row from its start to the
     /// pointer, and every row between them entirely. A block selection would be the
     /// wrong shape for prose, which is what this pager is mostly showing.
+    ///
+    /// This is a *cell* interval — it makes no distinction between text and chrome —
+    /// so [`highlighted_columns`] does not call it: the wash is built from
+    /// [`source_hull`] instead, which only ever covers spans. What still calls this is
+    /// [`rendered_text`], the spanless fallback (design spec §2, decision 3): a
+    /// diagram's box art has no source hull to consult, so what the reader dragged
+    /// over is answered the only way left — by the cells themselves.
     pub fn columns_on(self, row: usize, width: u16) -> Option<Range<u16>> {
         let (start, end) = self.ordered();
         if row < start.row || row > end.row {
@@ -313,6 +320,66 @@ fn byte_at_column(text: &str, columns: u16) -> usize {
     offset
 }
 
+/// The display column that `byte` bytes into `text` land on.
+///
+/// `byte_at_column`'s inverse, grapheme-wise for the same reason: only whole clusters
+/// consumed *before* `byte` count, so a byte offset that lands mid-cluster (which
+/// should not happen for a boundary this module produces, but a defensive read is
+/// cheaper than a panic) still yields a sane column rather than an inflated one.
+fn column_at_byte(text: &str, byte: usize) -> u16 {
+    let mut used = 0u16;
+    let mut offset = 0usize;
+    for cluster in graphemes(text) {
+        if offset >= byte {
+            break;
+        }
+        offset += cluster.len();
+        used = used.saturating_add(u16::try_from(display_width(cluster)).unwrap_or(u16::MAX));
+    }
+    used
+}
+
+/// The column ranges of `row` that a selection washes.
+///
+/// Every span the hull covers, clipped to the covered part. Chrome carries no spans, so
+/// borders, the line-number gutter, cell padding and the blank tail of a row are not in
+/// the answer and no rule had to say so (design spec §2). Consumes [`source_hull`]'s
+/// endpoints directly rather than re-resolving them from `canvas` and `selection`: a
+/// second `offset_at` walk would have to re-derive the far endpoint's inclusive-column
+/// convention, and a highlight that disagreed with the hull by one boundary would be far
+/// more visible than the same slip on a clipboard payload.
+pub(crate) fn highlighted_columns(
+    canvas: &Canvas,
+    source: &str,
+    selection: Selection,
+    row: usize,
+) -> Vec<Range<u16>> {
+    let Some((lo, hi)) = source_hull(canvas, source, selection) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for span in canvas.spans() {
+        if span.row != row || span.source_end <= lo || span.source_start >= hi {
+            continue;
+        }
+        let body = source
+            .get(span.source_start..span.source_end)
+            .unwrap_or_default();
+        let from = column_at_byte(body, lo.saturating_sub(span.source_start));
+        let to = if hi >= span.source_end {
+            span.cols
+        } else {
+            column_at_byte(body, hi - span.source_start)
+        };
+        let (a, b) = (span.col + from, span.col + to);
+        if a < b {
+            out.push(a..b);
+        }
+    }
+    out.sort_by_key(|r| r.start);
+    out
+}
+
 /// Widens `lo..hi` over source bytes the renderer never drew.
 ///
 /// `#`, `**`, `- `, `[`, `](url)`, a fence's info string: the reader could not have
@@ -382,4 +449,45 @@ fn rendered_text(canvas: &Canvas, selection: Selection) -> String {
         rows.pop();
     }
     rows.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::column_at_byte;
+
+    #[test]
+    fn column_at_byte_counts_display_width_not_bytes() {
+        assert_eq!(column_at_byte("abc", 0), 0);
+        assert_eq!(column_at_byte("abc", 2), 2);
+        assert_eq!(column_at_byte("abc", 3), 3);
+    }
+
+    #[test]
+    fn column_at_byte_handles_a_multi_byte_grapheme() {
+        // 'é' is two bytes and one display column.
+        let text = "café";
+        assert_eq!(text.len(), 5, "the fixture must actually be multi-byte");
+        assert_eq!(column_at_byte(text, 0), 0);
+        assert_eq!(column_at_byte(text, 3), 3, "just before the 'é'");
+        assert_eq!(
+            column_at_byte(text, 5),
+            4,
+            "past the 'é', which is two bytes but one column"
+        );
+    }
+
+    #[test]
+    fn column_at_byte_handles_a_wide_grapheme() {
+        // U+3000 IDEOGRAPHIC SPACE is three bytes and two display columns.
+        let text = "a\u{3000}b";
+        assert_eq!(text.len(), 5, "the fixture must actually be wide");
+        assert_eq!(column_at_byte(text, 0), 0);
+        assert_eq!(column_at_byte(text, 1), 1, "just before the wide space");
+        assert_eq!(
+            column_at_byte(text, 4),
+            3,
+            "past the wide space, which is three bytes but two columns"
+        );
+        assert_eq!(column_at_byte(text, 5), 4, "past the trailing 'b' too");
+    }
 }

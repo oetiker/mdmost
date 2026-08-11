@@ -14,6 +14,7 @@ use crate::theme::{Attributes, Color, Style};
 
 use super::app::{App, Overlay};
 use super::chrome;
+use super::select;
 
 /// Drawn in the first column when content is scrolled off to the left.
 const LEFT_MARKER: &str = "\u{2039}";
@@ -664,24 +665,24 @@ fn highlight_selection(buffer: &mut Buffer, area: Rect, app: &App, top: usize, l
         return;
     };
     let style = app.theme().ui.selection;
-    let width = app.rendered().width();
+    let canvas = app.rendered();
     for y in 0..area.height {
         let row = top + usize::from(y);
-        if app.rendered().row(row).is_none() {
+        if canvas.row(row).is_none() {
             break;
         }
-        let Some(columns) = selection.columns_on(row, width) else {
-            continue;
-        };
-        for col in columns {
-            let Some(x) = left.x_of(row, col) else {
-                continue;
-            };
-            if x >= area.width {
-                continue;
-            }
-            if let Some(cell) = buffer.cell_mut((area.x + x, area.y + y)) {
-                cell.set_style(patch_term(cell.style(), style));
+        let ranges = select::highlighted_columns(canvas, app.doc().source(), selection, row);
+        for columns in ranges {
+            for col in columns {
+                let Some(x) = left.x_of(row, col) else {
+                    continue;
+                };
+                if x >= area.width {
+                    continue;
+                }
+                if let Some(cell) = buffer.cell_mut((area.x + x, area.y + y)) {
+                    cell.set_style(patch_term(cell.style(), style));
+                }
             }
         }
     }
