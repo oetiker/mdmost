@@ -4832,3 +4832,99 @@ fn the_highlight_never_reaches_a_column_contiguous_next_span() {
         );
     }
 }
+#[test]
+fn a_soft_line_break_washes_like_any_other_word_separator() {
+    // A newline inside a paragraph is drawn as a space between two words. That space
+    // is body text the reader dragged over, not chrome, so it has to wash like every
+    // other separator. Three source lines reflow onto one row at this width, which
+    // puts both newlines mid-row — the shape where the hole is visible. A soft break
+    // that lands at a row end is swallowed by wrapping and hides the defect, so the
+    // fixture must be one where it does not.
+    let doc = "Alpha beta gamma\ndelta epsilon zeta\neta theta.\n";
+    let canvas = render(doc, 60);
+    let (row, first_col, _) = drawn(&canvas, "Alpha");
+    let (last_row, last_col, last_cols) = drawn(&canvas, "theta.");
+    assert_eq!(row, last_row, "fixture assumption: one reflowed row");
+    let sel = drag(
+        Pos::new(row, first_col),
+        Pos::new(row, last_col + last_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, row);
+    let text = canvas.row_text(row);
+    for col in first_col..last_col + last_cols {
+        assert!(
+            ranges.iter().any(|range| range.contains(&col)),
+            "column {col} of the paragraph is not washed: {ranges:?} over {text:?}"
+        );
+    }
+}
+
+#[test]
+fn a_crlf_soft_line_break_declines_its_origin_and_leaves_the_clipboard_whole() {
+    // `Piece::anchored` takes an origin only when the run reproduces its source byte
+    // for byte, and comrak reports a CRLF soft break as the two bytes `\r\n` against
+    // the one space it draws. So the guard declines, and the separator cell keeps the
+    // older, unwashed behaviour rather than claiming a byte it does not draw. That is
+    // the fail-closed half of the rule, pinned here so the degradation is a decision
+    // and not a surprise: what must never happen is the clipboard losing bytes over
+    // it. If a later change teaches the CRLF case to wash, this test is the one to
+    // rewrite — deliberately, not by deleting the assertion that fails.
+    let doc = "Alpha beta gamma\r\ndelta epsilon zeta\r\n";
+    let canvas = render(doc, 60);
+    let (row, first_col, _) = drawn(&canvas, "Alpha");
+    let (last_row, last_col, last_cols) = drawn(&canvas, "zeta");
+    assert_eq!(row, last_row, "fixture assumption: one reflowed row");
+    let sel = drag(
+        Pos::new(row, first_col),
+        Pos::new(row, last_col + last_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, row);
+    let separator = first_col + 16;
+    assert_eq!(
+        canvas.row_text(row).chars().nth(usize::from(separator)),
+        Some(' '),
+        "fixture assumption: the CRLF is drawn as a space at column {separator}"
+    );
+    assert!(
+        !ranges.iter().any(|range| range.contains(&separator)),
+        "the CRLF separator is expected to stay unwashed: {ranges:?}"
+    );
+    let extract = select::extract(&canvas, doc, sel).expect("the drag covered text");
+    assert!(
+        extract.from_source,
+        "the clipboard still answers from source"
+    );
+    // The trailing `\r` is `extend_over_markup` reaching to the line end over bytes
+    // that were never drawn — the same widening that brings a heading's `#` along,
+    // and untouched by the origin guard: a declined origin leaves this path exactly
+    // as it was before soft breaks were anchored at all.
+    assert_eq!(
+        extract.text, "Alpha beta gamma\r\ndelta epsilon zeta\r",
+        "no byte of the CRLF is lost on the way to the clipboard"
+    );
+}
+
+#[test]
+fn a_search_hit_across_a_soft_line_break_highlights_in_one_piece() {
+    // Anchoring the soft break's space is not only about the selection wash: a search
+    // runs over the source and projects its hit onto cells through the same spans, so
+    // a match that crosses the newline used to be drawn as two lit runs with a dark
+    // cell between them. One span, one segment.
+    let doc = "Alpha beta gamma\ndelta epsilon zeta\n";
+    let canvas = render(doc, 60);
+    let mut search = crate::search::Search::new(doc, "gamma\\s+delta", SearchMode::Regex)
+        .expect("a valid pattern");
+    search.locate(doc, canvas.spans());
+    let hit = search.hits().first().expect("the pattern matches");
+    assert_eq!(
+        hit.segments.len(),
+        1,
+        "the match is one unbroken run of cells: {:?}",
+        hit.segments
+    );
+    assert_eq!(
+        hit.segments[0].cols,
+        u16::try_from("gamma delta".len()).expect("short"),
+        "and it is as wide as the rendered match"
+    );
+}
