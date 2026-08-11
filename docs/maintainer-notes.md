@@ -153,3 +153,43 @@ Each release:
 What is deliberately not automated, and why, is in
 `docs/superpowers/specs/2026-08-09-publishing-design.md` §1 — there is no apt/yum
 repository, no Pages site, no container image and no macOS notarisation.
+
+## Regenerating the demo
+
+`docs/demo/mdmost.webp` is the README's hero image. It is recorded with
+[ansidrama](https://github.com/oetiker/ansidrama), from the repository root:
+
+```sh
+ansidrama record demo/mdmost.toml
+```
+
+The script drives `tmux` in an embedded terminal: `less` in the left pane and `mdmost`
+in the right, on `demo/tour.md`. Everything it depends on is under `demo/` —
+`config.toml` (mdmost's own settings, so the recording never inherits yours),
+`tmux.conf` (the split, the mouse, and `set-clipboard on`), and `mdmost.toml` (the
+script itself). It needs `tmux` >= 3.4, `less` and `nano` on the host, and nothing else.
+
+Three things in there are load-bearing and easy to break:
+
+- **`demo/tour.md`'s widths.** The point of the drag is that the pane passes through
+  the widths where the content changes shape. The three-column table has two-line cells
+  up to 59 columns and single-line rows from 60; the small flowchart's labels wrap
+  below 59 and are single-line above; the five-column table needs 60 and the
+  `pipeline.mmd` diagram 188, so neither fits the 47-column pane. Change a cell's text
+  and you can silently move one of those thresholds past the drag, leaving the demo
+  showing nothing. Check with `mdmost --render-once --width N demo/tour.md` at 48, 50,
+  59, 60, 64 and 100 before re-recording.
+- **`DISPLAY` and `WAYLAND_DISPLAY` are emptied** in `demo/mdmost.toml`. mdmost writes
+  OSC 52 unconditionally, and tmux's `set-clipboard on` takes it into its own paste
+  buffer — that is the whole of act 4 and it needs no display server. With one
+  reachable, `arboard` also takes the copy and the status bar says something else.
+- **`set -g set-clipboard on`.** Without it `prefix ]` pastes nothing and act 4 is a
+  mime.
+
+Recording takes about four minutes and the result is lossless WebP, currently 803
+frames and about 1.6 MB. Successive runs produce the same frame count and the same loop
+duration but **not** byte-identical files — a few hundred bytes drift between runs — so
+re-record only when the demo actually changes, not as routine hygiene.
+
+The copy buttons only exist when mouse capture succeeded, so `--render-once` shows none.
+That is correct, not a broken render.

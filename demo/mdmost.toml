@@ -1,0 +1,269 @@
+# The recording script for the README demo. Run from the repository root:
+#
+#     ansidrama record demo/mdmost.toml
+#
+# ansidrama drives the launch command in an embedded terminal and captures one frame
+# per key, per typed character and per mouse cell-step. `out` is resolved relative to
+# *this file's* directory, which is why it climbs one level.
+
+cols = 100
+rows = 30
+
+# The frame is 100x30 cells, so the font is what decides the pixel size of a README
+# hero image. 15px keeps the two panes legible at 1:1 without a 1200px-wide picture.
+font_px = 15
+card_font_px = 40
+max_fps = 30
+type_cs = 5
+move_cs = 2
+
+# tmux has to start, then `bash` and `mdmost` inside it. A short floor here races the
+# first prompt and the demo types into nothing.
+startup_ms = 2500
+settle_ms = 300
+
+# `q` quits mdmost, which is the last process standing, which ends the tmux session.
+quit_keys = ["q"]
+
+out = "../docs/demo/mdmost.webp"
+
+# DISPLAY and WAYLAND_DISPLAY are emptied on purpose. mdmost writes OSC 52
+# unconditionally, but with a reachable display server `arboard` *also* takes the copy
+# and the status bar says something different. Pinning them empty is what makes two
+# maintainers' recordings identical. LESS and the nano rc files are pinned for the same
+# reason — the left pane must not inherit the recording host's taste.
+env = { COLORTERM = "truecolor", DISPLAY = "", WAYLAND_DISPLAY = "", LESS = "", LESSOPEN = "", LESSCLOSE = "" }
+
+# A private tmux socket (`-L mdmost-demo`), so the recording can never join, resize or
+# outlive a tmux server the maintainer is sitting in. `-f demo/tmux.conf` keeps their
+# ~/.tmux.conf out of it. Pane 0 is a *shell*, not `less` directly: that is what lets
+# act 4 replace `less` with `nano` by typing, and act 5 close the pane with `exit`,
+# without a single tmux command-mode keystroke.
+#
+# `PS1='$ '` is a prefix on the pane's own command rather than an entry in `env` above:
+# an exported PS1 is reassigned by the recording host's /etc/profile inside the outer
+# login shell, and the pane then inherits *that* prompt instead of this one.
+launch = '''tmux -L mdmost-demo -f demo/tmux.conf new-session -s demo -x 100 -y 30 "PS1='$ ' bash --norc --noprofile -i" \; split-window -h -t demo "${CARGO_TARGET_DIR:-target}/release/mdmost --mouse --config demo/config.toml demo/tour.md"'''
+
+# ─── Act 1: the split ────────────────────────────────────────────────────────────
+# `less` on the left, `mdmost` on the right, the same file in both.
+
+[[scene]]
+card = { lines = ["mdmost", "less, but it knows what Markdown means"], fg = "#fef9c3" }
+hold_cs = 260
+
+[[scene]]
+click = { x = 20, y = 25 }
+hold_cs = 30
+
+[[scene]]
+text = "less demo/tour.md"
+hold_cs = 40
+
+[[scene]]
+keys = ["Enter"]
+hold_cs = 260
+
+# ─── Act 2: the drags ────────────────────────────────────────────────────────────
+# The divider sits at column 51 and mdmost is the RIGHT pane, so the divider moves
+# LEFT to widen it: 49 columns become 64. The table's cells go from two lines to one,
+# the flowchart's node labels stop wrapping, and the prose merely re-breaks. One
+# motion, three behaviours — while `less` re-wraps into different mush.
+
+[[scene]]
+click = { x = 76, y = 30 }
+hold_cs = 30
+
+[[scene]]
+keys = ["Space"]
+hold_cs = 160
+
+[[scene]]
+drag = { from = [51, 15], to = [37, 15] }
+hold_cs = 200
+
+[[scene]]
+drag = { from = [37, 15], to = [51, 15] }
+hold_cs = 160
+
+[[scene]]
+drag = { from = [51, 15], to = [37, 15] }
+hold_cs = 200
+
+[[scene]]
+drag = { from = [37, 15], to = [51, 15] }
+hold_cs = 200
+
+# ─── Act 3: scrolling what cannot reflow ─────────────────────────────────────────
+# The five-column table needs sixty columns and the pane has forty-seven. `Right`
+# moves the table and nothing else: the prose above it does not stir, and the `↔`
+# readout counts the columns still off the edge. `g` comes back to the top left.
+
+[[scene]]
+keys = ["Space"]
+hold_cs = 200
+
+[[scene]]
+keys = ["Right", "Right", "Right", "Right", "Right", "Right"]
+type_cs = 14
+hold_cs = 240
+
+[[scene]]
+keys = ["g"]
+hold_cs = 160
+
+# ─── Act 4: copy, into the other pane ────────────────────────────────────────────
+# `less` gives way to `nano`, and three copies cross the split. mdmost writes OSC 52,
+# tmux takes it into its own paste buffer, `prefix ]` pastes it next door. A table
+# arrives as TSV, a fenced block as its own source, a dragged paragraph as Markdown.
+
+[[scene]]
+click = { x = 20, y = 25 }
+hold_cs = 30
+
+[[scene]]
+keys = ["q"]
+hold_cs = 120
+
+[[scene]]
+text = "nano -I /tmp/pasted.txt"
+hold_cs = 40
+
+[[scene]]
+keys = ["Enter"]
+hold_cs = 200
+
+# The table's `[copy]` button — tab-separated values.
+[[scene]]
+click = { x = 76, y = 30 }
+hold_cs = 30
+
+[[scene]]
+keys = ["Space"]
+hold_cs = 140
+
+[[scene]]
+click = { x = 93, y = 2 }
+hold_cs = 220
+
+[[scene]]
+click = { x = 20, y = 25 }
+hold_cs = 30
+
+[[scene]]
+keys = ["C-b", "]"]
+hold_cs = 260
+
+# The fenced block's `[copy]` button — the Rust source that was written, not the
+# coloured cells that were drawn.
+[[scene]]
+click = { x = 76, y = 30 }
+hold_cs = 30
+
+[[scene]]
+keys = ["Space", "Space", "Space"]
+hold_cs = 140
+
+[[scene]]
+click = { x = 94, y = 16 }
+hold_cs = 220
+
+[[scene]]
+click = { x = 20, y = 25 }
+hold_cs = 30
+
+[[scene]]
+keys = ["C-b", "]"]
+hold_cs = 260
+
+# A dragged paragraph — the Markdown behind the cells, not the cells.
+[[scene]]
+click = { x = 76, y = 30 }
+hold_cs = 30
+
+[[scene]]
+keys = ["g"]
+hold_cs = 120
+
+[[scene]]
+drag = { from = [53, 7], to = [97, 11] }
+hold_cs = 240
+
+[[scene]]
+click = { x = 20, y = 25 }
+hold_cs = 30
+
+[[scene]]
+keys = ["C-b", "]"]
+hold_cs = 300
+
+# ─── Act 5: full width ───────────────────────────────────────────────────────────
+# The left pane closes and mdmost takes all hundred columns: the contents pane opens
+# into the margin the body cap leaves, the wide diagram finally draws and scrolls, and
+# the theme cycles back to where the loop started.
+
+[[scene]]
+keys = ["C-x"]
+hold_cs = 140
+
+[[scene]]
+keys = ["n"]
+hold_cs = 120
+
+[[scene]]
+text = "exit"
+hold_cs = 40
+
+[[scene]]
+keys = ["Enter"]
+hold_cs = 300
+
+[[scene]]
+keys = ["Tab"]
+hold_cs = 240
+
+[[scene]]
+keys = ["Down", "Down", "Down", "Down"]
+type_cs = 16
+hold_cs = 180
+
+[[scene]]
+keys = ["Enter"]
+hold_cs = 200
+
+[[scene]]
+keys = ["Tab"]
+hold_cs = 180
+
+[[scene]]
+keys = ["Right", "Right", "Right", "Right", "Right", "Right", "Right", "Right"]
+type_cs = 12
+hold_cs = 280
+
+[[scene]]
+keys = ["g"]
+hold_cs = 140
+
+[[scene]]
+keys = ["/"]
+hold_cs = 100
+
+[[scene]]
+text = "diagram"
+hold_cs = 60
+
+[[scene]]
+keys = ["Enter"]
+hold_cs = 280
+
+# No `Escape` before the theme keys: an ESC byte immediately followed by `t` arrives as
+# `M-t` and swallows the keystroke, so the cycle would end one theme short of where it
+# started — and the loop would jump. The match highlight simply stays up through both
+# themes instead, which is the better picture anyway.
+[[scene]]
+keys = ["t"]
+hold_cs = 280
+
+[[scene]]
+keys = ["t"]
+hold_cs = 300

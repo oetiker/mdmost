@@ -1,0 +1,28 @@
+# mdmost's own configuration for the recorded demo.
+#
+# Passed with `--config demo/config.toml` so the recording never inherits the
+# maintainer's `~/.config/mdmost/config.toml`. Every key that could otherwise be
+# decided by the host is pinned here, because a demo that renders differently on
+# two machines cannot be re-recorded.
+
+theme = "dark"
+
+# Nerd Font glyphs are otherwise *detected*, and the answer depends on which fonts
+# the recording host has installed. Pin it off: the recording is rasterised with
+# ansidrama's bundled JetBrains Mono, which has no Nerd Font glyphs.
+icons = false
+
+# The title banner is opt-in and off by default, so the demo has to ask for it.
+title_banner = true
+
+line_numbers = false
+section_numbers = true
+scroll_step = 3
+
+# The prose cap. At the 100 columns of act 5 this is what keeps the paragraphs
+# readable instead of running the whole width of the frame.
+body_width = 72
+
+[toc]
+open = false
+width = 28

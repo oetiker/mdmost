@@ -8,6 +8,16 @@ and negotiated column widths, fenced code is syntax-highlighted, and Mermaid dia
 are laid out as box art rather than shown as source. Resize the terminal and everything
 reflows, because rendering is a pure function of `(document, width, theme, options)`.
 
+![less on the left, mdmost on the right, on the same file](docs/demo/mdmost.webp)
+
+The same document in `less` and in `mdmost`, side by side. Dragging the divider is the
+whole argument: a table renegotiates its column widths, a diagram re-lays its node
+boxes, and prose only re-wraps. Content too wide to fold — a five-column table, a
+diagram that wants 188 columns — scrolls sideways rather than being mangled, and it
+scrolls alone, while the prose around it holds still. The copies at the end cross into
+the neighbouring pane as a table's TSV, a fenced block's own source, and a paragraph's
+Markdown.
+
 Heading levels are told apart by the rule underneath them — heavy, light, then dashed.
 
 Set `title_banner = true` and a document whose first block is its one and only `#`
