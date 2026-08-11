@@ -145,8 +145,10 @@ pub struct Hotspot {
 ///
 /// Like [`Pin`] and [`Hotspot`], an atom is a claim about rows a block owns outright, so
 /// it travels through [`Canvas::append`] and [`Canvas::indent`] and is dropped by
-/// [`Canvas::blit`]: a diagram placed at an arbitrary column of a row it shares with
-/// other content — a table cell — can no longer claim a rectangle of that row.
+/// [`Canvas::blit`]: a canvas placed at an arbitrary column of a row it shares with other
+/// content cannot claim a rectangle of that row. That is an invariant, not a live case —
+/// the only sub-canvas the renderer blits is a table cell, and a GFM table cell holds
+/// inline content, so no document puts a diagram inside one. Nothing to go looking for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Atom {
     /// The first row of the rectangle.

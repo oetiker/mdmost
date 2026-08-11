@@ -43,18 +43,21 @@
 //! walk over a drag on `    A[Read] --> B[Draw]` lit `Read` and copied `    A[Read] --> B[`
 //! — a truncated token, and the exact see/get divergence this module exists to remove.
 //! So a diagram records an [`Atom`]: its drawn rectangle, and its whole fenced block.
-//! A drag confined to one label copies that label; any wider drag takes the diagram
-//! whole — the fenced block on the clipboard, opener and closer included, and the whole
-//! rectangle washed on screen. [`resolve`] is where that is decided, once, for both.
+//! A drag confined to one label copies that label; any wider drag, and any drag *pressed*
+//! anywhere else inside the rectangle, takes the diagram whole — the fenced block on the
+//! clipboard, opener and closer included, and the whole rectangle washed on screen.
+//! [`resolve`] is where that is decided, once, for both.
 //!
 //! **3. Content with no spans falls back to what is on screen.** Spans are recorded by
 //! the inline renderer and, per line, by `render::code::code_area` (design spec §3), so
 //! a Mermaid diagram and a table's frame carry none, but a fenced or indented code
 //! block does (a table *cell* is a nested inline render and does too). When a selection
 //! touches no span at all, the rendered text of the selected cells is returned instead,
-//! and [`Extract::from_source`] says so, so the status bar can too. For a diagram that
-//! fallback is the box art the reader is looking at, which is at least what they
-//! pointed at.
+//! and [`Extract::from_source`] says so, so the status bar can too. What is left for it
+//! to answer is chrome that belongs to no atom — a table's frame, a thematic break — for
+//! which the rendered cells are at least what the reader pointed at. A diagram's box art
+//! no longer reaches it: decision 2b claims the whole rectangle, so a press on a border
+//! resolves to the fenced block instead.
 //!
 //! The known limitation this leaves, stated plainly because a doc comment that hid it
 //! would be the defect class this project keeps catching in itself: a drag that starts
@@ -251,19 +254,34 @@ impl Resolved {
 /// drawn rectangle and its whole fenced block, and its labels are the only spans inside
 /// that block. So:
 ///
-/// 1. **The hull lies inside one label.** The reader is pointing at one box. The answer
+/// 1. **The press landed inside the rectangle but on no label.** Box art, an arrow, an
+///    interior blank, the padding beside a box: the reader took hold of the *drawing*,
+///    not of anything in it, so the drag takes the diagram whole from the outset,
+///    wherever it is released. Without this case a drag confined to box art touched no
+///    label, found no hull worth the name, and left the clipboard on the drawn-cells
+///    fallback while the highlight stayed empty — copying something and showing nothing,
+///    which is the see/get shape this module exists to remove.
+/// 2. **The hull lies inside one label.** The reader is pointing at one box. The answer
 ///    is that label's *whole* source range — a label is the unit, so half of one is not
 ///    an answer — and nothing is washed beyond the spans that drew it. Note what this
 ///    does *not* do: it does not run [`extend_over_markup`], because on a Mermaid line
 ///    almost every byte is undrawn and the walk would swallow `A[`, the arrow and half
 ///    of the next box, none of which the reader saw light up.
-/// 2. **The hull touches a diagram and is wider than one of its labels.** Crossing from
+/// 3. **The hull touches a diagram and is wider than one of its labels.** Crossing from
 ///    one label into another, or leaving the diagram entirely: the diagram contributes
 ///    its whole fenced block, fence lines included, and the drag's own hull contributes
 ///    whatever else it covered. Widening the hull to cover the block gives exactly that,
 ///    in document order and with no second concatenation step — a drag that starts in a
 ///    diagram and ends below it yields the block and then the text under it.
-/// 3. **No diagram involved.** The hull, widened over adjacent markup, as before.
+/// 4. **No diagram involved.** The hull, widened over adjacent markup, as before.
+///
+/// Case 1 is the *only* thing here judged on a screen position, and it is judged on one
+/// cell — the anchor — never on the drag's shape. That matters: comparing the drag's
+/// cells against the rectangle would be a second, geometric rule able to disagree with
+/// the source-range one, which §2.2 refuses. Asking which atom, if any, holds the cell
+/// the button went down on cannot disagree with anything, because it decides *before*
+/// there is a range to disagree with. It is also what the reader experiences: the press
+/// is the moment they choose what they are selecting.
 ///
 /// The predicate for "confined to one label" is stated on the **hull**, not on the two
 /// screen positions, and that is deliberate. An endpoint that landed on chrome — a
@@ -278,38 +296,90 @@ impl Resolved {
 /// one span per row, each naming the whole label — hence the ranges are de-duplicated
 /// before they are counted, or every wrapped label would look like a crossing.
 pub(crate) fn resolve(canvas: &Canvas, source: &str, selection: Selection) -> Option<Resolved> {
-    let (lo, hi) = source_hull(canvas, source, selection)?;
-    let mut labels: Vec<(usize, usize)> = canvas
-        .spans()
-        .iter()
-        .filter(|span| span.source_end > lo && span.source_start < hi)
-        .filter(|span| canvas.atoms().iter().any(|atom| atom.contains_span(span)))
-        .map(|span| (span.source_start, span.source_end))
-        .collect();
-    labels.sort_unstable();
-    labels.dedup();
-    if let [(start, end)] = labels[..]
-        && lo >= start
-        && hi <= end
-    {
-        return Some(Resolved {
-            lo: start,
-            hi: end,
-            washed: Vec::new(),
-        });
+    let pressed_on = pressed_on_chrome_of(canvas, selection);
+    // A press on the drawing itself still has a hull when the drag reached text, and it
+    // is kept: the diagram is added to what the drag covered, not substituted for it, so
+    // a press on a border and a release in the prose below yields the block *and* the
+    // prose, exactly as a press on a label and the same release does.
+    let (lo, hi) = match (source_hull(canvas, source, selection), pressed_on) {
+        (Some(hull), _) => hull,
+        (None, Some(atom)) => (atom.source_start, atom.source_end),
+        (None, None) => return None,
+    };
+    if pressed_on.is_none() {
+        let mut labels: Vec<(usize, usize)> = canvas
+            .spans()
+            .iter()
+            .filter(|span| span.source_end > lo && span.source_start < hi)
+            .filter(|span| canvas.atoms().iter().any(|atom| atom.contains_span(span)))
+            .map(|span| (span.source_start, span.source_end))
+            .collect();
+        labels.sort_unstable();
+        labels.dedup();
+        if let [(start, end)] = labels[..]
+            && lo >= start
+            && hi <= end
+        {
+            return Some(Resolved {
+                lo: start,
+                hi: end,
+                washed: Vec::new(),
+            });
+        }
     }
     let (mut lo, mut hi) = extend_over_markup(canvas, source, lo, hi);
-    let washed: Vec<Atom> = canvas
+    let mut washed: Vec<Atom> = canvas
         .atoms()
         .iter()
         .filter(|atom| atom.source_end > lo && atom.source_start < hi)
         .copied()
         .collect();
+    if let Some(atom) = pressed_on
+        && !washed.contains(&atom)
+    {
+        washed.push(atom);
+    }
     for atom in &washed {
-        lo = lo.min(atom.source_start);
+        // To the *start of the line*, not to the atom's first byte: a fenced block's
+        // recorded extent begins at the backticks, so a diagram inside a block quote or
+        // a list item would otherwise come back ragged — `> ` on every interior line and
+        // nothing on the opener. Every other line of the block carries its container
+        // prefix verbatim, so the first one does too.
+        lo = lo.min(line_start(source, atom.source_start));
         hi = hi.max(atom.source_end);
     }
     Some(Resolved { lo, hi, washed })
+}
+
+/// The atom whose drawing the button went down on, if the press missed every label in it.
+///
+/// The whole of case 1 in [`resolve`]: one cell, one lookup, no comparison of the drag
+/// against the rectangle. A press *on* a label is `None` — that drag is judged by its
+/// hull like any other, so half a label still copies the label and not the chart.
+///
+/// The press is placed by **row**, not by the rectangle. An atom's rows are rows the
+/// block owns outright — that is the invariant [`Atom`] is dropped by `blit` to keep —
+/// whereas its columns are the drawing's bounding box, which the blank margin beside a
+/// narrow chart is not inside. Testing the columns too would leave that margin on the
+/// drawn-cells fallback, which is the state this case exists to abolish: the reader would
+/// press one column left of the border and get a clipboard with nothing lit.
+fn pressed_on_chrome_of(canvas: &Canvas, selection: Selection) -> Option<Atom> {
+    let at = selection.anchor;
+    let atom = canvas.atoms().iter().find(|atom| atom.covers_row(at.row))?;
+    let on_label = canvas.spans().iter().any(|span| {
+        span.row == at.row
+            && at.col >= span.col
+            && at.col < span.col.saturating_add(span.cols)
+            && atom.contains_span(span)
+    });
+    (!on_label).then_some(*atom)
+}
+
+/// The offset of the first byte of the line `at` lies on.
+fn line_start(source: &str, at: usize) -> usize {
+    source[..at.min(source.len())]
+        .rfind('\n')
+        .map_or(0, |newline| newline + 1)
 }
 
 /// The source range a selection covers.

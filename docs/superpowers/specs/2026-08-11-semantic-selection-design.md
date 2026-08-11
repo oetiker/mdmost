@@ -56,18 +56,42 @@ tests should be sharpest.
 ### 2.2 A diagram is atomic
 
 *Amended 2026-08-11, after task 5 landed and the first drag over a real chart was
-looked at.*
+looked at. Amended again the same day, after the review found the last see/get
+divergence left inside a diagram: the third case below.*
 
-Touching any part of a box selects that label's whole source range. Partial selection
-inside a label would need a byte mapping that survives entity decoding and `<br>`
-splitting (`Label::parse`, `src/mermaid/ast.rs`), which buys nothing a reader wants. The
-unit of selection in a diagram is the box, which is what a reader points at.
+A drag **confined to one box** — and only such a drag; the two cases after this one take
+precedence — selects that label's whole source range, whichever part of the box it
+touched. Partial selection inside a label would need a byte mapping that survives entity
+decoding and `<br>` splitting (`Label::parse`, `src/mermaid/ast.rs`), which buys nothing
+a reader wants. The unit of selection in a diagram is the box, which is what a reader
+points at.
 
 **A drag wider than one label takes the whole diagram.** Crossing from one label into
 another, or starting inside the diagram and ending outside it, expands the highlight to
 the diagram's whole rectangle and copies the **whole fenced block**, ```` ```mermaid ````
 opener and ```` ``` ```` closer included. A drag that continues past the diagram
 contributes the block first and then whatever else it covered, in document order.
+
+**A drag pressed outside any label takes the whole diagram immediately.** If the button
+goes down on box art, an arrow, a box's blank interior or the padding inside the
+rectangle, the reader has taken hold of the drawing rather than of anything written in
+it, and the answer is the whole diagram wherever the drag is released — the block on the
+clipboard, the rectangle washed. Before this case such a drag touched no label at all: it
+resolved to no source range, so the clipboard fell back to the drawn cells (§3.1) while
+the highlight stayed empty. The reader copied something and saw nothing, which is §1.
+
+This third case is decided by the **press**, on the single cell the button went down on,
+and never by comparing the drag's cells against the rectangle. A geometric rule over the
+drag would be a second rule able to disagree with the source-range one; a lookup of which
+atom, if any, holds the anchor decides before there is a range to disagree with. It is
+also the reader's own model: the press is where they choose what they are taking.
+
+**A block is copied verbatim, line one included.** The fenced block's recorded extent
+begins at the ```` ``` ```` and the container prefix of that first line sits before it, so
+copying the extent alone yields a diagram in a block quote as a bare ```` ```mermaid ````
+followed by `> flowchart LR`. The copy therefore reaches back to the start of the opener's
+line. An ordinary quoted fence keeps `> ` on every line it hands over; a diagram in one
+does the same, and a diagram indented into a list item keeps its indent.
 
 This is not a refinement of §2's markup rule but a replacement for it inside a diagram.
 That rule extends a selection over every byte nothing drew, which in prose is a pair of
@@ -127,7 +151,8 @@ CRLF and leading-whitespace handling have already bitten this project once each.
 
 Once labels carry spans, a drag over a diagram yields **mermaid source** and the status
 bar says `Markdown source`, like everything else. Which source is §2.2's answer: one
-label for a drag confined to one box, the whole fenced block for anything wider. The
+label for a drag confined to one box, the whole fenced block for anything wider and for
+anything pressed outside a label. The
 earlier draft of this paragraph promised the source *between* the first and last box
 touched — `A[Parse] --> B[Layout]` — which is what the implementation did and what the
 amendment above replaces; the string it produced in practice was truncated at the last
@@ -135,11 +160,17 @@ label it could map.
 
 ### 3.1 What remains of the rendered-cells fallback
 
-It stays, and it should be rare. Content that genuinely has no source mapping — box art
-between labels, a family whose layout has not yet been given spans — still falls back to
-the drawn cells with `from_source: false`, and the status bar still says `rendered
+It stays, and it should be rare. Content that genuinely has no source mapping — a table's
+frame, a thematic break, a family whose layout has not yet been given spans — still falls
+back to the drawn cells with `from_source: false`, and the status bar still says `rendered
 text`. The fallback is not the design; it is the honest answer when the mapping is
 absent.
+
+A diagram's box art is no longer one of its cases. It used to be the example, and it was
+the one place the fallback produced the §1 shape rather than an honest answer: the cells
+were copied and nothing lit up. §2.2's third case claims the whole rectangle, so the
+fallback is reached inside a diagram only where no atom was recorded at all — a layout
+that failed, which draws no rectangle to press on either.
 
 ## 4. The copy button
 

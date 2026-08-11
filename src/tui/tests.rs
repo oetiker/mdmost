@@ -3146,32 +3146,94 @@ fn extract_over_code(markdown: &str) -> select::Extract {
     drag_over(&canvas, markdown, "let a = 1;")
 }
 
-/// Now that a code fence carries spans, every survivor in this file that exercises
-/// `extract` on a code block asserts `from_source == true` — the suite lost its only
-/// negative case for the flag. A diagram's **box art** is still genuinely spanless (it
-/// is drawing, not source text; design spec §3.1), so a drag wholly inside it pins the
-/// other half of the contract: `Extract::from_source` still says `false` for content
-/// that really has no mapping, rather than having drifted to always-true.
+/// A press that lands on the drawing rather than on a label takes the diagram whole
+/// (design spec §2.2, third case).
 ///
-/// A flowchart's *labels* do carry spans now, which is why the drag below is over the
-/// box's top edge rather than over `Read` — see
-/// [`a_drag_over_a_diagram_label_yields_the_mermaid_source`] for that half.
+/// This test used to assert the opposite — that such a drag fell back to the drawn cells
+/// with `from_source == false` — and that was the last see/get divergence left inside a
+/// diagram: `resolve` found no hull, so the clipboard got `───` while the highlight
+/// stayed empty. The reader copied something and saw nothing. The owner's ruling is that
+/// a drag which starts outside a label area selects the entire diagram immediately, so
+/// the clipboard and the wash both answer for the whole rectangle here. The negative case
+/// this test used to carry for `Extract::from_source` moved to
+/// [`a_drag_over_a_thematic_break_falls_back_to_what_is_drawn`], which is chrome that
+/// belongs to no atom and so still has no mapping at all.
 #[test]
-fn a_drag_over_a_diagrams_box_art_still_falls_back_to_what_is_drawn() {
+fn a_press_on_a_diagrams_box_art_takes_the_diagram_whole() {
     let mut app = pager(FITTING_FENCE);
     let canvas = app.canvas().clone();
     // The row above the label is the top edge of both boxes: drawing, and nothing else.
     let (label, _, _) = drawn(&canvas, "Read");
     let edge = label - 1;
+    let on_art = drag(Pos::new(edge, 0), Pos::new(edge, 6));
+    let extract =
+        select::extract(&canvas, FITTING_FENCE, on_art).expect("the drag covered drawn cells");
+    assert!(
+        extract.from_source,
+        "the rectangle is one thing and it has a source range, got {:?}",
+        extract.text
+    );
+    assert_eq!(
+        extract.text,
+        FITTING_FENCE.trim_end_matches('\n'),
+        "the whole fenced block, opener and closer included"
+    );
+    // And the wash is the whole rectangle — the see/get half, which is why this test
+    // changed at all. Pinned against the drag that crosses both labels, whose wash
+    // `the_whole_diagram_wash_covers_its_box_art` already fixes to the rectangle and no
+    // more: every row of the canvas has to light identically, or the two ways of asking
+    // for the whole diagram disagree.
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (_, to, cols) = drawn(&canvas, "Draw");
+    let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+    for on in 0..canvas.height() {
+        assert_eq!(
+            select::highlighted_columns(&canvas, FITTING_FENCE, on_art, on),
+            select::highlighted_columns(&canvas, FITTING_FENCE, across, on),
+            "row {on} washes the same for a press on the art as for a drag across both boxes"
+        );
+    }
+    assert!(
+        !select::highlighted_columns(&canvas, FITTING_FENCE, on_art, edge).is_empty(),
+        "the top edge lights up, or the equality above compares two empty washes"
+    );
+}
+
+/// The other half of the contract the test above used to carry: `from_source` still says
+/// `false` for content the renderer really never mapped, rather than having drifted to
+/// always-true now that fences and labels both carry spans.
+///
+/// A thematic break is the case that is left. It is drawing with no source range of its
+/// own, and — unlike a diagram's box art — it belongs to no atom, so nothing claims it.
+#[test]
+fn a_drag_over_a_thematic_break_falls_back_to_what_is_drawn() {
+    let source = "Above it.\n\n---\n\nBelow it.\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (above, _, _) = drawn(&canvas, "Above it.");
+    let (below, _, _) = drawn(&canvas, "Below it.");
+    let rule = (above + 1..below)
+        .find(|&row| canvas.row_text(row).trim_start().starts_with('─'))
+        .expect("the thematic break is drawn as a rule");
+    let text = canvas.row_text(rule);
+    let from = u16::try_from(crate::text::display_width(
+        &text[..text.len() - text.trim_start().len()],
+    ))
+    .expect("a test canvas is narrow");
     let extract = select::extract(
         &canvas,
-        FITTING_FENCE,
-        drag(Pos::new(edge, 0), Pos::new(edge, 6)),
+        source,
+        drag(Pos::new(rule, from), Pos::new(rule, from + 6)),
     )
     .expect("the drag covered drawn cells");
     assert!(
         !extract.from_source,
-        "box art has no source span; the pager must not claim it does, got {:?}",
+        "a rule has no source span; the pager must not claim it does, got {:?}",
+        extract.text
+    );
+    assert!(
+        extract.text.starts_with('─'),
+        "what is copied is the drawing the reader pointed at, got {:?}",
         extract.text
     );
 }
@@ -3269,6 +3331,101 @@ fn a_drag_across_two_labels_takes_the_whole_fenced_block() {
     );
 }
 
+/// A press on the drawing takes the diagram *in addition to* what the drag went on to
+/// cover, not instead of it (design spec §2.2, third case).
+///
+/// The case that separates the two readings of "immediately": the button goes down on the
+/// boxes' **bottom** edge and comes up in the prose below. Every label is above the press,
+/// so §2.1 resolves that endpoint *forward* — the hull it produces lies entirely after the
+/// diagram and does not overlap it. An implementation that only widened over the atoms the
+/// hull already met would hand back the prose alone, and the reader would watch the
+/// rectangle light up under the pointer while the clipboard held a sentence.
+#[test]
+fn a_press_on_box_art_that_drags_into_prose_takes_the_block_and_the_prose() {
+    let source = concat!(
+        "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n",
+        "\nAfter the **fence**.\n"
+    );
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (label, _, _) = drawn(&canvas, "Read");
+    let (below, at, cols) = drawn(&canvas, "After the fence.");
+    let bottom = (label + 1..below)
+        .find(|&row| canvas.row_text(row).contains('└'))
+        .expect("the boxes have a bottom edge below their labels");
+    let out = drag(Pos::new(bottom, 1), Pos::new(below, at + cols - 1));
+    let extract = select::extract(&canvas, source, out).expect("covered");
+    assert_eq!(
+        extract.text,
+        "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n\nAfter the **fence**.",
+        "the block the press claimed, then the prose the drag reached"
+    );
+    assert!(
+        !select::highlighted_columns(&canvas, source, out, label - 1).is_empty(),
+        "the diagram's top edge is washed, though the drag never went near it"
+    );
+}
+
+/// The **press** decides, not the drag's extent (design spec §2.2, third case).
+///
+/// The discriminating case: the button goes down on the arrow between the two boxes and
+/// comes up inside `Read`, to its left. The resolved hull of that drag lies wholly inside
+/// `Read`'s source range — §2.1 resolves the arrow to the end of the label before it — so
+/// every rule stated on the hull, and any rule keyed on the drag's *first* cell in
+/// document order, answers `"Read"`. Only asking where the button went down gives the
+/// diagram. If this test ever agrees with
+/// [`a_drag_over_a_diagram_label_yields_the_mermaid_source`], the anchor has stopped
+/// being consulted.
+#[test]
+fn a_press_on_box_art_takes_the_diagram_even_when_it_ends_in_a_label() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, col, _) = drawn(&canvas, "Read");
+    let text = canvas.row_text(row);
+    let arrow = text.find('▶').expect("the boxes are joined by an arrow");
+    let arrow =
+        u16::try_from(crate::text::display_width(&text[..arrow])).expect("a test canvas is narrow");
+    assert!(arrow > col, "the arrow sits to the right of the label");
+    // Anchor on the arrow, head back inside the label: a *reversed* drag, so the earlier
+    // of the two positions is the label and only the press is on the art.
+    let back = drag(Pos::new(row, arrow), Pos::new(row, col + 1));
+    let extract = select::extract(&canvas, FITTING_FENCE, back).expect("covered drawn cells");
+    assert_eq!(
+        extract.text,
+        FITTING_FENCE.trim_end_matches('\n'),
+        "the press was on the drawing, so the whole block comes, wherever it was released"
+    );
+    let ranges = select::highlighted_columns(&canvas, FITTING_FENCE, back, row);
+    assert!(
+        ranges.iter().any(|range| range.contains(&arrow)),
+        "the wash covers the arrow the press landed on, got {ranges:?}"
+    );
+}
+
+/// A diagram inside a block quote copies with its container prefix on **every** line,
+/// the opener included.
+///
+/// The fenced block's recorded extent starts at the backticks, not at the start of the
+/// line, so this used to come back ragged — a bare ```` ```mermaid ```` followed by
+/// `> flowchart LR`. An ordinary fence in a quote keeps `> ` on every copied line, and a
+/// block that is copied verbatim has to mean verbatim on line one too, or what the reader
+/// pastes is not what the file says.
+#[test]
+fn a_quoted_diagram_keeps_its_prefix_on_the_first_line_too() {
+    let source = "> ```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (_, to, cols) = drawn(&canvas, "Draw");
+    let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+    let extract = select::extract(&canvas, source, across).expect("covered both boxes");
+    assert_eq!(
+        extract.text,
+        source.trim_end_matches('\n'),
+        "every line of the block verbatim, the opener's `> ` included"
+    );
+}
+
 /// The wash for a whole diagram covers its box art, and that is deliberate.
 ///
 /// Chrome never highlights anywhere else in this pager (design spec §2), and a test that
@@ -3359,10 +3516,10 @@ fn an_indented_diagrams_wash_moves_with_it() {
     let (_, to, cols) = drawn(&canvas, "Draw");
     let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
     let extract = select::extract(&canvas, source, across).expect("covered both boxes");
-    assert!(
-        extract.text.starts_with("```mermaid") && extract.text.ends_with("```"),
-        "the fenced block, from its opener to its closer, got {:?}",
-        extract.text
+    assert_eq!(
+        extract.text, "  ```mermaid\n  flowchart LR\n      A[Read] --> B[Draw]\n  ```",
+        "the fenced block from its opener to its closer, each line as the file has it — \
+         the opener's indent included, since every line below it keeps one"
     );
     let ranges = select::highlighted_columns(&canvas, source, across, row);
     let text = canvas.row_text(row);
