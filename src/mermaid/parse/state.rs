@@ -20,12 +20,16 @@ use super::lex::{self, Nesting, SrcLine};
 use super::{direction, intern};
 
 /// Parses a whole `stateDiagram` / `stateDiagram-v2`.
-pub fn parse(lines: &[SrcLine<'_>]) -> Result<StateDiagram, MermaidError> {
+///
+/// `src` is the full mermaid source `lines` was lexed from; it is kept only so that
+/// label text — always a subslice of it — can report where it came from.
+pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<StateDiagram, MermaidError> {
     let Some((header, body)) = lines.split_first() else {
         return Err(lex::syntax(1, "empty diagram"));
     };
     let mut builder = Builder {
         stack: vec![(None, StateScope::default())],
+        src,
         ..Builder::default()
     };
     let (_, rest) = lex::split_word(header.text);
@@ -44,21 +48,29 @@ struct PendingNote {
     placement: NotePlacement,
     target: StateId,
     lines: Vec<String>,
+    /// The byte range in the mermaid source spanning every line accumulated so far;
+    /// `None` until the first line arrives. Grown on each push rather than recovered
+    /// from `lines` afterwards, because by then the text has been copied into owned
+    /// `String`s and lost its position.
+    source: Option<std::ops::Range<usize>>,
     line: usize,
 }
 
 /// Accumulates the state arena and the scope stack.
 #[derive(Debug, Default)]
-struct Builder {
+struct Builder<'a> {
     direction: Option<Direction>,
     states: Vec<StateNode>,
     /// Open scopes; the last entry is the innermost. Entry 0 is the diagram root and
     /// has no owning state.
     stack: Vec<(Option<StateId>, StateScope)>,
     note: Option<PendingNote>,
+    /// The full mermaid source, used only to compute a label's byte offset
+    /// (`lex::offset_of`) — every label text this parser touches is a subslice of it.
+    src: &'a str,
 }
 
-impl Builder {
+impl Builder<'_> {
     /// Handles one source line, which may hold several `;`-separated statements.
     fn line(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         if self.note.is_some() {
@@ -69,10 +81,19 @@ impl Builder {
                     self.scope().notes.push(StateNote {
                         placement: note.placement,
                         target: note.target,
-                        text: Label { lines: note.lines },
+                        text: Label {
+                            lines: note.lines,
+                            source: note.source.unwrap_or_default(),
+                        },
                     });
                 }
             } else if let Some(note) = self.note.as_mut() {
+                let at = lex::offset_of(self.src, text);
+                let end = at + text.len();
+                note.source = Some(match note.source.take() {
+                    Some(range) => range.start..end,
+                    None => at..end,
+                });
                 note.lines.push(text.to_string());
             }
             return Ok(());
@@ -129,8 +150,12 @@ impl Builder {
         // `s2 : This is a description`.
         if let Some((key, description)) = lex::split_once_top_level(text, ':', Nesting::Honour) {
             let id = self.intern_state(key);
+            let description = lex::unquote(description);
             if let Some(state) = self.states.get_mut(id.0) {
-                state.label = Some(Label::parse(lex::unquote(description)));
+                state.label = Some(Label::parse_at(
+                    description,
+                    lex::offset_of(self.src, description),
+                ));
             }
             return Ok(());
         }
@@ -164,7 +189,11 @@ impl Builder {
         if let Some(description) = description
             && let Some(state) = self.states.get_mut(id.0)
         {
-            state.label = Some(Label::parse(lex::unquote(description)));
+            let description = lex::unquote(description);
+            state.label = Some(Label::parse_at(
+                description,
+                lex::offset_of(self.src, description),
+            ));
         }
         if let Some(stereotype) = stereotype {
             let kind = match stereotype.to_ascii_lowercase().as_str() {
@@ -222,10 +251,11 @@ impl Builder {
         let target = self.intern_state(lex::unquote(target));
         match text {
             Some(text) => {
+                let text = lex::unquote(text);
                 let note = StateNote {
                     placement,
                     target,
-                    text: Label::parse(lex::unquote(text)),
+                    text: Label::parse_at(text, lex::offset_of(self.src, text)),
                 };
                 self.scope().notes.push(note);
             }
@@ -234,6 +264,7 @@ impl Builder {
                     placement,
                     target,
                     lines: Vec::new(),
+                    source: None,
                     line,
                 });
             }
@@ -258,7 +289,7 @@ impl Builder {
             label: label
                 .map(lex::unquote)
                 .filter(|label| !label.is_empty())
-                .map(Label::parse),
+                .map(|label| Label::parse_at(label, lex::offset_of(self.src, label))),
         };
         self.scope().transitions.push(transition);
         Ok(())

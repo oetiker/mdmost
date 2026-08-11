@@ -20,11 +20,17 @@ use super::lex::{self, Nesting, SrcLine};
 use super::{direction, intern};
 
 /// Parses a whole `classDiagram`.
-pub fn parse(lines: &[SrcLine<'_>]) -> Result<ClassDiagram, MermaidError> {
+///
+/// `src` is the full mermaid source `lines` was lexed from; it is kept only so that
+/// label text — always a subslice of it — can report where it came from.
+pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<ClassDiagram, MermaidError> {
     let Some((header, body)) = lines.split_first() else {
         return Err(lex::syntax(1, "empty diagram"));
     };
-    let mut builder = Builder::default();
+    let mut builder = Builder {
+        src,
+        ..Builder::default()
+    };
     let (_, rest) = lex::split_word(header.text);
     if !rest.is_empty() {
         builder.line(rest, header.number)?;
@@ -44,16 +50,19 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<ClassDiagram, MermaidError> {
 
 /// Accumulates classes and relations.
 #[derive(Debug, Default)]
-struct Builder {
+struct Builder<'a> {
     direction: Option<crate::mermaid::ast::Direction>,
     classes: Vec<Class>,
     relations: Vec<ClassRelation>,
     /// The class whose `{ … }` block is currently open, and the line it opened on.
     current: Option<ClassId>,
     open: Option<usize>,
+    /// The full mermaid source, used only to compute a label's byte offset
+    /// (`lex::offset_of`) — every label text this parser touches is a subslice of it.
+    src: &'a str,
 }
 
-impl Builder {
+impl Builder<'_> {
     /// Handles one source line, which may hold several `;`-separated statements.
     fn line(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         if self.open.is_some() {
@@ -198,7 +207,10 @@ impl Builder {
             line: operator.line,
             left_cardinality: left_cardinality.map(str::to_string),
             right_cardinality: right_cardinality.map(str::to_string),
-            label: label.map(|label| Label::parse(lex::unquote(label))),
+            label: label.map(|label| {
+                let label = lex::unquote(label);
+                Label::parse_at(label, lex::offset_of(self.src, label))
+            }),
         }))
     }
 

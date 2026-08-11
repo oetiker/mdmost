@@ -47,15 +47,17 @@ pub fn parse(src: &str) -> Result<Diagram, MermaidError> {
     // `graph TD;` and `pie title X` put content on the header line, so the family
     // parsers receive the header line too and consume it themselves.
     match keyword.to_ascii_lowercase().as_str() {
-        "flowchart" | "flowchart-v2" | "graph" => flowchart::parse(&lines).map(Diagram::Flowchart),
-        "sequencediagram" => sequence::parse(&lines).map(Diagram::Sequence),
-        "classdiagram" | "classdiagram-v2" => class::parse(&lines).map(Diagram::Class),
-        "erdiagram" => er::parse(&lines).map(Diagram::Er),
+        "flowchart" | "flowchart-v2" | "graph" => {
+            flowchart::parse(&lines, src).map(Diagram::Flowchart)
+        }
+        "sequencediagram" => sequence::parse(&lines, src).map(Diagram::Sequence),
+        "classdiagram" | "classdiagram-v2" => class::parse(&lines, src).map(Diagram::Class),
+        "erdiagram" => er::parse(&lines, src).map(Diagram::Er),
         "pie" | "pie-beta" => pie::parse(&lines).map(Diagram::Pie),
         "gantt" => gantt::parse(&lines).map(Diagram::Gantt),
         // Plain `stateDiagram` uses the v1 renderer in Mermaid but the same grammar
         // subset we support, so both spellings are accepted.
-        "statediagram" | "statediagram-v2" => state::parse(&lines).map(Diagram::State),
+        "statediagram" | "statediagram-v2" => state::parse(&lines, src).map(Diagram::State),
         other => Err(MermaidError::UnsupportedFamily(other.to_string())),
     }
 }

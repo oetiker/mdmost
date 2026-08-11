@@ -408,6 +408,7 @@ fn every_line_of_a_multi_line_edge_label_shares_one_left_origin() {
     let edges = vec![FlowEdge {
         label: Some(Label {
             lines: vec!["alpha".into(), "bravo".into(), "charlie".into()],
+            source: Default::default(),
         }),
         ..edge(0, 1)
     }];

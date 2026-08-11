@@ -65,6 +65,17 @@ mod flowcharts {
     }
 
     #[test]
+    fn a_flowchart_node_label_knows_its_source_range() {
+        let src = "flowchart LR\n  A[Parse] --> B[Layout]\n";
+        let chart = flowchart(src);
+        let a = node(&chart, "A");
+        assert_eq!(a.label.lines, ["Parse"]);
+        assert_eq!(&src[a.label.source.clone()], "Parse");
+        let b = node(&chart, "B");
+        assert_eq!(&src[b.label.source.clone()], "Layout");
+    }
+
+    #[test]
     fn parses_every_direction() {
         for (source, expected) in [
             ("TD", Direction::TopToBottom),

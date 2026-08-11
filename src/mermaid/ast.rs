@@ -31,10 +31,39 @@
 ///
 /// A label never contains an empty `lines` vector: an empty label is `lines == [""]`
 /// only if the source really said so; otherwise use [`Label::is_empty`].
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[derive(Debug, Clone, Default)]
 pub struct Label {
     /// The label's lines, in order, without trailing newlines.
     pub lines: Vec<String>,
+    /// Where the raw label text sat in the mermaid source, before `<br>` splitting and
+    /// entity decoding.
+    ///
+    /// The range covers the text as written, so `A[Parse]` gives the range of `Parse`.
+    /// It is relative to the mermaid block, not the document; `render::diagram`
+    /// rebases it. An empty range means "synthesised, not from the source" — the
+    /// default a label gets unless it is built through [`Label::parse_at`].
+    pub source: std::ops::Range<usize>,
+}
+
+/// Equality and hashing consider only the visible text, not where it came from.
+///
+/// `source` is provenance metadata, not part of a label's identity: a hand-built
+/// [`Label::line`] and a parsed label with the same lines must compare equal, which is
+/// how most of the test suite already asserts on labels. Deriving `PartialEq` /
+/// `Hash` over both fields would make every such comparison depend on byte offsets
+/// nobody wrote down.
+impl PartialEq for Label {
+    fn eq(&self, other: &Self) -> bool {
+        self.lines == other.lines
+    }
+}
+
+impl Eq for Label {}
+
+impl std::hash::Hash for Label {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.lines.hash(state);
+    }
 }
 
 impl Label {
@@ -43,7 +72,16 @@ impl Label {
     ///
     /// Leading and trailing whitespace is trimmed from every resulting line. Trimming
     /// also precedes decoding, so a leading `&nbsp;` survives as a visible space.
+    ///
+    /// Equivalent to [`Label::parse_at`]`(text, 0)`, for call sites that genuinely have
+    /// no offset to give.
     pub fn parse(text: &str) -> Self {
+        Self::parse_at(text, 0)
+    }
+
+    /// Builds a label from raw label text taken from offset `at` in the mermaid
+    /// source, recording that as [`Label::source`].
+    pub fn parse_at(text: &str, at: usize) -> Self {
         let mut lines = Vec::new();
         let mut rest = text;
         loop {
@@ -58,13 +96,18 @@ impl Label {
                 }
             }
         }
-        Self { lines }
+        Self {
+            lines,
+            source: at..at + text.len(),
+        }
     }
 
-    /// A single-line label holding `text` verbatim.
+    /// A single-line label holding `text` verbatim, with an empty [`Label::source`]:
+    /// this builds labels that were never read from a document, chiefly in tests.
     pub fn line(text: impl Into<String>) -> Self {
         Self {
             lines: vec![text.into()],
+            source: Default::default(),
         }
     }
 

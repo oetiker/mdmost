@@ -19,11 +19,17 @@ use super::intern;
 use super::lex::{self, Nesting, SrcLine};
 
 /// Parses a whole `erDiagram`.
-pub fn parse(lines: &[SrcLine<'_>]) -> Result<ErDiagram, MermaidError> {
+///
+/// `src` is the full mermaid source `lines` was lexed from; it is kept only so that
+/// label text — always a subslice of it — can report where it came from.
+pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<ErDiagram, MermaidError> {
     let Some((header, body)) = lines.split_first() else {
         return Err(lex::syntax(1, "empty diagram"));
     };
-    let mut builder = Builder::default();
+    let mut builder = Builder {
+        src,
+        ..Builder::default()
+    };
     let (_, rest) = lex::split_word(header.text);
     if !rest.is_empty() {
         builder.line(rest, header.number)?;
@@ -42,15 +48,18 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<ErDiagram, MermaidError> {
 
 /// Accumulates entities and relationships.
 #[derive(Debug, Default)]
-struct Builder {
+struct Builder<'a> {
     entities: Vec<Entity>,
     relationships: Vec<ErRelationship>,
     /// The entity whose attribute block is open, and the line it opened on.
     current: Option<EntityId>,
     open: Option<usize>,
+    /// The full mermaid source, used only to compute a label's byte offset
+    /// (`lex::offset_of`) — every label text this parser touches is a subslice of it.
+    src: &'a str,
 }
 
-impl Builder {
+impl Builder<'_> {
     /// Handles one source line.
     fn line(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         if self.open.is_some() {
@@ -133,7 +142,7 @@ impl Builder {
         let label = label
             .map(lex::unquote)
             .filter(|label| !label.is_empty())
-            .map(Label::parse);
+            .map(|label| Label::parse_at(label, lex::offset_of(self.src, label)));
         Ok(Some(ErRelationship {
             left,
             right,

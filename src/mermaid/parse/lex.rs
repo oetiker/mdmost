@@ -60,6 +60,17 @@ fn strip_comment(text: &str) -> &str {
     }
 }
 
+/// Computes the byte offset of `sub` within `src`.
+///
+/// `sub` must be a byte-for-byte subslice of `src` — true of every string this parser
+/// hands to `Label::parse_at`, because every lexing helper in this module slices
+/// rather than allocates. Passing a `sub` that did not come from `src` by pure slicing
+/// is a logic error: the subtraction panics on underflow in debug builds rather than
+/// silently returning a meaningless offset.
+pub fn offset_of(src: &str, sub: &str) -> usize {
+    sub.as_ptr() as usize - src.as_ptr() as usize
+}
+
 /// Whether a scan should honour bracket nesting in addition to quotes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Nesting {
