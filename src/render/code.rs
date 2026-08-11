@@ -31,7 +31,7 @@
 //! `tui::tests::the_gutter_rule_matches_the_renderer` pins the published column to the
 //! layout drawn here.
 
-use crate::canvas::{BorderSet, Canvas, SearchSpan};
+use crate::canvas::{Atom, BorderSet, Canvas, SearchSpan};
 use crate::doc::SourceSpan;
 use crate::error::MermaidError;
 use crate::mermaid::Fit;
@@ -67,12 +67,13 @@ pub(crate) fn render_code_block(
     literal: &str,
     fenced: bool,
     origins: &[SourceSpan],
+    block: SourceSpan,
     width: u16,
     ctx: Ctx<'_>,
 ) -> Canvas {
     if is_mermaid(language) {
         return match bridge::mermaid(literal, width, ctx.theme, Fit::COMPACT) {
-            Ok(canvas) => diagram_block(canvas, width, literal, origins, ctx),
+            Ok(canvas) => diagram_block(canvas, width, literal, origins, block, ctx),
             Err(error) => fallback(literal, &error, origins, width, ctx),
         };
     }
@@ -80,22 +81,73 @@ pub(crate) fn render_code_block(
 }
 
 /// A drawn diagram as a block of the document: the canvas, padded to the block width,
-/// with its labels' spans rebased onto the document.
+/// with its labels' spans rebased onto the document and its drawn rectangle recorded as
+/// an [`Atom`].
 ///
 /// Shared with [`super::diagram::diagram`], which builds the same block at a width the
 /// viewport does not have, so that the two cannot disagree about what a diagram block
 /// *is* — the rebasing included, which is why it happens here and not at either call
 /// site.
+///
+/// `block` is the fence's own extent in the document, opener and closer included — the
+/// node's `source`, not anything re-derived by hunting for backticks. It is what a
+/// selection wider than one label copies (design spec §2.2), and it is recorded
+/// *before* the canvas is padded out to the block width so that the rectangle is the
+/// diagram's own, not the page's.
 pub(crate) fn diagram_block(
     mut canvas: Canvas,
     width: u16,
     literal: &str,
     origins: &[SourceSpan],
+    block: SourceSpan,
     ctx: Ctx<'_>,
 ) -> Canvas {
     rebase_spans(&mut canvas, literal, origins);
+    if let Some((row, rows, col, cols)) = drawn_bounds(&canvas) {
+        canvas.add_atom(Atom {
+            row,
+            rows,
+            col,
+            cols,
+            source_start: block.start,
+            source_end: block.end,
+        });
+    }
     canvas.resize_width(width, ctx.base);
     canvas
+}
+
+/// The bounding box of the cells a diagram actually drew: `(row, rows, col, cols)`.
+///
+/// A layout hands back a canvas as wide as the space it was offered, so the drawing sits
+/// in the top-left of a mostly blank rectangle. Recording *that* as the atom would wash
+/// the empty margin beside the diagram, which reads as a highlight bug rather than as a
+/// diagram taken whole — so the box is measured from the glyphs.
+///
+/// Blank rows and columns *inside* the box are part of it: the gap between two nodes is
+/// the diagram's own, and the wash is meant to be solid (design spec §2.2). Only the
+/// margin around the drawing is trimmed. `None` when nothing was drawn at all.
+fn drawn_bounds(canvas: &Canvas) -> Option<(usize, usize, u16, u16)> {
+    let mut top: Option<usize> = None;
+    let mut bottom = 0usize;
+    let mut left = u16::MAX;
+    let mut right = 0u16;
+    for row in 0..canvas.height() {
+        let text = canvas.row_text(row);
+        let drawn = text.trim_end();
+        let lead = drawn.len() - drawn.trim_start().len();
+        if lead == drawn.len() {
+            continue;
+        }
+        let start = u16::try_from(display_width(&drawn[..lead])).unwrap_or(u16::MAX);
+        let end = u16::try_from(display_width(drawn)).unwrap_or(u16::MAX);
+        top.get_or_insert(row);
+        bottom = row;
+        left = left.min(start);
+        right = right.max(end);
+    }
+    let top = top?;
+    (right > left).then(|| (top, bottom - top + 1, left, right - left))
 }
 
 /// Rewrites a diagram's spans from offsets into `literal` to offsets into the document.

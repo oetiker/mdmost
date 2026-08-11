@@ -4,7 +4,7 @@
 //! from. Every one of them preserves the canvas contract described in
 //! [`crate::canvas`].
 
-use super::{Anchor, BorderSet, Canvas, Cell, Hotspot, Pin, SearchSpan};
+use super::{Anchor, Atom, BorderSet, Canvas, Cell, Hotspot, Pin, SearchSpan};
 use crate::error::CanvasError;
 use crate::text::{Align, Line, display_width};
 use crate::theme::Style;
@@ -342,6 +342,19 @@ impl Canvas {
             }));
     }
 
+    /// Translates and merges `src`'s atoms into `self`.
+    ///
+    /// Separate from [`Canvas::merge_metadata`] for the reason [`Canvas::merge_pins`] is:
+    /// an atom claims a rectangle of rows a block owns outright, so it travels with the
+    /// operations that stack and inset whole rows and not with `blit`.
+    fn merge_atoms(&mut self, src: &Canvas, top: usize, left: u16) {
+        self.atoms.extend(src.atoms.iter().map(|atom| Atom {
+            row: atom.row + top,
+            col: atom.col.saturating_add(left),
+            ..*atom
+        }));
+    }
+
     /// Appends `other` below `self`.
     ///
     /// The result is as wide as the wider of the two; the narrower one is padded on
@@ -357,6 +370,7 @@ impl Canvas {
         self.merge_metadata(other, top, 0);
         self.merge_pins(other, top, 0);
         self.merge_hotspots(other, top, 0);
+        self.merge_atoms(other, top, 0);
     }
 
     /// Stacks canvases vertically, in order.
@@ -413,6 +427,7 @@ impl Canvas {
         out.blit(0, usize::from(left), self, fill);
         out.merge_pins(self, 0, left);
         out.merge_hotspots(self, 0, left);
+        out.merge_atoms(self, 0, left);
         out
     }
 
@@ -463,6 +478,22 @@ impl Canvas {
                 cols: spot.cols,
                 text: spot.text.clone(),
                 html: spot.html.clone(),
+            })
+            .collect();
+        // An atom that hangs off the end of the slice is *clipped*, not dropped: half a
+        // diagram on screen is still a diagram, and the source it copies does not
+        // depend on how much of it the viewport happens to show.
+        out.atoms = self
+            .atoms
+            .iter()
+            .filter_map(|atom| {
+                let top = atom.row.max(start);
+                let bottom = (atom.row + atom.rows).min(end);
+                (top < bottom).then_some(Atom {
+                    row: top - start,
+                    rows: bottom - top,
+                    ..*atom
+                })
             })
             .collect();
         out

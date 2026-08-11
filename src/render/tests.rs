@@ -2847,7 +2847,15 @@ fn a_mermaid_block_with_no_mapping_emits_no_diagram_spans() {
     let literal = "flowchart LR\n  A[Parse] --> B[Layout]\n";
     let theme = Theme::default_dark();
     let ctx = Ctx::new(&theme, &PLAIN);
-    let canvas = code::render_code_block(Some("mermaid"), literal, true, &[], 60, ctx);
+    let canvas = code::render_code_block(
+        Some("mermaid"),
+        literal,
+        true,
+        &[],
+        crate::doc::SourceSpan::default(),
+        60,
+        ctx,
+    );
     assert!(
         canvas.plain_text().contains("Parse"),
         "the diagram still draws:\n{}",

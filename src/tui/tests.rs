@@ -3208,7 +3208,14 @@ fn a_widened_diagram_maps_its_labels_back_to_the_document() {
 }
 
 /// The other half: a label *is* source text, and a drag over one copies the Mermaid
-/// that produced it rather than the drawn box (design spec §3).
+/// that produced it rather than the drawn box (design spec §3) — that label, and no
+/// more of the line it sits on.
+///
+/// This test used to pin `    A[Read] --> B[` as intended: `extend_over_markup` widened
+/// the hull over every byte nothing drew, which in prose is a pair of asterisks and on a
+/// Mermaid line is nearly the whole line. The highlight lit `Read` and the clipboard got
+/// a token cut in half. Design spec §2.2 now says a diagram is atomic, so what is copied
+/// here is exactly what lights up.
 #[test]
 fn a_drag_over_a_diagram_label_yields_the_mermaid_source() {
     let mut app = pager(FITTING_FENCE);
@@ -3219,26 +3226,209 @@ fn a_drag_over_a_diagram_label_yields_the_mermaid_source() {
         "a flowchart label now has provenance, got {:?}",
         extract.text
     );
-    // `extend_over_markup` then widens the hull over the bytes around it that were
-    // never drawn — `A[`, the arrow, the indent — exactly as a drag over `bold` picks
-    // up its `**`. The walk stops at the next *rendered* byte, which is the `Draw`
-    // label, so a one-box drag stops inside `B[`.
     assert_eq!(
-        extract.text, "    A[Read] --> B[",
-        "the label's own bytes, widened over the Mermaid punctuation around them"
+        extract.text, "Read",
+        "one label, not the punctuation of the line it was written on"
     );
-    // Design spec §3: a drag from the first box to the last yields the Mermaid source
-    // between them.
+    // Half a label is still the whole label: the box is the unit (design spec §2.2).
+    let (row, col, cols) = drawn(&canvas, "Read");
+    let half = drag(Pos::new(row, col), Pos::new(row, col + 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, half)
+            .expect("the drag covered a label")
+            .text,
+        "Read"
+    );
+    // And the highlight agrees, exactly: the whole label's cells and nothing beside
+    // them. Asserted on the canvas, because the defect being fixed is the two
+    // disagreeing (design spec §7).
+    assert_eq!(
+        select::highlighted_columns(&canvas, FITTING_FENCE, half, row),
+        vec![col..col + cols],
+        "the wash is the label the clipboard got"
+    );
+}
+
+/// A drag that leaves one label behind takes the diagram whole (design spec §2.2).
+///
+/// The clipboard gets the fenced block, opener and closer included — a truncation like
+/// `    A[Read] --> B[` is not something a reader can paste anywhere.
+#[test]
+fn a_drag_across_two_labels_takes_the_whole_fenced_block() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
     let (row, from, _) = drawn(&canvas, "Read");
     let (_, to, cols) = drawn(&canvas, "Draw");
-    let across = select::extract(
+    let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+    let extract = select::extract(&canvas, FITTING_FENCE, across).expect("covered both boxes");
+    assert!(extract.from_source);
+    assert_eq!(
+        extract.text,
+        FITTING_FENCE.trim_end_matches('\n'),
+        "the whole block, fences and all"
+    );
+}
+
+/// The wash for a whole diagram covers its box art, and that is deliberate.
+///
+/// Chrome never highlights anywhere else in this pager (design spec §2), and a test that
+/// only looked at the label cells would pass just as happily against an implementation
+/// that had quietly kept that rule here — leaving the reader a highlight over two words
+/// and a clipboard holding forty bytes of Mermaid.
+#[test]
+fn the_whole_diagram_wash_covers_its_box_art() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (_, to, cols) = drawn(&canvas, "Draw");
+    let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+    // The top edge: a row of pure drawing, one row above the labels.
+    let edge = row - 1;
+    let corner = canvas
+        .row_text(edge)
+        .find('┌')
+        .expect("the boxes have a top-left corner");
+    let corner = u16::try_from(crate::text::display_width(&canvas.row_text(edge)[..corner]))
+        .expect("a test canvas is narrow");
+    let ranges = select::highlighted_columns(&canvas, FITTING_FENCE, across, edge);
+    assert!(
+        ranges.iter().any(|range| range.contains(&corner)),
+        "the box's corner at column {corner} is washed too, got {ranges:?}"
+    );
+    // And the arrow between the boxes, on the label row: the interior of the rectangle
+    // is filled, not just the two words in it.
+    let arrow = canvas
+        .row_text(row)
+        .find('▶')
+        .expect("the boxes are joined by an arrow");
+    let arrow = u16::try_from(crate::text::display_width(&canvas.row_text(row)[..arrow]))
+        .expect("a test canvas is narrow");
+    let ranges = select::highlighted_columns(&canvas, FITTING_FENCE, across, row);
+    assert!(
+        ranges.iter().any(|range| range.contains(&arrow)),
+        "the arrow at column {arrow} is washed too, got {ranges:?}"
+    );
+    // Solid, but only over the diagram: the blank margin the layout was handed is not
+    // part of the drawing and washing it would read as a highlight bug.
+    let drawn_to = u16::try_from(crate::text::display_width(canvas.row_text(row).trim_end()))
+        .expect("a test canvas is narrow");
+    assert!(
+        canvas.width() > drawn_to + 8,
+        "this canvas has margin to spare, or the assertion below proves nothing"
+    );
+    assert_eq!(
+        ranges.iter().map(|range| range.end).max(),
+        Some(drawn_to),
+        "the wash stops where the diagram does, got {ranges:?}"
+    );
+}
+
+/// A wrapped label draws on several rows, each carrying a span that names the *whole*
+/// label (design spec §2.2). Counting spans rather than distinct labels would read that
+/// as a drag across two boxes and copy the entire chart.
+#[test]
+fn a_drag_over_one_row_of_a_wrapped_label_still_copies_just_that_label() {
+    let mut app = pager(WIDE_FENCE);
+    let canvas = app.canvas().clone();
+    let wrapped = canvas
+        .spans()
+        .iter()
+        .filter(|span| WIDE_FENCE.get(span.source_start..span.source_end) == Some("Parse Markdown"))
+        .count();
+    assert!(
+        wrapped > 1,
+        "this label has to be wrapped for the test to mean anything"
+    );
+    let extract = drag_over(&canvas, WIDE_FENCE, "Markdown");
+    assert_eq!(
+        extract.text, "Parse Markdown",
+        "one label, whichever of its rows was dragged over"
+    );
+}
+
+/// A diagram inside a list item is indented, and its rectangle has to move with it.
+///
+/// The atom travels through `Canvas::indent` like a pin does; if it did not, the wash
+/// would sit a few columns left of the drawing it claims to cover.
+#[test]
+fn an_indented_diagrams_wash_moves_with_it() {
+    let source = "- item\n\n  ```mermaid\n  flowchart LR\n      A[Read] --> B[Draw]\n  ```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (_, to, cols) = drawn(&canvas, "Draw");
+    let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+    let extract = select::extract(&canvas, source, across).expect("covered both boxes");
+    assert!(
+        extract.text.starts_with("```mermaid") && extract.text.ends_with("```"),
+        "the fenced block, from its opener to its closer, got {:?}",
+        extract.text
+    );
+    let ranges = select::highlighted_columns(&canvas, source, across, row);
+    let text = canvas.row_text(row);
+    let left = u16::try_from(crate::text::display_width(
+        &text[..text.len() - text.trim_start().len()],
+    ))
+    .expect("a test canvas is narrow");
+    assert!(left > 0, "the diagram is indented by the list");
+    assert_eq!(
+        ranges.first().map(|range| range.start),
+        Some(left),
+        "the wash starts at the indented drawing, got {ranges:?}"
+    );
+}
+
+/// A drag that starts in a diagram and ends outside it: the block, then what follows.
+///
+/// Document order, and no second concatenation step to get it wrong — the owner's rule
+/// is "```mermaid ... ``` whatever else is selected".
+#[test]
+fn a_drag_leaving_a_diagram_takes_the_block_and_then_what_follows() {
+    let source = concat!(
+        "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n",
+        "\nAfter the **fence**.\n"
+    );
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (below, at, cols) = drawn(&canvas, "After the fence.");
+    let out = drag(Pos::new(row, from), Pos::new(below, at + cols - 1));
+    let extract = select::extract(&canvas, source, out).expect("covered");
+    assert!(extract.from_source);
+    assert_eq!(
+        extract.text,
+        "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n\nAfter the **fence**.",
+        "the fenced block first, then the prose the drag reached"
+    );
+    // The diagram is washed whole even though the drag only entered one of its boxes.
+    let ranges = select::highlighted_columns(&canvas, source, out, row - 1);
+    assert!(
+        !ranges.is_empty(),
+        "the diagram's top edge is inside the wash"
+    );
+}
+
+/// The mirror: a drag that begins in prose and ends inside a diagram.
+///
+/// The block still arrives whole, and still in document order — the prose the drag
+/// started in comes first, because that is where it sits in the file.
+#[test]
+fn a_drag_entering_a_diagram_from_prose_takes_the_block_whole() {
+    let source = "Before it.\n\n```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (above, at, _) = drawn(&canvas, "Before it.");
+    let (row, to, cols) = drawn(&canvas, "Draw");
+    let extract = select::extract(
         &canvas,
-        FITTING_FENCE,
-        drag(Pos::new(row, from), Pos::new(row, to + cols - 1)),
+        source,
+        drag(Pos::new(above, at), Pos::new(row, to + cols - 1)),
     )
-    .expect("the drag covered both boxes");
-    assert_eq!(across.text, "    A[Read] --> B[Draw]");
-    assert!(across.from_source);
+    .expect("covered");
+    assert_eq!(
+        extract.text, "Before it.\n\n```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```",
+        "the prose, then the whole block the drag ended inside"
+    );
 }
 
 #[test]

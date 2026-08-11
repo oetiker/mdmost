@@ -131,6 +131,60 @@ pub struct Hotspot {
     pub html: Option<String>,
 }
 
+/// A rectangle of cells that is indivisible in a selection, and the source it copies.
+///
+/// The fifth metadata channel. A diagram records one, and it is the only way the pager
+/// can know that a rectangle of cells is *one thing*: a diagram's labels carry
+/// [`SearchSpan`]s and the box art between them carries nothing, so a drag from one
+/// label to the next would otherwise light two words and put the punctuation between
+/// them on the clipboard, truncated wherever the last label ended (design spec §2.2).
+///
+/// `source_start..source_end` is the **whole** construct — for a Mermaid fence, the
+/// fence lines included — not the union of the labels inside it. That is what makes the
+/// wider drag copy something that still parses as a diagram.
+///
+/// Like [`Pin`] and [`Hotspot`], an atom is a claim about rows a block owns outright, so
+/// it travels through [`Canvas::append`] and [`Canvas::indent`] and is dropped by
+/// [`Canvas::blit`]: a diagram placed at an arbitrary column of a row it shares with
+/// other content — a table cell — can no longer claim a rectangle of that row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Atom {
+    /// The first row of the rectangle.
+    pub row: usize,
+    /// How many rows it covers.
+    pub rows: usize,
+    /// The first column it occupies.
+    pub col: u16,
+    /// How many display columns it occupies.
+    pub cols: u16,
+    /// Start byte offset in the document source.
+    pub source_start: usize,
+    /// End byte offset (exclusive) in the document source.
+    pub source_end: usize,
+}
+
+impl Atom {
+    /// Whether the rectangle covers `row`.
+    pub fn covers_row(&self, row: usize) -> bool {
+        row >= self.row && row < self.row + self.rows
+    }
+
+    /// The columns the rectangle occupies, as a half-open interval.
+    pub fn columns(&self) -> std::ops::Range<u16> {
+        self.col..self.col.saturating_add(self.cols)
+    }
+
+    /// Whether `span`'s bytes lie inside the construct this atom copies.
+    ///
+    /// How the pager tells a diagram's own labels from every other span on the canvas.
+    /// Containment in the source, not overlap on screen: the drawn rectangle is padded
+    /// out to the block width and a row of it belongs to nothing else, but the source
+    /// range is exactly the fence and its contents.
+    pub fn contains_span(&self, span: &SearchSpan) -> bool {
+        span.source_start >= self.source_start && span.source_end <= self.source_end
+    }
+}
+
 /// A rectangle of styled cells, exactly [`Canvas::width`] columns wide on every row.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Canvas {
@@ -140,6 +194,7 @@ pub struct Canvas {
     spans: Vec<SearchSpan>,
     pins: Vec<Pin>,
     hotspots: Vec<Hotspot>,
+    atoms: Vec<Atom>,
 }
 
 impl Canvas {
@@ -159,6 +214,7 @@ impl Canvas {
             spans: Vec::new(),
             pins: Vec::new(),
             hotspots: Vec::new(),
+            atoms: Vec::new(),
         }
     }
 
@@ -284,6 +340,21 @@ impl Canvas {
     /// Records a control.
     pub fn add_hotspot(&mut self, hotspot: Hotspot) {
         self.hotspots.push(hotspot);
+    }
+
+    /// The indivisible regions recorded in this canvas.
+    pub fn atoms(&self) -> &[Atom] {
+        &self.atoms
+    }
+
+    /// Records that a rectangle of cells is one thing, copied as `source_start..end`.
+    ///
+    /// A rectangle with no rows or no columns is not recorded: nothing can be dragged
+    /// over it, so an entry for it could only ever be a way to get the wrong answer.
+    pub fn add_atom(&mut self, atom: Atom) {
+        if atom.rows > 0 && atom.cols > 0 && atom.source_end > atom.source_start {
+            self.atoms.push(atom);
+        }
     }
 
     /// How many leading columns of each row are chrome; one entry per row.

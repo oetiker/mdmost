@@ -53,12 +53,42 @@ with no span anywhere in that direction clamps to the document's start or end. T
 the only place a coordinate is interpreted rather than looked up, and it is where the
 tests should be sharpest.
 
-### 2.2 A diagram label is atomic
+### 2.2 A diagram is atomic
+
+*Amended 2026-08-11, after task 5 landed and the first drag over a real chart was
+looked at.*
 
 Touching any part of a box selects that label's whole source range. Partial selection
 inside a label would need a byte mapping that survives entity decoding and `<br>`
 splitting (`Label::parse`, `src/mermaid/ast.rs`), which buys nothing a reader wants. The
 unit of selection in a diagram is the box, which is what a reader points at.
+
+**A drag wider than one label takes the whole diagram.** Crossing from one label into
+another, or starting inside the diagram and ending outside it, expands the highlight to
+the diagram's whole rectangle and copies the **whole fenced block**, ```` ```mermaid ````
+opener and ```` ``` ```` closer included. A drag that continues past the diagram
+contributes the block first and then whatever else it covered, in document order.
+
+This is not a refinement of §2's markup rule but a replacement for it inside a diagram.
+That rule extends a selection over every byte nothing drew, which in prose is a pair of
+asterisks; on a Mermaid line it is nearly the whole line, so a drag over `Read` in
+`    A[Read] --> B[Draw]` lit one word and copied `    A[Read] --> B[` — a token cut in
+half, and precisely the see/get divergence of §1. It cannot be fixed from the highlight
+side: `A[` is never drawn, so there are no cells to light.
+
+**The whole-diagram wash covers the entire rectangle — box art, arrows and interior
+blanks included. This is a deliberate exception to "chrome never highlights" (§2), and
+the only one.** It is what makes the two states legible: either one label is lit and one
+label is copied, or the diagram is a solid block and the block is what the clipboard
+gets. Lighting only the labels while copying forty bytes of Mermaid would be §1 again,
+wearing the chrome rule as a disguise.
+
+The implementation keeps a single predicate for both: the diagram records its drawn
+rectangle and its block's source range as a `Canvas::Atom`, and `select::resolve`
+answers the clipboard and the highlight from one decision. "Confined to one label" is
+judged on the resolved source hull, not on the two screen positions, so an endpoint that
+landed on a border or an arrow — already resolved to a text offset by §2.1 — is judged
+by the same rule as one the reader dragged over directly.
 
 ## 3. Diagram provenance
 
@@ -95,10 +125,13 @@ absolute. `src/render/code.rs` already does exactly this rebasing for fenced cod
 and it is the single highest-risk piece of arithmetic in this design. It is also where
 CRLF and leading-whitespace handling have already bitten this project once each.
 
-Once labels carry spans, a drag over a diagram yields the **mermaid source** between the
-first and last box touched — `A[Parse] --> B[Layout]` — and the status bar says
-`Markdown source`, like everything else. The arrows and the boxes are drawn, never
-selected.
+Once labels carry spans, a drag over a diagram yields **mermaid source** and the status
+bar says `Markdown source`, like everything else. Which source is §2.2's answer: one
+label for a drag confined to one box, the whole fenced block for anything wider. The
+earlier draft of this paragraph promised the source *between* the first and last box
+touched — `A[Parse] --> B[Layout]` — which is what the implementation did and what the
+amendment above replaces; the string it produced in practice was truncated at the last
+label it could map.
 
 ### 3.1 What remains of the rendered-cells fallback
 

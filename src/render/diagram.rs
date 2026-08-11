@@ -100,7 +100,10 @@ pub(crate) fn diagram(
         }
         match bridge::mermaid(literal, at, theme, Fit::ROOMY) {
             Ok(canvas) => {
-                return Some((at, code::diagram_block(canvas, at, literal, lines, ctx)));
+                return Some((
+                    at,
+                    code::diagram_block(canvas, at, literal, lines, node.source, ctx),
+                ));
             }
             // `needed` is the exact width this diagram starts drawing at, so the usual
             // search is one further layout. It is treated as a hint rather than a

@@ -38,6 +38,15 @@
 //! drag. What it may do is include the delimiters the reader could not have selected
 //! because they were never drawn.
 //!
+//! **2b. A diagram is atomic.** Decision 2 is a rule for prose, where the bytes nothing
+//! drew are two asterisks. On a Mermaid line almost every byte is undrawn, so the same
+//! walk over a drag on `    A[Read] --> B[Draw]` lit `Read` and copied `    A[Read] --> B[`
+//! — a truncated token, and the exact see/get divergence this module exists to remove.
+//! So a diagram records an [`Atom`]: its drawn rectangle, and its whole fenced block.
+//! A drag confined to one label copies that label; any wider drag takes the diagram
+//! whole — the fenced block on the clipboard, opener and closer included, and the whole
+//! rectangle washed on screen. [`resolve`] is where that is decided, once, for both.
+//!
 //! **3. Content with no spans falls back to what is on screen.** Spans are recorded by
 //! the inline renderer and, per line, by `render::code::code_area` (design spec §3), so
 //! a Mermaid diagram and a table's frame carry none, but a fenced or indented code
@@ -69,7 +78,7 @@
 
 use std::ops::Range;
 
-use crate::canvas::Canvas;
+use crate::canvas::{Atom, Canvas};
 use crate::text::{display_width, graphemes};
 
 /// A position in document-canvas coordinates.
@@ -196,9 +205,8 @@ pub struct Extract {
 /// Returns `None` when the selection covers nothing at all — an empty region, or one
 /// entirely off the bottom of the canvas.
 pub fn extract(canvas: &Canvas, source: &str, selection: Selection) -> Option<Extract> {
-    if let Some((lo, hi)) = source_hull(canvas, source, selection) {
-        let (lo, hi) = extend_over_markup(canvas, source, lo, hi);
-        let text = source.get(lo..hi).unwrap_or_default();
+    if let Some(resolved) = resolve(canvas, source, selection) {
+        let text = source.get(resolved.range()).unwrap_or_default();
         if !text.is_empty() {
             return Some(Extract {
                 text: text.to_string(),
@@ -211,6 +219,97 @@ pub fn extract(canvas: &Canvas, source: &str, selection: Selection) -> Option<Ex
         text,
         from_source: false,
     })
+}
+
+/// What a selection resolves to: the source it copies, and the atoms it takes whole.
+///
+/// The single answer behind both the clipboard and the highlight. They used to be two
+/// computations over the same hull, which is one refactor away from the divergence this
+/// whole module exists to remove.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Resolved {
+    /// First byte of the document source the selection yields.
+    lo: usize,
+    /// One past the last byte.
+    hi: usize,
+    /// Rectangles washed in full, box art included. See [`resolve`].
+    washed: Vec<Atom>,
+}
+
+impl Resolved {
+    /// The source bytes the clipboard gets.
+    fn range(&self) -> Range<usize> {
+        self.lo..self.hi
+    }
+}
+
+/// What a selection means, for the clipboard and the highlight alike.
+///
+/// Three answers, in the order they are tried.
+///
+/// **A diagram is atomic** (design spec §2.2). A diagram records an [`Atom`] naming its
+/// drawn rectangle and its whole fenced block, and its labels are the only spans inside
+/// that block. So:
+///
+/// 1. **The hull lies inside one label.** The reader is pointing at one box. The answer
+///    is that label's *whole* source range — a label is the unit, so half of one is not
+///    an answer — and nothing is washed beyond the spans that drew it. Note what this
+///    does *not* do: it does not run [`extend_over_markup`], because on a Mermaid line
+///    almost every byte is undrawn and the walk would swallow `A[`, the arrow and half
+///    of the next box, none of which the reader saw light up.
+/// 2. **The hull touches a diagram and is wider than one of its labels.** Crossing from
+///    one label into another, or leaving the diagram entirely: the diagram contributes
+///    its whole fenced block, fence lines included, and the drag's own hull contributes
+///    whatever else it covered. Widening the hull to cover the block gives exactly that,
+///    in document order and with no second concatenation step — a drag that starts in a
+///    diagram and ends below it yields the block and then the text under it.
+/// 3. **No diagram involved.** The hull, widened over adjacent markup, as before.
+///
+/// The predicate for "confined to one label" is stated on the **hull**, not on the two
+/// screen positions, and that is deliberate. An endpoint that landed on chrome — a
+/// border, an arrow, a box's blank interior — has already been resolved to a text offset
+/// by §2.1, so a drag from a label out onto the arrow beside it is confined and copies
+/// that label, which is what the highlight shows. Anything an endpoint resolution can
+/// reach is therefore judged the same way as anything a reader dragged over directly,
+/// and there is no second, screen-shaped rule to disagree with this one.
+///
+/// A box holds one label, so two distinct label ranges are two boxes (or a box and a
+/// subgraph title) and always widen. A *wrapped* label draws on several rows and emits
+/// one span per row, each naming the whole label — hence the ranges are de-duplicated
+/// before they are counted, or every wrapped label would look like a crossing.
+pub(crate) fn resolve(canvas: &Canvas, source: &str, selection: Selection) -> Option<Resolved> {
+    let (lo, hi) = source_hull(canvas, source, selection)?;
+    let mut labels: Vec<(usize, usize)> = canvas
+        .spans()
+        .iter()
+        .filter(|span| span.source_end > lo && span.source_start < hi)
+        .filter(|span| canvas.atoms().iter().any(|atom| atom.contains_span(span)))
+        .map(|span| (span.source_start, span.source_end))
+        .collect();
+    labels.sort_unstable();
+    labels.dedup();
+    if let [(start, end)] = labels[..]
+        && lo >= start
+        && hi <= end
+    {
+        return Some(Resolved {
+            lo: start,
+            hi: end,
+            washed: Vec::new(),
+        });
+    }
+    let (mut lo, mut hi) = extend_over_markup(canvas, source, lo, hi);
+    let washed: Vec<Atom> = canvas
+        .atoms()
+        .iter()
+        .filter(|atom| atom.source_end > lo && atom.source_start < hi)
+        .copied()
+        .collect();
+    for atom in &washed {
+        lo = lo.min(atom.source_start);
+        hi = hi.max(atom.source_end);
+    }
+    Some(Resolved { lo, hi, washed })
 }
 
 /// The source range a selection covers.
@@ -341,25 +440,45 @@ fn column_at_byte(text: &str, byte: usize) -> u16 {
 
 /// The column ranges of `row` that a selection washes.
 ///
-/// Every span the hull covers, clipped to the covered part. Chrome carries no spans, so
-/// borders, the line-number gutter, cell padding and the blank tail of a row are not in
-/// the answer and no rule had to say so (design spec §2). Consumes [`source_hull`]'s
-/// endpoints directly rather than re-resolving them from `canvas` and `selection`: a
-/// second `offset_at` walk would have to re-derive the far endpoint's inclusive-column
-/// convention, and a highlight that disagreed with the hull by one boundary would be far
-/// more visible than the same slip on a clipboard payload.
+/// Every span the resolved range covers, clipped to the covered part, plus any atom
+/// taken whole. Chrome carries no spans, so borders, the line-number gutter, cell
+/// padding and the blank tail of a row are not in the answer and no rule had to say so
+/// (design spec §2). Consumes [`resolve`]'s answer rather than re-deriving one from
+/// `canvas` and `selection`: a second walk would have to reproduce the far endpoint's
+/// inclusive-column convention *and* the atomicity rule, and a highlight that disagreed
+/// with the clipboard would be far more visible than the same slip on a payload.
+///
+/// **A washed atom is the one place chrome does light up**, and it is deliberate
+/// (design spec §2.2): when a drag has grown past a single label, what the clipboard
+/// will get is the whole fenced block, and the only honest way to show that is to fill
+/// the whole rectangle — box art, arrows and interior blanks included. A wash that lit
+/// only the labels would be the see/get divergence again, wearing the chrome rule as a
+/// disguise. Spans inside a washed rectangle are skipped rather than painted twice.
 pub(crate) fn highlighted_columns(
     canvas: &Canvas,
     source: &str,
     selection: Selection,
     row: usize,
 ) -> Vec<Range<u16>> {
-    let Some((lo, hi)) = source_hull(canvas, source, selection) else {
+    let Some(resolved) = resolve(canvas, source, selection) else {
         return Vec::new();
     };
-    let mut out = Vec::new();
+    let (lo, hi) = (resolved.lo, resolved.hi);
+    let mut out: Vec<Range<u16>> = resolved
+        .washed
+        .iter()
+        .filter(|atom| atom.covers_row(row))
+        .map(Atom::columns)
+        .collect();
+    let washed = out.clone();
     for span in canvas.spans() {
         if span.row != row || span.source_end <= lo || span.source_start >= hi {
+            continue;
+        }
+        if washed
+            .iter()
+            .any(|wash| wash.start <= span.col && span.col < wash.end)
+        {
             continue;
         }
         let body = source
