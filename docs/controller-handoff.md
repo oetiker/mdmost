@@ -1,4 +1,4 @@
-# Controller Handoff — mdmost, code provenance and copy buttons
+# Controller Handoff — mdmost trunk, pre-public
 
 > Starter pack for the next controller session. This handoff lives in ONE
 > worktree — run `git worktree list` first and confirm this is the workstream
@@ -11,17 +11,13 @@
 > merged reality — do not merge or preserve this text.
 
 Handoff commit: the last commit touching this file — `git log -1 -- docs/controller-handoff.md`
-Date: 2026-08-10   Reason: context budget, after retiring an 8-hour agent (§4.11)
-Worktree / branch: `/scratch/oetiker/claude-worktrees/mdmost-provenance` @ `code-provenance`
-Trunk at time of writing: `main` @ `7693b00` — **reader: if trunk has moved, §2
-is provisionally stale; if trunk now contains this branch's HEAD, this file is a
-tombstone** (`git merge-base --is-ancestor HEAD main`). At `7693b00`: 959 tests
-across 30 suites, fmt / clippy / test / `cargo check --target
-x86_64-pc-windows-msvc` all exit 0. **Re-derive anyway** (§8).
-Sibling worktrees: `mdmost-publishing` @ `publishing`, `mdmost-tablezebra` @
-`table-zebra`, `mdmost-entities` @ `mermaid-entities` — **all three are merged
-into `main` and tombstoned; do not work in them.** This line cannot see
-worktrees created later; check yourself.
+Date: 2026-08-11   Reason: milestone — two plans finished, a third written and not started
+Worktree / branch: main checkout `/home/oetiker/checkouts/mdmost` @ `main`
+Trunk at time of writing: this **is** trunk. `main` @ `27aee88`.
+Sibling worktrees: **none.** All five feature worktrees were merged and removed on
+2026-08-11. One branch survives with no worktree — `worktree-code-provenance`, an
+abandoned earlier run at the copy work, now holding nothing that is not on `main` (§7.6).
+This line cannot see worktrees created later; check yourself.
 
 ## 1. Mission
 
@@ -32,224 +28,211 @@ Mermaid families drawn as Unicode box art.
 
 The mental model that matters: **rendering is a pure function of
 `(AST, width, theme, options)`**. Parse once; no layout decision at parse time;
-a resize discards the canvas and renders again.
-
-This branch is executing `docs/superpowers/plans/2026-08-10-code-provenance.md`:
-give code-block cells a link back to the document source so search and copy work
-inside fences, then spend that mapping on a clickable `[copy]` in code frames and
-tables, the table copying a grid that Excel and Sheets paste as cells.
+a resize discards the canvas and renders again. Anything that depends on the
+pointer — hover, the selection wash, the `[copied]` flash — is a **paint-time**
+concern in `src/tui/draw.rs`, never a render-time one. That seam is load-bearing
+and the next workstream leans on it hard.
 
 **How the owner works, and it is not optional.** They review by *looking at
 rendered output*, and their findings are consistently precise. **Answer a design
-question with a rendered sample, never with prose** — every design call this
-session was settled in one exchange by rendering the options. They will cut
-through analysis that has become over-engineered; treat that as direction. They
-report bugs from real use, so expect renderer bug reports to arrive mid-plan.
+question with a rendered sample, never with prose.** They will cut through
+analysis that has become over-engineered; treat that as direction. They report
+bugs from real use, so expect renderer bug reports mid-plan. When they reframe a
+question — "think how selection works in a web browser" — the reframe is the
+design; stop defending the old framing and follow it.
 
-## 2. Where we are now
+## 2. Where we are now, as of the handoff commit
 
-**Tasks 1-5 of nine are done and reviewed.** 13 commits ahead of `main` as of the
-handoff commit; re-derive (§8). At HEAD: **994 tests across 30 suites**, fmt and
-clippy clean.
+**Two plans are fully executed and merged.** Re-derive rather than inherit (§8).
 
-- Task 1 — the source-line mapping on `NodeKind::CodeBlock`, built in
-  `doc::convert` by suffix-matching literal lines against the real source.
-- Task 2 — one `SearchSpan` per drawn code line, so search and copy see inside a
-  fence.
-- Task 3 — the `Hotspot` canvas channel (`src/canvas/`), carrying clipboard
-  payloads alongside `Pin`.
-- Task 4 — `src/render/button.rs` and the code frame's `[copy]`.
-- Task 5 — `src/export/`, a pure AST-to-string module producing TSV and HTML.
+- **`code-provenance` (nine tasks)** — code blocks carry a mapping back to the
+  document source. Search and selection now see inside a fence (that was a
+  long-standing defect, and it is gone); `src/export/` turns a table into TSV and
+  HTML; the code frame and top-level tables offer a clickable `[copy]`; `Copied`
+  replaced the `from_source` bit so the status bar names `Markdown source`,
+  `rendered text`, `code` or `table`; a press is translated by the same
+  `canvas_pos` a drag uses.
+- **`publishing` (six tasks)** — CI, release workflow for five targets, packaging,
+  man page, Homebrew formula, and now the demo: a five-act tmux recording at
+  `docs/demo/mdmost.webp` (1,617,004 bytes), referenced from the README.
+- **One ported fix** — `219a6dc`, a trailing-whitespace clip predicate that cost
+  every such line the last character of its span (§4.5).
 
-**`main` was merged into this branch at `da4e0bb`**, bringing three finished
-workstreams. That matters more than it sounds:
+At `27aee88`: **1020 tests across 30 suites**, and `cargo fmt --check`, `cargo
+clippy --jobs 4 --all-targets -- -D warnings`, `cargo test --jobs 4` and `cargo
+check --jobs 4 --target x86_64-pc-windows-msvc` all exit 0. Verified on trunk
+after the merge, not inherited from the branch.
 
-- **Everything is left-aligned. Block centring was removed entirely** — narrow
-  content stops early on the right, wide content runs past. 108 snapshots moved.
-- **`src/render/table.rs` was rewritten**: the zebra stripe stops at the vertical
-  rules, a cell past 30 display columns earns the table gap rows even with no
-  wrapping, and inline code is a colour with no background.
-- Mermaid labels decode HTML entities and mermaid's `#…;` codes; a `;` inside a
-  `|…|` edge label is label text; an edge label is drawn once, not once per rank.
-
-**A fresh agent (`provenance2`) is running Tasks 6-9** as of the handoff commit.
-Task 8 modifies `render_table_node`, which the merge rewrote — **the plan's Task 8
-text predates that and its line references will not match.**
+**A third plan is written and has not been started**: semantic selection
+(§6). Nothing of it is implemented.
 
 ## 3. Do this next
 
-1. **Watch `provenance2` for the stall pattern in §4.1** — check
-   `git log`/`git status` in its worktree every ~10 minutes. If the tree is dirty
-   with no `cargo` process running, it has deadlocked: run the three gates
-   yourself, send it the numbers, and tell it to commit. That converts a
-   45-minute stall into two minutes and has been necessary five times.
-2. **When Tasks 6-9 land: merge `code-provenance` into `main`**, rewrite `main`'s
-   handoff to the merged reality, and **tombstone this branch** (§4.12).
-3. **Then the demo** — publishing Task 5, the only unexecuted task of the
-   publishing plan. It was deliberately deferred because it records a copy of a
-   table as TSV and a fence as its source, which Tasks 6-8 deliver. The brief is
-   already rewritten and committed; hand it over as-is.
+1. **Execute `docs/superpowers/plans/2026-08-11-semantic-selection.md`**, Task 1
+   first. Ten tasks. It is TDD with mandatory fault injection and its global
+   constraints block is written to be pasted into every implementer brief.
+2. **Task 3 and Task 8 stop and show the owner rendered output** — the first
+   selection across a table, and the three button states in every theme. Those
+   are gates, not suggestions: the button colours are deliberately unnamed
+   anywhere in the spec, because the owner settles them by looking.
+3. **The demo needs re-recording when that lands** (plan Task 10) — it shows both
+   the selection highlight and the buttons.
 
 ## 4. Lessons & traps ← the irreplaceable part
 
-Carried forward from the previous handoff and still true: **give every agent its
-own `CARGO_TARGET_DIR`**; **never read a gate's result through a pipe**; the
-standing clippy gate is `cargo clippy --all-targets -- -D warnings` because plain
-`cargo clippy` exits 0 on warnings; **verify a subagent's arithmetic, not its
-adjectives**; **do not choose glyphs by measuring them**; **do not hand-resolve
-snapshot conflicts**; **a rename is not a `sed`** (box art and the FIGlet
-fixture); **when two code paths render "the same" thing, prove it**; **flipping a
-default breaks the tests that used it as a convenience**. Read
-`git show 7693b00:docs/controller-handoff.md` for the full prior text.
+Carried forward and still true: **give every agent its own `CARGO_TARGET_DIR`**;
+**never read a gate's result through a pipe**; the standing clippy gate is
+`cargo clippy --all-targets -- -D warnings` because plain `cargo clippy` exits 0
+on warnings; **verify a subagent's arithmetic, not its adjectives**; **do not
+choose glyphs by measuring them**; **do not hand-resolve snapshot conflicts**;
+**a rename is not a `sed`**; **when two code paths render "the same" thing, prove
+it**; **measure box art in columns, not bytes** (every glyph is 3 bytes, 1
+column; use `perl -CSD`); **prove a large snapshot churn is pure movement** by
+stripping whitespace both sides, sorting and diffing; **backticks inside `git
+commit -m "…"` are command-substituted — use a quoted heredoc**; **never merge
+into a dirty worktree**; **tombstone every merged branch immediately**.
 
 New this session, in rough order of what they cost:
 
-1. **The background-test deadlock, five times, ~2 hours.** An implementer starts
-   `cargo test` in the background, arms a monitor or `until` loop, ends its turn
-   — and the turn that would consume the result never fires. **Gates must run in
-   the foreground.** The instruction only works if it is in the *implementer's
-   brief*; I put it in the parent's context after the second stall and it never
-   propagated, so stalls three, four and five were my briefing failure, not three
-   independent agent mistakes. **Put the rule verbatim at the top of every brief
-   you write.**
-2. **Four vacuous tests. A test written from a *description* of the behaviour
-   asserts the right property in the wrong place.** Only a test derived from an
-   *observed failure* is anchored to what actually breaks. The worst example was
-   doubly vacuous: its fixture used inline code where a fence was needed, and its
-   assertion was a disjunction that held when nothing was drawn — guarding
-   precisely the rule the design invented that seam for. **Fault injection is the
-   cure and is now standard here**: revert the mechanism, confirm *that* test
-   fails. Do it even when a report claims a red proof — three such claims did not
-   survive the mutation they supposedly demonstrated.
-3. **Measure box art in columns, not bytes — I got this wrong and sent an agent
-   after a phantom.** `perl -ne 'index($_, $needle)'` on UTF-8 returns a *byte*
-   offset; every box-drawing glyph is 3 bytes and 1 column, so the number runs
-   ahead by 2 per glyph to the left. I reported a "28-column misalignment" that
-   did not exist and told a correct test it was vacuous. **Use `perl -CSD`**, or
-   count with `chars()`. The tell I ignored: the offset scaled with the amount of
-   box art to the left, which is exactly what a byte/column confusion looks like.
-4. **Plans have holes exactly where they say "the same way X is handled".** Task
-   3's step said "implement it the same way pins are handled" while the test list
-   omitted the pin's coverage; Task 1's six tests missed the empty-literal case;
-   Task 2's missed tabs. **When a brief delegates a behaviour by analogy, check
-   that the analogy's tests came across too.**
-5. **The per-task review earned its cost on this plan and should be kept.** It
-   caught: a byte-offset bug that copied wrong bytes from any tabbed code block; a
-   phantom entry for empty fences; a silent *total* provenance loss on every CRLF
-   document; and the vacuous tests. Every one was invisible to a green suite.
-6. **Cross-agent messages get lost. Do not assume delivery.** One agent asked for
-   a ruling I had already sent twice; another's reviewer woke with an empty
-   context and answered "what would you like me to work on?". If an agent's
-   behaviour implies it never received something, **re-send consolidated into one
-   message** rather than referring back to the earlier one.
-7. **Check a process's parent before killing it.** A 45-minute-old `mdmost
-   README.md` looked exactly like the stray the house rules forbid. Its PPID was
-   an interactive `-bash` on `pts/0` — the owner's own shell, with the pager open.
-   One `ps -o ppid=` was the difference between hygiene and closing a document
-   someone was reading.
-8. **Prove a large snapshot churn is what you think it is.** The left-alignment
-   change rewrote 108 files, 3254 insertions and 3254 deletions. Strip leading and
-   trailing whitespace from both sides, sort, diff: identical means *pure
-   horizontal movement*, nothing added or lost. That check takes one command and
-   is the only thing standing between "moved left" and "quietly mangled".
-9. **Backticks inside `git commit -m "…"` are command-substituted.** It ate a
-   symbol name out of a merge message before I noticed. Use a quoted heredoc
-   (`-F - <<'EOF'`) for every commit message; the whole repo's style is full of
-   backticked identifiers.
-10. **Never merge into a dirty worktree.** Wait for the agent to commit. Twice I
-    wanted to land a port while a task was in flight and had to hold.
-11. **Retire long-running agents; do not nurse them.** The Tasks 1-5 agent ran ~8
-    hours, and its context held the plan, nine briefs, every report and every
-    review. Every turn re-sent all of it, so a wake producing one `git status`
-    cost as much input as writing a feature — and it was stalling anyway. A fresh
-    agent with a 200-line brief does the same work at a fraction of the cost and
-    starts with the rules already in it. **Watch for the symptom: an agent that
-    looks like it is "just sitting there" burning tokens.**
-12. **Tombstone every merged branch immediately** and say so in its handoff. Three
-    dead worktrees are on disk right now with tombstoned handoffs; without them a
-    fresh session can be launched into a corpse that answers questions
-    confidently.
+1. **Three of four agents finished their work and went idle without reporting.**
+   This is *not* the old stall — the tree was clean and the commit was made. Learn
+   the two signatures, because the remedies are opposite: **dirty tree + no cargo
+   process = stalled**, go run the gates and commit for it; **clean tree + commit
+   present = finished silently**, go read the commit. Check before assuming
+   either. A fourth agent was mid-flight when I checked (dirty tree *with* a live
+   `cargo`), which is neither.
+2. **`git status --porcelain` cannot see ignored files, and I destroyed the SDD
+   ledgers with it.** I verified all five worktrees were clean before removing
+   them; every ledger lived at `.superpowers/sdd/*/progress.md`, gitignored, and
+   went with the worktrees. Nothing shipped was lost, but the record of which
+   review found what, and which minors were deferred and why, is now only in
+   commit messages and this file. **Use `git status --porcelain --ignored` before
+   removing a worktree**, and expect gitignored working state to be exactly the
+   thing worth saving.
+3. **An abandoned branch can hold the only copy of a real fix.** The cleanup
+   nearly deleted `worktree-code-provenance` as duplicate work. Two of its
+   commits were fixes; one had been *rediscovered independently* and was already
+   on trunk, the other never was and was live on `main` — a trailing-whitespace
+   clip predicate that left the last character of such a line outside its own
+   span, unreachable to search and to copy. It was recorded in the ledger as a
+   "deferred minor", which reads like a rounding decision rather than a lost
+   character. **Check by content, not by commit subject, and check every commit
+   on a branch before deleting it.**
+4. **Two agents cannot share one git index.** Task 7 and Task 8 ran in parallel
+   with disjoint files, but a shared worktree means racing `git add`/`commit` and
+   gate runs that see each other's half-finished edits. Task 8 got its own
+   worktree. **Note its worktree was cut from `main`, not from the feature
+   branch** — the agent noticed, merged the branch in itself and said so, which
+   is the only reason it wasn't building on the wrong base. Check an isolated
+   agent's base commit yourself.
+5. **A test that goes *skipped* rather than red under mutation is a vacuous test
+   in disguise.** The clipboard test written as its plan implied would skip when
+   the alternate was dropped, because a read-back error read as "this display
+   server cannot". It now probes the capability with a plain copy first, so it has
+   no excuses left. **Prove the mutation makes a test FAIL, not skip.** This is a
+   new species of the vacuous-test problem and the old checks do not catch it.
+6. **The plan had three vacuous tests, unrunnable fixtures, and a nonexistent
+   field, and agents caught all of them only because they were briefed to prove
+   tests red.** `ctx.theme.table.frame` does not exist (it is `.border`); the
+   plan's placement "after the clip" put the button in empty padding because
+   `resize_width` pads to the viewport; and its own fixture (`| a | b |` at width
+   40) negotiates a 9-column table that cannot hold `[copy]`, so its positive test
+   asserted a button that correctly never appears. **A plan's test fixtures are as
+   likely to be wrong as its code.**
+7. **I re-ran the agents' fault injections myself and they held** — the nested
+   table gate, the clipboard alternate, the clipped-off hotspot. Do this. On this
+   project three earlier "verified red" claims did not survive it.
+8. **Self-reviewing the plan I had just written found a whole-document
+   selection bug.** `offset_at` searched only the cell's own row, so a drag inside
+   a diagram — where no row carries a span — would resolve to `0..source.len()`.
+   The fallbacks are now inverted from the obvious choice and the plan says so
+   twice. **Review a plan against its spec before handing it over; the bug you
+   find costs minutes, the one an implementer finds costs a task.**
+9. **`git merge` does not accept `-F -`.** Write the message to a file. (`git
+   commit -F -` does work.)
+10. **`git worktree remove` is blocked by the permission classifier** and needs
+    the owner's approval. Ask; do not reach for `rm -rf`, which is the workaround
+    the block exists to prevent.
 
 ## 5. Don'ts & constraints
 
 Carried forward and still binding: **no HTML rendering**; **Mermaid is Unicode box
-art only**; **bullets and task boxes are ASCII and do not vary by font
-detection**; **Nerd Font glyphs are detected, not defaulted on**; **`Esc` never
-quits**; **do not widen the `NodeArt` seam**; **`render` must not depend on
-`tui`**; **`#![forbid(unsafe_code)]`**; **the status bar never lies**; **no
-1000-node golden snapshot**; **4-core cap on every cargo invocation**; **tmux:
-kill only your own session**; **leave no stray `mdmost` processes** (but §4.7).
+art only**; **bullets and task boxes are ASCII and do not vary by font detection**;
+**Nerd Font glyphs are detected, not defaulted on**; **`Esc` never quits**; **do
+not widen the `NodeArt` seam**; **`render` must not depend on `tui`**;
+**`#![forbid(unsafe_code)]`**; **the status bar never lies**; **no 1000-node golden
+snapshot**; **4-core cap on every cargo invocation**; **tmux: kill only your own
+session**; **leave no stray `mdmost` processes — but check a process's parent with
+`ps -o ppid=` first**, because the owner runs this pager themselves on this machine.
 
-New or changed this session:
+Settled; do not relitigate:
 
-- **There is no centring anywhere.** Every block anchors at the same left margin;
-  longer content sticks out to the right. The owner was asked explicitly whether
-  the title banner and heading rules were exceptions and said *"no, everything
-  moved left"*. Do not reintroduce a centred measure.
-- **`src/export/` may depend only on `doc`** — not `canvas`, not `theme`, and
-  above all not `tui`. That is what makes it exhaustively testable.
+- **There is no centring anywhere.** Every block anchors at the same left margin.
+- **`src/export/` may depend only on `doc`** — not `canvas`, not `theme`, not `tui`.
 - **TSV is what every reader receives**; HTML is an upgrade where a flavoured
-  clipboard exists. Nobody gets less than TSV, because OSC 52 carries only one
-  flavour. Serialising the AST into a clipboard payload is **not** the "no HTML"
-  rule, which is about rendering markup from a document.
-- **Nothing has ever been pushed and there is no remote** *as of the handoff
-  commit* — `git remote -v`. Creating `github.com/oetiker/mdmost`, adding
-  `CRATES_IO_TOKEN` and setting workflow write permissions are the owner's steps.
-  **Do not push without asking.**
-- **The title banner is opt-in and stays opt-in.** **`--render-once` may emit
-  lines wider than `--width`** where a table or diagram earns it, and the README
-  must not promise exact width. Both settled; do not relitigate.
+  clipboard exists, because OSC 52 carries one flavour and is the route that
+  survives SSH. Nobody ever gets less than TSV.
+- **The title banner is opt-in**; **`--render-once` may emit lines wider than
+  `--width`**; the README must not promise exact width.
+- **The table gap-row threshold is 30 display columns.**
+- **The copy button follows what mouse capture actually did**, not what the config
+  asked for — a button nobody can click is worse than no button. This is why
+  `--render-once` shows none, which is correct and not a bug to work around.
 - **No apt/yum repository, no GitHub Pages site, no container image, no macOS
-  notarisation.** All four considered and rejected with reasons in the publishing
-  spec §1. The Pages site was dropped by the owner *after* being designed.
-- **The table gap-row threshold is 30 display columns.** The owner was shown a
-  28-column near-miss rendered both ways and did not ask for it to change.
+  notarisation.** All four considered and rejected; reasons in the publishing spec §1.
+- **Do not push.** Creating the remote is the owner's step (§7.1).
 
 ## 6. Where the detail lives
 
-- **Plan being executed:** `docs/superpowers/plans/2026-08-10-code-provenance.md`
-  (Tasks 6-9 remain).
-- **Design authority for it:** `docs/superpowers/specs/2026-08-10-code-provenance-design.md`
-  — §4 the button, §5 the Hotspot channel and payloads.
-- **Publishing plan, one task left:** `docs/superpowers/plans/2026-08-09-publishing.md`
-  Task 5, the demo. Its design is §7 of
-  `docs/superpowers/specs/2026-08-09-publishing-design.md` — rewritten this
-  session into a five-act tmux split-screen recording at 100 columns.
+- **Plan to execute:** `docs/superpowers/plans/2026-08-11-semantic-selection.md`
+- **Its design authority:** `docs/superpowers/specs/2026-08-11-semantic-selection-design.md`
+  — §2 the model, §2.1 endpoint resolution, §3 diagram provenance, §4 the button.
 - **Renderer design authority:** `docs/superpowers/specs/2026-08-08-mdmost-design.md`
-- **Ledger:** `.superpowers/sdd/2026-08-10-code-provenance/progress.md` (gitignored)
-- Key files: `src/doc/convert.rs` (`code_lines`, the suffix match and the CRLF
-  strip), `src/render/code.rs:311` (the span byte end and its `.min(origin.end)`
-  clamp), `src/canvas/ops.rs` (`merge_hotspots`), `src/export/`,
-  `src/render/document.rs` (`placed`, where centring used to be),
-  `src/render/table.rs` (rewritten), `src/tui/term.rs` (Tasks 7 and 9 edit it).
-- Reference repo for the demo work: `~/checkouts/ansidrama`.
+- Finished plans, for context on why code looks as it does:
+  `docs/superpowers/plans/2026-08-10-code-provenance.md`,
+  `docs/superpowers/plans/2026-08-09-publishing.md`
+- **The SDD ledgers no longer exist** (§4.2). Commit messages are the record.
+- **Demo:** `demo/tour.md`, `demo/mdmost.toml` (the ansidrama script),
+  `demo/tmux.conf`, `demo/config.toml`; regeneration recipe in
+  `docs/maintainer-notes.md`. Reference repo: `~/checkouts/ansidrama`.
+- Key files: `src/tui/select.rs` (`source_hull`, `columns_on` — the geometry the
+  next plan replaces), `src/tui/draw.rs:350` (`copied_flash`, the paint-time seam
+  hover reuses), `src/tui/draw.rs:662` (`highlight_selection`),
+  `src/mermaid/ast.rs:35` (`Label`, shared by all seven families),
+  `src/render/code.rs:338` (the clip predicate, and the rebasing to imitate),
+  `src/render/button.rs:35` (`place`), `src/canvas/ops.rs:127` (the `is_blank`
+  clip rule).
 
 ## 7. Open questions / pending decisions
 
-1. **The banner's internal band centring was never ruled on.** A multi-line FIGlet
-   banner still centres its bands relative to each other. The block now anchors
-   left like everything else, but its internal composition was left alone
-   deliberately. Worth rendering for the owner now that nothing else is centred.
-2. **The RPM payload is unverified** — `rpm(1)` is not installed on this machine,
-   so the `.rpm` was built and sized but never listed. Twice recorded.
-3. **The release workflow has never executed.** The changelog rewrite, the formula
-   marker rewrite, the deb/rpm builds and the Windows check were rehearsed
-   locally; the matrix builds, crates.io publish, GitHub release and Homebrew
-   commit are unexercised. The first real run is the first test.
-4. **Windows compiles but has never been run.** `cargo check --target
-   x86_64-pc-windows-msvc` is green and there is a CI leg for it, inert until a
-   remote exists. The mouse, clipboard and alternate screen are unexercised there.
-5. **The banner fixture is self-referential on this machine** — `figlet`'s `Small`
-   font is not installed, so the reference art came from our own layout.
-6. Carried forward and still open: `fc-list` as the macOS icon probe is untested
-   there; nested diagrams are never widened while nested tables are; Nerd Fonts v2
-   patches fail icon detection (deliberate); a copy made just before `q` still dies
-   on a desktop with no clipboard manager.
-7. **The light theme's flat heading ramp** (measured 4.80 → 4.89 → 4.92 → 4.95 →
-   4.90 → 4.86:1, non-monotone) is untouched and inherited from two handoffs ago.
-   **Re-measure before designing** — it may have moved under the theme changes.
-   Note the *other* long-standing defect, search not matching inside fenced code,
-   was fixed by Task 2 of this plan.
+1. **The owner's manual steps, all still outstanding:** create
+   `github.com/oetiker/mdmost`, add `CRATES_IO_TOKEN`, grant Actions write
+   permission. Both CI workflows are inert until then, so the local
+   `cargo check --target x86_64-pc-windows-msvc` is the only Windows detector.
+2. **The release workflow has never executed.** The changelog rewrite, the formula
+   marker rewrite and the deb/rpm builds were rehearsed locally; the matrix builds,
+   crates.io publish, GitHub release and Homebrew commit are unexercised. The first
+   real run is the first test.
+3. **Windows compiles but has never been run.** Mouse, clipboard and alternate
+   screen are all unexercised there — and the next plan adds motion-event handling.
+4. **The button colours are deliberately unnamed** (spec §8). Plan Task 8 renders
+   them for the owner. The light theme's heading ramp is separately known to be
+   flat and non-monotone (measured 4.80 → 4.89 → 4.92 → 4.95 → 4.90 → 4.86:1);
+   re-measure before designing, it may have moved.
+5. **The banner's internal band centring was never ruled on.** A multi-line FIGlet
+   banner still centres its bands relative to each other, though the block anchors
+   left like everything else. Worth rendering now that nothing else is centred.
+6. **`worktree-code-provenance` is now redundant** — both of its unique fixes are
+   accounted for (§4.3). Safe to delete; left alone because it costs nothing
+   without a worktree.
+7. **~14.3 GB of orphaned cargo target dirs** under `/scratch/oetiker/` from the
+   removed worktrees (`cargo-target-mdmost-*`). `/scratch` was at 55% with 299G
+   free, so there is no pressure. Ask before deleting.
+8. Carried forward and still open: the RPM payload is unverified (`rpm(1)` is not
+   installed here); `fc-list` as the macOS icon probe is untested there; nested
+   diagrams are never widened while nested tables are; Nerd Fonts v2 patches fail
+   icon detection (deliberate); the banner fixture is self-referential because
+   `figlet`'s `Small` font is not installed on this machine.
 
 ## 8. Staleness watch
 
@@ -260,9 +243,11 @@ New or changed this session:
   to the successor's handoff.
 - **Sibling worktrees / other workstreams may exist that this file cannot name** —
   anything started after the handoff commit is invisible here.
-- **`provenance2` was mid-Task-6 when this was written.** Tasks 6-9 may be done,
-  half-done, or stalled. `git log` in its worktree is the truth, not this file.
-- The 994-test count and the clean gates are as of the handoff commit. Re-run
-  them; a count that moved without an explanation is the signal.
-- The "no remote, nothing pushed" claim rots the moment the owner creates the
-  repository, which is step one of the publishing plan's manual steps.
+- The 1020-test count and the four green gates are as of the handoff commit.
+  Re-run them; a count that moved without an explanation is the signal.
+- **"Nothing has been pushed and there is no remote" rots the moment the owner
+  creates the repository**, which is step one of their manual list. Check
+  `git remote -v` rather than believing §7.1.
+- The semantic-selection plan is written against the code as of `27aee88`. Its
+  line references and its claim that `columns_on` still exists are true only until
+  someone starts Task 3.
