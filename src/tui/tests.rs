@@ -3892,3 +3892,146 @@ fn the_flash_is_painted_over_the_button_that_was_pressed() {
         rows[usize::from(y)]
     );
 }
+
+// --- Resolving a cell to a source offset (design spec §2.1) ----------------------
+
+/// Renders `doc` at `width` directly, with no pager or terminal in the way.
+///
+/// `offset_at` is tested against the canvas alone, so the tests build one the same way
+/// `render/tests.rs` does rather than driving a full [`App`](super::app::App).
+fn render(doc: &str, width: u16) -> Canvas {
+    let parsed = Doc::parse(doc);
+    let theme = crate::theme::Theme::default_dark();
+    crate::render::render_document(
+        &parsed,
+        width,
+        None,
+        &theme,
+        &crate::render::RenderOptions::default(),
+    )
+}
+
+#[test]
+fn a_cell_on_text_resolves_to_that_byte() {
+    let doc = "| alpha | beta |\n| --- | --- |\n| one | two |\n";
+    let canvas = render(doc, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| &doc[s.source_start..s.source_end] == "alpha")
+        .expect("a span for alpha");
+    let at = select::offset_at(
+        &canvas,
+        doc,
+        Pos {
+            row: span.row,
+            col: span.col,
+        },
+        select::Bias::Start,
+    );
+    assert_eq!(at, Some(span.source_start));
+}
+
+#[test]
+fn a_cell_on_a_border_resolves_to_the_next_text_in_document_order() {
+    // Column 1 of a table row is the left vertical rule: chrome, with no span.
+    let doc = "| alpha | beta |\n| --- | --- |\n| one | two |\n";
+    let canvas = render(doc, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| &doc[s.source_start..s.source_end] == "alpha")
+        .expect("a span for alpha");
+    let on_rule = Pos {
+        row: span.row,
+        col: 1,
+    };
+    assert!(
+        canvas
+            .spans()
+            .iter()
+            .all(|s| s.row != span.row || s.col > 1),
+        "column 1 must really be chrome for this test to mean anything"
+    );
+    assert_eq!(
+        select::offset_at(&canvas, doc, on_rule, select::Bias::Start),
+        Some(span.source_start),
+        "a press on the rule takes the start of the cell's text"
+    );
+    // Column 1 sits before every span on the row, so it cannot tell "reading order" from
+    // "row order" apart: a comparison that dropped the column and kept only the row would
+    // land on the same answer. The rule *between* alpha and beta can: it sits after
+    // alpha's span and before beta's, on the very same row, so only a genuine `(row,
+    // col)` comparison picks beta over alpha for `Start` and alpha over beta for `End`.
+    let beta = canvas
+        .spans()
+        .iter()
+        .find(|s| &doc[s.source_start..s.source_end] == "beta")
+        .expect("a span for beta");
+    let between = Pos {
+        row: span.row,
+        col: span.col + span.cols,
+    };
+    assert!(
+        between.col < beta.col,
+        "the rule between the cells must actually sit before beta's span"
+    );
+    assert_eq!(
+        select::offset_at(&canvas, doc, between, select::Bias::Start),
+        Some(beta.source_start),
+        "reading order, not row order: the rule between cells takes the next cell's start"
+    );
+    assert_eq!(
+        select::offset_at(&canvas, doc, between, select::Bias::End),
+        Some(span.source_end),
+        "reading order, not row order: the rule between cells takes the previous cell's end"
+    );
+}
+
+#[test]
+fn a_cell_past_the_end_of_a_row_resolves_to_the_last_span_on_it() {
+    let doc = "| alpha | beta |\n| --- | --- |\n| one | two |\n";
+    let canvas = render(doc, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| &doc[s.source_start..s.source_end] == "beta")
+        .expect("a span for beta");
+    let past = Pos {
+        row: span.row,
+        col: 200,
+    };
+    assert_eq!(
+        select::offset_at(&canvas, doc, past, select::Bias::End),
+        Some(span.source_end)
+    );
+}
+
+#[test]
+fn a_drag_entirely_on_chrome_selects_nothing() {
+    // The interior of a diagram: box art, no labels under either endpoint.
+    let doc = "```mermaid\nflowchart LR\n  A[Parse] --> B[Layout]\n```\n";
+    let canvas = render(doc, 60);
+    let lo = select::offset_at(&canvas, doc, Pos { row: 0, col: 0 }, select::Bias::Start);
+    let hi = select::offset_at(&canvas, doc, Pos { row: 0, col: 1 }, select::Bias::End);
+    assert!(
+        lo >= hi,
+        "an empty range, not the whole document: {lo:?}..{hi:?}"
+    );
+    // `lo >= hi` alone is satisfied by *either* fallback landing on the same value as
+    // the other, which is not what an inverted fallback actually does — it moves both
+    // ends toward each other, and `usize` can never go negative, so `>=` alone cannot
+    // tell a single inverted fallback from a correct one. Pin the values themselves:
+    // this is the "either way lo >= hi" case the module doc warns about, and it must
+    // be an *empty* range (`lo == source.len()`, `hi == 0`), never the whole document.
+    assert_eq!(
+        lo,
+        Some(doc.len()),
+        "no span at/after the cell clamps to the document end"
+    );
+    assert_eq!(
+        hi,
+        Some(0),
+        "no span at/before the cell clamps to the document start"
+    );
+}

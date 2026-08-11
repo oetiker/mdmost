@@ -234,6 +234,73 @@ fn source_hull(canvas: &Canvas, source: &str, selection: Selection) -> Option<(u
     (lo < hi).then_some((lo, hi))
 }
 
+/// Which way an endpoint resolves when it lands on a cell no span covers.
+///
+/// Only `offset_at`'s own tests call this yet — the hull that will use it to resolve a
+/// selection's two ends lands in a later task of this plan — so `cargo clippy
+/// --all-targets` sees it as dead code in the non-test build it also checks (tests
+/// exercise it, so `#[expect]` would flag *that* build as an unfulfilled expectation
+/// instead; `#[allow]` is the one attribute stable across both).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "consumed by the hull in a later task of this plan"
+)]
+pub(crate) enum Bias {
+    /// The near end of the range: take the start of the next text.
+    Start,
+    /// The far end: take the end of the previous text.
+    End,
+}
+
+/// The source byte a cell points at.
+///
+/// A cell inside a span is exact. A cell on chrome — a border, the gutter, padding,
+/// the blank tail of a row — has no span to ask, so it resolves to the nearest text in
+/// document order in the direction `bias` names. This is the only coordinate in the
+/// selection that is interpreted rather than looked up (design spec §2.1).
+///
+/// See [`Bias`]'s doc comment for why this is `#[allow(dead_code)]` rather than unmarked
+/// or `#[expect]`.
+#[allow(
+    dead_code,
+    reason = "consumed by the hull in a later task of this plan"
+)]
+pub(crate) fn offset_at(canvas: &Canvas, source: &str, pos: Pos, bias: Bias) -> Option<usize> {
+    // Exact hit first: the cell is inside some span's drawn columns.
+    for span in canvas.spans() {
+        let end = span.col.saturating_add(span.cols);
+        if span.row == pos.row && pos.col >= span.col && pos.col < end {
+            let body = source
+                .get(span.source_start..span.source_end)
+                .unwrap_or_default();
+            return Some(span.source_start + byte_at_column(body, pos.col - span.col));
+        }
+    }
+    // Chrome. Search in READING ORDER — (row, col) across the whole canvas, not just
+    // this row — because "document order" is the whole point and a drag inside a
+    // diagram's blank interior has no span on its own rows at all.
+    let key = (pos.row, pos.col);
+    match bias {
+        // The near end takes the first text at or after the cell.
+        Bias::Start => canvas
+            .spans()
+            .iter()
+            .filter(|s| (s.row, s.col) >= key)
+            .min_by_key(|s| (s.row, s.col))
+            .map(|s| s.source_start)
+            .or(Some(source.len())),
+        // The far end takes the last text at or before it.
+        Bias::End => canvas
+            .spans()
+            .iter()
+            .filter(|s| (s.row, s.col) <= key)
+            .max_by_key(|s| (s.row, s.col))
+            .map(|s| s.source_end)
+            .or(Some(0)),
+    }
+}
+
 /// The byte offset in `text` that `columns` display columns land on.
 ///
 /// The exact inverse of the column arithmetic `search::segments_for` does in the other
