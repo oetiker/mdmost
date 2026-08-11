@@ -9,8 +9,7 @@
 
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
-    Entity, EntityId, ErAttribute, ErCardinality, ErDiagram, ErKey, ErRelationship, Label,
-    LineStyle,
+    Entity, EntityId, ErAttribute, ErCardinality, ErDiagram, ErKey, ErRelationship, LineStyle,
 };
 
 use crate::mermaid::entity;
@@ -54,8 +53,8 @@ struct Builder<'a> {
     /// The entity whose attribute block is open, and the line it opened on.
     current: Option<EntityId>,
     open: Option<usize>,
-    /// The full mermaid source, used only to compute a label's byte offset
-    /// (`lex::offset_of`) — every label text this parser touches is a subslice of it.
+    /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
+    /// offset — every label text this parser touches is a subslice of it.
     src: &'a str,
 }
 
@@ -142,7 +141,7 @@ impl Builder<'_> {
         let label = label
             .map(lex::unquote)
             .filter(|label| !label.is_empty())
-            .map(|label| Label::parse_at(label, lex::offset_of(self.src, label)));
+            .map(|label| lex::label_at(self.src, label));
         Ok(Some(ErRelationship {
             left,
             right,

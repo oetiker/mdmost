@@ -40,8 +40,10 @@ pub struct Label {
     ///
     /// The range covers the text as written, so `A[Parse]` gives the range of `Parse`.
     /// It is relative to the mermaid block, not the document; `render::diagram`
-    /// rebases it. An empty range means "synthesised, not from the source" — the
-    /// default a label gets unless it is built through [`Label::parse_at`].
+    /// rebases it. An empty range means "synthesised, not from the source" — what a
+    /// label gets unless it records a real offset, whether because it was never read
+    /// from a document ([`Label::line`]) or because [`Label::parse`] was asked to
+    /// place it without one.
     pub source: std::ops::Range<usize>,
 }
 
@@ -52,6 +54,11 @@ pub struct Label {
 /// how most of the test suite already asserts on labels. Deriving `PartialEq` /
 /// `Hash` over both fields would make every such comparison depend on byte offsets
 /// nobody wrote down.
+///
+/// A consequence worth knowing before writing a test: `assert_eq!(label, Label::line("Parse"))`
+/// (or against any other hand-built `Label`) proves nothing about `source` — it passes
+/// no matter what byte range the label actually carries. A test that cares about
+/// provenance must assert on `label.source` directly.
 impl PartialEq for Label {
     fn eq(&self, other: &Self) -> bool {
         self.lines == other.lines
@@ -73,31 +80,22 @@ impl Label {
     /// Leading and trailing whitespace is trimmed from every resulting line. Trimming
     /// also precedes decoding, so a leading `&nbsp;` survives as a visible space.
     ///
-    /// Equivalent to [`Label::parse_at`]`(text, 0)`, for call sites that genuinely have
-    /// no offset to give.
+    /// For a call site that knows where `text` sat in the mermaid source, prefer
+    /// [`Label::parse_at`] — this gives an empty [`Label::source`], the same "not from
+    /// the source" value [`Label::line`] gets, rather than falsely claiming `text`
+    /// began at the very start of a document.
     pub fn parse(text: &str) -> Self {
-        Self::parse_at(text, 0)
+        Self {
+            lines: split_lines(text),
+            source: Default::default(),
+        }
     }
 
     /// Builds a label from raw label text taken from offset `at` in the mermaid
     /// source, recording that as [`Label::source`].
     pub fn parse_at(text: &str, at: usize) -> Self {
-        let mut lines = Vec::new();
-        let mut rest = text;
-        loop {
-            match find_break(rest) {
-                Some((at, len)) => {
-                    lines.push(line_text(&rest[..at]));
-                    rest = &rest[at + len..];
-                }
-                None => {
-                    lines.push(line_text(rest));
-                    break;
-                }
-            }
-        }
         Self {
-            lines,
+            lines: split_lines(text),
             source: at..at + text.len(),
         }
     }
@@ -120,6 +118,27 @@ impl Label {
     pub fn text(&self) -> String {
         self.lines.join("\n")
     }
+}
+
+/// Splits raw label text into lines on `<br>` variants and newlines, trimming and
+/// entity-decoding each one. Shared by [`Label::parse`] and [`Label::parse_at`], which
+/// differ only in what they record as [`Label::source`].
+fn split_lines(text: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut rest = text;
+    loop {
+        match find_break(rest) {
+            Some((at, len)) => {
+                lines.push(line_text(&rest[..at]));
+                rest = &rest[at + len..];
+            }
+            None => {
+                lines.push(line_text(rest));
+                break;
+            }
+        }
+    }
+    lines
 }
 
 /// Trims one line of a label and decodes its character entities.

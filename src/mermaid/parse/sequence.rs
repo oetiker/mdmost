@@ -64,8 +64,8 @@ struct Builder<'a> {
     participants: Vec<Participant>,
     items: Vec<SequenceItem>,
     stack: Vec<Frame>,
-    /// The full mermaid source, used only to compute a label's byte offset
-    /// (`lex::offset_of`) — every label text this parser touches is a subslice of it.
+    /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
+    /// offset — every label text this parser touches is a subslice of it.
     src: &'a str,
 }
 
@@ -150,8 +150,7 @@ impl Builder<'_> {
         if let Some(participant) = self.participants.get_mut(index) {
             participant.kind = kind;
             if let Some(alias) = alias {
-                let alias = lex::unquote(alias);
-                participant.label = Label::parse_at(alias, lex::offset_of(self.src, alias));
+                participant.label = lex::label_at(self.src, lex::unquote(alias));
             }
         }
         Ok(())
@@ -179,7 +178,7 @@ impl Builder<'_> {
         self.push(SequenceItem::Note(Note {
             placement,
             participants,
-            text: Label::parse_at(text, lex::offset_of(self.src, text)),
+            text: lex::label_at(self.src, text),
         }));
         Ok(())
     }
@@ -246,7 +245,7 @@ impl Builder<'_> {
             to,
             line: arrow.line,
             head: arrow.head,
-            label: Label::parse_at(label, lex::offset_of(self.src, label)),
+            label: lex::label_at(self.src, label),
             activates,
             deactivates,
         }));
@@ -279,7 +278,7 @@ impl Builder<'_> {
             |participant| participant.key.as_str(),
             || Participant {
                 key: key.to_string(),
-                label: Label::parse_at(key, lex::offset_of(src, key)),
+                label: lex::label_at(src, key),
                 kind: ParticipantKind::Participant,
             },
         )
@@ -304,7 +303,7 @@ impl Builder<'_> {
 /// Turns the text after a block keyword into an optional label.
 fn label_of(rest: &str, src: &str) -> Option<Label> {
     let rest = lex::unquote(rest.trim());
-    (!rest.is_empty()).then(|| Label::parse_at(rest, lex::offset_of(src, rest)))
+    (!rest.is_empty()).then(|| lex::label_at(src, rest))
 }
 
 /// A message arrow found in a statement.

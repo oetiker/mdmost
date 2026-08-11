@@ -48,10 +48,12 @@ struct PendingNote {
     placement: NotePlacement,
     target: StateId,
     lines: Vec<String>,
-    /// The byte range in the mermaid source spanning every line accumulated so far;
-    /// `None` until the first line arrives. Grown on each push rather than recovered
-    /// from `lines` afterwards, because by then the text has been copied into owned
-    /// `String`s and lost its position.
+    /// A hull over every line accumulated so far: from the first line's start to the
+    /// last line's end, so it also covers the newlines, per-line indentation and any
+    /// blank or `%%` line `preprocess` dropped in between — not only the note's own
+    /// text. `None` until the first line arrives. Grown on each push rather than
+    /// recovered from `lines` afterwards, because by then the text has been copied
+    /// into owned `String`s and lost its position.
     source: Option<std::ops::Range<usize>>,
     line: usize,
 }
@@ -65,8 +67,9 @@ struct Builder<'a> {
     /// has no owning state.
     stack: Vec<(Option<StateId>, StateScope)>,
     note: Option<PendingNote>,
-    /// The full mermaid source, used only to compute a label's byte offset
-    /// (`lex::offset_of`) — every label text this parser touches is a subslice of it.
+    /// The full mermaid source, passed to `lex::label_at` (and, for the multi-line
+    /// note form, `lex::offset_of` directly) to compute a label's byte offset — every
+    /// label text this parser touches is a subslice of it.
     src: &'a str,
 }
 
@@ -88,12 +91,17 @@ impl Builder<'_> {
                     });
                 }
             } else if let Some(note) = self.note.as_mut() {
-                let at = lex::offset_of(self.src, text);
-                let end = at + text.len();
-                note.source = Some(match note.source.take() {
-                    Some(range) => range.start..end,
-                    None => at..end,
-                });
+                // A line that fails `offset_of` (should never happen — `text` is
+                // always a slice of `self.src`) contributes no position information
+                // rather than a wrong one: `note.source` simply stops growing, so the
+                // final range covers only the lines that did check out.
+                if let Some(at) = lex::offset_of(self.src, text) {
+                    let end = at + text.len();
+                    note.source = Some(match note.source.take() {
+                        Some(range) => range.start..end,
+                        None => at..end,
+                    });
+                }
                 note.lines.push(text.to_string());
             }
             return Ok(());
@@ -152,10 +160,7 @@ impl Builder<'_> {
             let id = self.intern_state(key);
             let description = lex::unquote(description);
             if let Some(state) = self.states.get_mut(id.0) {
-                state.label = Some(Label::parse_at(
-                    description,
-                    lex::offset_of(self.src, description),
-                ));
+                state.label = Some(lex::label_at(self.src, description));
             }
             return Ok(());
         }
@@ -190,10 +195,7 @@ impl Builder<'_> {
             && let Some(state) = self.states.get_mut(id.0)
         {
             let description = lex::unquote(description);
-            state.label = Some(Label::parse_at(
-                description,
-                lex::offset_of(self.src, description),
-            ));
+            state.label = Some(lex::label_at(self.src, description));
         }
         if let Some(stereotype) = stereotype {
             let kind = match stereotype.to_ascii_lowercase().as_str() {
@@ -255,7 +257,7 @@ impl Builder<'_> {
                 let note = StateNote {
                     placement,
                     target,
-                    text: Label::parse_at(text, lex::offset_of(self.src, text)),
+                    text: lex::label_at(self.src, text),
                 };
                 self.scope().notes.push(note);
             }
@@ -289,7 +291,7 @@ impl Builder<'_> {
             label: label
                 .map(lex::unquote)
                 .filter(|label| !label.is_empty())
-                .map(|label| Label::parse_at(label, lex::offset_of(self.src, label))),
+                .map(|label| lex::label_at(self.src, label)),
         };
         self.scope().transitions.push(transition);
         Ok(())

@@ -60,15 +60,39 @@ fn strip_comment(text: &str) -> &str {
     }
 }
 
-/// Computes the byte offset of `sub` within `src`.
+/// Computes the byte offset of `sub` within `src`, or `None` when `sub` is not a
+/// byte-for-byte subslice of `src`.
 ///
-/// `sub` must be a byte-for-byte subslice of `src` — true of every string this parser
-/// hands to `Label::parse_at`, because every lexing helper in this module slices
-/// rather than allocates. Passing a `sub` that did not come from `src` by pure slicing
-/// is a logic error: the subtraction panics on underflow in debug builds rather than
-/// silently returning a meaningless offset.
-pub fn offset_of(src: &str, sub: &str) -> usize {
-    sub.as_ptr() as usize - src.as_ptr() as usize
+/// `sub` should always be such a subslice — every lexing helper in this module slices
+/// rather than allocates, so a label text handed to [`label_at`] is always genuinely
+/// read from the mermaid source it claims to be. But that invariant is
+/// convention-enforced, not type-enforced (a `Builder`'s `src` field carries no
+/// lifetime tie to the strings it hands to `label_at`), so this checks both ends
+/// rather than trusting the caller: plain `usize` subtraction has no overflow check
+/// in a release build, and a wrapped offset looks like a small, plausible, *wrong*
+/// position rather than a panic — one that a later pipeline stage could offset
+/// further into a different kind of wrong. Failing closed here is what lets
+/// [`label_at`] fail closed in turn.
+///
+/// Public (rather than folded entirely into `label_at`) because `state`'s multi-line
+/// `note … end note` form grows one range across several pushed lines instead of
+/// building a fresh label per line, and needs the same closed-failure guarantee.
+pub fn offset_of(src: &str, sub: &str) -> Option<usize> {
+    let at = (sub.as_ptr() as usize).checked_sub(src.as_ptr() as usize)?;
+    (at + sub.len() <= src.len()).then_some(at)
+}
+
+/// Builds a label from `text`, which should be a subslice of the mermaid source `src`.
+///
+/// This is the one place a family parser should reach for when building a label from
+/// real source text — it is [`offset_of`] plus the fallback the contract already
+/// defines for "not from the source": when `text` cannot be placed in `src`, the
+/// label gets [`Label::parse`]'s empty range instead of a wrong one.
+pub fn label_at(src: &str, text: &str) -> crate::mermaid::ast::Label {
+    match offset_of(src, text) {
+        Some(at) => crate::mermaid::ast::Label::parse_at(text, at),
+        None => crate::mermaid::ast::Label::parse(text),
+    }
 }
 
 /// Whether a scan should honour bracket nesting in addition to quotes.
@@ -296,4 +320,34 @@ pub fn split_stereotype(head: &str, line: usize) -> Result<(&str, Option<&str>),
         .find(">>")
         .ok_or_else(|| syntax(line, "unterminated `<<…>>` annotation".to_string()))?;
     Ok((head[..at].trim(), Some(after[..close].trim())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `offset_of`'s whole point: `sub` byte-identical to a piece of `src` but drawn
+    /// from a different allocation is not a subslice of `src`, no matter what its
+    /// contents say, and must fail closed rather than hand back a wrapped or
+    /// out-of-bounds `usize`.
+    #[test]
+    fn offset_of_a_slice_from_a_different_allocation_fails_closed() {
+        let src = "flowchart LR\n  A[Parse] --> B[Layout]\n";
+        // Same bytes as the real `Parse`, but a separate allocation — `checked_sub`
+        // must see this as "not within `src`", not as an in-bounds-looking offset.
+        let elsewhere = String::from("Parse");
+        assert_eq!(offset_of(src, &elsewhere), None);
+    }
+
+    /// The consumer-facing half of the same guarantee: `label_at` must not let a
+    /// failed `offset_of` leak through as a wrong `source` — it falls back to
+    /// `Label::parse`'s empty range, same as a label nobody claims a position for.
+    #[test]
+    fn label_at_a_slice_from_a_different_allocation_gets_an_empty_range() {
+        let src = "flowchart LR\n  A[Parse] --> B[Layout]\n";
+        let elsewhere = String::from("Parse");
+        let label = label_at(src, &elsewhere);
+        assert_eq!(label.lines, ["Parse"]);
+        assert_eq!(label.source, 0..0);
+    }
 }

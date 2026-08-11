@@ -13,7 +13,7 @@
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
     Class, ClassAnnotation, ClassArrow, ClassDiagram, ClassId, ClassRelation, Classifier, Field,
-    Label, LineStyle, Member, Method, Param, Visibility,
+    LineStyle, Member, Method, Param, Visibility,
 };
 
 use super::lex::{self, Nesting, SrcLine};
@@ -57,8 +57,8 @@ struct Builder<'a> {
     /// The class whose `{ … }` block is currently open, and the line it opened on.
     current: Option<ClassId>,
     open: Option<usize>,
-    /// The full mermaid source, used only to compute a label's byte offset
-    /// (`lex::offset_of`) — every label text this parser touches is a subslice of it.
+    /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
+    /// offset — every label text this parser touches is a subslice of it.
     src: &'a str,
 }
 
@@ -207,10 +207,7 @@ impl Builder<'_> {
             line: operator.line,
             left_cardinality: left_cardinality.map(str::to_string),
             right_cardinality: right_cardinality.map(str::to_string),
-            label: label.map(|label| {
-                let label = lex::unquote(label);
-                Label::parse_at(label, lex::offset_of(self.src, label))
-            }),
+            label: label.map(|label| lex::label_at(self.src, lex::unquote(label))),
         }))
     }
 

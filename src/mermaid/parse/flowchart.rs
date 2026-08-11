@@ -12,7 +12,7 @@
 
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
-    ArrowHead, EdgeStroke, FlowEdge, FlowNode, Flowchart, Group, Label, NodeId, NodeShape,
+    ArrowHead, EdgeStroke, FlowEdge, FlowNode, Flowchart, Group, NodeId, NodeShape,
 };
 
 use super::lex::{self, Nesting, SrcLine};
@@ -67,8 +67,8 @@ struct Builder<'a> {
     stack: Vec<Group>,
     /// Keys of every subgraph seen, used to reject edges that point at one.
     subgraph_keys: Vec<String>,
-    /// The full mermaid source, used only to compute a label's byte offset
-    /// (`lex::offset_of`) — every label text this parser touches is a subslice of it.
+    /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
+    /// offset — every label text this parser touches is a subslice of it.
     src: &'a str,
 }
 
@@ -112,7 +112,7 @@ impl Builder<'_> {
                 let text = lex::unquote(shape.text);
                 (
                     Some(rest[..shape.start].trim().to_string()),
-                    Some(Label::parse_at(text, lex::offset_of(src, text))),
+                    Some(lex::label_at(src, text)),
                 )
             }
             _ => {
@@ -121,12 +121,9 @@ impl Builder<'_> {
                     (None, None)
                 } else if name.chars().all(lex::is_ident_char) {
                     // Mermaid uses the bare word as both id and title.
-                    (
-                        Some(name.to_string()),
-                        Some(Label::parse_at(name, lex::offset_of(src, name))),
-                    )
+                    (Some(name.to_string()), Some(lex::label_at(src, name)))
                 } else {
-                    (None, Some(Label::parse_at(name, lex::offset_of(src, name))))
+                    (None, Some(lex::label_at(src, name)))
                 }
             }
         };
@@ -186,9 +183,7 @@ impl Builder<'_> {
                         stroke: link.stroke,
                         tail: link.tail,
                         head: link.head,
-                        label: link
-                            .label
-                            .map(|text| Label::parse_at(text, lex::offset_of(self.src, text))),
+                        label: link.label.map(|text| lex::label_at(self.src, text)),
                     });
                 }
             }
@@ -248,7 +243,7 @@ impl Builder<'_> {
             |node| node.key.as_str(),
             || FlowNode {
                 key: key_owned.clone(),
-                label: Label::parse_at(key, lex::offset_of(src, key)),
+                label: lex::label_at(src, key),
                 shape: NodeShape::Rect,
             },
         );
@@ -261,7 +256,7 @@ impl Builder<'_> {
         {
             node.shape = shape.shape;
             let text = lex::unquote(shape.text);
-            node.label = Label::parse_at(text, lex::offset_of(src, text));
+            node.label = lex::label_at(src, text);
         }
         Ok(NodeId(index))
     }
@@ -305,8 +300,8 @@ struct Link<'a> {
     stroke: EdgeStroke,
     tail: ArrowHead,
     head: ArrowHead,
-    /// The `|text|` or `-- text -->` label, still a slice of the mermaid source so its
-    /// offset can be recovered with `lex::offset_of`.
+    /// The `|text|` or `-- text -->` label, still a slice of the mermaid source so
+    /// `lex::label_at` can recover its offset.
     label: Option<&'a str>,
     /// Byte offset of the first character of the operator.
     start: usize,
@@ -472,7 +467,7 @@ fn closing_run(text: &str, from: usize) -> Option<(&str, usize, usize, ArrowHead
 struct Shape<'a> {
     shape: NodeShape,
     /// The inner label text, brackets and decorations removed. Still a slice of the
-    /// mermaid source, so its offset can be recovered with `lex::offset_of`.
+    /// mermaid source, so `lex::label_at` can recover its offset.
     text: &'a str,
     /// Byte offset of the opening bracket.
     start: usize,
