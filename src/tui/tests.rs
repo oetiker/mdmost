@@ -3402,27 +3402,77 @@ fn a_press_on_box_art_takes_the_diagram_even_when_it_ends_in_a_label() {
     );
 }
 
-/// A diagram inside a block quote copies with its container prefix on **every** line,
-/// the opener included.
+/// A diagram inside a container copies as clean Mermaid: **no** line keeps the container
+/// prefix (design spec §2.2).
 ///
-/// The fenced block's recorded extent starts at the backticks, not at the start of the
-/// line, so this used to come back ragged — a bare ```` ```mermaid ```` followed by
-/// `> flowchart LR`. An ordinary fence in a quote keeps `> ` on every copied line, and a
-/// block that is copied verbatim has to mean verbatim on line one too, or what the reader
-/// pastes is not what the file says.
+/// The owner's ruling. What a reader copies a diagram *for* is to paste it somewhere
+/// else, and `> ```mermaid` pastes as a block quote containing a fence. The block's
+/// recorded extent begins at the backticks, so the prefix was already absent from line one
+/// and present on every line after it; the fix takes it off the rest rather than putting
+/// it back on the first.
+///
+/// Three containers in one test, because the reason to read the prefix out of the document
+/// rather than match `> ` is that there is no single prefix to match: a quote is `> `, a
+/// nested quote `> > `, and a fence in a list item is indented instead. All three fall out
+/// of the one rule, and the fence lines are stripped along with the content — the opener
+/// and the closer are source lines and carry the prefix too.
 #[test]
-fn a_quoted_diagram_keeps_its_prefix_on_the_first_line_too() {
-    let source = "> ```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n";
+fn a_diagram_in_a_container_copies_without_its_container_prefix() {
+    let clean = "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```";
+    for (container, source) in [
+        (
+            "a block quote",
+            "> ```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n",
+        ),
+        (
+            "a nested block quote",
+            "> > ```mermaid\n> > flowchart LR\n> >     A[Read] --> B[Draw]\n> > ```\n",
+        ),
+        (
+            "a list item",
+            "- item\n\n  ```mermaid\n  flowchart LR\n      A[Read] --> B[Draw]\n  ```\n",
+        ),
+    ] {
+        let mut app = pager(source);
+        let canvas = app.canvas().clone();
+        let (row, from, _) = drawn(&canvas, "Read");
+        let (_, to, cols) = drawn(&canvas, "Draw");
+        let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+        let extract = select::extract(&canvas, source, across).expect("covered both boxes");
+        // Whole-block equality, not a check on line one: the defect being fixed lived on
+        // every line *but* the first, and the one before it lived only on the first.
+        assert_eq!(
+            extract.text, clean,
+            "a diagram in {container} copies as if it had been written at the top level"
+        );
+        for line in extract.text.lines() {
+            assert!(
+                !line.starts_with('>'),
+                "no line copied out of {container} keeps a quote marker, got {:?}",
+                extract.text
+            );
+        }
+    }
+}
+
+/// The prefix comes off the diagram and off nothing else.
+///
+/// A drag that leaves a quoted diagram for the quoted prose below it: the block is
+/// stripped because it is an atom, and the prose is not, because the reader selected prose
+/// and decision 1 takes prose verbatim. An implementation that stripped the whole range
+/// once it saw an atom in it would quietly rewrite the paragraph too.
+#[test]
+fn the_prefix_comes_off_the_diagram_and_not_off_the_prose_beside_it() {
+    let source = "> ```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n>\n> After it.\n";
     let mut app = pager(source);
     let canvas = app.canvas().clone();
     let (row, from, _) = drawn(&canvas, "Read");
-    let (_, to, cols) = drawn(&canvas, "Draw");
-    let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
-    let extract = select::extract(&canvas, source, across).expect("covered both boxes");
+    let (below, at, cols) = drawn(&canvas, "After it.");
+    let out = drag(Pos::new(row, from), Pos::new(below, at + cols - 1));
+    let extract = select::extract(&canvas, source, out).expect("covered");
     assert_eq!(
-        extract.text,
-        source.trim_end_matches('\n'),
-        "every line of the block verbatim, the opener's `> ` included"
+        extract.text, "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n>\n> After it.",
+        "the block clean, the prose exactly as the file has it"
     );
 }
 
@@ -3517,9 +3567,9 @@ fn an_indented_diagrams_wash_moves_with_it() {
     let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
     let extract = select::extract(&canvas, source, across).expect("covered both boxes");
     assert_eq!(
-        extract.text, "  ```mermaid\n  flowchart LR\n      A[Read] --> B[Draw]\n  ```",
-        "the fenced block from its opener to its closer, each line as the file has it — \
-         the opener's indent included, since every line below it keeps one"
+        extract.text, "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```",
+        "the fenced block from its opener to its closer, with the list's indent off every \
+         line — see `a_diagram_in_a_container_copies_without_its_container_prefix`"
     );
     let ranges = select::highlighted_columns(&canvas, source, across, row);
     let text = canvas.row_text(row);

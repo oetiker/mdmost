@@ -86,12 +86,27 @@ drag would be a second rule able to disagree with the source-range one; a lookup
 atom, if any, holds the anchor decides before there is a range to disagree with. It is
 also the reader's own model: the press is where they choose what they are taking.
 
-**A block is copied verbatim, line one included.** The fenced block's recorded extent
-begins at the ```` ``` ```` and the container prefix of that first line sits before it, so
-copying the extent alone yields a diagram in a block quote as a bare ```` ```mermaid ````
-followed by `> flowchart LR`. The copy therefore reaches back to the start of the opener's
-line. An ordinary quoted fence keeps `> ` on every line it hands over; a diagram in one
-does the same, and a diagram indented into a list item keeps its indent.
+**A diagram copies as clean Mermaid: the container prefix comes off every line.** A
+diagram written inside a block quote is `> ```mermaid` / `> flowchart LR`, and handing
+that over verbatim gives the reader something that pastes into another document as a quote
+containing a fence. What a reader copies a diagram *for* is to paste it, so the markers are
+removed — from every line, the ```` ```mermaid ```` opener and the ```` ``` ```` closer
+included, since those are source lines and carry the prefix too. A diagram indented into a
+list item loses that indent by the same rule.
+
+This is the one qualification of §2's "taken verbatim", and it is confined to the atom: a
+drag that leaves a quoted diagram for the quoted prose below it strips the block and keeps
+the prose exactly as written, because the reader selected prose.
+
+The prefix is **read out of the document, not matched as a pattern**. A block's recorded
+extent starts after its prefix — comrak reports a fence as beginning at the backticks — so
+the prefix is the text between the start of that first line and the extent's first byte,
+and every later line is stripped only if it genuinely begins with that exact string. `> `,
+`> > ` and a list indent therefore fall out of one rule rather than three cases, and a `> `
+that is part of the Mermaid source survives: at the top level the prefix is empty and
+nothing is removed, and inside a quote only the outer marker matches. This is the same
+relationship `doc::convert::code_lines` uses in the other direction, where a content line
+is located as a *suffix* of its source line.
 
 This is not a refinement of §2's markup rule but a replacement for it inside a diagram.
 That rule extends a selection over every byte nothing drew, which in prose is a pair of

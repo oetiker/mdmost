@@ -25,7 +25,9 @@
 //! paragraph has wraps that exist nowhere in the source, and the hull simply does not
 //! contain them — it contains the newlines the author typed. It is also why dragging
 //! from a paragraph above a code fence to one below it yields the fence, verbatim,
-//! including its fence lines: they lie between the ends of the hull.
+//! including its fence lines: they lie between the ends of the hull. The one
+//! qualification is decision 2b's: inside a diagram the container prefix comes off, so
+//! what is copied out of a block quote is Mermaid a reader can paste.
 //!
 //! **2. Markup adjacent to a selected edge comes with it.** After the hull is taken,
 //! each end is extended outward over bytes that *no span rendered* — `#`, `**`, `- `,
@@ -45,8 +47,9 @@
 //! So a diagram records an [`Atom`]: its drawn rectangle, and its whole fenced block.
 //! A drag confined to one label copies that label; any wider drag, and any drag *pressed*
 //! anywhere else inside the rectangle, takes the diagram whole — the fenced block on the
-//! clipboard, opener and closer included, and the whole rectangle washed on screen.
-//! [`resolve`] is where that is decided, once, for both.
+//! clipboard, opener and closer included and its container prefix stripped off every
+//! line, and the whole rectangle washed on screen. [`resolve`] is where that is decided,
+//! once, for both; [`Resolved::text`] is where the prefix comes off.
 //!
 //! **3. Content with no spans falls back to what is on screen.** Spans are recorded by
 //! the inline renderer and, per line, by `render::code::code_area` (design spec §3), so
@@ -209,10 +212,10 @@ pub struct Extract {
 /// entirely off the bottom of the canvas.
 pub fn extract(canvas: &Canvas, source: &str, selection: Selection) -> Option<Extract> {
     if let Some(resolved) = resolve(canvas, source, selection) {
-        let text = source.get(resolved.range()).unwrap_or_default();
+        let text = resolved.text(source);
         if !text.is_empty() {
             return Some(Extract {
-                text: text.to_string(),
+                text,
                 from_source: true,
             });
         }
@@ -244,6 +247,66 @@ impl Resolved {
     fn range(&self) -> Range<usize> {
         self.lo..self.hi
     }
+
+    /// The text the clipboard gets: those bytes, with each atom's container prefix gone.
+    ///
+    /// The one place decision 1's "taken verbatim" is qualified, and only inside an atom.
+    /// A diagram in a block quote is written `> ```mermaid` / `> flowchart LR`; handing
+    /// that over verbatim gives a reader something they cannot paste into another
+    /// document, which is the entire purpose of copying a diagram. So the quote markers
+    /// come off — and the list indent of an indented one, by the same single rule.
+    ///
+    /// Nothing is guessed and no pattern is matched. [`container_prefix`] reads the
+    /// prefix straight out of the document, from the gap between the start of the block's
+    /// first line and the byte comrak said the block begins at; every later line is
+    /// stripped only if it *actually* starts with that exact text. So a `> ` that is
+    /// genuinely part of the Mermaid source survives: in an unquoted diagram the prefix is
+    /// empty and nothing is removed, and in a quoted one only the outer marker matches,
+    /// leaving `> > flowchart` as `> flowchart`.
+    ///
+    /// Text outside an atom is untouched. A drag that leaves a quoted diagram for the
+    /// quoted prose below it keeps the prose's `> ` — that is decision 1, and the reader
+    /// selected prose, not a diagram.
+    fn text(&self, source: &str) -> String {
+        let raw = source.get(self.range()).unwrap_or_default();
+        if self.washed.is_empty() {
+            return raw.to_string();
+        }
+        let mut out = String::with_capacity(raw.len());
+        let mut at = self.lo;
+        for (index, line) in raw.split_inclusive('\n').enumerate() {
+            // The first line of the range is never stripped: either it begins mid-line,
+            // in prose the reader selected, or it begins at the atom's own first byte,
+            // which is already past the prefix — that is where the prefix is *read* from.
+            let kept = if index == 0 {
+                line
+            } else {
+                self.washed
+                    .iter()
+                    .filter(|atom| at >= atom.source_start && at < atom.source_end)
+                    .find_map(|atom| line.strip_prefix(container_prefix(source, *atom)))
+                    .unwrap_or(line)
+            };
+            out.push_str(kept);
+            at += line.len();
+        }
+        out
+    }
+}
+
+/// The container prefix comrak stripped from the lines of `atom`'s block.
+///
+/// `source_start` is the first byte of the block *after* its container prefix — comrak
+/// reports a fenced block as starting at the backticks — so the prefix is simply what
+/// lies between the start of that line and it: `> ` in a block quote, `> > ` in a nested
+/// one, the indent of a fence inside a list item, and the empty string for a block at the
+/// top level. One rule, read from the document, rather than three cases guessed from a
+/// pattern; the same relationship `doc::convert::code_lines` uses in the other direction
+/// to locate a content line as a *suffix* of its source line.
+fn container_prefix(source: &str, atom: Atom) -> &str {
+    source
+        .get(line_start(source, atom.source_start)..atom.source_start)
+        .unwrap_or_default()
 }
 
 /// What a selection means, for the clipboard and the highlight alike.
@@ -340,12 +403,11 @@ pub(crate) fn resolve(canvas: &Canvas, source: &str, selection: Selection) -> Op
         washed.push(atom);
     }
     for atom in &washed {
-        // To the *start of the line*, not to the atom's first byte: a fenced block's
-        // recorded extent begins at the backticks, so a diagram inside a block quote or
-        // a list item would otherwise come back ragged — `> ` on every interior line and
-        // nothing on the opener. Every other line of the block carries its container
-        // prefix verbatim, so the first one does too.
-        lo = lo.min(line_start(source, atom.source_start));
+        // The atom's own extent, not its line's: a fenced block's recorded start is the
+        // backtick, so reaching back to the line start would pull in the container prefix
+        // that `Resolved::text` exists to take *off*. The prefix stays outside the range,
+        // where it is read from rather than copied.
+        lo = lo.min(atom.source_start);
         hi = hi.max(atom.source_end);
     }
     Some(Resolved { lo, hi, washed })
