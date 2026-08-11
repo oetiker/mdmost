@@ -4035,3 +4035,29 @@ fn a_drag_entirely_on_chrome_selects_nothing() {
         "no span at/before the cell clamps to the document start"
     );
 }
+
+// --- The hull is the range between two endpoints (design spec §2) ----------------
+
+#[test]
+fn a_drag_across_a_table_selects_whole_cells_in_document_order() {
+    // Dragging from the second cell of row 1 to the first cell of row 2 selects the
+    // text between them in the *source*, which is row-major — not the rectangle the
+    // two corners describe on screen. `drawn` and `drag` already exist for exactly
+    // this (used throughout the drag tests above); no new test helper is needed.
+    let doc = "| a | b |\n| --- | --- |\n| one | two |\n| three | four |\n";
+    let canvas = render(doc, 40);
+    let (two_row, two_col, _) = drawn(&canvas, "two");
+    let (three_row, three_col, three_cols) = drawn(&canvas, "three");
+    let sel = drag(
+        Pos::new(two_row, two_col),
+        Pos::new(three_row, three_col + three_cols - 1),
+    );
+    let (lo, hi) = select::source_hull(&canvas, doc, sel).expect("a hull");
+    let text = &doc[lo..hi];
+    assert!(text.starts_with("two"), "got {text:?}");
+    assert!(text.ends_with("three"), "got {text:?}");
+    assert!(
+        text.contains('\n'),
+        "the hull crosses the source's row boundary: {text:?}"
+    );
+}

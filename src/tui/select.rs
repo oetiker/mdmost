@@ -206,46 +206,46 @@ pub fn extract(canvas: &Canvas, source: &str, selection: Selection) -> Option<Ex
     })
 }
 
-/// The lowest and highest source byte the selected cells cover.
-fn source_hull(canvas: &Canvas, source: &str, selection: Selection) -> Option<(usize, usize)> {
-    let width = canvas.width();
-    let mut lo = usize::MAX;
-    let mut hi = 0usize;
-    for span in canvas.spans() {
-        let Some(wanted) = selection.columns_on(span.row, width) else {
-            continue;
-        };
-        let first = wanted.start.max(span.col);
-        let last = wanted.end.min(span.col.saturating_add(span.cols));
-        if first >= last {
-            continue;
-        }
-        let body = source
-            .get(span.source_start..span.source_end)
-            .unwrap_or_default();
-        let start = span.source_start + byte_at_column(body, first - span.col);
-        let end = span.source_start + byte_at_column(body, last - span.col);
-        if start >= end {
-            continue;
-        }
-        lo = lo.min(start);
-        hi = hi.max(end);
-    }
+/// The source range a selection covers.
+///
+/// Two endpoints, resolved to source offsets, and everything between them — which is
+/// document order, not screen geometry. A wrapped table cell therefore continues into
+/// the *next cell* rather than into whatever sits beside it on the same screen row, and
+/// a drag whose corners describe a rectangle still selects what a reader would read
+/// between them (design spec §2).
+///
+/// `end`'s column is a mouse cell — inclusive, like every other column this pager
+/// hands to `columns_on` — but `offset_at` resolves a column to the byte *at* it, not
+/// past it, so the far endpoint is probed one column beyond where the drag actually
+/// ended. That is what makes `Bias::End`'s "end of the previous span" fallback land on
+/// the end of the clicked word rather than its last-but-one byte (design spec §2.1:
+/// "a release past the end of a line takes the end of the last span on that row").
+///
+/// The two offsets are used exactly as `offset_at` returns them, with no reordering:
+/// `Bias::Start`'s and `Bias::End`'s chrome fallbacks are inverted on purpose so that a
+/// drag over chrome alone yields `lo >= hi` (design spec §2, "dragging across only
+/// chrome selects nothing"; see `Bias`'s doc comment). Sorting the pair back into
+/// ascending order — tempting, since `start`/`end` are already in document order —
+/// would silently turn that empty signal into a hull spanning from the fallback's `0`
+/// to its `len()`, i.e. the whole document, which is the one answer decision 1
+/// explicitly rules out.
+pub(crate) fn source_hull(
+    canvas: &Canvas,
+    source: &str,
+    selection: Selection,
+) -> Option<(usize, usize)> {
+    let (start, end) = selection.ordered();
+    let far = Pos {
+        row: end.row,
+        col: end.col.saturating_add(1),
+    };
+    let lo = offset_at(canvas, source, start, Bias::Start)?;
+    let hi = offset_at(canvas, source, far, Bias::End)?;
     (lo < hi).then_some((lo, hi))
 }
 
 /// Which way an endpoint resolves when it lands on a cell no span covers.
-///
-/// Only `offset_at`'s own tests call this yet — the hull that will use it to resolve a
-/// selection's two ends lands in a later task of this plan — so `cargo clippy
-/// --all-targets` sees it as dead code in the non-test build it also checks (tests
-/// exercise it, so `#[expect]` would flag *that* build as an unfulfilled expectation
-/// instead; `#[allow]` is the one attribute stable across both).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(
-    dead_code,
-    reason = "consumed by the hull in a later task of this plan"
-)]
 pub(crate) enum Bias {
     /// The near end of the range: take the start of the next text.
     Start,
@@ -259,13 +259,6 @@ pub(crate) enum Bias {
 /// the blank tail of a row — has no span to ask, so it resolves to the nearest text in
 /// document order in the direction `bias` names. This is the only coordinate in the
 /// selection that is interpreted rather than looked up (design spec §2.1).
-///
-/// See [`Bias`]'s doc comment for why this is `#[allow(dead_code)]` rather than unmarked
-/// or `#[expect]`.
-#[allow(
-    dead_code,
-    reason = "consumed by the hull in a later task of this plan"
-)]
 pub(crate) fn offset_at(canvas: &Canvas, source: &str, pos: Pos, bias: Bias) -> Option<usize> {
     // Exact hit first: the cell is inside some span's drawn columns.
     for span in canvas.spans() {
