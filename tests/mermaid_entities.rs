@@ -221,3 +221,100 @@ mod edge_labels {
         assert_eq!(chart.edges.len(), 2);
     }
 }
+
+/// `Label::spans_for` maps a *piece* of a drawn line back to source bytes, which is what
+/// makes a drag inside a diagram label copy the characters it went over (design spec
+/// §2.2). The entity is where the mapping stops being a byte offset and starts being a
+/// walk, so it is tested here beside the decoding it has to survive.
+mod label_provenance {
+    use super::*;
+
+    /// `Parse & draw`, drawn from `Parse &amp; draw` at byte 17 of some Mermaid block.
+    fn label() -> Label {
+        Label::parse_at("Parse &amp; draw", 17)
+    }
+
+    /// A run as `(source range, column, columns)`.
+    fn runs(label: &Label, at: usize, text: &str) -> Vec<((usize, usize), usize, usize)> {
+        label
+            .spans_for(0, at, text)
+            .into_iter()
+            .map(|span| ((span.source.start, span.source.end), span.col, span.cols))
+            .collect()
+    }
+
+    #[test]
+    fn a_piece_of_a_line_is_cut_into_runs_at_the_entity() {
+        let label = label();
+        assert_eq!(label.lines, vec!["Parse & draw".to_string()]);
+        assert_eq!(
+            runs(&label, 0, "Parse & draw"),
+            vec![((17, 23), 0, 6), ((23, 28), 6, 1), ((28, 33), 7, 5)],
+            "`Parse ` copies its bytes, `&amp;` is five bytes in one column, ` draw` \
+             copies its bytes and starts one column after the entity"
+        );
+    }
+
+    #[test]
+    fn a_piece_shorter_than_the_line_is_clipped_to_what_it_drew() {
+        // The middle of a word: neither end of the piece is a run boundary.
+        assert_eq!(
+            runs(&label(), 1, "ars"),
+            vec![((18, 21), 0, 3)],
+            "three characters in, three bytes out, columns relative to the piece"
+        );
+        // Up to and including the entity, which is whole or not at all.
+        assert_eq!(
+            runs(&label(), 4, "e & d"),
+            vec![((21, 23), 0, 2), ((23, 28), 2, 1), ((28, 30), 3, 2)]
+        );
+    }
+
+    #[test]
+    fn a_piece_the_line_does_not_contain_is_declined() {
+        // The caller's contract is that `text` is the piece of `lines[index]` at `at`.
+        // A caller that gets it wrong gets nothing, rather than bytes chosen by
+        // arithmetic over a string this label never drew — a future family layouter
+        // (design spec §6) is exactly who this is for.
+        assert!(runs(&label(), 3, "nope").is_empty());
+        assert!(runs(&label(), 40, "Parse").is_empty());
+        assert!(label().spans_for(7, 0, "Parse").is_empty(), "no such line");
+    }
+
+    #[test]
+    fn a_label_that_was_never_read_from_a_source_declines() {
+        assert!(
+            runs(&Label::line("Parse & draw"), 0, "Parse & draw").is_empty(),
+            "an empty source range is the contract's `synthesised`"
+        );
+        assert!(
+            Label::from_lines(vec!["Parse".into()], 17..40)
+                .spans_for(0, 0, "Parse")
+                .is_empty(),
+            "and a range that is a hull over already-split lines is not a mapping"
+        );
+    }
+}
+
+/// A label written with padding inside its brackets draws trimmed, and its spans have to
+/// name the text rather than the padding.
+///
+/// `Label::parse` trims each line before decoding it, so the raw text a label records is
+/// wider than the text it draws — at both ends of the label and at both sides of a
+/// `<br>`. A mapping that ignored that would slide every run of the line left by as many
+/// bytes as the author happened to indent by.
+#[test]
+fn a_padded_label_maps_its_lines_past_the_padding() {
+    let label = Label::parse_at("  One  <br>  Two  ", 100);
+    assert_eq!(label.lines, vec!["One".to_string(), "Two".to_string()]);
+    let ranges: Vec<(usize, usize)> = [0usize, 1]
+        .iter()
+        .flat_map(|index| label.spans_for(*index, 0, &label.lines[*index]))
+        .map(|span| (span.source.start, span.source.end))
+        .collect();
+    assert_eq!(
+        ranges,
+        vec![(102, 105), (113, 116)],
+        "each line names its own three bytes, and neither names a space"
+    );
+}

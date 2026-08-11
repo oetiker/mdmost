@@ -45,6 +45,17 @@ pub struct Label {
     /// from a document ([`Label::line`]) or because [`Label::parse`] was asked to
     /// place it without one.
     pub source: std::ops::Range<usize>,
+    /// The raw label text [`source`](Label::source) names, exactly as written.
+    ///
+    /// Kept because `lines` cannot be mapped back to bytes without it: `<br>` splitting,
+    /// trimming and entity decoding all move text, and the label is the only place that
+    /// knows how far. [`Label::spans_for`] is what it is for.
+    ///
+    /// The invariant that makes it usable is `raw.len() == source.len()` — the raw text
+    /// *is* those source bytes. A label built from lines that were already split
+    /// ([`Label::from_lines`]) carries a hull rather than one slice and holds an empty
+    /// `raw`, which `spans_for` reads as "no per-line provenance" and fails closed on.
+    raw: String,
 }
 
 /// Equality and hashing consider only the visible text, not where it came from.
@@ -88,6 +99,7 @@ impl Label {
         Self {
             lines: split_lines(text),
             source: Default::default(),
+            raw: text.to_string(),
         }
     }
 
@@ -97,15 +109,34 @@ impl Label {
         Self {
             lines: split_lines(text),
             source: at..at + text.len(),
+            raw: text.to_string(),
         }
     }
 
     /// A single-line label holding `text` verbatim, with an empty [`Label::source`]:
     /// this builds labels that were never read from a document, chiefly in tests.
     pub fn line(text: impl Into<String>) -> Self {
+        let text = text.into();
         Self {
-            lines: vec![text.into()],
+            lines: vec![text.clone()],
             source: Default::default(),
+            raw: text,
+        }
+    }
+
+    /// A label whose lines were split by the caller, from `source` bytes that are a
+    /// *hull* over them rather than one slice of raw label text.
+    ///
+    /// The state diagram's multi-line `note … end note` is the case: its range grows
+    /// line by line and covers the `note` keyword's own line endings, so no single
+    /// stretch of the document is "the label text". Such a label carries no
+    /// [`raw`](Label::raw) and therefore no per-line provenance — [`Label::spans_for`]
+    /// declines rather than answering from a mapping it does not have.
+    pub fn from_lines(lines: Vec<String>, source: std::ops::Range<usize>) -> Self {
+        Self {
+            lines,
+            source,
+            raw: String::new(),
         }
     }
 
@@ -118,22 +149,124 @@ impl Label {
     pub fn text(&self) -> String {
         self.lines.join("\n")
     }
+
+    /// The source bytes behind one drawn piece of line `index`, run by run.
+    ///
+    /// A layout draws a label by wrapping [`lines`](Label::lines) and putting the
+    /// resulting pieces on the canvas; this answers, for one such piece, which source
+    /// bytes each part of it came from and where that part sits inside it. It is what
+    /// lets a selection copy the characters a reader dragged over rather than the whole
+    /// label (design spec §2.2), and a wrapped label is exactly the case that needs it:
+    /// its rows would otherwise all name the same range and no column arithmetic inside
+    /// one could be right.
+    ///
+    /// `at` is where `text` starts in `self.lines[index]`, in bytes.
+    ///
+    /// **Every run it returns is a byte-for-byte copy of the cells it names, or one
+    /// column drawn by one entity reference.** That is the property the selection's
+    /// column walks depend on (`select::offset_at`, `select::highlighted_columns`,
+    /// `search::segments_for` all convert between bytes and columns *inside* a span by
+    /// walking its source), so a decoded entity is cut out into a run of its own instead
+    /// of being left inside a run whose bytes and cells no longer line up. An entity
+    /// that draws more than one column — `&#x1F600;` — is the one thing with no honest
+    /// answer and is dropped, leaving its cell dark, which is the same call
+    /// `render::inline` makes for the same reason.
+    ///
+    /// Empty when this label has no per-line provenance to give ([`Label::raw`]), or
+    /// when `text` is not the piece of line `index` it claims to be. No provenance is
+    /// always better than provenance from somewhere else in the document.
+    pub fn spans_for(&self, index: usize, at: usize, text: &str) -> Vec<LabelSpan> {
+        if self.source.is_empty() || self.raw.len() != self.source.len() {
+            return Vec::new();
+        }
+        let (Some(line), Some(raw)) = (self.lines.get(index), self.line_source(index)) else {
+            return Vec::new();
+        };
+        let piece = at..at + text.len();
+        if line.get(piece.clone()) != Some(text) {
+            return Vec::new();
+        }
+        let base = self.source.start + raw.start;
+        let (decoded, runs) = crate::mermaid::entity::decode_runs(&self.raw[raw.clone()]);
+        if decoded != *line {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for run in runs {
+            let lo = run.text.start.max(piece.start);
+            let hi = run.text.end.min(piece.end);
+            if lo >= hi {
+                continue;
+            }
+            let cols = crate::text::display_width(&line[lo..hi]);
+            let source = if run.faithful {
+                let start = base + run.source.start;
+                start + (lo - run.text.start)..start + (hi - run.text.start)
+            } else if cols == 1 && (lo, hi) == (run.text.start, run.text.end) {
+                base + run.source.start..base + run.source.end
+            } else {
+                continue;
+            };
+            out.push(LabelSpan {
+                source,
+                col: crate::text::display_width(&line[piece.start..lo]),
+                cols,
+            });
+        }
+        out
+    }
+
+    /// Where line `index` sits in [`raw`](Label::raw), trimmed as the line was.
+    ///
+    /// The same split and the same trim [`split_lines`] made, so the two cannot
+    /// disagree about which bytes became which line.
+    fn line_source(&self, index: usize) -> Option<std::ops::Range<usize>> {
+        let raw = *split_raw(&self.raw).get(index)?;
+        let text = &self.raw[raw.0..raw.1];
+        let start = raw.0 + (text.len() - text.trim_start().len());
+        Some(start..start + text.trim().len())
+    }
+}
+
+/// One run of a drawn label piece, and the source bytes that drew it.
+///
+/// Columns are relative to the start of the piece [`Label::spans_for`] was asked about;
+/// the layout knows where that piece landed and adds its own origin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabelSpan {
+    /// The source byte range, in the same space as [`Label::source`].
+    pub source: std::ops::Range<usize>,
+    /// The first display column of the piece this run drew.
+    pub col: usize,
+    /// How many display columns it drew.
+    pub cols: usize,
 }
 
 /// Splits raw label text into lines on `<br>` variants and newlines, trimming and
 /// entity-decoding each one. Shared by [`Label::parse`] and [`Label::parse_at`], which
 /// differ only in what they record as [`Label::source`].
 fn split_lines(text: &str) -> Vec<String> {
+    split_raw(text)
+        .into_iter()
+        .map(|(start, end)| line_text(&text[start..end]))
+        .collect()
+}
+
+/// Where each line of `text` sits in it, before trimming: the split alone.
+///
+/// Split out of [`split_lines`] so that [`Label::line_source`] answers from the same
+/// walk rather than from a second one that would have to be kept in step with it.
+fn split_raw(text: &str) -> Vec<(usize, usize)> {
     let mut lines = Vec::new();
-    let mut rest = text;
+    let mut at = 0usize;
     loop {
-        match find_break(rest) {
-            Some((at, len)) => {
-                lines.push(line_text(&rest[..at]));
-                rest = &rest[at + len..];
+        match find_break(&text[at..]) {
+            Some((to, len)) => {
+                lines.push((at, at + to));
+                at += to + len;
             }
             None => {
-                lines.push(line_text(rest));
+                lines.push((at, text.len()));
                 break;
             }
         }

@@ -518,6 +518,7 @@ pub(crate) fn render_title(node: &Node, id: &str, width: u16, ctx: Ctx<'_>) -> O
             out.add_span(SearchSpan {
                 source_start: start,
                 source_end: start + len,
+                unit: None,
                 row,
                 col: letter.col,
                 cols: letter.cols,

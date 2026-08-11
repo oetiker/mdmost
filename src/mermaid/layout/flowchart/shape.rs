@@ -21,37 +21,45 @@ pub(super) fn draw(label: &Label, shape: NodeShape, budget: u16, theme: &Theme) 
     let lines = wrap(label, inner_budget);
     let text = lines
         .iter()
-        .map(|line| display_width(line))
+        .map(|line| display_width(&line.text))
         .max()
         .unwrap_or(0)
         .max(1);
     let styles = theme.diagram;
     let field = text + 2 * PAD;
     let mut body = Canvas::new(field as u16, lines.len(), theme.base());
+    let unit = (!label.source.is_empty()).then_some((label.source.start, label.source.end));
     for (row, line) in lines.iter().enumerate() {
-        body.write_field(row, 0, field, line, Align::Center, styles.node_text);
-        // Where this drawn line came from in the Mermaid source. Every line of a label
-        // names the *whole* label: it is atomic to a selection (design spec §2.2),
-        // because `<br>` splitting and entity decoding have already happened and there
-        // is no byte mapping left to apportion the range across the pieces.
+        body.write_field(row, 0, field, &line.text, Align::Center, styles.node_text);
+        // Where this drawn line came from in the Mermaid source, run by run: the
+        // characters a reader drags over are the characters they get (design spec §2.2),
+        // so a wrapped label's rows name their own bytes rather than all naming the whole
+        // label. They still carry the whole label as their `unit`, because "did the drag
+        // stay inside one label?" is a question about the label and not about a row of it.
         //
         // An empty `source` is the contract's "synthesised, not from the source" — a
         // label built by `Label::line` or one `lex::label_at` refused to place — and it
         // must emit nothing rather than a span at byte zero of the document.
-        let drawn = display_width(line);
-        if label.source.is_empty() || drawn == 0 {
+        let drawn = display_width(&line.text);
+        let (Some(unit), Some(at)) = (unit, line.at) else {
+            continue;
+        };
+        if drawn == 0 {
             continue;
         }
         // `write_field` centres through `text::pad_to_width`, whose left pad is
         // `slack / 2`; `align_offset` is the same rule, asked rather than re-derived.
         let col = align_offset(field, drawn, Align::Center);
-        body.add_span(SearchSpan {
-            source_start: label.source.start,
-            source_end: label.source.end,
-            row,
-            col: u16::try_from(col).unwrap_or(u16::MAX),
-            cols: u16::try_from(drawn).unwrap_or(u16::MAX),
-        });
+        for span in label.spans_for(line.index, at, &line.text) {
+            body.add_span(SearchSpan {
+                source_start: span.source.start,
+                source_end: span.source.end,
+                unit: Some(unit),
+                row,
+                col: u16::try_from(col + span.col).unwrap_or(u16::MAX),
+                cols: u16::try_from(span.cols).unwrap_or(u16::MAX),
+            });
+        }
     }
     match shape {
         NodeShape::Rect => body.framed(BorderSet::PLAIN, styles.node_border, None, theme.base()),
@@ -108,15 +116,41 @@ fn outline_width(shape: NodeShape) -> usize {
     }
 }
 
+/// One drawn line of a wrapped label, and where it came from inside the label.
+struct Drawn {
+    /// The text to draw.
+    text: String,
+    /// Which line of [`Label::lines`] it is a piece of.
+    index: usize,
+    /// Where it starts in that line, in bytes, or `None` if it could not be located.
+    at: Option<usize>,
+}
+
 /// Wraps a label to `budget` columns, keeping its explicit `<br>` breaks.
-fn wrap(label: &Label, budget: usize) -> Vec<String> {
-    let mut out: Vec<String> = label
-        .lines
-        .iter()
-        .flat_map(|line| wrap_plain(line, budget.max(1)))
-        .collect();
+///
+/// Each piece is located back in the line it was wrapped from, because a span has to
+/// name the bytes that drew it and wrapping is where the correspondence is lost. The
+/// search is a forward scan rather than arithmetic: `wrap_spans` drops the whitespace at
+/// a break, and drops a grapheme cluster wider than the whole budget, so the pieces of a
+/// line are in order but not adjacent. A piece the scan cannot find — which that dropped
+/// cluster can produce — is left unlocated and draws without provenance, rather than
+/// claiming bytes chosen by a guess.
+fn wrap(label: &Label, budget: usize) -> Vec<Drawn> {
+    let mut out: Vec<Drawn> = Vec::new();
+    for (index, line) in label.lines.iter().enumerate() {
+        let mut cursor = 0usize;
+        for text in wrap_plain(line, budget.max(1)) {
+            let at = line[cursor..].find(&text).map(|found| cursor + found);
+            cursor = at.map_or(cursor, |at| at + text.len());
+            out.push(Drawn { text, index, at });
+        }
+    }
     if out.is_empty() {
-        out.push(String::new());
+        out.push(Drawn {
+            text: String::new(),
+            index: 0,
+            at: Some(0),
+        });
     }
     out
 }

@@ -67,6 +67,19 @@ pub struct SearchSpan {
     pub source_start: usize,
     /// End byte offset (exclusive) in the document source.
     pub source_end: usize,
+    /// The atomic unit this span is one piece of, as `(start, end)` source offsets, or
+    /// `None` when the span stands for itself.
+    ///
+    /// A diagram label is the only thing that has one, and it exists because a label is
+    /// no longer one span: it wraps onto several rows, and a decoded entity inside it is
+    /// cut out into a run of its own, so that every span's source stays a copy of the
+    /// cells it names (`mermaid::ast::Label::spans_for`). `select::resolve` still has to
+    /// ask "did this drag stay inside one label?" (design spec §2.2), and it cannot ask
+    /// that of the pieces — so each piece names the whole it belongs to.
+    ///
+    /// It is not a second source range: nothing is ever copied or washed from it. It is
+    /// a boundary the selection compares its hull against, and the answer stays the hull.
+    pub unit: Option<(usize, usize)>,
     /// The row the text was rendered on.
     pub row: usize,
     /// The first column the text occupies.

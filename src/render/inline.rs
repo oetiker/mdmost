@@ -259,6 +259,7 @@ fn reconcile(lines: &[Line], flat: &[Anchored<'_>]) -> Vec<SearchSpan> {
             let span = |source: SourceSpan| SearchSpan {
                 source_start: source.start,
                 source_end: source.end,
+                unit: None,
                 row,
                 col,
                 cols,

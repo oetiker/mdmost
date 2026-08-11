@@ -45,7 +45,8 @@
 //! walk over a drag on `    A[Read] --> B[Draw]` lit `Read` and copied `    A[Read] --> B[`
 //! — a truncated token, and the exact see/get divergence this module exists to remove.
 //! So a diagram records an [`Atom`]: its drawn rectangle, and its whole fenced block.
-//! A drag confined to one label copies that label; any wider drag, and any drag *pressed*
+//! A drag confined to one label copies what it went over, that label being as far as it
+//! can reach; any wider drag, and any drag *pressed*
 //! anywhere else inside the rectangle, takes the diagram whole — the fenced block on the
 //! clipboard, opener and closer included and its container prefix stripped off every
 //! line, and the whole rectangle washed on screen. [`resolve`] is where that is decided,
@@ -382,12 +383,15 @@ fn line_end(source: &str, at: usize, end: usize) -> usize {
 ///    label, found no hull worth the name, and left the clipboard on the drawn-cells
 ///    fallback while the highlight stayed empty — copying something and showing nothing,
 ///    which is the see/get shape this module exists to remove.
-/// 2. **The hull lies inside one label.** The reader is pointing at one box. The answer
-///    is that label's *whole* source range — a label is the unit, so half of one is not
-///    an answer — and nothing is washed beyond the spans that drew it. Note what this
-///    does *not* do: it does not run [`extend_over_markup`], because on a Mermaid line
-///    almost every byte is undrawn and the walk would swallow `A[`, the arrow and half
-///    of the next box, none of which the reader saw light up.
+/// 2. **The hull lies inside one label.** The reader is pointing at one box, and the
+///    answer is the hull exactly as it stands: the characters they dragged over, and
+///    nothing else. Note what this does *not* do: it does not run [`extend_over_markup`],
+///    because on a Mermaid line almost every byte is undrawn and the walk would swallow
+///    `A[`, the arrow and half of the next box, none of which the reader saw light up.
+///    That exclusion is the whole of the case — a partial hull inside a label is already
+///    the right answer, and widening it is the only thing that could spoil it. Nor is
+///    anything washed beyond the spans the hull covers, so the untouched half of a label
+///    stays dark.
 /// 3. **The hull touches a diagram and is wider than one of its labels.** Crossing from
 ///    one label into another, or leaving the diagram entirely: the diagram contributes
 ///    its whole fenced block, fence lines included, and the drag's own hull contributes
@@ -412,10 +416,12 @@ fn line_end(source: &str, at: usize, end: usize) -> usize {
 /// reach is therefore judged the same way as anything a reader dragged over directly,
 /// and there is no second, screen-shaped rule to disagree with this one.
 ///
-/// A box holds one label, so two distinct label ranges are two boxes (or a box and a
-/// subgraph title) and always widen. A *wrapped* label draws on several rows and emits
-/// one span per row, each naming the whole label — hence the ranges are de-duplicated
-/// before they are counted, or every wrapped label would look like a crossing.
+/// A box holds one label, so two distinct labels are two boxes (or a box and a subgraph
+/// title) and always widen. What is counted is each span's [`SearchSpan::unit`] — the
+/// label a span is one piece of — and not the span's own range: a label wraps onto
+/// several rows and is cut at a decoded entity, so counting ranges would read one box as
+/// a crossing between several. A span with no unit stands for itself and is counted as
+/// its own label, which is what anything else drawn inside a diagram would be.
 pub(crate) fn resolve(canvas: &Canvas, source: &str, selection: Selection) -> Option<Resolved> {
     let pressed_on = pressed_on_chrome_of(canvas, selection);
     // A press on the drawing itself still has a hull when the drag reached text, and it
@@ -433,7 +439,7 @@ pub(crate) fn resolve(canvas: &Canvas, source: &str, selection: Selection) -> Op
             .iter()
             .filter(|span| span.source_end > lo && span.source_start < hi)
             .filter(|span| canvas.atoms().iter().any(|atom| atom.contains_span(span)))
-            .map(|span| (span.source_start, span.source_end))
+            .map(|span| span.unit.unwrap_or((span.source_start, span.source_end)))
             .collect();
         labels.sort_unstable();
         labels.dedup();
@@ -442,8 +448,8 @@ pub(crate) fn resolve(canvas: &Canvas, source: &str, selection: Selection) -> Op
             && hi <= end
         {
             return Some(Resolved {
-                lo: start,
-                hi: end,
+                lo,
+                hi,
                 washed: Vec::new(),
             });
         }

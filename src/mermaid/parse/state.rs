@@ -84,10 +84,7 @@ impl Builder<'_> {
                     self.scope().notes.push(StateNote {
                         placement: note.placement,
                         target: note.target,
-                        text: Label {
-                            lines: note.lines,
-                            source: note.source.unwrap_or_default(),
-                        },
+                        text: Label::from_lines(note.lines, note.source.unwrap_or_default()),
                     });
                 }
             } else if let Some(note) = self.note.as_mut() {

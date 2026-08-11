@@ -184,9 +184,22 @@ fn rebase_spans(canvas: &mut Canvas, literal: &str, origins: &[SourceSpan]) {
     canvas.map_spans(|span| {
         let start = document_offset(&lines, origins, span.source_start)?;
         let end = document_offset(&lines, origins, span.source_end)?;
+        // A unit is a source range like any other and is rebased with the span that
+        // names it. Failing closed drops the whole span rather than just its unit: a
+        // label whose pieces disagreed about which label they belong to would read as a
+        // drag across several boxes, and a reader pointing at one word would get the
+        // whole chart.
+        let unit = match span.unit {
+            Some((from, to)) => Some((
+                document_offset(&lines, origins, from)?,
+                document_offset(&lines, origins, to)?,
+            )),
+            None => None,
+        };
         (start <= end).then_some(SearchSpan {
             source_start: start,
             source_end: end,
+            unit,
             ..*span
         })
     });
@@ -489,6 +502,7 @@ fn code_area(
                 out.add_span(SearchSpan {
                     source_start: origin.start,
                     source_end,
+                    unit: None,
                     row,
                     col: u16::try_from(gutter).unwrap_or(u16::MAX),
                     cols: u16::try_from(drawn).unwrap_or(u16::MAX),

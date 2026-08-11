@@ -3247,25 +3247,55 @@ fn a_widened_diagram_maps_its_labels_back_to_the_document() {
     let mut app = pager(WIDE_FENCE);
     let canvas = app.canvas().clone();
     assert!(canvas.width() > 80, "this chart had to be widened");
-    // The label is wrapped onto two rows in this chart, and both rows name the whole
-    // label (design spec §2.2) — so what is *drawn* under each span is one word of it.
-    let drawn: Vec<String> = canvas
+    // The label is wrapped onto two rows in this chart, and each row names the bytes it
+    // drew (design spec §2.2). This used to filter on the spans naming the whole label,
+    // which is the rule the amendment removed; the filter is the label's `unit` now, and
+    // the assertion is stronger than it was — each span's source is *exactly* the text
+    // under it, which is the property every column walk in the selection depends on.
+    let label = WIDE_FENCE
+        .find("Parse Markdown")
+        .expect("the fixture's label");
+    let mapped: Vec<(String, &str)> = canvas
         .spans()
         .iter()
-        .filter(|s| WIDE_FENCE.get(s.source_start..s.source_end) == Some("Parse Markdown"))
+        .filter(|s| s.unit == Some((label, label + "Parse Markdown".len())))
         .map(|s| {
-            canvas
+            let drawn: String = canvas
                 .row_text(s.row)
                 .chars()
                 .skip(usize::from(s.col))
                 .take(usize::from(s.cols))
-                .collect()
+                .collect();
+            (
+                drawn,
+                WIDE_FENCE.get(s.source_start..s.source_end).unwrap_or(""),
+            )
         })
         .collect();
     assert_eq!(
-        drawn,
-        vec!["Parse", "Markdown"],
-        "the spans sit on the drawn label of the widened diagram"
+        mapped,
+        vec![
+            ("Parse".to_string(), "Parse"),
+            ("Markdown".to_string(), "Markdown")
+        ],
+        "each span of the widened diagram sits on the source bytes it drew"
+    );
+}
+
+/// A drag that stays inside one label copies the characters it went over, and no more
+/// (design spec §2.2, owner ruling 2026-08-11).
+#[test]
+fn a_drag_over_part_of_a_label_copies_only_those_characters() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, col, _) = drawn(&canvas, "Read");
+    let half = drag(Pos::new(row, col), Pos::new(row, col + 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, half)
+            .expect("the drag covered a label")
+            .text,
+        "Re",
+        "two characters dragged over, two characters copied"
     );
 }
 
@@ -3292,22 +3322,52 @@ fn a_drag_over_a_diagram_label_yields_the_mermaid_source() {
         extract.text, "Read",
         "one label, not the punctuation of the line it was written on"
     );
-    // Half a label is still the whole label: the box is the unit (design spec §2.2).
+    // Half a label is half a label (design spec §2.2, amended after live testing; this
+    // assertion used to read "Read" and pinned the box as the unit of selection).
     let (row, col, cols) = drawn(&canvas, "Read");
     let half = drag(Pos::new(row, col), Pos::new(row, col + 1));
     assert_eq!(
         select::extract(&canvas, FITTING_FENCE, half)
             .expect("the drag covered a label")
             .text,
-        "Read"
+        "Re"
     );
-    // And the highlight agrees, exactly: the whole label's cells and nothing beside
+    // And the highlight agrees, exactly: the two cells dragged over and nothing beside
     // them. Asserted on the canvas, because the defect being fixed is the two
-    // disagreeing (design spec §7).
+    // disagreeing (design spec §7). Both directions — that the dragged characters wash
+    // *and* that the rest of the same label does not — because a wash that lit the whole
+    // label would still pass an assertion that only looked at the start of the range.
     assert_eq!(
         select::highlighted_columns(&canvas, FITTING_FENCE, half, row),
-        vec![col..col + cols],
-        "the wash is the label the clipboard got"
+        vec![col..col + 2],
+        "the wash is the two characters the clipboard got, not the label"
+    );
+    // The whole label, dragged end to end, is still the whole label.
+    let all = drag(Pos::new(row, col), Pos::new(row, col + cols - 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, all)
+            .expect("the drag covered a label")
+            .text,
+        "Read"
+    );
+    assert_eq!(
+        select::highlighted_columns(&canvas, FITTING_FENCE, all, row),
+        vec![col..col + cols]
+    );
+    // The narrowest drag the pager acts on at all is two cells — one is a click and
+    // `App::end_selection` drops it — and taken at the label's *far* end it pins the
+    // other endpoint: a hull that rounded up to the label would pass the test above.
+    let tail = drag(Pos::new(row, col + cols - 2), Pos::new(row, col + cols - 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, tail)
+            .expect("the drag covered a label")
+            .text,
+        "ad"
+    );
+    assert_eq!(
+        select::highlighted_columns(&canvas, FITTING_FENCE, tail, row),
+        vec![col + cols - 2..col + cols],
+        "and the first half of the label stays dark"
     );
 }
 
@@ -3697,26 +3757,222 @@ fn the_whole_diagram_wash_covers_its_box_art() {
     );
 }
 
-/// A wrapped label draws on several rows, each carrying a span that names the *whole*
-/// label (design spec §2.2). Counting spans rather than distinct labels would read that
-/// as a drag across two boxes and copy the entire chart.
+/// A wrapped label draws on several rows, and a drag over one of them copies that row.
+///
+/// This test used to assert the opposite — `Parse Markdown`, the whole label, whichever
+/// row was dragged over — because a label was the unit of selection. Design spec §2.2 was
+/// amended after live testing and the rows now name their own bytes; what still has to
+/// hold, and is the reason the test exists, is that several rows of one label are not
+/// read as a drag across two boxes, which would copy the entire chart. That is now the
+/// spans' shared `unit`, not their shared range.
 #[test]
-fn a_drag_over_one_row_of_a_wrapped_label_still_copies_just_that_label() {
+fn a_drag_over_one_row_of_a_wrapped_label_copies_that_row() {
     let mut app = pager(WIDE_FENCE);
     let canvas = app.canvas().clone();
+    let label = WIDE_FENCE
+        .find("Parse Markdown")
+        .expect("the fixture's label");
     let wrapped = canvas
         .spans()
         .iter()
-        .filter(|span| WIDE_FENCE.get(span.source_start..span.source_end) == Some("Parse Markdown"))
+        .filter(|span| span.unit == Some((label, label + "Parse Markdown".len())))
         .count();
-    assert!(
-        wrapped > 1,
+    assert_eq!(
+        wrapped, 2,
         "this label has to be wrapped for the test to mean anything"
     );
-    let extract = drag_over(&canvas, WIDE_FENCE, "Markdown");
+    assert_eq!(
+        drag_over(&canvas, WIDE_FENCE, "Markdown").text,
+        "Markdown",
+        "the row that was dragged over, not the label it belongs to"
+    );
+    assert_eq!(
+        drag_over(&canvas, WIDE_FENCE, "Parse").text,
+        "Parse",
+        "and the same for the other row"
+    );
+    // Across both rows: the hull runs from one to the other and the space between them —
+    // a space that *is* in the source, since this label wraps rather than breaking — is
+    // between the ends of the hull and comes along (design spec §2, decision 1).
+    let (top, from, _) = drawn(&canvas, "Parse");
+    let (bottom, to, cols) = drawn(&canvas, "Markdown");
+    assert_eq!(top + 1, bottom, "the two rows are consecutive");
+    let both = drag(Pos::new(top, from), Pos::new(bottom, to + cols - 1));
+    let extract = select::extract(&canvas, WIDE_FENCE, both).expect("the drag covered a label");
     assert_eq!(
         extract.text, "Parse Markdown",
-        "one label, whichever of its rows was dragged over"
+        "still one label: two rows of it are not two boxes"
+    );
+    assert!(
+        !extract.text.contains("```"),
+        "and emphatically not the whole block, got {:?}",
+        extract.text
+    );
+}
+
+/// Partial selection inside a *wrapped* label — the case that would silently do the
+/// wrong thing, because until this task every row of one named the whole label and no
+/// column arithmetic inside a row could be right.
+#[test]
+fn a_drag_over_part_of_a_wrapped_labels_row_copies_only_those_characters() {
+    let mut app = pager(WIDE_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, col, cols) = drawn(&canvas, "Markdown");
+    let (top, parse, parse_cols) = drawn(&canvas, "Parse");
+    assert_eq!(top + 1, row, "the label wraps onto the row below `Parse`");
+    let half = drag(Pos::new(row, col), Pos::new(row, col + 4));
+    assert_eq!(
+        select::extract(&canvas, WIDE_FENCE, half)
+            .expect("the drag covered a label")
+            .text,
+        "Markd",
+        "five characters of the second row, and not the label they belong to"
+    );
+    // Both directions: what was dragged over washes, and what was not stays dark —
+    // including the row above, which shares the label and would light up under any rule
+    // that still answered with the whole of it.
+    assert_eq!(
+        select::highlighted_columns(&canvas, WIDE_FENCE, half, row),
+        vec![col..col + 5],
+        "the wash is the five characters, not the eight of the row"
+    );
+    assert_eq!(
+        select::highlighted_columns(&canvas, WIDE_FENCE, half, top),
+        Vec::new(),
+        "and nothing at all on the row above"
+    );
+    // The whole of one row, exactly: its own word, still not the label.
+    let all = drag(Pos::new(row, col), Pos::new(row, col + cols - 1));
+    assert_eq!(
+        select::extract(&canvas, WIDE_FENCE, all)
+            .expect("the drag covered a label")
+            .text,
+        "Markdown"
+    );
+    assert_eq!(
+        select::highlighted_columns(&canvas, WIDE_FENCE, all, top),
+        Vec::new(),
+        "the row above is still dark"
+    );
+    let above = drag(Pos::new(top, parse), Pos::new(top, parse + parse_cols - 1));
+    assert_eq!(
+        select::highlighted_columns(&canvas, WIDE_FENCE, above, row),
+        Vec::new(),
+        "and the same the other way round"
+    );
+}
+
+/// A label is as far as a confined drag can reach, and the Mermaid around it is not
+/// picked up on the way out.
+///
+/// `extend_over_markup` (design spec §2, decision 2) widens a hull over every byte no
+/// span drew, which on a Mermaid line is `A[`, the arrow and half the next box. The
+/// confined case must not run it, and the way to see that it does not is to drag right
+/// up to a label's edge — where the widening would start — and out onto the box art
+/// beside it, which §2.1 resolves back to the label's own end.
+#[test]
+fn a_drag_to_the_edge_of_a_label_stops_at_the_label() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, col, cols) = drawn(&canvas, "Read");
+    for reach in 0..3u16 {
+        let selection = drag(Pos::new(row, col), Pos::new(row, col + cols - 1 + reach));
+        assert_eq!(
+            select::extract(&canvas, FITTING_FENCE, selection)
+                .expect("the drag covered a label")
+                .text,
+            "Read",
+            "dragging {reach} columns past the label picked up the Mermaid around it"
+        );
+    }
+    // And from the other side: a drag that starts on the box art *left* of the label is
+    // a press outside every label, which is the third case and takes the diagram whole.
+    let outside = drag(Pos::new(row, col - 1), Pos::new(row, col + 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, outside)
+            .expect("the drag covered the diagram")
+            .text,
+        FITTING_FENCE.trim_end_matches('\n'),
+        "a press on the drawing takes the block, wherever it is released"
+    );
+}
+
+/// A `<br>` in a label is markup between two drawn rows, and a drag across both of them
+/// takes what lies between their ends — the `<br>` included.
+///
+/// Decision 1's hull, unqualified: nothing between the ends of a selection is dropped,
+/// which is the same rule that puts a code fence's own fence lines on the clipboard when
+/// a drag crosses one. The rows themselves name only what they drew, so dragging either
+/// one alone gives that one word.
+///
+/// The fixture pads the `<br>`, which is the shape where the padding is *inside* the
+/// label's own source text rather than trimmed off by the parser before it gets there:
+/// each drawn line is trimmed of it, and a mapping that forgot would slide every run of
+/// the second line one byte left.
+#[test]
+fn a_drag_across_an_explicit_line_break_in_a_label_keeps_it() {
+    let source = "```mermaid\nflowchart LR\n    A[One <br> Two] --> B[End]\n```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (top, one, _) = drawn(&canvas, "One");
+    let (bottom, two, two_cols) = drawn(&canvas, "Two");
+    assert_eq!(top + 1, bottom, "the label draws on two rows");
+    assert_eq!(drag_over(&canvas, source, "One").text, "One");
+    assert_eq!(drag_over(&canvas, source, "Two").text, "Two");
+    let both = drag(Pos::new(top, one), Pos::new(bottom, two + two_cols - 1));
+    assert_eq!(
+        select::extract(&canvas, source, both)
+            .expect("the drag covered a label")
+            .text,
+        "One <br> Two",
+        "the label as written, which is what the reader dragged across"
+    );
+}
+
+/// An entity in a label is one cell drawn by five bytes, and the selection has to answer
+/// with the bytes.
+///
+/// `&amp;` is the only span in a diagram whose source is not a copy of its cells, and it
+/// is cut out into a span of its own precisely so that the text either side of it stays a
+/// copy of its own — otherwise every column inside that label would resolve to a byte a
+/// few places out, and a reader dragging over `draw` would get `mp; d`.
+#[test]
+fn a_drag_over_an_entity_in_a_label_copies_the_reference() {
+    let source = "```mermaid\nflowchart LR\n    A[Parse &amp; draw] --> B[End]\n```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    assert_eq!(
+        drag_over(&canvas, source, "draw").text,
+        "draw",
+        "the text after the entity resolves to its own bytes"
+    );
+    assert_eq!(drag_over(&canvas, source, "Parse").text, "Parse");
+    let (row, col, _) = drawn(&canvas, "Parse & draw");
+    let entity = drag(Pos::new(row, col + 6), Pos::new(row, col + 6));
+    assert_eq!(
+        select::extract(&canvas, source, entity)
+            .expect("the drag covered a label")
+            .text,
+        "&amp;",
+        "the one cell the entity drew answers with the whole reference"
+    );
+    assert_eq!(
+        drag_over(&canvas, source, "Parse & draw").text,
+        "Parse &amp; draw",
+        "and the whole label is the label as written"
+    );
+    // A label *ending* in the entity, because that is the only shape in which the
+    // entity's own end is the end of the hull. Anywhere else the next run's start
+    // answers for it, and a span claiming one byte of `&amp;` instead of five gives the
+    // same clipboard as a correct one — which it does above, and which is why the run
+    // rule is pinned at the layout level as well.
+    let trailing = "```mermaid\nflowchart LR\n    A[Parse &amp;] --> B[End]\n```\n";
+    let mut app = pager(trailing);
+    let canvas = app.canvas().clone();
+    assert_eq!(
+        drag_over(&canvas, trailing, "Parse &").text,
+        "Parse &amp;",
+        "the entity is five bytes, and they are all in the hull"
     );
 }
 

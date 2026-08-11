@@ -406,10 +406,10 @@ fn every_line_of_a_multi_line_edge_label_shares_one_left_origin() {
         node("B", "Target", NodeShape::Rect),
     ];
     let edges = vec![FlowEdge {
-        label: Some(Label {
-            lines: vec!["alpha".into(), "bravo".into(), "charlie".into()],
-            source: Default::default(),
-        }),
+        label: Some(Label::from_lines(
+            vec!["alpha".into(), "bravo".into(), "charlie".into()],
+            Default::default(),
+        )),
         ..edge(0, 1)
     }];
     for direction in [Direction::TopToBottom, Direction::LeftToRight] {
@@ -537,12 +537,147 @@ fn every_node_shape_puts_its_label_span_on_the_drawn_text() {
             "{shape:?} keeps the label's own source range"
         );
         assert_eq!(
+            spans[0].unit,
+            Some((17, 22)),
+            "{shape:?} names the label the span belongs to"
+        );
+        assert_eq!(
             span_cells(&canvas, &spans[0]),
             "Parse",
             "{shape:?} puts the span on the drawn label:\n{}",
             canvas.plain_text()
         );
     }
+}
+
+/// The same seven shapes, with a label that has to be *cut*: it wraps onto two rows and
+/// carries a decoded entity, so one label becomes several spans and every one of them
+/// has to come through the shape's own copy loop with its columns intact.
+///
+/// The extension of `every_node_shape_puts_its_label_span_on_the_drawn_text` for partial
+/// selection (design spec §2.2): the one-span case above cannot tell a shape that keeps
+/// the first span and drops the rest from one that keeps them all.
+#[test]
+fn every_node_shape_carries_every_piece_of_a_cut_label() {
+    let shapes = [
+        NodeShape::Rect,
+        NodeShape::Round,
+        NodeShape::Stadium,
+        NodeShape::Rhombus,
+        NodeShape::Circle,
+        NodeShape::Subroutine,
+        NodeShape::Cylinder,
+    ];
+    let theme = Theme::default_dark();
+    for shape in shapes {
+        // `Parse &amp; draw` at byte 17: three spans, because the `&amp;` is not a copy
+        // of the cell it draws and cannot share a span with the text either side of it.
+        let label = "Parse &amp; draw";
+        let chart = chart(
+            Direction::LeftToRight,
+            vec![placed_node("A", label, 17, shape)],
+            Vec::new(),
+        );
+        // Narrow enough that the label wraps, wide enough that no word is hard-split.
+        // Where it wraps depends on the shape's own frame width, so what is asserted is
+        // the relationship between each span and its cells rather than a fixed cut.
+        let canvas = flowchart::draw(&chart, 12, &theme).expect("one node fits in 12 columns");
+        let spans = canvas.spans();
+        let named: Vec<(String, &str)> = spans
+            .iter()
+            .map(|span| {
+                (
+                    span_cells(&canvas, span),
+                    &label[span.source_start - 17..span.source_end - 17],
+                )
+            })
+            .collect();
+        for (cells, source) in &named {
+            assert!(
+                cells == source || (cells == "&" && *source == "&amp;"),
+                "{shape:?}: span drew {cells:?} and claims {source:?}, which is neither a \
+                 copy of its cells nor the entity that drew them:\n{}",
+                canvas.plain_text()
+            );
+        }
+        assert_eq!(
+            named
+                .iter()
+                .filter(|(_, source)| *source == "&amp;")
+                .count(),
+            1,
+            "{shape:?}: the entity is cut out into exactly one span, got {named:?}"
+        );
+        // Joined without the whitespace a wrap drops — a narrow shape hard-splits the
+        // words as well as wrapping between them, which is a further chance to lose a
+        // piece and which the spans have to survive too.
+        let joined: String = named
+            .iter()
+            .flat_map(|(cells, _)| cells.split_whitespace())
+            .collect();
+        assert_eq!(
+            joined,
+            "Parse&draw",
+            "{shape:?}: the spans together cover the whole drawn label:\n{}",
+            canvas.plain_text()
+        );
+        assert!(
+            spans
+                .iter()
+                .all(|span| span.unit == Some((17, 17 + label.len()))),
+            "{shape:?}: every piece belongs to the one label, got {spans:?}"
+        );
+        let rows: Vec<usize> = spans.iter().map(|span| span.row).collect();
+        assert!(
+            rows.first() < rows.last(),
+            "{shape:?}: the label has to wrap for this test to mean anything, got {rows:?}\n{}",
+            canvas.plain_text()
+        );
+    }
+}
+
+/// An entity that draws more than one column claims nothing, and costs the text around
+/// it nothing either.
+///
+/// `&#x1F600;` is nine source bytes drawn as one two-column cluster, and there is no
+/// sub-range of those nine bytes that any one of the two columns came from. A span over
+/// it would hand `select`'s column walks a body they cannot walk — the same shape
+/// `render::inline` declines for an emoji reference in prose — so the cell is left dark
+/// and the runs either side stay exact.
+#[test]
+fn a_wide_entity_in_a_label_claims_no_bytes_and_costs_its_neighbours_none() {
+    let label = "a&#x1F600;b";
+    let theme = Theme::default_dark();
+    let chart = chart(
+        Direction::LeftToRight,
+        vec![placed_node("A", label, 40, NodeShape::Rect)],
+        Vec::new(),
+    );
+    let canvas = flowchart::draw(&chart, 60, &theme).expect("one node fits");
+    let spans = canvas.spans();
+    // Asserted on columns rather than through `span_cells`, which skips *characters*: a
+    // two-column cluster is one character, so the helper cannot see the difference this
+    // test is about.
+    let named: Vec<(&str, u16)> = spans
+        .iter()
+        .map(|span| {
+            (
+                &label[span.source_start - 40..span.source_end - 40],
+                span.cols,
+            )
+        })
+        .collect();
+    assert_eq!(
+        named,
+        vec![("a", 1), ("b", 1)],
+        "the emoji claims no bytes, and its neighbours claim only their own:\n{}",
+        canvas.plain_text()
+    );
+    assert_eq!(
+        spans[1].col,
+        spans[0].col + 3,
+        "and `b` is placed past the two columns the emoji drew, not past one character"
+    );
 }
 
 #[test]
@@ -571,8 +706,11 @@ fn a_label_with_no_source_range_emits_no_span() {
 
 #[test]
 fn a_multi_line_label_emits_one_span_per_drawn_line() {
-    // Design spec §2.2: the label is atomic, so both drawn lines name the whole range
-    // rather than the range being apportioned across them.
+    // Design spec §2.2, amended after live testing: a drag inside a box copies the
+    // characters it went over, so each drawn line names the bytes that drew it. This
+    // test used to assert the opposite — every line naming the whole range — and that
+    // range survives as the `unit` the rows share, which is what tells a selection that
+    // two rows are one box rather than two.
     let theme = Theme::default_dark();
     let chart = chart(
         Direction::LeftToRight,
@@ -583,11 +721,21 @@ fn a_multi_line_label_emits_one_span_per_drawn_line() {
     let spans = canvas.spans();
     assert_eq!(spans.len(), 2, "two drawn lines, two spans");
     assert_eq!(spans[0].row + 1, spans[1].row, "on consecutive rows");
+    assert_eq!(
+        (spans[0].source_start, spans[0].source_end),
+        (30, 33),
+        "the first line names `One`"
+    );
+    assert_eq!(
+        (spans[1].source_start, spans[1].source_end),
+        (37, 40),
+        "the second names `Two`, the `<br>` between them belonging to neither"
+    );
     for span in spans {
         assert_eq!(
-            (span.source_start, span.source_end),
-            (30, 40),
-            "every line names the whole label"
+            span.unit,
+            Some((30, 40)),
+            "but both lines belong to the whole label"
         );
     }
     assert_eq!(span_cells(&canvas, &spans[0]), "One");

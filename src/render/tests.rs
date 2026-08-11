@@ -2823,10 +2823,13 @@ fn every_flowchart_label_span_names_its_own_drawn_text() {
     }
 }
 
+/// The second half of this test used to assert the opposite: both drawn lines named the
+/// *whole* label, because the label was the unit of selection. Design spec §2.2 was
+/// amended after live testing — a drag inside a box copies the characters it went over —
+/// and a row naming the whole label cannot answer that. So each row names its own bytes
+/// now, and the label survives as the `unit` the rows share.
 #[test]
-fn a_multi_line_label_points_every_drawn_line_at_the_whole_label() {
-    // Design spec §2.2: a label is atomic. Two drawn lines, one source range, so
-    // touching either line selects the label's whole source text.
+fn a_multi_line_label_points_every_drawn_line_at_its_own_bytes() {
     let doc = "```mermaid\nflowchart LR\n  A[One<br>Two] --> B[End]\n```\n";
     let canvas = render(doc, 60);
     let drawn: Vec<String> = canvas
@@ -2835,20 +2838,26 @@ fn a_multi_line_label_points_every_drawn_line_at_the_whole_label() {
         .map(|s| span_cells(&canvas, s).trim().to_string())
         .collect();
     assert_eq!(drawn, vec!["One", "Two", "End"], "each line is drawn");
-    let ranges: Vec<(usize, usize)> = canvas
+    let named: Vec<Option<&str>> = canvas
+        .spans()
+        .iter()
+        .map(|s| doc.get(s.source_start..s.source_end))
+        .collect();
+    assert_eq!(
+        named,
+        vec![Some("One"), Some("Two"), Some("End")],
+        "each drawn line names the bytes that drew it, `<br>` excluded"
+    );
+    let units: Vec<Option<&str>> = canvas
         .spans()
         .iter()
         .take(2)
-        .map(|s| (s.source_start, s.source_end))
+        .map(|s| s.unit.and_then(|(start, end)| doc.get(start..end)))
         .collect();
     assert_eq!(
-        ranges[0], ranges[1],
-        "both lines name the same source range"
-    );
-    assert_eq!(
-        doc.get(ranges[0].0..ranges[0].1),
-        Some("One<br>Two"),
-        "and that range is the label as written"
+        units,
+        vec![Some("One<br>Two"), Some("One<br>Two")],
+        "but both rows belong to one label, which is what a selection asks about"
     );
 }
 

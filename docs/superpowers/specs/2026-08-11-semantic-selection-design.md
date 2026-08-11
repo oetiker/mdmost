@@ -57,14 +57,37 @@ tests should be sharpest.
 
 *Amended 2026-08-11, after task 5 landed and the first drag over a real chart was
 looked at. Amended again the same day, after the review found the last see/get
-divergence left inside a diagram: the third case below.*
+divergence left inside a diagram: the third case below. Amended a third time on
+2026-08-12, after live testing: the first case used to read "selects that label's whole
+source range, whichever part of the box it touched", on the grounds that partial
+selection would need a byte mapping surviving entity decoding and `<br>` splitting and
+that it bought nothing a reader wants. The owner, selecting text in a real chart, wanted
+exactly that. The mapping was built — `Label::spans_for`, `src/mermaid/ast.rs` — and it
+is what the next three paragraphs describe.*
 
 A drag **confined to one box** — and only such a drag; the two cases after this one take
-precedence — selects that label's whole source range, whichever part of the box it
-touched. Partial selection inside a label would need a byte mapping that survives entity
-decoding and `<br>` splitting (`Label::parse`, `src/mermaid/ast.rs`), which buys nothing
-a reader wants. The unit of selection in a diagram is the box, which is what a reader
-points at.
+precedence — selects **the characters it went over**, and no more. The box is as far as
+such a drag can reach, not the least it can take: a drag over two characters of a label
+copies those two characters and lights those two cells. A label wrapped onto several rows
+behaves the same on every row, and so does one holding a decoded entity; a reader cannot
+see which boxes were easy.
+
+What makes that possible is that a label's drawn text is mapped back to its source **run
+by run** rather than as a whole. Every run a layout emits is either a byte-for-byte copy
+of the cells it names or one entity reference drawing one column — that is the property
+§2.1's column arithmetic rests on, and it is why a decoded `&amp;` is cut out into a run
+of its own rather than left inside a run whose bytes and cells have drifted apart. An
+entity drawing more than one column has no honest answer and is dropped, leaving its cell
+dark: the same call `render::inline` makes for the same reason.
+
+A label is therefore several spans, and "confined to one box" is asked of a span's
+**unit** — the label the run belongs to, recorded on the span — and not of the run's own
+range. Counting ranges would read a wrapped label as a crossing between boxes and hand
+back the whole chart for a drag over one word. The answer is the hull exactly as §2 took
+it, which is also why a drag across a `<br>` copies the `<br>` between the two rows it
+went over: nothing between the ends of a selection is dropped. What has not changed is
+that the confined case does not extend over markup — see the paragraph on that below,
+which is the reason this case exists at all.
 
 **A drag wider than one label takes the whole diagram.** Crossing from one label into
 another, or starting inside the diagram and ending outside it, expands the highlight to
@@ -178,9 +201,9 @@ and it is the single highest-risk piece of arithmetic in this design. It is also
 CRLF and leading-whitespace handling have already bitten this project once each.
 
 Once labels carry spans, a drag over a diagram yields **mermaid source** and the status
-bar says `Markdown source`, like everything else. Which source is §2.2's answer: one
-label for a drag confined to one box, the whole fenced block for anything wider and for
-anything pressed outside a label. The
+bar says `Markdown source`, like everything else. Which source is §2.2's answer: what the
+drag went over, for a drag confined to one box, and the whole fenced block for anything
+wider and for anything pressed outside a label. The
 earlier draft of this paragraph promised the source *between* the first and last box
 touched — `A[Parse] --> B[Layout]` — which is what the implementation did and what the
 amendment above replaces; the string it produced in practice was truncated at the last

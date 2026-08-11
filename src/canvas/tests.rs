@@ -357,6 +357,7 @@ fn blit_translates_anchors_and_spans() {
     src.add_span(SearchSpan {
         source_start: 5,
         source_end: 9,
+        unit: None,
         row: 1,
         col: 1,
         cols: 3,
