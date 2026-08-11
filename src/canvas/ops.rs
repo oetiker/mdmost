@@ -351,7 +351,7 @@ impl Canvas {
         self.atoms.extend(src.atoms.iter().map(|atom| Atom {
             row: atom.row + top,
             col: atom.col.saturating_add(left),
-            ..*atom
+            ..atom.clone()
         }));
     }
 
@@ -492,7 +492,7 @@ impl Canvas {
                 (top < bottom).then_some(Atom {
                     row: top - start,
                     rows: bottom - top,
-                    ..*atom
+                    ..atom.clone()
                 })
             })
             .collect();

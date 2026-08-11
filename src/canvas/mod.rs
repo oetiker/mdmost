@@ -149,7 +149,7 @@ pub struct Hotspot {
 /// content cannot claim a rectangle of that row. That is an invariant, not a live case —
 /// the only sub-canvas the renderer blits is a table cell, and a GFM table cell holds
 /// inline content, so no document puts a diagram inside one. Nothing to go looking for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Atom {
     /// The first row of the rectangle.
     pub row: usize,
@@ -163,6 +163,25 @@ pub struct Atom {
     pub source_start: usize,
     /// End byte offset (exclusive) in the document source.
     pub source_end: usize,
+    /// The block's content with its container prefix already off — comrak's `literal`.
+    ///
+    /// Carried rather than re-derived from `source_start..source_end`, because *what the
+    /// prefix was* is not a question the source range can answer. A quoted block's lines
+    /// need not carry the same bytes: `>` and `> ` are the same marker, a blank quoted
+    /// line is a bare `>` — which is what `CommonMark` itself produces for one — and a
+    /// document may mix them freely inside one quote. Sampling one line's prefix and
+    /// requiring every other line to start with that exact string renders correctly and
+    /// *copies wrong*, putting a stray `>` inside the Mermaid: the see/get divergence an
+    /// [`Atom`] exists to remove. comrak already stripped the prefix when it parsed the
+    /// block, so its answer is the authority; `select::extract` checks that answer back
+    /// against the document line by line rather than trusting it blind, and leaves a line
+    /// it cannot locate alone (design spec §2.2).
+    ///
+    /// Content only: the fence lines are not in it. They are read from the document
+    /// instead — the opener because `source_start` already points past the prefix at it,
+    /// the closer because the fence character the opener begins with locates it on its
+    /// own line.
+    pub content: String,
 }
 
 impl Atom {

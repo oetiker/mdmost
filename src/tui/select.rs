@@ -256,57 +256,115 @@ impl Resolved {
     /// document, which is the entire purpose of copying a diagram. So the quote markers
     /// come off — and the list indent of an indented one, by the same single rule.
     ///
-    /// Nothing is guessed and no pattern is matched. [`container_prefix`] reads the
-    /// prefix straight out of the document, from the gap between the start of the block's
-    /// first line and the byte comrak said the block begins at; every later line is
-    /// stripped only if it *actually* starts with that exact text. So a `> ` that is
-    /// genuinely part of the Mermaid source survives: in an unquoted diagram the prefix is
-    /// empty and nothing is removed, and in a quoted one only the outer marker matches,
-    /// leaving `> > flowchart` as `> flowchart`.
+    /// The range is spliced rather than filtered line by line: everything before a washed
+    /// atom's *line* is emitted verbatim, then [`atom_text`] answers for the whole block,
+    /// then the walk resumes past its end. Cutting at the line start and not at
+    /// `source_start` is what takes the opener's prefix off, and it does so for every
+    /// drag shape — a press on the box art, or a drag down from the quoted prose above,
+    /// both put those bytes inside the range, which a rule keyed on "the first line of
+    /// the range begins past the prefix" gets wrong exactly there.
     ///
     /// Text outside an atom is untouched. A drag that leaves a quoted diagram for the
     /// quoted prose below it keeps the prose's `> ` — that is decision 1, and the reader
-    /// selected prose, not a diagram.
+    /// selected prose, not a diagram. The prose *above* one keeps it for the same reason.
+    ///
+    /// [`resolve`] widens the range over every washed atom, so an atom in `washed` is
+    /// covered whole; the bounds checks below only keep a hand-built [`Resolved`] honest.
     fn text(&self, source: &str) -> String {
         let raw = source.get(self.range()).unwrap_or_default();
         if self.washed.is_empty() {
             return raw.to_string();
         }
+        let mut atoms: Vec<&Atom> = self.washed.iter().collect();
+        atoms.sort_by_key(|atom| atom.source_start);
         let mut out = String::with_capacity(raw.len());
         let mut at = self.lo;
-        for (index, line) in raw.split_inclusive('\n').enumerate() {
-            // The first line of the range is never stripped: either it begins mid-line,
-            // in prose the reader selected, or it begins at the atom's own first byte,
-            // which is already past the prefix — that is where the prefix is *read* from.
-            let kept = if index == 0 {
-                line
-            } else {
-                self.washed
-                    .iter()
-                    .filter(|atom| at >= atom.source_start && at < atom.source_end)
-                    .find_map(|atom| line.strip_prefix(container_prefix(source, *atom)))
-                    .unwrap_or(line)
-            };
-            out.push_str(kept);
-            at += line.len();
+        for atom in atoms {
+            let head = line_start(source, atom.source_start);
+            if at < head {
+                out.push_str(source.get(at..head).unwrap_or_default());
+            }
+            out.push_str(&atom_text(source, atom));
+            at = at.max(atom.source_end);
+        }
+        if at < self.hi {
+            out.push_str(source.get(at..self.hi).unwrap_or_default());
         }
         out
     }
 }
 
-/// The container prefix comrak stripped from the lines of `atom`'s block.
+/// An atom's whole block, as a reader could paste it: no container prefix on any line.
 ///
-/// `source_start` is the first byte of the block *after* its container prefix — comrak
-/// reports a fenced block as starting at the backticks — so the prefix is simply what
-/// lies between the start of that line and it: `> ` in a block quote, `> > ` in a nested
-/// one, the indent of a fence inside a list item, and the empty string for a block at the
-/// top level. One rule, read from the document, rather than three cases guessed from a
-/// pattern; the same relationship `doc::convert::code_lines` uses in the other direction
-/// to locate a content line as a *suffix* of its source line.
-fn container_prefix(source: &str, atom: Atom) -> &str {
-    source
-        .get(line_start(source, atom.source_start)..atom.source_start)
-        .unwrap_or_default()
+/// Three kinds of line, and none of them is guessed from a pattern:
+///
+/// - **The opener.** comrak records a fenced block as starting at the backticks, which is
+///   already past the prefix, so the opener is `source_start` to the end of its line.
+/// - **The content.** [`Atom::content`] is what comrak handed the renderer, with the
+///   prefix off — one literal line per source line, in order, because a container strips
+///   line by line and never merges or splits one. Each is checked back against the
+///   document as a *suffix* of its source line, which is `doc::convert::code_lines`'
+///   discipline run over the same pair of texts: it recognises `>` and `> ` and a bare
+///   `>` on a blank line as the prefixes they each are, rather than requiring every line
+///   to repeat the first line's bytes. A line that does not match — a tab-indented one,
+///   where comrak's expansion means the content is no longer a suffix of the source — is
+///   left exactly as the document has it. That degradation is the point: an unstripped
+///   line is a line the reader can still read, where a mis-stripped one is broken
+///   Mermaid.
+/// - **The closer**, and anything after the content. It carries no literal to match, so
+///   it is cut at the first fence character — the byte `source_start` itself points at.
+///   A container prefix cannot contain that character (a quote marker is `>`, a list
+///   indent is spaces), so the cut is exact rather than a guess about what `> ` looks
+///   like. A block that ends at EOF has no closing fence and simply has no such line.
+fn atom_text(source: &str, atom: &Atom) -> String {
+    let end = atom.source_end.min(source.len());
+    let start = atom.source_start.min(end);
+    let mut out = String::with_capacity(end - start);
+    let mut at = line_end(source, start, end);
+    out.push_str(&source[start..at]);
+    let fence = source[start..].chars().next();
+    let mut content = atom.content.split_inclusive('\n');
+    while at < end {
+        let stop = line_end(source, at, end);
+        let line = &source[at..stop];
+        let kept = match content.next() {
+            Some(literal) => strip_to_content(line, literal),
+            None => fence.map_or(line, |fence| {
+                line.find(fence).map_or(line, |cut| &line[cut..])
+            }),
+        };
+        out.push_str(kept);
+        at = stop;
+    }
+    out
+}
+
+/// One source line of a block, with whatever the container put in front of `literal` off.
+///
+/// The suffix check is what makes this safe: `literal` is comrak's own answer, but it is
+/// only *used* where the document agrees with it, so a line the parser and the source
+/// have drifted apart on comes back untouched instead of silently rewritten. The trailing
+/// newline is compared off both sides and then taken from the source line, so a blank
+/// quoted line — `>` in the document, nothing at all in the literal — becomes the empty
+/// line it renders as, and a CRLF document keeps its `\r` (comrak leaves it in the
+/// literal, so the suffix still matches).
+fn strip_to_content<'a>(line: &'a str, literal: &str) -> &'a str {
+    let body = line.strip_suffix('\n').unwrap_or(line);
+    let wanted = literal.strip_suffix('\n').unwrap_or(literal);
+    if body.len() >= wanted.len() && body.ends_with(wanted) {
+        &line[body.len() - wanted.len()..]
+    } else {
+        line
+    }
+}
+
+/// The offset just past the line `at` starts on, never beyond `end`.
+///
+/// The newline is part of the line, so the pieces concatenate back into the text.
+fn line_end(source: &str, at: usize, end: usize) -> usize {
+    source[at..end]
+        .find('\n')
+        .map_or(end, |newline| at + newline + 1)
 }
 
 /// What a selection means, for the clipboard and the highlight alike.
@@ -364,7 +422,7 @@ pub(crate) fn resolve(canvas: &Canvas, source: &str, selection: Selection) -> Op
     // is kept: the diagram is added to what the drag covered, not substituted for it, so
     // a press on a border and a release in the prose below yields the block *and* the
     // prose, exactly as a press on a label and the same release does.
-    let (lo, hi) = match (source_hull(canvas, source, selection), pressed_on) {
+    let (lo, hi) = match (source_hull(canvas, source, selection), pressed_on.as_ref()) {
         (Some(hull), _) => hull,
         (None, Some(atom)) => (atom.source_start, atom.source_end),
         (None, None) => return None,
@@ -395,7 +453,7 @@ pub(crate) fn resolve(canvas: &Canvas, source: &str, selection: Selection) -> Op
         .atoms()
         .iter()
         .filter(|atom| atom.source_end > lo && atom.source_start < hi)
-        .copied()
+        .cloned()
         .collect();
     if let Some(atom) = pressed_on
         && !washed.contains(&atom)
@@ -403,10 +461,12 @@ pub(crate) fn resolve(canvas: &Canvas, source: &str, selection: Selection) -> Op
         washed.push(atom);
     }
     for atom in &washed {
-        // The atom's own extent, not its line's: a fenced block's recorded start is the
-        // backtick, so reaching back to the line start would pull in the container prefix
-        // that `Resolved::text` exists to take *off*. The prefix stays outside the range,
-        // where it is read from rather than copied.
+        // The atom's own extent, not its line's. Widening to the line start would put the
+        // container prefix in the range for no gain: `Resolved::text` splices a washed
+        // atom's block in whole and cuts back to the line start itself, so the prefix
+        // comes off whether or not the range happens to contain it — which it does
+        // already whenever `extend_over_markup` above walked `lo` back over it, the `> `
+        // being undrawn markup like any other.
         lo = lo.min(atom.source_start);
         hi = hi.max(atom.source_end);
     }
@@ -434,7 +494,7 @@ fn pressed_on_chrome_of(canvas: &Canvas, selection: Selection) -> Option<Atom> {
             && at.col < span.col.saturating_add(span.cols)
             && atom.contains_span(span)
     });
-    (!on_label).then_some(*atom)
+    (!on_label).then(|| atom.clone())
 }
 
 /// The offset of the first byte of the line `at` lies on.

@@ -98,15 +98,28 @@ This is the one qualification of §2's "taken verbatim", and it is confined to t
 drag that leaves a quoted diagram for the quoted prose below it strips the block and keeps
 the prose exactly as written, because the reader selected prose.
 
-The prefix is **read out of the document, not matched as a pattern**. A block's recorded
-extent starts after its prefix — comrak reports a fence as beginning at the backticks — so
-the prefix is the text between the start of that first line and the extent's first byte,
-and every later line is stripped only if it genuinely begins with that exact string. `> `,
-`> > ` and a list indent therefore fall out of one rule rather than three cases, and a `> `
-that is part of the Mermaid source survives: at the top level the prefix is empty and
-nothing is removed, and inside a quote only the outer marker matches. This is the same
-relationship `doc::convert::code_lines` uses in the other direction, where a content line
-is located as a *suffix* of its source line.
+The prefix is **read out of the document per line, not matched as a pattern and not
+sampled once**. *Amended 2026-08-11: this paragraph previously specified one prefix, taken
+from the block's first line and required of every later line. That is not a rule
+CommonMark obeys — `>` and `> ` are the same marker, a blank quoted line is a bare `>`,
+and a document may mix them inside one quote — and an implementation of it renders three
+such documents correctly while copying broken Mermaid out of them.*
+
+The block's content, with the prefix already off, is what comrak handed the renderer, and
+an atom carries it. Each line of it is located as a **suffix** of its source line — the
+same relationship `doc::convert::code_lines` uses, and comrak's own prefix-stripping run
+backwards — so what comes off a line is what that line actually had in front of it. `> `,
+`> > `, `>`, a bare `>` and a list indent all fall out of the one rule, and a `> ` that is
+part of the Mermaid source survives, because the suffix is matched against the document
+rather than assumed. A line whose content cannot be located there — comrak expands a tab
+when it strips a container, so a tab-indented line is no longer a suffix of its source —
+is copied **exactly as the document has it**: an unstripped line is one the reader can
+still read, where a mis-stripped one is broken Mermaid.
+
+The two fence lines carry no content to match and are read straight from the source: the
+opener from the block's recorded start, which comrak places after the prefix at the
+backticks, and the closer from the first fence character on its line, which a container
+prefix cannot contain.
 
 This is not a refinement of §2's markup rule but a replacement for it inside a diagram.
 That rule extends a selection over every byte nothing drew, which in prose is a pair of

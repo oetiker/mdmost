@@ -3476,6 +3476,173 @@ fn the_prefix_comes_off_the_diagram_and_not_off_the_prose_beside_it() {
     );
 }
 
+/// The prefix comes off the **opener** too, when the press lands on the drawing.
+///
+/// The drag-shape axis, which every other prefix test here misses: they all drag from one
+/// label to another, and that is the one shape whose hull starts *inside* a label, so the
+/// range's first byte lands exactly on the block's recorded start and the opener's `> `
+/// is never in the range to begin with. Press on the box art instead — design spec §2.2's
+/// third case, and the commonest gesture on a diagram — and the range starts at the
+/// opener's *line*, prefix included. Two reviewers found this independently on
+/// `3a3dedb`, where it copied `> ```mermaid` as line one: a quote containing a fence,
+/// which is exactly what the owner's ruling was made to prevent.
+#[test]
+fn a_press_on_box_art_in_a_quote_copies_the_opener_without_its_prefix() {
+    let source = "> ```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    // The row above the labels is the boxes' top edge: drawing, and nothing else.
+    let (label, _, _) = drawn(&canvas, "Read");
+    let (edge, left, _) = drawn(&canvas, "┌");
+    assert_eq!(
+        edge,
+        label - 1,
+        "the top edge sits directly above the labels"
+    );
+    let on_art = drag(Pos::new(edge, left), Pos::new(edge, left.saturating_add(2)));
+    let extract = select::extract(&canvas, source, on_art).expect("the drag covered drawn cells");
+    assert_eq!(
+        extract.text, "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```",
+        "a press on the drawing copies the block as cleanly as a drag across its labels"
+    );
+    for line in extract.text.lines() {
+        assert!(
+            !line.starts_with('>'),
+            "no line keeps a quote marker, opener included, got {:?}",
+            extract.text
+        );
+    }
+}
+
+/// The mirror of [`the_prefix_comes_off_the_diagram_and_not_off_the_prose_beside_it`]:
+/// quoted prose *above*, dragged down into the diagram.
+///
+/// The other drag shape that puts the opener's line — prefix and all — inside the range.
+/// The prose keeps its `> `, because the reader selected prose and decision 1 takes prose
+/// verbatim; the block does not, because it is an atom. On `3a3dedb` the boundary between
+/// the two fell one line late, and the clipboard held `> ```mermaid` followed by stripped
+/// content: unpasteable read either way.
+#[test]
+fn a_drag_from_the_quoted_prose_above_strips_the_diagrams_opener() {
+    let source =
+        "> Before it.\n>\n> ```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (above, at, _) = drawn(&canvas, "Before it.");
+    let (row, to, cols) = drawn(&canvas, "Draw");
+    let down = drag(Pos::new(above, at), Pos::new(row, to + cols - 1));
+    let extract = select::extract(&canvas, source, down).expect("covered");
+    assert_eq!(
+        extract.text, "> Before it.\n>\n```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```",
+        "the prose exactly as the file has it, the block as if it were at the top level"
+    );
+}
+
+/// A container prefix is recognised **per line**, not sampled once from the opener.
+///
+/// `CommonMark` does not require every line of a block quote to carry the same bytes: `>`
+/// with no space after it is the same marker as `> `, and a blank quoted line is a bare
+/// `>` — which is what `CommonMark` itself produces for one. An implementation that reads
+/// one prefix from line one and then requires every later line to *start with that exact
+/// string* renders all three of these correctly and copies them wrong, which is the
+/// see/get divergence this module exists to remove. Every fixture below is legal
+/// `CommonMark` and renders the same diagram as a plain quoted one.
+///
+/// The remedy the owner's ruling names is comrak's own prefix-stripping, checked back
+/// against the document: the block's content is matched line by line as a *suffix* of its
+/// source line, so a line whose prefix does not look like any other line's is still
+/// stripped exactly, and a line that cannot be located is left alone rather than mangled.
+#[test]
+fn a_quoted_diagrams_prefix_is_read_line_by_line() {
+    let clean = "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```";
+    for (shape, source, want) in [
+        (
+            "a quote marker with no space after it",
+            "> ```mermaid\n>flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n",
+            clean,
+        ),
+        (
+            "a bare quote marker on a blank line",
+            "> ```mermaid\n> flowchart LR\n>\n>     A[Read] --> B[Draw]\n> ```\n",
+            "```mermaid\nflowchart LR\n\n    A[Read] --> B[Draw]\n```",
+        ),
+        (
+            "an opener with no space and a body with one",
+            ">```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n",
+            clean,
+        ),
+    ] {
+        let mut app = pager(source);
+        let canvas = app.canvas().clone();
+        let (row, from, _) = drawn(&canvas, "Read");
+        let (_, to, cols) = drawn(&canvas, "Draw");
+        let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+        let extract = select::extract(&canvas, source, across).expect("covered both boxes");
+        assert_eq!(
+            extract.text, want,
+            "a diagram written with {shape} copies as clean Mermaid"
+        );
+        for line in extract.text.lines() {
+            assert!(
+                !line.starts_with('>'),
+                "no line copied from {shape} keeps a quote marker, got {:?}",
+                extract.text
+            );
+        }
+        // The third fixture's failure mode is not a marker but what it *leaves behind*:
+        // a prefix sampled as `>` takes one byte off a `> ` line, so every content line
+        // comes back indented by one space. A `starts_with('>')` loop cannot see that,
+        // and neither can it see a closer left half-stripped, so the fence is pinned
+        // here as the fence it has to still be.
+        assert!(
+            extract.text.ends_with("\n```"),
+            "the closing fence is a fence, not an indented line, got {:?}",
+            extract.text
+        );
+    }
+}
+
+/// The other half of reading the prefix per line: a line the parser and the document
+/// **disagree** about comes back exactly as the document has it.
+///
+/// A tab-indented quoted diagram is the case that exists today. comrak expands the tab
+/// when it strips the container, so its content is no longer a suffix of the source line
+/// and no prefix can be established for that line. Two ways to go: emit comrak's text
+/// anyway, which puts on the clipboard bytes that appear nowhere in the file, or leave
+/// the line alone. This asserts the second, and asserts it byte for byte — a line the
+/// reader can still read beats a line quietly rewritten, which is the same call
+/// `doc::convert::code_lines` makes when it cannot locate a line at all.
+///
+/// The tab case is *not* fixed here and this test does not pretend it is: the fences come
+/// off, the content lines keep their `>` and their tab. What it pins is the direction of
+/// the degradation, so that "check comrak's answer against the document" cannot quietly
+/// become "trust it".
+#[test]
+fn a_line_the_parser_cannot_locate_is_copied_as_the_document_has_it() {
+    let source = "> ```mermaid\n>\tflowchart LR\n>\t    A[Read] --> B[Draw]\n> ```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    assert!(
+        canvas.spans().is_empty(),
+        "comrak's tab expansion costs this block every span it might have had, which is \
+         what puts every drag over it on the press-on-drawing path"
+    );
+    let (edge, left, _) = drawn(&canvas, "┌");
+    let on_art = drag(Pos::new(edge, left), Pos::new(edge, left.saturating_add(2)));
+    let extract = select::extract(&canvas, source, on_art).expect("the drag covered drawn cells");
+    assert_eq!(
+        extract.text, "```mermaid\n>\tflowchart LR\n>\t    A[Read] --> B[Draw]\n```",
+        "the two lines that could not be located are the document's own bytes, tab and \
+         marker included; nothing was invented for them"
+    );
+    for line in extract.text.lines() {
+        assert!(
+            source.contains(line),
+            "every copied line is a line the file actually has, got {line:?}"
+        );
+    }
+}
+
 /// The wash for a whole diagram covers its box art, and that is deliberate.
 ///
 /// Chrome never highlights anywhere else in this pager (design spec §2), and a test that

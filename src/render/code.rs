@@ -111,6 +111,11 @@ pub(crate) fn diagram_block(
             cols,
             source_start: block.start,
             source_end: block.end,
+            // comrak's own prefix-stripping, carried over verbatim. What a container
+            // stripped from each line is not recoverable from the source range alone, and
+            // a selection left to guess it copies Mermaid a reader cannot paste — see
+            // [`Atom::content`].
+            content: literal.to_string(),
         });
     }
     canvas.resize_width(width, ctx.base);
