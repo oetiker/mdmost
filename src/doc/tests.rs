@@ -369,3 +369,176 @@ fn a_fenced_block_holding_one_blank_line_has_exactly_one_empty_span() {
     assert_eq!(lines.len(), 1, "one literal line, so one entry");
     assert!(lines[0].is_empty(), "a blank line points at nothing");
 }
+
+/// Every text node of `source`, as `(text, start, end)`, in document order.
+fn text_nodes(source: &str) -> Vec<(String, usize, usize)> {
+    let doc = Doc::parse(source);
+    let mut out = Vec::new();
+    doc.root().walk(&mut |node| {
+        if let NodeKind::Text(text) = &node.kind {
+            out.push((text.clone(), node.source.start, node.source.end));
+        }
+    });
+    out
+}
+
+/// Asserts that every text node either copies its source byte for byte or is a single
+/// character transcribed from the whole of the source it names.
+fn assert_faithful(source: &str, nodes: &[(String, usize, usize)]) {
+    for (text, start, end) in nodes {
+        let bytes = source.get(*start..*end).expect("a span inside the source");
+        assert!(
+            bytes == text || text.chars().count() == 1,
+            "the node {text:?} names {bytes:?}, which it neither copies nor transcribes"
+        );
+    }
+}
+
+#[test]
+fn an_escape_splits_its_text_node_at_the_backslash() {
+    // comrak hands the whole run to one text node whose source is a byte longer than
+    // its text, and a node whose lengths disagree can carry no provenance at all — so
+    // one escape used to cost the whole paragraph its spans. Split at the escape, the
+    // two prose runs are exact copies again and only the backslash is left over, which
+    // is undrawn markup like the `**` around a bold word.
+    let source = "Alpha \\* beta.\n";
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![
+            ("Alpha ".to_string(), 0, 6),
+            ("*".to_string(), 7, 8),
+            (" beta.".to_string(), 8, 14),
+        ]
+    );
+    assert_faithful(source, &nodes);
+}
+
+#[test]
+fn an_entity_becomes_one_node_naming_the_whole_entity() {
+    // Nothing in `&amp;` is a copy of the `&` it draws, so the transcribed character
+    // takes the entity entire: those five bytes are exactly what produced that one cell.
+    let source = "Alpha &amp; beta.\n";
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![
+            ("Alpha ".to_string(), 0, 6),
+            ("&".to_string(), 6, 11),
+            (" beta.".to_string(), 11, 17),
+        ]
+    );
+    assert_eq!(
+        source.get(6..11),
+        Some("&amp;"),
+        "the whole entity, no less"
+    );
+    assert_faithful(source, &nodes);
+}
+
+#[test]
+fn a_numeric_entity_is_transcribed_like_a_named_one() {
+    for (source, expected) in [
+        ("Alpha &#65; beta.\n", ("A".to_string(), 6, 11)),
+        ("Alpha &#x41; beta.\n", ("A".to_string(), 6, 12)),
+    ] {
+        let nodes = text_nodes(source);
+        assert_eq!(nodes.len(), 3, "{source:?} splits into three runs");
+        assert_eq!(nodes[1], expected, "{source:?}");
+        assert_faithful(source, &nodes);
+    }
+}
+
+#[test]
+fn an_escaped_backslash_is_aligned_by_rewinding_onto_it() {
+    // `\\` is the case a forward-only walk gets wrong: the first backslash of the pair
+    // compares equal to the single backslash it draws, so the walk sails past it and
+    // only notices one byte later, with the escape already behind it. The alignment
+    // has to be able to step back onto it.
+    let source = "Alpha \\\\ beta.\n";
+    assert_eq!(source.get(6..8), Some("\\\\"), "fixture: two backslashes");
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![
+            ("Alpha ".to_string(), 0, 6),
+            ("\\".to_string(), 7, 8),
+            (" beta.".to_string(), 8, 14),
+        ]
+    );
+    assert_faithful(source, &nodes);
+}
+
+#[test]
+fn two_entities_in_a_row_are_aligned_by_rewinding_onto_the_second() {
+    // The same trap as `\\`, one construct along: the `&` opening the second entity
+    // compares equal to the `&` the first one drew.
+    let source = "Alpha &amp;&amp; beta\n";
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![
+            ("Alpha ".to_string(), 0, 6),
+            ("&".to_string(), 6, 11),
+            ("&".to_string(), 11, 16),
+            (" beta".to_string(), 16, 21),
+        ]
+    );
+    assert_faithful(source, &nodes);
+}
+
+#[test]
+fn a_text_node_that_copies_its_source_is_left_whole() {
+    // `&notreal;` is not an entity, so comrak passes it through and the node is
+    // already an exact copy. Nothing to split, and no new nodes to surprise a walk.
+    let source = "&notreal; x\n";
+    assert_eq!(text_nodes(source), vec![("&notreal; x".to_string(), 0, 11)]);
+}
+
+#[test]
+fn a_text_node_that_cannot_be_aligned_keeps_its_whole_source() {
+    // `&fjlig;` expands to *two* characters. The alignment anchors an entity to one,
+    // so this one does not re-synchronise and the node is left exactly as comrak
+    // reported it — no provenance, which is what it had before, rather than a split
+    // at a guessed position. Fail closed, per grapheme where it can and per node
+    // where it cannot.
+    let source = "Alpha &fjlig; beta\n";
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![("Alpha fj beta".to_string(), 0, 18)],
+        "one node, unsplit"
+    );
+    assert_ne!(
+        source.get(nodes[0].1..nodes[0].2),
+        Some(nodes[0].0.as_str()),
+        "and it is still the node that cannot carry provenance"
+    );
+}
+
+#[test]
+fn an_escape_inside_markup_is_split_like_any_other() {
+    // The alignment runs over every text node, not only the ones in a bare paragraph.
+    for (source, expected) in [
+        (
+            "# Alpha \\* beta\n",
+            vec![("Alpha ", 2, 8), ("*", 9, 10), (" beta", 10, 15)],
+        ),
+        (
+            "> Alpha \\* beta\n",
+            vec![("Alpha ", 2, 8), ("*", 9, 10), (" beta", 10, 15)],
+        ),
+        (
+            "- Alpha \\* beta\n",
+            vec![("Alpha ", 2, 8), ("*", 9, 10), (" beta", 10, 15)],
+        ),
+    ] {
+        let nodes = text_nodes(source);
+        let expected: Vec<(String, usize, usize)> = expected
+            .into_iter()
+            .map(|(t, a, b)| (t.to_string(), a, b))
+            .collect();
+        assert_eq!(nodes, expected, "{source:?}");
+        assert_faithful(source, &nodes);
+    }
+}

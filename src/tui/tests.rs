@@ -4904,6 +4904,209 @@ fn a_crlf_soft_line_break_declines_its_origin_and_leaves_the_clipboard_whole() {
     );
 }
 
+/// Asserts that every column of the paragraph on `row` is washed by a drag across it.
+fn assert_paragraph_washes(doc: &str, first: &str, last: &str) -> select::Extract {
+    let canvas = render(doc, 60);
+    let (row, first_col, _) = drawn(&canvas, first);
+    let (last_row, last_col, last_cols) = drawn(&canvas, last);
+    assert_eq!(row, last_row, "fixture assumption: one reflowed row");
+    let sel = drag(
+        Pos::new(row, first_col),
+        Pos::new(row, last_col + last_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, row);
+    let text = canvas.row_text(row);
+    for col in first_col..last_col + last_cols {
+        assert!(
+            ranges.iter().any(|range| range.contains(&col)),
+            "column {col} of the paragraph is not washed: {ranges:?} over {text:?}"
+        );
+    }
+    select::extract(&canvas, doc, sel).expect("the drag covered text")
+}
+
+#[test]
+fn an_escape_no_longer_darkens_its_whole_paragraph() {
+    // One `\*` used to cost every span in the paragraph: comrak reports the whole run
+    // as one text node whose source is a byte longer than its text, and a node whose
+    // lengths disagree carries no origin. Nothing highlighted and the clipboard fell
+    // through to the drawn cells. Split at the escape, the prose either side is an
+    // exact copy of its source again and the character the backslash protected is a
+    // copy of the byte after it, so the whole row washes.
+    let doc = "Alpha \\* beta gamma.\n";
+    let extract = assert_paragraph_washes(doc, "Alpha", "gamma.");
+    assert!(extract.from_source, "and the clipboard answers from source");
+    assert_eq!(
+        extract.text, "Alpha \\* beta gamma.",
+        "the source, backslash and all"
+    );
+}
+
+#[test]
+fn an_entity_no_longer_darkens_its_whole_paragraph() {
+    // The other half of the same defect. `&amp;` draws a character that copies no
+    // byte of its source, so the run around it is split and the entity's one cell is
+    // anchored to the whole of `&amp;` — those five bytes are exactly what drew it.
+    let doc = "Alpha &amp; beta gamma.\n";
+    let extract = assert_paragraph_washes(doc, "Alpha", "gamma.");
+    assert!(extract.from_source, "and the clipboard answers from source");
+    assert_eq!(
+        extract.text, "Alpha &amp; beta gamma.",
+        "the source, unexpanded"
+    );
+}
+
+#[test]
+fn a_numeric_entity_no_longer_darkens_its_whole_paragraph() {
+    for doc in ["Alpha &#65; beta gamma.\n", "Alpha &#x41; beta gamma.\n"] {
+        let extract = assert_paragraph_washes(doc, "Alpha", "gamma.");
+        assert!(extract.from_source, "{doc:?}: from source");
+        assert_eq!(extract.text, doc.trim_end(), "{doc:?}");
+    }
+}
+
+#[test]
+fn an_escape_at_the_very_start_of_a_paragraph_keeps_its_spans() {
+    // A boundary an alignment walk can drop: there is no prose run in front of the
+    // escape to flush, so the first thing the walk does is diverge.
+    let doc = "\\*Alpha beta gamma.\n";
+    let extract = assert_paragraph_washes(doc, "*Alpha", "gamma.");
+    assert!(extract.from_source, "the clipboard answers from source");
+    assert_eq!(extract.text, "\\*Alpha beta gamma.");
+}
+
+#[test]
+fn an_escape_at_the_very_end_of_a_paragraph_keeps_its_spans() {
+    // The other boundary: the walk diverges with nothing left to re-synchronise
+    // against, so it has to finish on the escape rather than look past it.
+    let doc = "Alpha beta gamma\\*\n";
+    let extract = assert_paragraph_washes(doc, "Alpha", "gamma*");
+    assert!(extract.from_source, "the clipboard answers from source");
+    assert_eq!(extract.text, "Alpha beta gamma\\*");
+}
+
+#[test]
+fn an_entity_at_either_end_of_a_paragraph_keeps_its_spans() {
+    for (doc, first, last, text) in [
+        (
+            "&amp;Alpha beta gamma.\n",
+            "&Alpha",
+            "gamma.",
+            "&amp;Alpha beta gamma.",
+        ),
+        (
+            "Alpha beta gamma&amp;\n",
+            "Alpha",
+            "gamma&",
+            "Alpha beta gamma&amp;",
+        ),
+    ] {
+        let extract = assert_paragraph_washes(doc, first, last);
+        assert!(extract.from_source, "{doc:?}: from source");
+        assert_eq!(extract.text, text, "{doc:?}");
+    }
+}
+
+#[test]
+fn dragging_the_character_an_escape_protected_copies_the_escape() {
+    // The escaped character's own cell is a copy of the byte after the backslash, so
+    // it resolves exactly; the backslash is undrawn markup, and `extend_over_markup`
+    // brings it along exactly as it brings a heading's `#`.
+    let doc = "Alpha \\* beta gamma.\n";
+    let canvas = render(doc, 60);
+    let extract = drag_over(&canvas, doc, "*");
+    assert!(extract.from_source, "one cell, resolved from source");
+    assert_eq!(extract.text, "\\*", "the escape, not the character alone");
+}
+
+#[test]
+fn dragging_the_character_an_entity_produced_copies_the_entity() {
+    // A transcribed cell has no interior: its span names the whole entity, so a drag
+    // over that one cell copies `&amp;` and never a fragment of it.
+    let doc = "Alpha &amp; beta gamma.\n";
+    let canvas = render(doc, 60);
+    let extract = drag_over(&canvas, doc, "&");
+    assert!(extract.from_source, "one cell, resolved from source");
+    assert_eq!(extract.text, "&amp;", "the whole entity");
+}
+
+#[test]
+fn a_search_hit_after_an_escape_lands_on_the_cells_it_drew() {
+    // Search runs over the source and projects through the same spans. With the
+    // paragraph unspanned there was nothing to project onto at all; with it split,
+    // the words after the escape are one run of cells again.
+    let doc = "Alpha \\* beta gamma.\n";
+    let canvas = render(doc, 60);
+    let mut search = crate::search::Search::new(doc, "beta gamma", SearchMode::Literal)
+        .expect("a valid pattern");
+    search.locate(doc, canvas.spans());
+    let hit = search.hits().first().expect("the pattern matches");
+    assert_eq!(
+        hit.segments.len(),
+        1,
+        "one unbroken run of cells: {:?}",
+        hit.segments
+    );
+    assert_eq!(
+        hit.segments[0].cols,
+        u16::try_from("beta gamma".len()).expect("short"),
+        "as wide as the rendered match"
+    );
+    let (row, col, _) = drawn(&canvas, "beta");
+    assert_eq!(
+        (hit.segments[0].row, hit.segments[0].col),
+        (row, col),
+        "and it starts where the words are drawn"
+    );
+}
+
+#[test]
+fn an_entity_wider_than_one_column_declines_its_origin() {
+    // The fail-closed edge of the transcription rule. A span's source is otherwise a
+    // byte-for-byte copy of the cells it names, which is what lets `select` and
+    // `search` convert between bytes and columns inside it. A transcribed span breaks
+    // that, and it is only harmless while the span has no interior — one column. An
+    // emoji entity draws two, so it is declined and that cell stays dark rather than
+    // handing the column arithmetic a body it cannot walk.
+    let doc = "Alpha &#x1F600; beta gamma.\n";
+    let canvas = render(doc, 60);
+    let (row, col, _) = drawn(&canvas, "\u{1F600}");
+    assert!(
+        !canvas
+            .spans()
+            .iter()
+            .any(|s| s.row == row && s.col <= col && col < s.col + s.cols),
+        "the emoji cell is deliberately unspanned: {:?}",
+        canvas.spans()
+    );
+    // And the prose either side of it keeps its provenance, which is the whole point:
+    // the degradation is one cell wide, not one paragraph wide.
+    let extract = drag_over(&canvas, doc, "gamma.");
+    assert!(extract.from_source, "the words after it still resolve");
+    assert_eq!(extract.text, "gamma.");
+}
+
+#[test]
+fn a_run_that_cannot_be_aligned_keeps_todays_honest_fallback() {
+    // `&fjlig;` expands to two characters and the alignment declines it, so this
+    // paragraph keeps the behaviour every escape used to get: no spans, and a
+    // clipboard that says so. Pinned because "fail closed" has to be a decision that
+    // stays visible, not a case nobody looked at.
+    let doc = "Alpha &fjlig; beta gamma.\n";
+    let canvas = render(doc, 60);
+    let (row, _, _) = drawn(&canvas, "Alpha");
+    assert!(
+        !canvas.spans().iter().any(|s| s.row == row),
+        "the paragraph carries no spans: {:?}",
+        canvas.spans()
+    );
+    let extract = drag_over(&canvas, doc, "gamma.");
+    assert!(
+        !extract.from_source,
+        "and the clipboard admits it is the rendered text"
+    );
+}
+
 #[test]
 fn a_search_hit_across_a_soft_line_break_highlights_in_one_piece() {
     // Anchoring the soft break's space is not only about the selection wash: a search

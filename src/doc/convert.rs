@@ -157,7 +157,203 @@ pub(super) fn document<'a>(
     let offsets = LineOffsets::new(source);
     let mut doc = convert(root, &offsets, slugger, headings);
     number_footnotes(&mut doc);
+    split_transcriptions(&mut doc, source);
     doc
+}
+
+/// The longest `&…;` treated as an entity: HTML5's longest name is 31 characters.
+const MAX_ENTITY: usize = 34;
+
+/// What a divergence between the source and the text it drew turned out to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Transcription {
+    /// A backslash escape: two source bytes, the second of which is drawn verbatim.
+    Escape,
+    /// A character reference of this many source bytes, `&` and `;` included.
+    Entity(usize),
+}
+
+/// Splits every text node whose text is not a byte-for-byte copy of its source.
+///
+/// comrak reports one `Text` node per unbroken run of literal text, and the run keeps
+/// its escapes and entities in its `sourcepos` while its text has them resolved. The
+/// two lengths then disagree — and a run whose lengths disagree can carry no
+/// provenance at all, because there is no way to say which byte drew which cell. So a
+/// single `\*` or `&amp;` anywhere in a paragraph used to cost *every* word in it its
+/// search spans, its selection highlight and its place in the clipboard.
+///
+/// Splitting makes that degradation one character wide instead of one paragraph wide.
+/// The prose either side of a transcription is an exact copy of its source again, and
+/// the transcription becomes a node of its own naming exactly the bytes that drew it.
+/// A run that does not re-synchronise is left precisely as comrak reported it, which
+/// is the behaviour every escaped run had before: no origin beats a guessed one.
+///
+/// Run once over the finished tree rather than inside [`convert`] because one node
+/// becomes several, which only the parent can hold.
+fn split_transcriptions(node: &mut Node, source: &str) {
+    let mut out: Vec<Node> = Vec::with_capacity(node.children.len());
+    for mut child in std::mem::take(&mut node.children) {
+        split_transcriptions(&mut child, source);
+        match segments(&child, source) {
+            Some(segments) => out.extend(
+                segments
+                    .into_iter()
+                    .map(|(text, span)| Node::new(NodeKind::Text(text), span)),
+            ),
+            None => out.push(child),
+        }
+    }
+    node.children = out;
+}
+
+/// The aligned runs of a text node, or `None` if it is already faithful or cannot be
+/// aligned.
+fn segments(node: &Node, source: &str) -> Option<Vec<(String, SourceSpan)>> {
+    let NodeKind::Text(text) = &node.kind else {
+        return None;
+    };
+    if node.source.len() == text.len() {
+        return None;
+    }
+    let bytes = source.get(node.source.start..node.source.end)?;
+    align(bytes, text, node.source.start)
+}
+
+/// Walks `src` and the `text` it produced together, cutting at every transcription.
+///
+/// Where the two agree the walk advances both, which is the run of prose that copies
+/// its source. Where they diverge it is at an escape or a character reference, and the
+/// walk consumes the source form against the one character it drew before carrying on.
+/// `start` is where `src` sits in the document, so the spans come out absolute.
+///
+/// Returns `None` the moment the two stop re-synchronising: an entity that expands to
+/// more than one character (`&fjlig;` is `fj`), a tab comrak widened, anything unknown.
+/// The caller then keeps the node whole, which is exactly today's behaviour.
+fn align(src: &str, text: &str, start: usize) -> Option<Vec<(String, SourceSpan)>> {
+    let mut out: Vec<(String, SourceSpan)> = Vec::new();
+    let (mut s, mut t) = (0usize, 0usize);
+    let (mut run_s, mut run_t) = (0usize, 0usize);
+    loop {
+        let source_char = src[s..].chars().next();
+        let text_char = text[t..].chars().next();
+        if let (Some(a), Some(b)) = (source_char, text_char)
+            && a == b
+        {
+            s += a.len_utf8();
+            t += b.len_utf8();
+            continue;
+        }
+        if source_char.is_none() && text_char.is_none() {
+            break;
+        }
+        let (at, kind) = rewind(src, text, run_s, run_t, s)?;
+        let t_at = run_t + (at - run_s);
+        if at > run_s {
+            out.push((
+                text[run_t..t_at].to_string(),
+                SourceSpan::new(start + run_s, start + at),
+            ));
+        }
+        let drawn = text[t_at..].chars().next()?;
+        let span = match kind {
+            // The backslash is undrawn markup, like the `**` around a bold word: the
+            // character it protects *is* a copy of the byte after it, so the segment
+            // names that byte alone and stays faithful. `extend_over_markup` picks the
+            // backslash up from the selection side, as it does every other marker.
+            Transcription::Escape => {
+                SourceSpan::new(start + at + 1, start + at + 1 + drawn.len_utf8())
+            }
+            // Nothing in `&amp;` copies the `&` it draws, so the character takes the
+            // whole reference: those bytes are exactly what produced that one cell.
+            Transcription::Entity(len) => SourceSpan::new(start + at, start + at + len),
+        };
+        out.push((drawn.to_string(), span));
+        s = match kind {
+            Transcription::Escape => at + 1 + drawn.len_utf8(),
+            Transcription::Entity(len) => at + len,
+        };
+        t = t_at + drawn.len_utf8();
+        run_s = s;
+        run_t = t;
+    }
+    if s > run_s {
+        out.push((
+            text[run_t..t].to_string(),
+            SourceSpan::new(start + run_s, start + s),
+        ));
+    }
+    debug_assert_eq!(
+        out.iter()
+            .map(|(text, _)| text.as_str())
+            .collect::<String>(),
+        text,
+        "the segments must reproduce the text they were cut from"
+    );
+    (!out.is_empty()).then_some(out)
+}
+
+/// Where the divergence noticed at `s` actually began, and what it is.
+///
+/// Usually `s` itself. But a transcription whose *first* character happens to be what
+/// it draws is walked straight past: the first byte of `\\` compares equal to the one
+/// backslash it draws, and so does the `&` opening the second of two `&amp;`s. Both
+/// are only noticed a character later, with the transcription already behind the
+/// cursor — so the search runs backwards, and the nearest candidate inside the run of
+/// prose just walked wins.
+fn rewind(
+    src: &str,
+    text: &str,
+    run_s: usize,
+    run_t: usize,
+    s: usize,
+) -> Option<(usize, Transcription)> {
+    let bytes = src.as_bytes();
+    for at in (run_s..=s).rev().filter(|at| *at < src.len()) {
+        // The run walked between `run_s` and `s` copies its source, so the two cursors
+        // moved in step and the text position is the same distance along.
+        let t_at = run_t + (at - run_s);
+        let Some(drawn) = text[t_at..].chars().next() else {
+            continue;
+        };
+        match bytes[at] {
+            b'\\' => {
+                // comrak only honours a backslash in front of ASCII punctuation; in
+                // front of anything else it is a literal backslash, which would have
+                // compared equal and never reached here.
+                if let Some(escaped) = src[at + 1..].chars().next()
+                    && escaped.is_ascii_punctuation()
+                    && escaped == drawn
+                {
+                    return Some((at, Transcription::Escape));
+                }
+            }
+            b'&' => {
+                if let Some(len) = entity_len(&src[at..]) {
+                    return Some((at, Transcription::Entity(len)));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The byte length of the character reference `src` opens with, `&` and `;` included.
+///
+/// Shape only — whether the name is one comrak knows is not decidable here, and does
+/// not need to be: a name it does not know never diverges from the text it drew, so
+/// the walk never asks. `&notreal;` is passed through verbatim and stays a copy.
+fn entity_len(src: &str) -> Option<usize> {
+    let body = src.strip_prefix('&')?;
+    let name = body.split(';').next()?;
+    if name.is_empty()
+        || name.len() > MAX_ENTITY - 2
+        || name.len() == body.len()
+        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'#')
+    {
+        return None;
+    }
+    Some(name.len() + 2)
 }
 
 /// Whether an inline HTML tag is a `<br>` in any of its accepted spellings.

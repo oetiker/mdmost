@@ -29,6 +29,18 @@ pub fn wrap(spans: &[Span], width: usize) -> Vec<Line> {
     wrap_spans(spans, width)
 }
 
+/// Where the text of a run came from in the document source.
+#[derive(Debug, Clone, Copy)]
+enum Origin {
+    /// The run reproduces the source byte for byte from this offset, so every cluster
+    /// of it can be given an offset of its own.
+    Copied(usize),
+    /// The whole run — exactly one grapheme, exactly one column — was *transcribed*
+    /// from these bytes: `&amp;` drawing an `&`. Nothing in it copies anything, so it
+    /// maps as an indivisible unit and never joins a neighbouring run.
+    Transcribed(SourceSpan),
+}
+
 /// A styled run together with the source bytes it was produced from.
 #[derive(Debug, Clone)]
 struct Piece {
@@ -36,9 +48,9 @@ struct Piece {
     text: String,
     /// The style the run is drawn in, overlaid on whatever is underneath.
     style: Style,
-    /// Byte offset in the document source of `text[0]`, when the run maps to the
-    /// source one byte at a time. `None` for synthesised text such as link targets.
-    origin: Option<usize>,
+    /// What in the source drew this run. `None` for synthesised text such as link
+    /// targets, and for anything whose mapping is not knowable.
+    origin: Option<Origin>,
 }
 
 impl Piece {
@@ -53,7 +65,41 @@ impl Piece {
 
     /// A run that reproduces `source` verbatim, if the lengths agree.
     fn anchored(text: String, style: Style, source: SourceSpan) -> Self {
-        let origin = (source.len() == text.len()).then_some(source.start);
+        let origin = (source.len() == text.len()).then_some(Origin::Copied(source.start));
+        Self {
+            text,
+            style,
+            origin,
+        }
+    }
+
+    /// A run of document text, which may be a transcription rather than a copy.
+    ///
+    /// [`crate::doc`] has already cut every text node at its escapes and character
+    /// references, so a run whose lengths still disagree is one of two things: a
+    /// transcription — one character drawn from a `&…;` that copies none of it — or a
+    /// run whose alignment was declined, which keeps no origin at all.
+    ///
+    /// A transcription is anchored only while it draws **one column**. That is the
+    /// only case with no interior position: a span's source is otherwise a
+    /// byte-for-byte copy of the cells it names, which is what lets `select` and
+    /// `search` convert between bytes and columns inside it, and a two-column
+    /// transcription would hand that arithmetic a body it cannot walk. Wider ones —
+    /// an emoji reference — decline and stay dark, one cell wide.
+    fn transcribable(text: String, style: Style, source: SourceSpan) -> Self {
+        if source.len() == text.len() {
+            return Self {
+                text,
+                style,
+                origin: Some(Origin::Copied(source.start)),
+            };
+        }
+        // One grapheme drawing one column: the two halves of "this run has no interior
+        // position", which is what makes a span whose source is not a copy of its text
+        // safe for the column arithmetic in `select` and `search`.
+        let clusters: Vec<&str> = graphemes(&text).collect();
+        let single = matches!(clusters[..], [only] if display_width(only) == 1);
+        let origin = (single && !source.is_empty()).then_some(Origin::Transcribed(source));
         Self {
             text,
             style,
@@ -62,11 +108,15 @@ impl Piece {
     }
 }
 
-/// One grapheme cluster of the flattened inline stream, with its source offset.
+/// One grapheme cluster of the flattened inline stream, with the source that drew it.
 #[derive(Debug, Clone, Copy)]
 struct Anchored<'a> {
     text: &'a str,
-    origin: Option<usize>,
+    /// The bytes this one cluster was drawn from, if they are known.
+    source: Option<SourceSpan>,
+    /// Whether those bytes are a verbatim copy of the cluster. A transcribed cluster
+    /// is a span of its own; see [`reconcile`].
+    copied: bool,
 }
 
 /// Flattens inline nodes into styled runs.
@@ -97,7 +147,14 @@ fn trim_edges(pieces: &mut Vec<Piece>) {
         let trimmed = first.text.trim_start();
         let removed = first.text.len() - trimmed.len();
         if removed > 0 {
-            first.origin = first.origin.map(|start| start + removed);
+            first.origin = match first.origin {
+                Some(Origin::Copied(start)) => Some(Origin::Copied(start + removed)),
+                // A transcription maps as a unit, so a partial trim would leave it
+                // claiming bytes for text it no longer draws. Defensive: it is one
+                // grapheme, so trimming it is all-or-nothing and the piece below is
+                // dropped whole — a `&nbsp;` opening a paragraph is that case.
+                Some(Origin::Transcribed(_)) | None => None,
+            };
             first.text = trimmed.to_string();
         }
         if first.text.is_empty() {
@@ -130,17 +187,46 @@ fn render_pieces(pieces: &[Piece], width: u16, base: Style) -> Canvas {
     canvas
 }
 
-/// Splits the runs into per-grapheme entries carrying absolute source offsets.
+/// Splits the runs into per-grapheme entries carrying absolute source ranges.
 fn flatten(pieces: &[Piece]) -> Vec<Anchored<'_>> {
     let mut out = Vec::new();
     for piece in pieces {
-        let mut offset = 0usize;
-        for cluster in graphemes(&piece.text) {
-            out.push(Anchored {
+        let clusters: Vec<&str> = graphemes(&piece.text).collect();
+        match piece.origin {
+            Some(Origin::Copied(start)) => {
+                let mut offset = 0usize;
+                for cluster in clusters {
+                    out.push(Anchored {
+                        text: cluster,
+                        source: Some(SourceSpan::new(
+                            start + offset,
+                            start + offset + cluster.len(),
+                        )),
+                        copied: true,
+                    });
+                    offset += cluster.len();
+                }
+            }
+            // A transcription is one grapheme, which is [`Piece::transcribable`]'s
+            // decision to make and the only shape the bytes can be given to whole.
+            Some(Origin::Transcribed(source)) => {
+                debug_assert_eq!(clusters.len(), 1, "a transcription draws one cluster");
+                out.extend(
+                    clusters
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, cluster)| Anchored {
+                            text: cluster,
+                            source: (index == 0).then_some(source),
+                            copied: false,
+                        }),
+                );
+            }
+            None => out.extend(clusters.into_iter().map(|cluster| Anchored {
                 text: cluster,
-                origin: piece.origin.map(|start| start + offset),
-            });
-            offset += cluster.len();
+                source: None,
+                copied: false,
+            })),
         }
     }
     out
@@ -162,7 +248,7 @@ fn reconcile(lines: &[Line], flat: &[Anchored<'_>]) -> Vec<SearchSpan> {
             while cursor < flat.len() && flat[cursor].text != cluster {
                 cursor += 1;
             }
-            let origin = flat.get(cursor).and_then(|entry| entry.origin);
+            let entry = flat.get(cursor).copied();
             cursor = cursor.saturating_add(1);
             // The cluster must be charged the columns it actually draws, not the
             // one-or-two a single cell can hold: `Canvas::write_str` splits a cluster
@@ -170,24 +256,36 @@ fn reconcile(lines: &[Line], flat: &[Anchored<'_>]) -> Vec<SearchSpan> {
             // walk the cursor left of the text it is describing and drag every
             // following search span with it.
             let cols = u16::try_from(display_width(cluster)).unwrap_or(u16::MAX);
-            match (origin, run.as_mut()) {
-                (Some(start), Some(current))
-                    if current.source_end == start && current.col + current.cols == col =>
-                {
-                    current.source_end = start + cluster.len();
-                    current.cols += cols;
-                }
-                (Some(start), _) => {
+            let span = |source: SourceSpan| SearchSpan {
+                source_start: source.start,
+                source_end: source.end,
+                row,
+                col,
+                cols,
+            };
+            match entry.and_then(|entry| entry.source.map(|source| (source, entry.copied))) {
+                // A run grows only while it stays a byte-for-byte copy of the cells it
+                // names — `select` and `search` both convert between bytes and columns
+                // inside a span by walking its source. A transcribed cluster is
+                // therefore a span of its own, and closes the run either side of it.
+                Some((source, false)) => {
                     out.extend(run.take());
-                    run = Some(SearchSpan {
-                        source_start: start,
-                        source_end: start + cluster.len(),
-                        row,
-                        col,
-                        cols,
-                    });
+                    out.push(span(source));
                 }
-                (None, _) => out.extend(run.take()),
+                Some((source, true)) => match run.as_mut() {
+                    Some(current)
+                        if current.source_end == source.start
+                            && current.col + current.cols == col =>
+                    {
+                        current.source_end = source.end;
+                        current.cols += cols;
+                    }
+                    _ => {
+                        out.extend(run.take());
+                        run = Some(span(source));
+                    }
+                },
+                None => out.extend(run.take()),
             }
             col = col.saturating_add(cols);
         }
@@ -209,7 +307,7 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
     for node in nodes {
         match &node.kind {
             NodeKind::Text(text) => {
-                out.push(Piece::anchored(text.clone(), style, node.source));
+                out.push(Piece::transcribable(text.clone(), style, node.source));
             }
             // The space a soft break draws is body text, not decoration: the reader
             // sees a word separator and a newline in the source is what produced it.
@@ -318,7 +416,7 @@ fn ends_with_space(pieces: &[Piece]) -> bool {
 fn code_piece(literal: &str, style: Style, source: SourceSpan) -> Piece {
     let padding = source.len().checked_sub(literal.len());
     let origin = match padding {
-        Some(extra) if extra.is_multiple_of(2) => Some(source.start + extra / 2),
+        Some(extra) if extra.is_multiple_of(2) => Some(Origin::Copied(source.start + extra / 2)),
         _ => None,
     };
     Piece {
