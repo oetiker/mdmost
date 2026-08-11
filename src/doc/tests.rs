@@ -542,3 +542,68 @@ fn an_escape_inside_markup_is_split_like_any_other() {
         assert_faithful(source, &nodes);
     }
 }
+
+// --- Line endings are normalised where the document is read ---------------------
+
+#[test]
+fn a_crlf_document_reads_as_the_same_document_as_its_lf_twin() {
+    // The whole rule in one assertion. `Doc` derives `PartialEq`, so this compares the
+    // stored source, every node's kind, every node's byte range, the heading list and
+    // the version hash at once: if a single `\r` survived anywhere, or if one offset
+    // were still counted against the file as it was on disk, this would fail.
+    let crlf = "# Title\r\n\r\nAlpha beta\r\ndelta zeta\r\n\r\n```rust\r\nlet a = 1;\r\n```\r\n";
+    let lf = "# Title\n\nAlpha beta\ndelta zeta\n\n```rust\nlet a = 1;\n```\n";
+    assert_eq!(Doc::parse(crlf), Doc::parse(lf));
+    assert_eq!(Doc::parse(crlf).source(), lf);
+    assert!(!Doc::parse(crlf).source().contains('\r'));
+}
+
+#[test]
+fn a_lone_carriage_return_is_a_line_ending_too() {
+    // Not the owner's case, and normalised anyway on evidence rather than symmetry.
+    // `CommonMark` counts a lone `\r` as a line ending and comrak agrees — it reports a
+    // `SoftBreak` for `"Alpha\rBeta\n"` — but its sourcepos for what follows is wrong:
+    // probed, `Text("Beta")` comes back as the empty span `11..11` in an 11-byte
+    // document instead of `6..10`. Leaving the lone `\r` alone would therefore leave a
+    // document whose provenance is already broken; normalising costs one branch and
+    // makes it a document like any other. It cannot change the document's *shape*,
+    // because comrak already breaks the line there.
+    assert_eq!(Doc::parse("Alpha\rBeta\n"), Doc::parse("Alpha\nBeta\n"));
+    assert_eq!(Doc::parse("Alpha\rBeta\n").source(), "Alpha\nBeta\n");
+    // `\n\r` is two line endings, not one: the paragraph must break in two.
+    assert_eq!(Doc::parse("Alpha\n\rBeta\n"), Doc::parse("Alpha\n\nBeta\n"));
+}
+
+#[test]
+fn both_other_ways_into_a_document_normalise_on_the_same_boundary() {
+    // `parse` is not the only constructor: `parse_plain` builds its own tree, with its
+    // own offsets, and `parse_auto` chooses between them. A `\r` reaching either would
+    // be a `\r` on the clipboard of a `git log | mdmost` pipe.
+    let crlf = "commit abc\r\n\r\n    a line\r\n";
+    let lf = "commit abc\n\n    a line\n";
+    assert_eq!(Doc::parse_plain(crlf), Doc::parse_plain(lf));
+    assert_eq!(Doc::parse_auto(crlf), Doc::parse_auto(lf));
+    assert!(!Doc::parse_auto(crlf).source().contains('\r'));
+}
+
+#[test]
+fn a_crlf_code_blocks_literal_carries_no_carriage_return() {
+    // comrak copies a fenced block's bytes into `literal` verbatim, `\r` included, and
+    // `convert::code_lines` used to strip that `\r` back off line by line. Normalising
+    // at the read is what makes that strip unnecessary: there is no `\r` left to keep.
+    let doc = Doc::parse("```rust\r\nlet a = 1;\r\n\r\nlet b = 2;\r\n```\r\n");
+    let block = find(doc.root(), &|n| {
+        matches!(n.kind, NodeKind::CodeBlock { .. })
+    })
+    .expect("a fenced block");
+    let NodeKind::CodeBlock { literal, lines, .. } = &block.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "let a = 1;\n\nlet b = 2;\n");
+    // Provenance survives, and every located line reads back clean from the source.
+    let located: Vec<&str> = lines
+        .iter()
+        .map(|s| &doc.source()[s.start..s.end])
+        .collect();
+    assert_eq!(located, vec!["let a = 1;", "", "let b = 2;"]);
+}

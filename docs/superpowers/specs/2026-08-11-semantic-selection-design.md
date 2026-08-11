@@ -268,6 +268,17 @@ Carried from the renderer's design authority and still binding:
    this project has already been bitten by CRLF (provenance was silently lost on every
    CRLF document) and by measuring an expanded line against a source offset. Tests must
    include a CRLF document and a diagram indented inside a list.
+
+   *Amended 2026-08-12 (owner ruling: "copy paste should always get clean \n newline"):*
+   **line endings are no longer part of this arithmetic, or of any other.**
+   `doc::normalise_line_endings` rewrites every line ending to a lone `\n` inside
+   `Doc::parse` and `Doc::parse_plain`, which between them are the only ways to build a
+   `Doc`, and the parser is handed the normalised text — so a CRLF document has ceased to
+   exist by the time anything downstream sees one, and every byte offset in the crate
+   indexes a source with no `\r` in it. The three per-line `\r` strips this risk produced
+   (two in `doc::convert`, one in `doc::plain`) are gone with it. The requirement to test
+   a CRLF document stands, and is now met by **equivalence**: a CRLF document must draw
+   the same canvas and copy the same bytes as its LF twin.
 2. **Endpoint resolution on chrome** (§2.1) — the one interpreted coordinate.
 3. **Snapshot churn.** The muted button style and the highlight change will move
    goldens. Prove any large churn is what it looks like: strip leading and trailing

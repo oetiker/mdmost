@@ -63,13 +63,16 @@ fn is_autolink(node: &Node, url: &str) -> bool {
 }
 
 /// Builds a document that reproduces `source` line for line.
+///
+/// `source` has been through [`super::normalise_line_endings`], so splitting on `\n` and
+/// taking one byte off the end is the whole of "a line" here — a `\r` this walk had to
+/// strip for itself would also be a `\r` the offsets below counted as text.
 pub(super) fn document(source: &str) -> Node {
     let mut root = Node::new(NodeKind::Document, SourceSpan::new(0, source.len()));
     let mut paragraph: Option<Node> = None;
     let mut offset = 0usize;
     for line in source.split_inclusive('\n') {
         let text = line.strip_suffix('\n').unwrap_or(line);
-        let text = text.strip_suffix('\r').unwrap_or(text);
         if text.trim().is_empty() {
             root.children.extend(paragraph.take());
         } else {

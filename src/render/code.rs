@@ -164,7 +164,8 @@ fn drawn_bounds(canvas: &Canvas) -> Option<(usize, usize, u16, u16)> {
 /// is no single delta to add. `origins` already carries the answer per line, built by
 /// `doc::convert::code_lines`, which locates each line as a *suffix* of a source line;
 /// that is the same mapping `code_area` uses for a code block's own spans, and it is
-/// where both CRLF and the container indent have already been solved.
+/// where the container indent has already been solved. (Line endings are no longer part
+/// of that problem: they are normalised where the document is read.)
 ///
 /// It is reused here rather than re-derived, but not by analogy: `code_area` maps a
 /// *row* to a line and needs no column arithmetic on the source side, whereas a label
@@ -195,12 +196,13 @@ fn rebase_spans(canvas: &mut Canvas, literal: &str, origins: &[SourceSpan]) {
 ///
 /// `lines` is the literal split by [`crate::doc::literal_lines`] — the crate's one
 /// definition of "a line of `literal`", and the same split `origins` was built against,
-/// so index `n` names the same line in both. A line still carries its `\r` in a CRLF
-/// document (comrak keeps it in a fenced literal) while `origins` names the source
-/// bytes *without* it, which is why the guard below is against the origin's own end
-/// rather than against the line's length: an offset landing on the `\r` clamps to the
-/// end of the line it belongs to instead of pointing one byte past a range that has
-/// nothing to do with it.
+/// so index `n` names the same line in both. The guard below is against the **origin's
+/// own end** rather than against the line's length, because the two are the same length
+/// only when the line was located: a line `code_lines` could not find contributes an
+/// empty origin, and an offset inside it must be dropped rather than measured against a
+/// range that has nothing to do with it. (It also used to absorb the `\r` a CRLF literal
+/// carried past the end of its origin; line endings are normalised at the read now, so
+/// that case no longer arises and the guard stands on the reason above alone.)
 fn document_offset(lines: &[&str], origins: &[SourceSpan], at: usize) -> Option<usize> {
     let mut base = 0usize;
     for (row, line) in lines.iter().enumerate() {

@@ -346,8 +346,8 @@ fn atom_text(source: &str, atom: &Atom) -> String {
 /// have drifted apart on comes back untouched instead of silently rewritten. The trailing
 /// newline is compared off both sides and then taken from the source line, so a blank
 /// quoted line — `>` in the document, nothing at all in the literal — becomes the empty
-/// line it renders as, and a CRLF document keeps its `\r` (comrak leaves it in the
-/// literal, so the suffix still matches).
+/// line it renders as. Line endings need no case of their own: they are normalised where
+/// the document is read, so both sides of the suffix check see the same one byte.
 fn strip_to_content<'a>(line: &'a str, literal: &str) -> &'a str {
     let body = line.strip_suffix('\n').unwrap_or(line);
     let wanted = literal.strip_suffix('\n').unwrap_or(literal);

@@ -4859,18 +4859,32 @@ fn a_soft_line_break_washes_like_any_other_word_separator() {
     }
 }
 
+/// The document source as [`Doc`] stores it, which is what every byte offset in the
+/// application indexes — never the bytes as they sat in the file.
+///
+/// `App` passes `self.doc.source()` to `extract`, to `highlighted_columns` and to
+/// `Search`, so a test that passed its own string literal instead would be testing a
+/// pairing the pager never makes. That distinction is invisible while the two are equal
+/// and load-bearing the moment they are not, which is exactly the CRLF case.
+fn read(markdown: &str) -> String {
+    Doc::parse(markdown).source().to_string()
+}
+
 #[test]
-fn a_crlf_soft_line_break_declines_its_origin_and_leaves_the_clipboard_whole() {
-    // `Piece::anchored` takes an origin only when the run reproduces its source byte
-    // for byte, and comrak reports a CRLF soft break as the two bytes `\r\n` against
-    // the one space it draws. So the guard declines, and the separator cell keeps the
-    // older, unwashed behaviour rather than claiming a byte it does not draw. That is
-    // the fail-closed half of the rule, pinned here so the degradation is a decision
-    // and not a surprise: what must never happen is the clipboard losing bytes over
-    // it. If a later change teaches the CRLF case to wash, this test is the one to
-    // rewrite — deliberately, not by deleting the assertion that fails.
-    let doc = "Alpha beta gamma\r\ndelta epsilon zeta\r\n";
-    let canvas = render(doc, 60);
+fn a_crlf_soft_line_break_washes_and_copies_a_clean_newline() {
+    // Line endings are normalised where the document is read, so by the time anything
+    // here runs there is no CRLF left: the separator is one `\n` drawn as one space,
+    // `Piece::anchored`'s length guard stops declining it without being touched, and
+    // the clipboard cannot carry a `\r` because the document no longer holds one.
+    //
+    // This replaces `a_crlf_soft_line_break_declines_its_origin_and_leaves_the_clipboard_whole`,
+    // whose two assertions this reverses on purpose (owner ruling: "copy paste should
+    // always get clean \n newline"). Its second assertion pinned a stray trailing `\r`
+    // on the clipboard — `extend_over_markup` walking to the line end over the undrawn
+    // `\r` — which was the more visible half of the defect and is gone with the byte.
+    let markdown = "Alpha beta gamma\r\ndelta epsilon zeta\r\n";
+    let doc = read(markdown);
+    let canvas = render(markdown, 60);
     let (row, first_col, _) = drawn(&canvas, "Alpha");
     let (last_row, last_col, last_cols) = drawn(&canvas, "zeta");
     assert_eq!(row, last_row, "fixture assumption: one reflowed row");
@@ -4878,30 +4892,154 @@ fn a_crlf_soft_line_break_declines_its_origin_and_leaves_the_clipboard_whole() {
         Pos::new(row, first_col),
         Pos::new(row, last_col + last_cols - 1),
     );
-    let ranges = select::highlighted_columns(&canvas, doc, sel, row);
+    let ranges = select::highlighted_columns(&canvas, &doc, sel, row);
     let separator = first_col + 16;
     assert_eq!(
         canvas.row_text(row).chars().nth(usize::from(separator)),
         Some(' '),
-        "fixture assumption: the CRLF is drawn as a space at column {separator}"
+        "fixture assumption: the line ending is drawn as a space at column {separator}"
     );
     assert!(
-        !ranges.iter().any(|range| range.contains(&separator)),
-        "the CRLF separator is expected to stay unwashed: {ranges:?}"
+        ranges.iter().any(|range| range.contains(&separator)),
+        "the separator washes like any other: {ranges:?}"
     );
-    let extract = select::extract(&canvas, doc, sel).expect("the drag covered text");
+    let extract = select::extract(&canvas, &doc, sel).expect("the drag covered text");
     assert!(
         extract.from_source,
         "the clipboard still answers from source"
     );
-    // The trailing `\r` is `extend_over_markup` reaching to the line end over bytes
-    // that were never drawn — the same widening that brings a heading's `#` along,
-    // and untouched by the origin guard: a declined origin leaves this path exactly
-    // as it was before soft breaks were anchored at all.
     assert_eq!(
-        extract.text, "Alpha beta gamma\r\ndelta epsilon zeta\r",
-        "no byte of the CRLF is lost on the way to the clipboard"
+        extract.text, "Alpha beta gamma\ndelta epsilon zeta",
+        "the clipboard gets a clean newline and no carriage return"
     );
+}
+
+#[test]
+fn a_crlf_document_drags_exactly_like_its_lf_twin() {
+    // The strongest statement of the rule available at this level, and the reason the
+    // fix belongs at the read rather than at three places downstream: a CRLF document
+    // is not *handled* by the pager, it has ceased to exist by the time the pager sees
+    // it. `Canvas` compares every cell, every style and every span, so this covers the
+    // paint; the drag covers the clipboard.
+    //
+    // The fixture is deliberately broad, because every construct that maps cells back to
+    // bytes does it by its own route and each of those routes used to have a line-ending
+    // clause: a paragraph reflowed across soft breaks (`inline::collect`), a fenced block
+    // (`convert::code_lines`' suffix match), an indented one (same rule, four spaces), a
+    // quoted fence (same rule again, over `> `), a quoted *diagram* (an `Atom`, whose
+    // `strip_to_content` pairing of comrak's literal against the source lines is
+    // positional and line for line — the construct with the most to lose from a line
+    // ending that is two bytes on one side and one on the other), a table, a list, and an
+    // escape and an entity, whose spans `convert::split_transcriptions` cuts by aligning
+    // the drawn text against the source byte for byte.
+    let body = |eol: &str| {
+        [
+            "# Title",
+            "",
+            "Alpha beta gamma",
+            "delta epsilon zeta",
+            "eta theta \\* and &amp; onwards.",
+            "",
+            "```rust",
+            "let a = 1;",
+            "",
+            "let b = 2;",
+            "```",
+            "",
+            "> quoted prose",
+            "> ",
+            "> ```text",
+            "> quoted code",
+            "> ```",
+            "",
+            "> ```mermaid",
+            "> flowchart LR",
+            ">   A[Parse] --> B[Layout]",
+            "> ```",
+            "",
+            "- one item",
+            "- another item",
+            "",
+            "| alpha | beta |",
+            "| --- | --- |",
+            "| one | two |",
+            "",
+            "    indented code",
+            "",
+        ]
+        .join(eol)
+            + eol
+    };
+    let crlf = body("\r\n");
+    let lf = body("\n");
+    // The claim underneath every other assertion here: the two documents are not merely
+    // handled alike, they *are* one document by the time anything indexes them.
+    assert_eq!(read(&crlf), lf, "a CRLF document reads as its LF twin");
+    let (crlf_canvas, lf_canvas) = (render(&crlf, 60), render(&lf, 60));
+    // Compared in three widening steps rather than by one `assert_eq!` on the canvases:
+    // a whole-`Canvas` mismatch prints every cell of both, which is 170KB of `Debug`
+    // nobody can read. The narrow assertions name what differs; the last one is still
+    // the full comparison, so nothing is given up for the legibility.
+    let rows = |c: &Canvas| (0..c.height()).map(|r| c.row_text(r)).collect::<Vec<_>>();
+    assert_eq!(rows(&crlf_canvas), rows(&lf_canvas), "same drawn text");
+    assert_eq!(
+        crlf_canvas.spans(),
+        lf_canvas.spans(),
+        "same spans, naming the same document bytes"
+    );
+    assert!(
+        crlf_canvas == lf_canvas,
+        "the canvases differ in something other than their text or their spans"
+    );
+    let sel = drag(
+        Pos::new(0, 0),
+        Pos::new(
+            crlf_canvas.height() - 1,
+            crlf_canvas.width().saturating_sub(1),
+        ),
+    );
+    let crlf_extract = select::extract(&crlf_canvas, &read(&crlf), sel).expect("text");
+    let lf_extract = select::extract(&lf_canvas, &read(&lf), sel).expect("text");
+    assert_eq!(
+        crlf_extract.text, lf_extract.text,
+        "both documents copy the same bytes"
+    );
+    assert!(
+        !crlf_extract.text.contains('\r'),
+        "no carriage return anywhere on the clipboard: {:?}",
+        crlf_extract.text
+    );
+    // Anchors proving the drag is not degenerate — it really did reach the document
+    // through the spans rather than falling back to the drawn cells, and it really did
+    // cover the constructs the fixture was widened for. Deliberately anchors, not a
+    // whole-string comparison: what a drag over a diagram copies is Task 5's ruling and
+    // is still moving, and this test is about line endings.
+    assert!(crlf_extract.from_source, "answered from the document");
+    assert!(crlf_extract.text.contains("let a = 1;\n\nlet b = 2;"));
+    assert!(crlf_extract.text.contains("> quoted code"));
+    assert!(crlf_extract.text.contains("```mermaid\nflowchart LR"));
+    assert!(crlf_extract.text.contains("| one | two |"));
+}
+
+#[test]
+fn a_crlf_fenced_code_block_copies_clean_newlines() {
+    // The one case where preserving `\r` could be argued — a code block is meant to be
+    // copied verbatim, and its bytes are the author's. The ruling is explicit that it
+    // is not argued: copy-paste always gets clean `\n`. Dragged on its own here rather
+    // than as part of the whole document, because a code block reaches the clipboard
+    // through `code_lines`' per-line provenance and not through the inline path.
+    let markdown = "```rust\r\nlet a = 1;\r\nlet b = 2;\r\n```\r\n";
+    let doc = read(markdown);
+    let canvas = render(markdown, 40);
+    let (first_row, first_col, _) = drawn(&canvas, "let a = 1;");
+    let (last_row, last_col, last_cols) = drawn(&canvas, "let b = 2;");
+    let sel = drag(
+        Pos::new(first_row, first_col),
+        Pos::new(last_row, last_col + last_cols - 1),
+    );
+    let extract = select::extract(&canvas, &doc, sel).expect("the drag covered code");
+    assert!(extract.from_source, "code answers from source");
+    assert_eq!(extract.text, "let a = 1;\nlet b = 2;");
 }
 
 /// Asserts that every column of the paragraph on `row` is washed by a drag across it.

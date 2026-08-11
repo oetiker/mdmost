@@ -312,9 +312,10 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
             // The space a soft break draws is body text, not decoration: the reader
             // sees a word separator and a newline in the source is what produced it.
             // Anchoring it gives that cell a search span, so the selection highlight
-            // reaches it like any other separator. `anchored` takes the origin only
-            // when the lengths agree — one `\n` for one space — so a CRLF document,
-            // whose break is two bytes, declines it and keeps the older behaviour.
+            // reaches it like any other separator. `anchored` takes the origin only when
+            // the lengths agree — one `\n` for one space — and that now holds for every
+            // document: a CRLF break was two bytes and declined until line endings were
+            // normalised where the document is read.
             NodeKind::SoftBreak => out.push(Piece::anchored(" ".to_string(), style, node.source)),
             NodeKind::LineBreak => out.push(Piece::synthetic("\n", style)),
             NodeKind::Code { literal } => {

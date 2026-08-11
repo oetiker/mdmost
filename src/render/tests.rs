@@ -2445,52 +2445,60 @@ fn a_row_that_exactly_fits_is_not_shortened_because_another_row_overflows() {
     assert_eq!(usize::from(span.cols), 16);
 }
 
+/// The source a document was parsed from, which is what its spans index.
+///
+/// A test that slices its own CRLF string literal instead is slicing a text nothing in
+/// the crate ever holds: line endings are normalised in `Doc::parse`, so the file's
+/// bytes and the document's stop being the same length there. Slicing the wrong one of
+/// the two reports a mapping bug that is not there.
+fn parsed_source(markdown: &str) -> String {
+    Doc::parse(markdown).source().to_string()
+}
+
 #[test]
 fn a_crlf_authored_fence_maps_to_the_source_without_the_carriage_return() {
-    // comrak keeps a CRLF document's `\r` inside a code block's `literal`
-    // (`literal == "let needle = 1;\r\n"`), but `LineOffsets::line` strips it from the
-    // *source* line `doc::convert::code_lines` searches — so before that function
-    // stripped it too, `text.ends_with(line)` could never hold and every line of every
-    // code block in a CRLF document got no provenance at all. `doc::literal_lines`'s
-    // split and `bridge::highlight`'s both split only on `\n`, so the `\r` travels
-    // with the same line on both sides and the row alignment between `origins` and the
-    // drawn lines was never in question — only the byte match was broken.
+    // comrak copies a fenced block's bytes into `literal` verbatim, `\r` included, and
+    // `convert::code_lines` used to strip that `\r` back off line by line so that
+    // `text.ends_with(line)` could hold against a source line `LineOffsets::line` had
+    // already stripped. Normalising at the read retires both strips: there is no `\r`
+    // in the document, so the two sides agree without either of them saying so.
     let markdown = "```rust\r\nlet needle = 1;\r\n```\r\n";
+    let doc = parsed_source(markdown);
     let canvas = render(markdown, 40);
     let span = canvas
         .spans()
         .iter()
-        .find(|s| markdown[s.source_start..s.source_end].contains("needle"))
+        .find(|s| doc[s.source_start..s.source_end].contains("needle"))
         .expect("a CRLF-authored code line must still map to its source");
-    let text = &markdown[s_range(span)];
-    assert_eq!(text, "let needle = 1;");
+    assert_eq!(&doc[s_range(span)], "let needle = 1;");
     assert!(
-        !text.contains('\r'),
-        "a copy must never carry the line's own carriage return: {text:?}"
+        !doc.contains('\r'),
+        "the document a span indexes has no carriage return left in it: {doc:?}"
     );
 }
 
 #[test]
 fn a_crlf_fence_with_a_blank_line_still_maps_the_lines_around_it() {
-    // The blank-line branch of `code_lines` returns early, without advancing the
-    // search index, before ever reaching the `ends_with` match this fix repairs — so
-    // it needs its own coverage: a CRLF literal's blank line is `"\r"`, not `""`, and
-    // has to be recognised as empty *after* the `\r` is stripped, or every line after
-    // it searches from the wrong index.
+    // The blank-line branch of `code_lines` returns early, without advancing the search
+    // index, before ever reaching the `ends_with` match — so it needs its own coverage.
+    // Before normalisation the point was that a CRLF literal's blank line is `"\r"` and
+    // had to be recognised as empty *after* stripping; it now arrives as `""` like any
+    // other, and what is pinned here is that the lines around it map either way.
     let markdown = "```rust\r\nlet needle = 1;\r\n\r\nlet other = 2;\r\n```\r\n";
+    let doc = parsed_source(markdown);
     let canvas = render(markdown, 40);
     let needle = canvas
         .spans()
         .iter()
-        .find(|s| markdown[s.source_start..s.source_end].contains("needle"))
+        .find(|s| doc[s.source_start..s.source_end].contains("needle"))
         .expect("the line before the blank line must map");
-    assert_eq!(&markdown[s_range(needle)], "let needle = 1;");
+    assert_eq!(&doc[s_range(needle)], "let needle = 1;");
     let other = canvas
         .spans()
         .iter()
-        .find(|s| markdown[s.source_start..s.source_end].contains("other"))
+        .find(|s| doc[s.source_start..s.source_end].contains("other"))
         .expect("the line after the blank line must map");
-    assert_eq!(&markdown[s_range(other)], "let other = 2;");
+    assert_eq!(&doc[s_range(other)], "let other = 2;");
 }
 
 #[test]
@@ -2756,11 +2764,16 @@ fn a_flowchart_label_maps_back_to_the_document() {
 
 #[test]
 fn a_flowchart_label_maps_back_in_a_crlf_document() {
-    // comrak keeps the \r in a fenced literal; a mapping that measures against the
-    // stripped text lands every label one byte further left per preceding line.
-    let doc = "# Chart\r\n\r\n```mermaid\r\nflowchart LR\r\n  A[Parse] --> B[Layout]\r\n```\r\n";
-    let canvas = render(doc, 60);
-    let span = span_for(&canvas, doc, "Parse");
+    // A diagram label is rebased from a block-relative offset onto a document one, and
+    // that arithmetic used to have to account for the `\r` comrak keeps in the fenced
+    // literal. Since line endings are normalised at the read there is no `\r` to
+    // account for — kept as a fixture because a CRLF document is still what an author
+    // on Windows hands the pager, and the rebasing must land on the label either way.
+    let markdown =
+        "# Chart\r\n\r\n```mermaid\r\nflowchart LR\r\n  A[Parse] --> B[Layout]\r\n```\r\n";
+    let doc = parsed_source(markdown);
+    let canvas = render(markdown, 60);
+    let span = span_for(&canvas, &doc, "Parse");
     assert_eq!(
         span_cells(&canvas, span),
         "Parse",

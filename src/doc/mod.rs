@@ -25,6 +25,7 @@ mod slug;
 #[cfg(test)]
 mod tests;
 
+use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -88,6 +89,43 @@ pub(crate) fn literal_lines(literal: &str) -> Vec<&str> {
         .unwrap_or(literal)
         .split('\n')
         .collect()
+}
+
+/// Rewrites every line ending to a lone `\n`, before anything indexes the source.
+///
+/// **This is the crate's single boundary rule for line endings** (owner ruling: "crlf
+/// should NOT cause \r on the clipboard ... copy paste should always get clean \n
+/// newline"). It runs inside [`Doc::parse`] and [`Doc::parse_plain`], which between them
+/// are the only ways to build a [`Doc`] — the parser is handed the normalised text and
+/// [`Doc::source`] keeps that same text, so every byte offset in the application, from a
+/// [`SourceSpan`] to a search hit to the clipboard, indexes a document that has no `\r`
+/// in it. Nothing downstream needs a rule of its own, and nothing downstream may assume
+/// it can recover the bytes as they sat on disk.
+///
+/// A **lone `\r`** is normalised too, on evidence rather than symmetry: `CommonMark`
+/// counts it as a line ending and comrak breaks the line there, so this changes no
+/// document's shape — but comrak's sourcepos for what follows a lone `\r` is wrong
+/// (probed: `Text("Beta")` in `"Alpha\rBeta\n"` comes back as the empty span `11..11` in
+/// an 11-byte document), so leaving it alone would leave a document whose provenance is
+/// already broken. `"\n\r"` stays two line endings, as `CommonMark` says it is.
+///
+/// Borrows when there is nothing to do, which is every document anybody wrote on this
+/// machine.
+fn normalise_line_endings(source: &str) -> Cow<'_, str> {
+    if !source.contains('\r') {
+        return Cow::Borrowed(source);
+    }
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    while let Some(at) = rest.find('\r') {
+        out.push_str(&rest[..at]);
+        out.push('\n');
+        // Only the `\n` of a `\r\n` pair is swallowed: a `\r` followed by anything else
+        // ended its own line, and the byte after it opens the next one.
+        rest = rest[at + 1..].strip_prefix('\n').unwrap_or(&rest[at + 1..]);
+    }
+    out.push_str(rest);
+    Cow::Owned(out)
 }
 
 /// How a list is numbered.
@@ -305,7 +343,11 @@ impl Doc {
     /// Parses Markdown into an owned document tree.
     ///
     /// Parsing never fails: `CommonMark` has no syntax errors (design spec §12).
+    ///
+    /// Line endings are normalised first, so a CRLF document becomes an ordinary one
+    /// here and stays one everywhere after; see [`normalise_line_endings`].
     pub fn parse(source: &str) -> Self {
+        let source = &*normalise_line_endings(source);
         let arena = Arena::new();
         let root = parse_document(&arena, source, &convert::options());
         let mut slugger = Slugger::new();
@@ -339,7 +381,12 @@ impl Doc {
     }
 
     /// Parses `source` as plain text: paragraphs of hard-broken lines, nothing else.
+    ///
+    /// Normalises line endings on the same terms as [`Doc::parse`]: this builds its own
+    /// tree with its own offsets, so a `\r` left here would be a `\r` on the clipboard
+    /// of a `git log | mdmost` pipe.
     pub fn parse_plain(source: &str) -> Self {
+        let source = &*normalise_line_endings(source);
         let mut hasher = DefaultHasher::new();
         source.hash(&mut hasher);
         Self {
@@ -351,6 +398,11 @@ impl Doc {
     }
 
     /// The document source, exactly as it was parsed.
+    ///
+    /// **Exactly as it was parsed, which is not necessarily as it was written**: line
+    /// endings have been normalised (see [`normalise_line_endings`]). This is the string
+    /// every offset the crate hands out indexes, so it is the one to slice — never the
+    /// bytes the caller read off disk, which may be a different length.
     pub fn source(&self) -> &str {
         &self.source
     }

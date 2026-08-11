@@ -77,15 +77,15 @@ impl<'s> LineOffsets<'s> {
 
     /// The content of 0-based line `index`, without its line ending, and where it starts.
     ///
-    /// A trailing `\r` is dropped so that a CRLF document matches like any other.
+    /// A line ending is one byte here, always: [`super::normalise_line_endings`] runs
+    /// before the parser does, so there is no `\r` left to drop.
     fn line(&self, index: usize) -> Option<(usize, &'s str)> {
         let start = *self.starts.get(index)?;
         let end = self
             .starts
             .get(index + 1)
             .map_or(self.len, |next| next.saturating_sub(1));
-        let text = self.source.get(start..end)?;
-        Some((start, text.strip_suffix('\r').unwrap_or(text)))
+        Some((start, self.source.get(start..end)?))
     }
 }
 
@@ -103,17 +103,14 @@ fn code_lines(offsets: &LineOffsets<'_>, span: SourceSpan, literal: &str) -> Vec
     let mut index = offsets.line_index(span.start);
     let last = offsets.line_index(span.end.saturating_sub(1));
     for line in lines {
-        // comrak keeps a CRLF document's `\r` in the literal (confirmed against
-        // comrak's `parser/mod.rs`: the code-block path appends the raw slice
-        // verbatim and strips `\r` only from the info string, never the content), but
-        // `offsets.line` above strips it from the *source* side it searches. Left
-        // unstripped here, `line` carried a trailing byte the source line never had,
-        // so `text.ends_with(line)` could never hold and every line of every code
-        // block in a CRLF document — fenced or indented — got no provenance at all.
-        // Stripping it before the emptiness check matters too: a literal line that is
-        // only `"\r"` (a blank line in a CRLF document) must still become an empty
-        // span, not a doomed search for a single carriage return.
-        let line = line.strip_suffix('\r').unwrap_or(line);
+        // comrak copies a code block's bytes into `literal` verbatim (confirmed against
+        // comrak's `parser/mod.rs`: the code-block path appends the raw slice and
+        // strips only the info string), so `line` is a byte-for-byte copy of the part
+        // of the source line that follows the container prefix — which is exactly what
+        // the suffix match below needs, and only because both sides went through
+        // `super::normalise_line_endings` first. This used to strip a trailing `\r`
+        // from `line`, because `offsets.line` stripped one from the source side and the
+        // two could never match otherwise; there is no longer a `\r` on either side.
         if line.is_empty() {
             // A blank line pushes an empty span without advancing `index`, which widens
             // the search window for the next line by one slot. That is safe: an empty
