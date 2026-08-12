@@ -1541,28 +1541,46 @@ fn painted_at(app: &mut App, width: u16, height: u16, needle: &str) -> (u16, u16
 
 #[test]
 fn a_control_character_in_a_hovered_url_cannot_reach_the_terminal() {
-    // Built directly, not through `Doc::parse` -> `classify`: whether a raw control
-    // byte can survive comrak's link-destination grammar is exactly the guarantee
-    // design spec §8 says must not be trusted, so this bypasses the parser on purpose
-    // and proves the *display* path -- the one place a hovered URL reaches a `Span`
-    // outside the `Canvas` path -- is safe independent of it.
-    let hostile = crate::canvas::HotspotKind::Open {
+    // Injected directly through `App::hover_hotspot_for_test`, not through
+    // `Doc::parse` -> `classify`: whether a raw control byte can survive comrak's
+    // link-destination grammar is exactly the guarantee design spec §8 says must not
+    // be trusted, so this bypasses the parser on purpose. It goes through
+    // `chrome::draw_status` itself -- not just the `sanitized_url` helper it calls --
+    // so this fails if the call site is ever dropped, not only if the helper breaks.
+    //
+    // The load-bearing assertion is the *second* one below, not the first: ratatui's
+    // own `Buffer::set_line` already drops every Unicode `Cc` control character
+    // (verified against ESC, TAB, CR, BEL, DEL, NUL and a C1 CSI byte) before it ever
+    // reaches a cell, independent of anything this project does -- so "no raw ESC in
+    // the drawn output" holds *whether or not* `sanitized_url` is wired in, and cannot
+    // by itself prove the call site is still there. What sanitization actually changes
+    // is that the control character is replaced with a *visible* one-column marker
+    // (`text::UNPLACEABLE`, U+FFFD) instead of silently vanishing -- ratatui's own
+    // drop leaves no trace at all, which is a column miscounted between what this
+    // program's own width arithmetic assumed and what was drawn, the exact class of
+    // bug `cell_clusters` exists to prevent. That marker's presence is what a removed
+    // call site cannot fake.
+    let mut app = pager_at("hello\n", 60, 10);
+    app.hover_hotspot_for_test(crate::canvas::HotspotKind::Open {
         url: "https://example.com/\u{1b}[31mpwned".to_string(),
-    };
-    let crate::canvas::HotspotKind::Open { url } = hostile else {
-        unreachable!("constructed as Open above")
-    };
-    let safe = super::chrome::sanitized_url(&url);
+    });
+    let rows = painted(60, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
     assert!(
-        !safe.contains('\u{1b}'),
-        "no raw ESC reaches the drawn string: {safe:?}"
+        !status.contains('\u{1b}'),
+        "no raw ESC reaches the drawn status bar: {status:?}"
     );
-    // One column in, one column out (`crate::text::cell_clusters`), so nothing
-    // measured for the status bar's layout moves because of the substitution.
-    assert_eq!(
-        crate::text::display_width(&safe),
-        crate::text::display_width(&url),
-        "the substitution preserves width"
+    assert!(
+        status.contains('\u{fffd}'),
+        "the control character is substituted, not silently dropped, which is what \
+         actually distinguishes a wired-in sanitizer from one that was never called: \
+         {status:?}"
+    );
+    assert!(
+        status.contains("https://example.com/"),
+        "the rest of the url still draws: {status:?}"
     );
 }
 

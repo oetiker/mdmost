@@ -120,4 +120,17 @@ impl RenderCache {
     pub fn max_reach(&self) -> u16 {
         self.max_reach
     }
+
+    /// Test-only: overwrites the cached canvas directly, bypassing `refresh` and the
+    /// renderer entirely.
+    ///
+    /// Exists so a test can put a synthetic hotspot behind [`super::app::App::hovered`]
+    /// without going through `Doc::parse` at all — see
+    /// `tui::tests::a_control_character_in_a_hovered_url_cannot_reach_the_terminal`,
+    /// which proves an embedded `ESC` cannot reach the drawn status bar independent of
+    /// whether the parser could ever produce one in a link destination.
+    #[cfg(test)]
+    pub(crate) fn set_canvas_for_test(&mut self, canvas: Canvas) {
+        self.canvas = canvas;
+    }
 }
