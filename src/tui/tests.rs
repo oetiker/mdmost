@@ -1584,16 +1584,24 @@ fn a_control_character_in_a_hovered_url_cannot_reach_the_terminal() {
         !status.contains('\u{9b}'),
         "the raw C1 control byte does not reach the drawn status bar: {status:?}"
     );
-    // The load-bearing assertion: ratatui's own `Buffer::set_line` already drops a
-    // lone `Cc` control character silently before a cell is ever written (verified
-    // outside the project against ESC, TAB, CR, BEL, DEL, NUL and this same C1 byte),
-    // independent of anything sanitized here -- so the assertion above holds whether
-    // or not `sanitized_url` is wired in, and cannot by itself prove the call site is
-    // still there. What sanitization changes is that the control character is
-    // replaced with a *visible* one-column marker (`text::UNPLACEABLE`, U+FFFD)
-    // instead of silently vanishing without a trace, which is the width-mismatch
-    // defect class `cell_clusters` exists to prevent. That marker's presence is what
-    // a removed call site cannot fake.
+    // The load-bearing assertion is the one below, not the one above. `\u{9b}` never
+    // survives to `status` *either way* -- that is what the assertion above pins, and
+    // it is true for two different reasons depending on whether the call site exists:
+    //
+    // * with `sanitized_url` wired in, the raw byte is replaced with `text::UNPLACEABLE`
+    //   (U+FFFD) *before* the string ever reaches a `Span`, so ratatui draws an
+    //   ordinary printable character in its place;
+    // * with the call site removed, the raw byte reaches `Span`/`Buffer::set_line`
+    //   unsanitized, and ratatui's own buffer-writing code silently drops it there --
+    //   verified outside this project against ESC, TAB, CR, BEL, DEL, NUL and this
+    //   same C1 byte, none of which are ever placed in a cell. Nothing stands in for
+    //   it: the character is simply gone, one column short of what this program's own
+    //   width arithmetic assumed.
+    //
+    // So "no raw `\u{9b}` in the output" cannot distinguish the two cases, and is not
+    // the proof. Whether a *marker* took its place is: only the sanitized path leaves
+    // one, which is the width-mismatch defect class `cell_clusters` exists to
+    // prevent. That marker's presence is what a removed call site cannot fake.
     assert!(
         status.contains('\u{fffd}'),
         "the control character is substituted, not silently dropped: {status:?}"
