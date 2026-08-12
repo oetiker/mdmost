@@ -5149,6 +5149,125 @@ fn a_reflow_drops_the_hover_rather_than_moving_it() {
     }
 }
 
+// --- Hover lights a whole control, not one row of it (design spec §2.2) --------
+
+#[test]
+fn hovering_a_link_shades_every_row_of_it() {
+    // A wrapped link is several hotspots sharing one `target`; hovering any one row
+    // must light all of them, or the link visibly breaks in half under the pointer.
+    let mut app = pager_at(
+        "[a fairly long link label that wraps across several rows](https://example.com/x)\n",
+        24,
+        10,
+    );
+    let spots = app.rendered().hotspots().to_vec();
+    assert!(
+        spots.len() >= 2,
+        "the premise: the link wraps, got {spots:?}"
+    );
+    let target = spots[0].target;
+    assert!(
+        spots.iter().all(|spot| spot.target == target),
+        "one link, one target: {spots:?}"
+    );
+
+    // The label and its ` (url)` suffix take different resting styles
+    // (`theme.text.link` and `theme.text.link_url`), so "lit" is checked cell by cell,
+    // against what that exact cell had at rest — not against one derived colour.
+    let resting = framed_buffer(&mut app, 24, 10);
+
+    app.set_pointer(spots[0].col, u16::try_from(spots[0].row).expect("a row"));
+    assert_eq!(
+        app.hovered(),
+        Some(0),
+        "the first row is the one hit-tested"
+    );
+
+    let buffer = framed_buffer(&mut app, 24, 10);
+    let theme = app.theme();
+    let lit: Vec<usize> = spots
+        .iter()
+        .filter(|spot| {
+            let y = u16::try_from(spot.row).expect("a row");
+            (spot.col..spot.col.saturating_add(spot.cols)).all(|x| {
+                let before = resting[(x, y)].style();
+                let expected = super::draw::term_style(theme.hovered(from_term_style(before))).fg;
+                buffer[(x, y)].style().fg == expected
+            })
+        })
+        .map(|spot| spot.row)
+        .collect();
+    assert_eq!(
+        lit.len(),
+        spots.len(),
+        "only row(s) {lit:?} lit out of {spots:?}; the link wraps"
+    );
+}
+
+/// Recovers a `theme::Style` foreground from a drawn cell's `ratatui::Style`.
+///
+/// Only the foreground round-trips through the buffer, which is all a hovered cell's
+/// ink depends on — [`super::draw::hover_highlight`] derives the shade from the cell's
+/// own colour, not from any other attribute.
+fn from_term_style(style: ratatui::style::Style) -> crate::theme::Style {
+    let ratatui::style::Color::Rgb(r, g, b) = style.fg.expect("a foreground") else {
+        panic!("a drawn cell's foreground is always RGB");
+    };
+    crate::theme::Style {
+        fg: Some(crate::theme::Color { r, g, b }),
+        bg: None,
+        attrs: crate::theme::Attributes::NONE,
+    }
+}
+
+#[test]
+fn ordinary_prose_under_the_pointer_is_not_shaded() {
+    // The design spec §9.1 asymmetry, stated as a test: proving the non-hotspot
+    // direction too, not only that a hovered control lights.
+    let mut app = pager_at("just some words\n", 60, 10);
+    let before = framed_buffer(&mut app, 60, 10);
+    assert!(!app.set_pointer(2, 0), "plain prose has nothing to hover");
+    assert_eq!(app.hovered(), None);
+    let after = framed_buffer(&mut app, 60, 10);
+    for x in 0..60 {
+        assert_eq!(
+            after[(x, 0)].style(),
+            before[(x, 0)].style(),
+            "column {x} of plain prose changed style under the pointer"
+        );
+    }
+}
+
+#[test]
+fn hovering_a_link_does_not_light_an_unrelated_copy_button() {
+    // Painting "every hotspot sharing this target" must stop at the target: a control
+    // with a *different* target — here the fence's `[copy]` button — must stay exactly
+    // as it was, or two controls that merely happen to be on screen together would be
+    // confused for one.
+    let mut app = pager_at(
+        "```rust\nfn f() {}\n```\n\n[a link](https://example.com/x)\n",
+        60,
+        20,
+    );
+    app.set_copy_button(true);
+    let (bx, by) = painted_button(&mut app, 60, 20, 0);
+    let resting = button_inks(&mut app, 60, 20, (bx, by));
+
+    let spots = app.rendered().hotspots().to_vec();
+    let link = spots
+        .iter()
+        .find(|spot| matches!(spot.kind, crate::canvas::HotspotKind::Open { .. }))
+        .expect("the link recorded a hotspot");
+    app.set_pointer(link.col, u16::try_from(link.row).expect("a row"));
+    assert!(app.hovered().is_some(), "the link is hovered");
+
+    assert_eq!(
+        button_inks(&mut app, 60, 20, (bx, by)),
+        resting,
+        "the copy button stays at rest while a different control is hovered"
+    );
+}
+
 /// A bare pointer motion over the terminal, at screen column `column`, row `row`.
 fn motion(column: u16, row: u16) -> crossterm::event::MouseEvent {
     crossterm::event::MouseEvent {

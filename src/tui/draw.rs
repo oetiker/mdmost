@@ -83,10 +83,24 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     // Before the flash, and that ordering is the precedence: the pointer is necessarily
     // over the button at the moment it is clicked, so a hover painted afterwards would
     // repaint the one piece of feedback the press produces. `[copied]` wins.
-    let hovered = app
+    //
+    // A control can be several hotspots — a link wrapped across rows, or wrapped inside
+    // a centred table cell (design spec §2.2) — sharing one `target`. Resolving the
+    // hovered index to its target and painting every hotspot that shares it is what
+    // keeps such a control looking like one thing under the pointer, rather than
+    // visibly breaking at the row boundary that lit it.
+    let hovered_spots: Vec<(usize, u16, u16)> = app
         .hovered()
         .and_then(|index| app.rendered().hotspots().get(index))
-        .map(|spot| (spot.row, spot.col, spot.cols));
+        .map(|hovered| {
+            app.rendered()
+                .hotspots()
+                .iter()
+                .filter(|spot| spot.target == hovered.target)
+                .map(|spot| (spot.row, spot.col, spot.cols))
+                .collect()
+        })
+        .unwrap_or_default();
     hover_highlight(
         buffer,
         doc_area,
@@ -95,7 +109,7 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         &hscroll,
         base,
         app.theme(),
-        hovered,
+        &hovered_spots,
     );
     // Under the search wash and the selection, which say where the reader's attention
     // is; the flash only says what their last click did.
@@ -416,6 +430,11 @@ fn copied_flash(
 /// fence in the fence's frame colour, without this function knowing there are two.
 /// Columns that are off screen — scrolled behind a pinned prefix, past the rail, or on a
 /// row above or below the viewport — are simply not painted, which [`Offsets`] answers.
+///
+/// `at` is every region of the hovered control, not one: a wrapped link is several
+/// hotspots sharing a `target`, and the caller has already resolved that grouping — this
+/// function just paints each region it is handed. An empty slice paints nothing, which is
+/// what an unhovered frame gets.
 #[allow(clippy::too_many_arguments)]
 fn hover_highlight(
     buffer: &mut Buffer,
@@ -425,24 +444,25 @@ fn hover_highlight(
     left: &Offsets<'_>,
     base: Style,
     theme: &crate::theme::Theme,
-    at: Option<(usize, u16, u16)>,
+    at: &[(usize, u16, u16)],
 ) {
-    let Some((row, col, cols)) = at else { return };
-    let Some(y) = row.checked_sub(top).and_then(|y| u16::try_from(y).ok()) else {
-        return;
-    };
-    let Some(cells) = canvas.row(row).filter(|_| y < area.height) else {
-        return;
-    };
-    for column in col..col.saturating_add(cols) {
-        let Some(x) = left.x_of(row, column).filter(|x| *x < left.content()) else {
+    for &(row, col, cols) in at {
+        let Some(y) = row.checked_sub(top).and_then(|y| u16::try_from(y).ok()) else {
             continue;
         };
-        let under = cells
-            .get(usize::from(column))
-            .map_or(base, |cell| base.patch(cell.style()));
-        if let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) {
-            target.set_style(term_style(theme.hovered(under)));
+        let Some(cells) = canvas.row(row).filter(|_| y < area.height) else {
+            continue;
+        };
+        for column in col..col.saturating_add(cols) {
+            let Some(x) = left.x_of(row, column).filter(|x| *x < left.content()) else {
+                continue;
+            };
+            let under = cells
+                .get(usize::from(column))
+                .map_or(base, |cell| base.patch(cell.style()));
+            if let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) {
+                target.set_style(term_style(theme.hovered(under)));
+            }
         }
     }
 }
