@@ -10,7 +10,7 @@
 //! Composition (`blit`, `append`, `indent`, `hconcat`) translates those spans for
 //! free, so no other module in `render` does offset arithmetic.
 
-use crate::canvas::{Canvas, SearchSpan};
+use crate::canvas::{Canvas, Hotspot, HotspotKind, SearchSpan};
 use crate::doc::{Node, NodeKind, SourceSpan};
 use crate::text::{Line, Span, display_width, graphemes, wrap_spans};
 use crate::theme::Style;
@@ -41,6 +41,27 @@ enum Origin {
     Transcribed(SourceSpan),
 }
 
+/// The control a piece belongs to, if any.
+///
+/// Parallel to [`Origin`], and deliberately not part of it: `Origin` answers "which
+/// source bytes did this draw", and a link's printed ` (url)` suffix belongs to the
+/// control while belonging to no source bytes at all (design spec §2.1). That is the
+/// one place a [`Hotspot`] and a [`SearchSpan`] are allowed to disagree, and giving
+/// the suffix a span instead would break the rule that a span's source is a
+/// byte-for-byte copy of the cells it names.
+#[derive(Debug, Clone)]
+struct Control {
+    /// Which control — one id per link, shared by all of its pieces.
+    ///
+    /// Unique within one flattened inline run, which is all the uniqueness needed:
+    /// [`render_pieces`] rebases these onto the canvas's own numbering before the
+    /// hotspots are recorded, and every composition that merges two canvases rebases
+    /// them again.
+    id: usize,
+    /// What activating it does.
+    kind: HotspotKind,
+}
+
 /// A styled run together with the source bytes it was produced from.
 #[derive(Debug, Clone)]
 struct Piece {
@@ -51,6 +72,8 @@ struct Piece {
     /// What in the source drew this run. `None` for synthesised text such as link
     /// targets, and for anything whose mapping is not knowable.
     origin: Option<Origin>,
+    /// The control this run is part of, if it is part of one.
+    control: Option<Control>,
 }
 
 impl Piece {
@@ -60,6 +83,7 @@ impl Piece {
             text: text.into(),
             style,
             origin: None,
+            control: None,
         }
     }
 
@@ -70,6 +94,7 @@ impl Piece {
             text,
             style,
             origin,
+            control: None,
         }
     }
 
@@ -92,6 +117,7 @@ impl Piece {
                 text,
                 style,
                 origin: Some(Origin::Copied(source.start)),
+                control: None,
             };
         }
         // One grapheme drawing one column: the two halves of "this run has no interior
@@ -104,6 +130,7 @@ impl Piece {
             text,
             style,
             origin,
+            control: None,
         }
     }
 }
@@ -117,6 +144,11 @@ struct Anchored<'a> {
     /// Whether those bytes are a verbatim copy of the cluster. A transcribed cluster
     /// is a span of its own; see [`reconcile`].
     copied: bool,
+    /// The control this cluster is part of, borrowed from the piece it came from.
+    ///
+    /// Borrowed rather than cloned so this stays [`Copy`], which is what the single
+    /// forward cursor in [`reconcile`] walks with.
+    control: Option<&'a Control>,
 }
 
 /// Flattens inline nodes into styled runs.
@@ -181,8 +213,22 @@ fn render_pieces(pieces: &[Piece], width: u16, base: Style) -> Canvas {
         .collect();
     let lines = wrap(&spans, usize::from(width));
     let mut canvas = Canvas::from_lines(width, &lines, base);
-    for span in reconcile(&lines, &flatten(pieces)) {
+    let (found, spots) = reconcile(&lines, &flatten(pieces));
+    for span in found {
         canvas.add_span(span);
+    }
+    // The ids `link` issued number the controls of *this* inline run from zero; the
+    // canvas numbers its own from zero too. Rebasing here — the same remap
+    // `Canvas::merge_hotspots` does, for the same reason — keeps `Hotspot::target`
+    // meaning "unique on the canvas that carries it" everywhere, so `link` never has to
+    // know what else is drawn beside it. Distinct source ids get distinct new ones and
+    // the rows of one wrapped link keep sharing theirs.
+    let mut rebased = std::collections::HashMap::new();
+    for mut spot in spots {
+        spot.target = *rebased
+            .entry(spot.target)
+            .or_insert_with(|| canvas.next_target());
+        canvas.add_hotspot(spot);
     }
     canvas
 }
@@ -192,6 +238,7 @@ fn flatten(pieces: &[Piece]) -> Vec<Anchored<'_>> {
     let mut out = Vec::new();
     for piece in pieces {
         let clusters: Vec<&str> = graphemes(&piece.text).collect();
+        let control = piece.control.as_ref();
         match piece.origin {
             Some(Origin::Copied(start)) => {
                 let mut offset = 0usize;
@@ -203,6 +250,7 @@ fn flatten(pieces: &[Piece]) -> Vec<Anchored<'_>> {
                             start + offset + cluster.len(),
                         )),
                         copied: true,
+                        control,
                     });
                     offset += cluster.len();
                 }
@@ -219,6 +267,7 @@ fn flatten(pieces: &[Piece]) -> Vec<Anchored<'_>> {
                             text: cluster,
                             source: (index == 0).then_some(source),
                             copied: false,
+                            control,
                         }),
                 );
             }
@@ -226,6 +275,7 @@ fn flatten(pieces: &[Piece]) -> Vec<Anchored<'_>> {
                 text: cluster,
                 source: None,
                 copied: false,
+                control,
             })),
         }
     }
@@ -237,13 +287,19 @@ fn flatten(pieces: &[Piece]) -> Vec<Anchored<'_>> {
 /// Wrapping preserves grapheme order and only ever *drops* clusters (whitespace at a
 /// break, a double-width cluster that cannot fit a one-column budget), so the output
 /// is a subsequence of the input and a single forward cursor suffices.
-fn reconcile(lines: &[Line], flat: &[Anchored<'_>]) -> Vec<SearchSpan> {
+fn reconcile(lines: &[Line], flat: &[Anchored<'_>]) -> (Vec<SearchSpan>, Vec<Hotspot>) {
     let mut out = Vec::new();
+    let mut spots = Vec::new();
     let mut cursor = 0usize;
     for (row, line) in lines.iter().enumerate() {
         let text = line.text();
         let mut col = 0u16;
         let mut run: Option<SearchSpan> = None;
+        // A control run grows while the cluster belongs to the SAME control and stays
+        // column-contiguous, and closes at the end of a row exactly as a search run
+        // does. That is what makes a wrapped link several hotspots sharing one target
+        // — the shape design spec §2.2 asks for, for free.
+        let mut control: Option<Hotspot> = None;
         for cluster in graphemes(&text) {
             while cursor < flat.len() && flat[cursor].text != cluster {
                 cursor += 1;
@@ -288,22 +344,49 @@ fn reconcile(lines: &[Line], flat: &[Anchored<'_>]) -> Vec<SearchSpan> {
                 },
                 None => out.extend(run.take()),
             }
+            match entry.and_then(|entry| entry.control) {
+                Some(Control { id, kind }) => match control.as_mut() {
+                    Some(open) if open.target == *id && open.col + open.cols == col => {
+                        open.cols += cols;
+                    }
+                    _ => {
+                        spots.extend(control.take());
+                        control = Some(Hotspot {
+                            row,
+                            col,
+                            cols,
+                            kind: kind.clone(),
+                            target: *id,
+                        });
+                    }
+                },
+                None => spots.extend(control.take()),
+            }
             col = col.saturating_add(cols);
         }
         out.extend(run.take());
+        spots.extend(control.take());
     }
-    out
+    (out, spots)
 }
 
 /// Flattens inline nodes into runs, resolving semantic styles.
 fn pieces(nodes: &[Node], ctx: Ctx<'_>) -> Vec<Piece> {
     let mut out = Vec::new();
-    collect(nodes, Style::NONE, ctx, &mut out);
+    // The control counter lives here rather than on `Ctx` because `Ctx` is `Copy`: a
+    // counter carried by value would hand every nested inline subtree its own numbering
+    // and every link in the run would collide on id 0, which is exactly what a wrapped
+    // link's shared target id would then no longer distinguish. A `&mut usize` walked
+    // down the recursion is one counter by construction.
+    let mut ids = 0usize;
+    collect(nodes, Style::NONE, ctx, &mut ids, &mut out);
     out
 }
 
 /// Recursively flattens `nodes`, with `style` inherited from the enclosing markup.
-fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
+///
+/// `ids` issues one control id per link met, unique within this run; see [`Control`].
+fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, ids: &mut usize, out: &mut Vec<Piece>) {
     let theme = ctx.theme;
     for node in nodes {
         match &node.kind {
@@ -326,16 +409,29 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
                     node.source,
                 ));
             }
-            NodeKind::Emph => collect(&node.children, style.patch(theme.text.emphasis), ctx, out),
-            NodeKind::Strong => collect(&node.children, style.patch(theme.text.strong), ctx, out),
+            NodeKind::Emph => collect(
+                &node.children,
+                style.patch(theme.text.emphasis),
+                ctx,
+                ids,
+                out,
+            ),
+            NodeKind::Strong => collect(
+                &node.children,
+                style.patch(theme.text.strong),
+                ctx,
+                ids,
+                out,
+            ),
             NodeKind::Strikethrough => collect(
                 &node.children,
                 style.patch(theme.text.strikethrough),
                 ctx,
+                ids,
                 out,
             ),
-            NodeKind::Link { url, .. } => link(node, url, style, ctx, out),
-            NodeKind::Image { .. } => image_marker(node, style, ctx, out),
+            NodeKind::Link { url, .. } => link(node, url, style, ctx, ids, out),
+            NodeKind::Image { .. } => image_marker(node, style, ctx, ids, out),
             NodeKind::FootnoteReference { number, .. } => {
                 out.push(Piece::synthetic(
                     format!("[{number}]"),
@@ -357,7 +453,7 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
             }
             // Any other node appearing in an inline position is a container we do not
             // style specially; its children still render.
-            _ => collect(&node.children, style, ctx, out),
+            _ => collect(&node.children, style, ctx, ids, out),
         }
     }
 }
@@ -384,10 +480,10 @@ const IMAGE_UNTITLED: &str = "image";
 /// read as three unrelated ones. The box is kept for the block case, decided in
 /// [`block::paragraph`](super::block); everything else, including an image nested in a
 /// link or a heading and an image in a table cell, arrives here.
-fn image_marker(node: &Node, style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
+fn image_marker(node: &Node, style: Style, ctx: Ctx<'_>, ids: &mut usize, out: &mut Vec<Piece>) {
     let style = style.patch(ctx.theme.text.image_alt);
     let before = out.len();
-    collect(&node.children, style, ctx, out);
+    collect(&node.children, style, ctx, ids, out);
     let alt: String = out[before..]
         .iter()
         .map(|piece| piece.text.as_str())
@@ -425,6 +521,7 @@ fn code_piece(literal: &str, style: Style, source: SourceSpan) -> Piece {
         text: literal.to_string(),
         style,
         origin,
+        control: None,
     }
 }
 
@@ -437,10 +534,10 @@ const URL_BUDGET: usize = 34;
 /// against every other column in the table, and one long URL would otherwise claim a
 /// whole row for itself (design spec §7.2). Elsewhere an over-long target is elided in
 /// the middle, which keeps the informative ends — the host and the last path segment.
-fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>) {
+fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, ids: &mut usize, out: &mut Vec<Piece>) {
     let theme = ctx.theme;
     let before = out.len();
-    collect(&node.children, style.patch(theme.text.link), ctx, out);
+    collect(&node.children, style.patch(theme.text.link), ctx, ids, out);
     let text: String = out[before..]
         .iter()
         .map(|piece| piece.text.as_str())
@@ -449,6 +546,30 @@ fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>
     // bare e-mail address is the same case wearing a scheme: comrak gives `a@b.c` the
     // target `mailto:a@b.c`, and `a@b.c (mailto:a@b.c)` tells the reader nothing.
     let target = url.trim();
+
+    // Tagged *before* the three early returns below, because each of them draws a link
+    // that simply prints no ` (url)` suffix — an autolink, a bare e-mail address, a
+    // link in a table cell — and a link with no suffix is still a link.
+    //
+    // Task 3 replaces this with the scheme classifier of design spec §8. Until then
+    // every non-empty target is `Open`, which is wrong for `mailto:` and for a local
+    // `.md` link, and is why Task 3 exists.
+    let control = (!target.is_empty()).then(|| {
+        let id = *ids;
+        *ids += 1;
+        Control {
+            id,
+            // The FULL url, never the elided form the suffix draws: the status bar
+            // shows the whole thing (§8) and the opener receives it (§7).
+            kind: HotspotKind::Open {
+                url: url.to_string(),
+            },
+        }
+    });
+    for piece in &mut out[before..] {
+        piece.control = control.clone();
+    }
+
     if target.is_empty()
         || text.trim() == target
         || text.trim() == target.trim_start_matches("mailto:")
@@ -458,10 +579,13 @@ fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, out: &mut Vec<Piece>
     if ctx.table_depth > 0 && !text.trim().is_empty() {
         return;
     }
-    out.push(Piece::synthetic(
+    let mut suffix = Piece::synthetic(
         format!(" ({})", elide_middle(url, URL_BUDGET)),
         style.patch(theme.text.link_url),
-    ));
+    );
+    // §2.1: the suffix carries no source span and *is* part of the control.
+    suffix.control = control;
+    out.push(suffix);
 }
 
 /// Shortens `text` to `budget` display columns by replacing its middle with `…`.

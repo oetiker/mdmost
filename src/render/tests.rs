@@ -3521,3 +3521,64 @@ fn a_failed_mermaid_block_offers_exactly_one_button() {
     assert_eq!(spots.len(), 1, "one button, one hotspot: {spots:?}");
     assert_eq!(copy_text(&spots[0]), "not a diagram at all\n");
 }
+
+#[test]
+fn an_inline_canvas_numbers_its_controls_from_its_own_counter() {
+    // `Hotspot::target` is unique *per canvas*, and `Canvas::next_target` is what issues
+    // the ids. A link numbers its control while there is no canvas yet — inside
+    // `inline::link`, before anything is wrapped — so those ids are rebased onto the
+    // canvas's own counter as the hotspots are recorded.
+    //
+    // Tested here rather than through a document because every consumer of an inline
+    // canvas merges it into another one, and `Canvas::merge_hotspots` rebases again;
+    // the raw canvas is the only place the invariant is observable, and it is what a
+    // caller placing a *second* kind of control on it would rely on.
+    let theme = Theme::default_dark();
+    let ctx = Ctx::new(&theme, &PLAIN);
+    let doc = Doc::parse("[a](https://example.com/a) and [b](https://example.com/b)\n");
+    let paragraph = &doc.root().children[0];
+    let mut canvas = inline::render_inline(&paragraph.children, 60, theme.base(), ctx);
+    let used: Vec<usize> = canvas.hotspots().iter().map(|spot| spot.target).collect();
+    assert_eq!(used.len(), 2, "two links, two hotspots: {used:?}");
+    let next = canvas.next_target();
+    assert!(
+        !used.contains(&next),
+        "the canvas offered {next} while its links already hold {used:?}"
+    );
+}
+
+#[test]
+fn a_link_in_a_table_cell_records_a_hotspot_on_the_cell_canvas() {
+    // `inline::link` returns early inside a table, because a column negotiated against
+    // every other column cannot afford a printed URL — but a link with no suffix is
+    // still a link, so the pieces are tagged before that return.
+    //
+    // Tested on the cell's own canvas, because it goes no further: `render_table` places
+    // a cell with `Canvas::blit`, which drops hotspots on purpose, and
+    // `a_link_in_a_table_cell_records_no_hotspot_because_a_cell_is_blitted` in
+    // `tests/link_hotspots.rs` pins that outcome. This is the half that would already be
+    // right the day `blit` learns to carry a control.
+    let theme = Theme::default_dark();
+    let ctx = Ctx::new(&theme, &PLAIN).in_table();
+    let doc = Doc::parse("[go](https://example.com/a)\n");
+    let paragraph = &doc.root().children[0];
+    let canvas = inline::render_inline(&paragraph.children, 20, theme.base(), ctx);
+    assert_eq!(
+        canvas.plain_text().trim_end(),
+        "go",
+        "a table cell prints the label and no target"
+    );
+    let spots = canvas.hotspots();
+    assert_eq!(
+        spots.len(),
+        1,
+        "a table-cell link is still a link: {spots:?}"
+    );
+    assert_eq!(
+        spots[0].kind,
+        HotspotKind::Open {
+            url: "https://example.com/a".to_string()
+        }
+    );
+    assert_eq!((spots[0].col, spots[0].cols), (0, 2), "over `go`");
+}
