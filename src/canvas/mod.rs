@@ -116,15 +116,45 @@ pub struct Pin {
     pub cols: u16,
 }
 
-/// A region of a row that is a control, and what clicking it copies.
+/// What a [`Hotspot`] does when it is activated.
+///
+/// One hit-test serves all four, which is the point: the copy button was a parallel
+/// mechanism and is now one case of a general one. A hotspot is a claim on drawn
+/// *cells*, which is why it is exempt from the byte-for-byte rule a `SearchSpan`
+/// obeys — a link's printed ` (url)` suffix is part of the control and part of no
+/// source range (design spec §2.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HotspotKind {
+    /// The copy button: plain text always, a richer flavour where one exists.
+    Copy {
+        /// The plain-text payload. Always present: the only thing OSC 52 can carry.
+        text: String,
+        /// A richer flavour offered to a local clipboard only.
+        html: Option<String>,
+    },
+    /// An `http`/`https` link. Carries the **full** URL, never the elided form
+    /// drawn on screen (`render::inline::elide_middle`).
+    Open {
+        /// The untruncated target.
+        url: String,
+    },
+    /// A `#heading` reference into this document, as a GFM slug.
+    Anchor {
+        /// Matched against `doc::Heading::id`, the same enumeration the TOC uses.
+        slug: String,
+    },
+    /// A footnote reference marker.
+    Footnote {
+        /// The footnote's identifier as the document spells it.
+        id: String,
+    },
+}
+
+/// A region of a row that is a control, and what activating it does.
 ///
 /// The fourth metadata channel, and it exists for the reason the other three do: the
 /// pager needs to know something about a region that only the renderer which drew it can
-/// know. Here that these cells are a button, and what it puts on the clipboard.
-///
-/// The payload is text, not a source byte range, because the two are not the same
-/// answer: the source of a fence inside a block quote carries `> ` on every interior
-/// line, and copying that is not what the button promises.
+/// know. Here that these cells are a control, and what it does when pressed.
 ///
 /// Like [`Pin`], a hotspot is a claim about a region of one row, so it travels through
 /// [`Canvas::append`] and [`Canvas::indent`] and is dropped by [`Canvas::blit`] — a
@@ -138,10 +168,16 @@ pub struct Hotspot {
     pub col: u16,
     /// How many display columns it occupies.
     pub cols: u16,
-    /// The plain-text payload. Always present: the only thing OSC 52 can carry.
-    pub text: String,
-    /// A richer flavour offered to a local clipboard only. `None` for a code block.
-    pub html: Option<String>,
+    /// What activating it does.
+    pub kind: HotspotKind,
+    /// Groups the rows of one control.
+    ///
+    /// A link crossing a row boundary records several hotspots sharing this id, so
+    /// hovering any row lights every row of it (design spec §2.2). Unique per canvas;
+    /// rebased on merge exactly as rows and columns are, so two controls that were
+    /// numbered independently on their own canvases never collide once stacked into
+    /// one (see [`Canvas::next_target`]).
+    pub target: usize,
 }
 
 /// A rectangle of cells that is indivisible in a selection, and the source it copies.
@@ -228,6 +264,8 @@ pub struct Canvas {
     spans: Vec<SearchSpan>,
     pins: Vec<Pin>,
     hotspots: Vec<Hotspot>,
+    /// The next id [`Canvas::next_target`] issues.
+    next_target: usize,
     atoms: Vec<Atom>,
 }
 
@@ -248,6 +286,7 @@ impl Canvas {
             spans: Vec::new(),
             pins: Vec::new(),
             hotspots: Vec::new(),
+            next_target: 0,
             atoms: Vec::new(),
         }
     }
@@ -374,6 +413,12 @@ impl Canvas {
     /// Records a control.
     pub fn add_hotspot(&mut self, hotspot: Hotspot) {
         self.hotspots.push(hotspot);
+    }
+
+    /// Issues the next control id for this canvas. See [`Hotspot::target`].
+    pub fn next_target(&mut self) -> usize {
+        self.next_target += 1;
+        self.next_target - 1
     }
 
     /// The indivisible regions recorded in this canvas.

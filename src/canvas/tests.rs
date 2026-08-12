@@ -855,12 +855,16 @@ fn grid_border_row_matches_the_widths_it_was_given() {
 /// A hotspot at a known place, for the propagation tests.
 fn marked(width: u16) -> Canvas {
     let mut canvas = Canvas::new(width, 2, Style::default());
+    let target = canvas.next_target();
     canvas.add_hotspot(Hotspot {
         row: 0,
         col: 3,
         cols: 6,
-        text: "payload".to_string(),
-        html: None,
+        kind: HotspotKind::Copy {
+            text: "payload".to_string(),
+            html: None,
+        },
+        target,
     });
     canvas
 }
@@ -871,7 +875,13 @@ fn append_moves_a_hotspot_down() {
     top.append(&marked(20), Style::default());
     let spot = &top.hotspots()[0];
     assert_eq!((spot.row, spot.col), (3, 3));
-    assert_eq!(spot.text, "payload");
+    assert_eq!(
+        spot.kind,
+        HotspotKind::Copy {
+            text: "payload".to_string(),
+            html: None,
+        }
+    );
 }
 
 #[test]
@@ -888,5 +898,108 @@ fn blit_drops_a_hotspot() {
     assert!(
         host.hotspots().is_empty(),
         "a canvas placed into a row it shares cannot claim a control there"
+    );
+}
+
+#[test]
+fn a_hotspot_carries_its_kind_through_a_merge() {
+    let mut inner = Canvas::new(20, 1, Style::default());
+    let target = inner.next_target();
+    inner.add_hotspot(Hotspot {
+        row: 0,
+        col: 2,
+        cols: 6,
+        kind: HotspotKind::Open {
+            url: "https://example.com/a".to_string(),
+        },
+        target,
+    });
+    // append, not blit: a blit places `src` on a row it may share with other content
+    // (blit_drops_a_hotspot above) and only append/indent, which move whole rows, keep
+    // a hotspot at all (see `Hotspot`'s doc comment). A merge rebases a hotspot's row
+    // and column; it must not flatten what the hotspot IS. Before HotspotKind existed
+    // every hotspot was a copy payload and this could not be got wrong.
+    let mut outer = Canvas::new(30, 2, Style::default());
+    outer.append(&inner, Style::default());
+    let spot = outer
+        .hotspots()
+        .first()
+        .expect("the merge dropped the hotspot");
+    assert_eq!(
+        spot.kind,
+        HotspotKind::Open {
+            url: "https://example.com/a".to_string()
+        }
+    );
+}
+
+#[test]
+fn two_merged_canvases_do_not_collide_on_target_ids() {
+    // Each canvas numbers its own controls from zero. Without a rebase on merge, an
+    // unrelated button in each would share an id -- and hovering one would light the
+    // other, because hover lights every hotspot sharing a target. This is exactly how
+    // `render::document` builds the page: one block canvas appended after another,
+    // each with its own copy button numbered from zero. Target is rebased exactly as
+    // row and col are.
+    let mut a = Canvas::new(10, 1, Style::default());
+    let ta = a.next_target();
+    a.add_hotspot(Hotspot {
+        row: 0,
+        col: 0,
+        cols: 4,
+        kind: HotspotKind::Copy {
+            text: "a".into(),
+            html: None,
+        },
+        target: ta,
+    });
+    let mut b = Canvas::new(10, 1, Style::default());
+    let tb = b.next_target();
+    b.add_hotspot(Hotspot {
+        row: 0,
+        col: 0,
+        cols: 4,
+        kind: HotspotKind::Copy {
+            text: "b".into(),
+            html: None,
+        },
+        target: tb,
+    });
+    assert_eq!(
+        ta, tb,
+        "each canvas numbers from zero -- that is the hazard"
+    );
+
+    let mut outer = Canvas::new(10, 0, Style::default());
+    outer.append(&a, Style::default());
+    outer.append(&b, Style::default());
+    let targets: Vec<usize> = outer.hotspots().iter().map(|s| s.target).collect();
+    assert_eq!(targets.len(), 2);
+    assert_ne!(targets[0], targets[1], "two unrelated controls share an id");
+}
+
+#[test]
+fn a_merge_keeps_the_rows_of_one_control_together() {
+    // The other half: rebasing must not SPLIT a control that spans rows.
+    let mut inner = Canvas::new(10, 2, Style::default());
+    let t = inner.next_target();
+    for row in 0..2 {
+        inner.add_hotspot(Hotspot {
+            row,
+            col: 0,
+            cols: 4,
+            kind: HotspotKind::Open {
+                url: "https://e.com/a".into(),
+            },
+            target: t,
+        });
+    }
+    let mut outer = Canvas::new(10, 1, Style::default());
+    outer.append(&inner, Style::default());
+    let targets: Vec<usize> = outer.hotspots().iter().map(|s| s.target).collect();
+    assert_eq!(targets.len(), 2);
+    assert_eq!(
+        targets[0], targets[1],
+        "one control was split into two by the rebase"
     );
 }

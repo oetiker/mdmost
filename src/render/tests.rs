@@ -5,11 +5,28 @@
 //! Individual tests then check what the output actually says.
 
 use super::*;
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, Hotspot, HotspotKind};
 use crate::doc::Doc;
 use crate::text::display_width;
 use crate::theme::{Attributes, Theme};
 use crate::tui::icons::is_private_use;
+
+/// The plain-text copy payload of a `[copy]` hotspot, for tests that only ever deal
+/// with the `Copy` kind and would rather assert on the payload directly.
+fn copy_text(spot: &Hotspot) -> &str {
+    match &spot.kind {
+        HotspotKind::Copy { text, .. } => text,
+        other => panic!("expected a Copy hotspot, got {other:?}"),
+    }
+}
+
+/// The richer clipboard flavour of a `[copy]` hotspot, if it carries one.
+fn copy_html(spot: &Hotspot) -> Option<&str> {
+    match &spot.kind {
+        HotspotKind::Copy { html, .. } => html.as_deref(),
+        other => panic!("expected a Copy hotspot, got {other:?}"),
+    }
+}
 
 /// Options the readable assertions below are written against.
 ///
@@ -2534,8 +2551,8 @@ fn a_code_frame_offers_a_copy_button() {
     let spot = canvas.hotspots().first().expect("a hotspot");
     assert_eq!(spot.row, 0);
     assert_eq!(spot.cols, 6);
-    assert_eq!(spot.text, "let a = 1;\n");
-    assert_eq!(spot.html, None, "code has one flavour");
+    assert_eq!(copy_text(spot), "let a = 1;\n");
+    assert_eq!(copy_html(spot), None, "code has one flavour");
 }
 
 #[test]
@@ -2594,7 +2611,7 @@ fn a_failed_mermaid_block_offers_its_source() {
         .hotspots()
         .first()
         .expect("a hotspot on the fallback");
-    assert_eq!(spot.text, "not a diagram at all\n");
+    assert_eq!(copy_text(spot), "not a diagram at all\n");
 }
 
 #[test]
@@ -2628,7 +2645,7 @@ fn a_code_block_in_a_table_cell_shows_no_button() {
     let spots = canvas.hotspots();
     assert_eq!(spots.len(), 1, "one button, one hotspot: {spots:?}");
     assert!(
-        !spots[0].text.contains("let value"),
+        !copy_text(&spots[0]).contains("let value"),
         "a code block inside a table cell must record no hotspot of its own: {spots:?}"
     );
 }
@@ -2662,14 +2679,11 @@ fn a_table_offers_a_copy_button_with_both_flavours() {
         bracket,
         "the hotspot covers the drawn label"
     );
-    assert_eq!(spot.text, "name\trole\nada\tdesign\n");
+    assert_eq!(copy_text(spot), "name\trole\nada\tdesign\n");
     assert!(
-        spot.html
-            .as_deref()
-            .unwrap_or_default()
-            .starts_with("<table>"),
+        copy_html(spot).unwrap_or_default().starts_with("<table>"),
         "a table offers the richer flavour too: {:?}",
-        spot.html
+        copy_html(spot)
     );
 }
 
@@ -3356,13 +3370,17 @@ fn a_diagram_offers_a_copy_button_carrying_its_source() {
     let spot = canvas.hotspots().first().expect("a hotspot");
     assert_eq!(spot.row, 0, "the button floats at the top of the block");
     assert_eq!(spot.cols, 6);
-    assert!(spot.text.contains("flowchart LR"), "got {:?}", spot.text);
     assert!(
-        spot.text.contains("A[Parse] --> B[Layout]"),
-        "the whole diagram source: {:?}",
-        spot.text
+        copy_text(spot).contains("flowchart LR"),
+        "got {:?}",
+        copy_text(spot)
     );
-    assert!(spot.html.is_none(), "a diagram has no richer flavour");
+    assert!(
+        copy_text(spot).contains("A[Parse] --> B[Layout]"),
+        "the whole diagram source: {:?}",
+        copy_text(spot)
+    );
+    assert!(copy_html(spot).is_none(), "a diagram has no richer flavour");
 }
 
 #[test]
@@ -3374,18 +3392,19 @@ fn a_diagram_button_carries_the_content_and_not_the_fences() {
     let canvas = render_with(DIAGRAM, 60, &BUTTONS);
     let spot = canvas.hotspots().first().expect("a hotspot");
     assert_eq!(
-        spot.text, "flowchart LR\n  A[Parse] --> B[Layout]\n",
+        copy_text(spot),
+        "flowchart LR\n  A[Parse] --> B[Layout]\n",
         "the mermaid source exactly, opener and closer excluded"
     );
     assert!(
-        !spot.text.starts_with("```"),
+        !copy_text(spot).starts_with("```"),
         "the opening fence is not part of the payload: {:?}",
-        spot.text
+        copy_text(spot)
     );
     assert!(
-        !spot.text.contains("```"),
+        !copy_text(spot).contains("```"),
         "and neither is the closing one: {:?}",
-        spot.text
+        copy_text(spot)
     );
 }
 
@@ -3460,7 +3479,7 @@ fn a_diagram_in_a_table_cell_shows_no_button() {
         loose
             .hotspots()
             .iter()
-            .any(|spot| spot.text.contains("flowchart")),
+            .any(|spot| copy_text(spot).contains("flowchart")),
         "the control must fit a button at this width: {:?}",
         loose.hotspots()
     );
@@ -3481,7 +3500,7 @@ fn a_diagram_in_a_table_cell_shows_no_button() {
     let spots = canvas.hotspots();
     assert_eq!(spots.len(), 1, "one button, one hotspot: {spots:?}");
     assert!(
-        !spots[0].text.contains("flowchart"),
+        !copy_text(&spots[0]).contains("flowchart"),
         "a diagram inside a table cell records no hotspot of its own: {spots:?}"
     );
 }
@@ -3500,5 +3519,5 @@ fn a_failed_mermaid_block_offers_exactly_one_button() {
     );
     let spots = canvas.hotspots();
     assert_eq!(spots.len(), 1, "one button, one hotspot: {spots:?}");
-    assert_eq!(spots[0].text, "not a diagram at all\n");
+    assert_eq!(copy_text(&spots[0]), "not a diagram at all\n");
 }

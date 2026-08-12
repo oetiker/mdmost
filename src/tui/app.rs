@@ -5,7 +5,7 @@
 //! module drives the real application logic, and [`super::draw`] is left with nothing
 //! but painting.
 
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, HotspotKind};
 use crate::config::{Action, Config, Key, KeyCode};
 use crate::doc::Doc;
 use crate::render::RenderOptions;
@@ -1717,9 +1717,15 @@ impl App {
         let Some(spot) = self.hotspot_at(x, y) else {
             return false;
         };
+        // Task 5 activates the other kinds. Doing nothing here is deliberate and
+        // temporary: a control that reacts before its action exists is the "visible
+        // and dead" failure the spec forbids (§1.1).
+        let HotspotKind::Copy { text, html } = &spot.kind else {
+            return false;
+        };
         // Code carries one flavour and a table two, and that is the whole difference
         // between the two nouns the status bar has for them.
-        let what = if spot.html.is_some() {
+        let what = if html.is_some() {
             crate::tui::clipboard::Copied::Table
         } else {
             crate::tui::clipboard::Copied::Code
@@ -1727,8 +1733,8 @@ impl App {
         self.pending_hotspot = Some(HotspotCopy {
             row: spot.row,
             col: spot.col,
-            text: spot.text.clone(),
-            html: spot.html.clone(),
+            text: text.clone(),
+            html: html.clone(),
             what,
         });
         self.clear_notice();

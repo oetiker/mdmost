@@ -331,15 +331,28 @@ impl Canvas {
     /// Separate from [`Canvas::merge_metadata`] for the reason [`Canvas::merge_pins`] is:
     /// a control belongs to a row a block owns outright, so it travels with the
     /// operations that stack and inset whole rows and not with `blit`.
+    ///
+    /// `target` is rebased, not copied verbatim: `src` numbered its controls from zero
+    /// on its own canvas, and `self` may already hold controls numbered from zero too
+    /// (`document::render` stacks one block canvas after another this way). Copying the
+    /// id through unchanged would let an unrelated control in each collide on the same
+    /// target, which would then light together on hover. Each *distinct* source target
+    /// gets one fresh id in `self`; two source hotspots sharing a target still share
+    /// their new one, so a control that wraps across rows stays one control.
     fn merge_hotspots(&mut self, src: &Canvas, top: usize, left: u16) {
-        self.hotspots
-            .extend(src.hotspots.iter().map(|spot| Hotspot {
+        let mut rebased = std::collections::HashMap::new();
+        for spot in &src.hotspots {
+            let target = *rebased
+                .entry(spot.target)
+                .or_insert_with(|| self.next_target());
+            self.hotspots.push(Hotspot {
                 row: spot.row + top,
                 col: spot.col.saturating_add(left),
                 cols: spot.cols,
-                text: spot.text.clone(),
-                html: spot.html.clone(),
-            }));
+                kind: spot.kind.clone(),
+                target,
+            });
+        }
     }
 
     /// Translates and merges `src`'s atoms into `self`.
@@ -476,8 +489,8 @@ impl Canvas {
                 row: spot.row - start,
                 col: spot.col,
                 cols: spot.cols,
-                text: spot.text.clone(),
-                html: spot.html.clone(),
+                kind: spot.kind.clone(),
+                target: spot.target,
             })
             .collect();
         // An atom that hangs off the end of the slice is *clipped*, not dropped: half a
