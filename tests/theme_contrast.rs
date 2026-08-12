@@ -331,10 +331,10 @@ fn section_numbers_are_readable_but_quieter_than_every_heading() {
 /// to move *away* from the page: lighter on a dark theme, darker on a light one, which
 /// is what the owner asked for and what a shift in the wrong direction would fail.
 ///
-/// Measured when this was written, against the page: dark 3.27:1 at rest and 6.17:1
-/// hovered, light 3.45:1 and 5.77:1. Against a code surface: 3.03 → 5.71 and
-/// 3.08 → 5.15. Blending the same distance towards the *background* instead — the shift
-/// inverted — measures 1.94:1 and 1.98:1, well under the floor, which is what makes this
+/// Measured at `HOVER_SHIFT = 0.6`, against the page: dark 3.27:1 at rest and 8.16:1
+/// hovered, light 3.45:1 and 7.51:1. Against a code surface: 3.03 → 7.55 and
+/// 3.08 → 6.70. Blending the same distance towards the *background* instead — the shift
+/// inverted — measures 1.52:1 and 1.53:1, well under the floor, which is what makes this
 /// test a guard on the direction rather than a restatement of the palette's own numbers.
 #[test]
 fn the_hovered_copy_button_stays_legible_in_every_theme() {

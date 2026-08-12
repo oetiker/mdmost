@@ -298,13 +298,17 @@ pub struct UiStyles {
 
 /// How far [`Theme::hovered`] blends a control towards the theme's own ink.
 ///
-/// Chosen by measurement, not by taste. At `0.4` the built-in frames move 100–136 in
-/// RGB Manhattan distance and 0.14–0.18 in relative luminance, which is unmistakable at
-/// a glance and still recognisably the same colour — the button looks touched, not
-/// selected. Anything under about `0.25` was a shade nobody notices on a six-cell label,
-/// and past `0.6` the control starts reading as an accent competing with the heading
-/// above it.
-const HOVER_SHIFT: f32 = 0.4;
+/// Settled by the owner looking at it, and the measurements record what they chose
+/// rather than argue for it. At `0.6` the built-in frames move 149–205 in RGB Manhattan
+/// distance and 0.208–0.273 in relative luminance. Anything under about `0.25` was a
+/// shade nobody notices on a six-cell label.
+///
+/// This was `0.4` first, whose comment predicted that past about `0.6` the control would
+/// read as an accent competing with the heading above it. That prediction was made by
+/// measuring, not by looking; the owner looked at `0.4`, asked for more, and looked at
+/// `0.6` (2026-08-12). It is a shade on a six-cell label, and the eye is the instrument.
+/// Do not retune without asking.
+const HOVER_SHIFT: f32 = 0.6;
 
 /// A complete theme: palette plus every semantic style slot.
 #[derive(Debug, Clone, PartialEq)]
