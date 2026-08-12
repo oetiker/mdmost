@@ -7,10 +7,12 @@
 
 use crate::canvas::Canvas;
 use crate::mermaid::ast::Direction;
+use crate::mermaid::chrome;
 use crate::theme::Style;
 
 use super::glyph::{Dir, Stroke};
 use super::ink::Ink;
+use super::spec::DrawnLabel;
 
 /// Maps flow-space coordinates onto a canvas of a known size.
 #[derive(Debug, Clone, Copy)]
@@ -180,8 +182,34 @@ impl Pen {
         }
     }
 
-    /// Writes an edge label whose block starts at `(flow, cross)` in flow space.
-    pub(super) fn label(&mut self, flow: usize, cross: usize, lines: &[String]) {
+    /// Writes an edge label whose block starts at `(flow, cross)` in flow space, and
+    /// maps every drawn row back to the document bytes that drew it.
+    ///
+    /// The spans come from [`chrome::label_spans`], run by run, so a reader dragging
+    /// across a wrapped edge label gets the characters they went over rather than the
+    /// whole label (design spec §2.2). A label with no source — a synthesised one, or a
+    /// container key standing in for a title — emits nothing, which is that helper's own
+    /// rule and not a second one written here.
+    pub(super) fn drawn_label(&mut self, flow: usize, cross: usize, label: &DrawnLabel) {
+        let (row, col) = self.write_lines(flow, cross, &label.lines());
+        for (index, piece) in label.rows.iter().enumerate() {
+            chrome::label_spans(&mut self.canvas, &label.label, piece, row + index, col);
+        }
+    }
+
+    /// Writes an end note — a class cardinality — whose block starts at `(flow, cross)`.
+    ///
+    /// A bare string, because that is all a cardinality ever is: the parser reads it as a
+    /// quoted word and never builds a [`Label`](crate::mermaid::ast::Label) for it. So it
+    /// draws without a span rather than being handed an empty label to fit
+    /// [`drawn_label`](Pen::drawn_label) — an empty `Label::source` emits nothing anyway,
+    /// and a span at byte zero of the document would be worse than none at all.
+    pub(super) fn note(&mut self, flow: usize, cross: usize, text: &str) {
+        self.write_lines(flow, cross, &[text]);
+    }
+
+    /// Paints `lines` as a block starting at `(flow, cross)`, returning its top-left cell.
+    fn write_lines(&mut self, flow: usize, cross: usize, lines: &[&str]) -> (usize, usize) {
         let width = lines
             .iter()
             .map(|line| crate::text::display_width(line))
@@ -197,5 +225,6 @@ impl Pen {
         for (index, line) in lines.iter().enumerate() {
             self.canvas.write_str(row + index, col, line, style);
         }
+        (row, col)
     }
 }

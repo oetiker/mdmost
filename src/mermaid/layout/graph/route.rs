@@ -16,7 +16,7 @@ mod plan;
 use super::frame::Pen;
 use super::glyph::Stroke;
 use super::rank::{Layered, VKind};
-use super::spec::{PortPolicy, Terminator};
+use super::spec::{DrawnLabel, PortPolicy, Terminator};
 
 use plan::{assign_ports, plan_gap, stack_ranks};
 
@@ -46,8 +46,8 @@ pub(super) struct LevelEdge {
     pub tail: Terminator,
     /// Terminator at the target end.
     pub head: Terminator,
-    /// The mid label, already split into lines.
-    pub label: Vec<String>,
+    /// The mid label, wrapped into rows, with the document bytes behind them.
+    pub label: DrawnLabel,
     /// A short note drawn beside the source end.
     pub tail_label: Option<String>,
     /// A short note drawn beside the target end.
@@ -246,13 +246,13 @@ impl Routing {
             pen.terminator(head_at, route.dst, head.glyphs(forward), edge.stroke, true);
         }
         if let Some((flow, cross)) = route.label {
-            pen.label(self.band_end[rank] + flow, cross, &edge.label);
+            pen.drawn_label(self.band_end[rank] + flow, cross, &edge.label);
         }
         // End notes — class-diagram cardinalities and the like — sit just outside the
         // terminator they belong to.
         if let Some(note) = edge.tail_label.as_ref().filter(|_| is_source) {
             let at = self.band_end[rank] + gap.tail_len;
-            pen.label(at, route.src + 1, std::slice::from_ref(note));
+            pen.note(at, route.src + 1, note);
         }
         if let Some(note) = edge
             .head_label
@@ -260,7 +260,7 @@ impl Routing {
             .filter(|_| head_len > 0 || is_item(input, b))
         {
             let at = head_at.saturating_sub(gap.head_note);
-            pen.label(at, route.dst + 1, std::slice::from_ref(note));
+            pen.note(at, route.dst + 1, note);
         }
     }
 
@@ -303,13 +303,9 @@ fn label_extent(input: &Input<'_>, routes: &[Route]) -> usize {
         // Across the flow axis a label is as wide as its widest line when the graph
         // runs down the page, and as tall as its line count when it runs across.
         let widest = if input.vertical {
-            edge.label
-                .iter()
-                .map(|line| crate::text::display_width(line))
-                .max()
-                .unwrap_or(0)
+            edge.label.width()
         } else {
-            edge.label.len()
+            edge.label.height()
         };
         if widest > 0 {
             extent = extent.max(route.dst + 1 + widest);

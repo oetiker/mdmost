@@ -3145,3 +3145,197 @@ fn a_sequence_actor_label_maps_back_to_the_document() {
     );
     every_span_names_its_own_cells(&canvas, doc);
 }
+
+/// Asserts that no span sits on line art — an edge's own glyphs or a frame's border.
+///
+/// The other direction of the edge-label mapping: a span that names a label but is
+/// placed on the arrow beside it draws box-drawing characters, and no label a reader can
+/// select is made of those. Mermaid is Unicode box art only, so any drawn cell in the
+/// box-drawing block came from the engine's pen and not from the author's text.
+fn no_span_sits_on_line_art(canvas: &Canvas) {
+    for span in canvas.spans() {
+        let cells = span_cells(canvas, span);
+        assert!(
+            !cells.chars().any(is_line_art),
+            "span {span:?} draws line art {cells:?}; row {:?}",
+            canvas.row_text(span.row)
+        );
+    }
+}
+
+/// True for the glyphs the graph engine draws lines, arrowheads and frames with.
+fn is_line_art(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{2500}'..='\u{257F}' | '▶' | '◀' | '▲' | '▼' | '◆' | '◇' | '△' | '▽'
+    )
+}
+
+#[test]
+fn a_flowchart_edge_label_maps_back_to_the_document() {
+    // The label rides in the middle of the arrow, and it is long enough to wrap: every
+    // drawn row must name the bytes that drew *it*, because one span naming the whole
+    // label would put the same range on two rows and no column inside either could be
+    // right.
+    let doc = "```mermaid\nflowchart LR\n  A[Parse] -->|needs a fresh token| B[Layout]\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "needs a fresh");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "needs a fresh",
+        "the edge label's first row must sit on its own drawn text: {:?}",
+        canvas.row_text(span.row)
+    );
+    let tail = span_for(&canvas, doc, "token");
+    assert_eq!(
+        span_cells(&canvas, tail),
+        "token",
+        "and the wrapped remainder on its own: {:?}",
+        canvas.row_text(tail.row)
+    );
+    assert_ne!(span.row, tail.row, "the two rows of a wrapped label differ");
+    assert_eq!(
+        [span, tail].map(|s| s.unit.and_then(|(start, end)| doc.get(start..end))),
+        [Some("needs a fresh token"); 2],
+        "but both rows belong to the one label"
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+}
+
+#[test]
+fn a_flowchart_subgraph_title_maps_back_to_the_document() {
+    // A frame draws the first line of its title into its top edge, so that line — and
+    // not the whole `<br>`-broken label — is what the span may name.
+    let doc =
+        "```mermaid\nflowchart LR\n  subgraph one [Front<br>Back]\n    A[Parse]\n  end\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "Front");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Front",
+        "the title's span must sit on the drawn top edge: {:?}",
+        canvas.row_text(span.row)
+    );
+    let drawn: Vec<String> = canvas
+        .spans()
+        .iter()
+        .map(|s| span_cells(&canvas, s))
+        .collect();
+    assert!(
+        !drawn.iter().any(|text| text == "Back"),
+        "the line the frame never draws claims no cells: {drawn:?}"
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+}
+
+#[test]
+fn a_composite_state_title_maps_back_to_the_document() {
+    // A composite state is drawn as a frame, and its description is the frame's title.
+    let doc = "```mermaid\nstateDiagram-v2\n  state \"Doing work\" as w {\n    started --> stopped\n  }\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "Doing work");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Doing work",
+        "the composite's span must sit on its drawn frame title: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+
+    // The same title over a narrower frame, where the top edge has no room for it: a
+    // frame clips its title, and the span may only name the bytes behind the cells that
+    // survived the clip. An implementation that names the whole title regardless passes
+    // the assertions above and fails these.
+    let narrow =
+        "```mermaid\nstateDiagram-v2\n  state \"Doing work\" as w {\n    a --> b\n  }\n```\n";
+    let canvas = render(narrow, 80);
+    let span = span_for(&canvas, narrow, "Doing ");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Doing ",
+        "a clipped title names only what is drawn: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, narrow);
+    no_span_sits_on_line_art(&canvas);
+}
+
+#[test]
+fn a_class_relation_label_maps_back_to_the_document() {
+    // A relation label wraps at the same budget an edge label does, so it is the same
+    // two-row case, reached through the class family's own producer.
+    let doc = "```mermaid\nclassDiagram\n  Animal <|-- Duck : quacks a great deal\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "quacks a great");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "quacks a great",
+        "the relation label's first row must sit on its own text: {:?}",
+        canvas.row_text(span.row)
+    );
+    let tail = span_for(&canvas, doc, "deal");
+    assert_eq!(span_cells(&canvas, tail), "deal");
+    assert_ne!(span.row, tail.row, "the two rows of a wrapped label differ");
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+}
+
+#[test]
+fn an_er_relationship_label_maps_back_to_the_document() {
+    // The entity fixture of the six: a decoded reference draws fewer cells than it
+    // spells, so it has to be cut out into a run of its own, and `&#65;` is kept beside
+    // `&amp;` because a mutation a named reference alone cannot expose has survived on
+    // this project before. It sits in the ER family because `&` separates statements in
+    // the flowchart, class and state lexers, so none of those three can carry an entity
+    // in an edge label at all.
+    let doc =
+        "```mermaid\nerDiagram\n  CUSTOMER ||--o{ ORDER : \"places &amp; pays &#65; lot\"\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "places ");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "places ",
+        "the relationship label's first row must sit on its own text: {:?}",
+        canvas.row_text(span.row)
+    );
+    let tail = span_for(&canvas, doc, "lot");
+    assert_eq!(span_cells(&canvas, tail), "lot");
+    assert_ne!(span.row, tail.row, "the two rows of a wrapped label differ");
+    let named: Vec<&str> = canvas
+        .spans()
+        .iter()
+        .filter_map(|s| doc.get(s.source_start..s.source_end))
+        .collect();
+    assert!(
+        named.contains(&"&amp;") && named.contains(&"&#65;"),
+        "each entity reference is a run of its own: {named:?}"
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+}
+
+#[test]
+fn a_state_transition_label_maps_back_to_the_document() {
+    let doc = "```mermaid\nstateDiagram-v2\n  s1 --> s2 : press and hold a key\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "press and hold a");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "press and hold a",
+        "the transition label's first row must sit on its own text: {:?}",
+        canvas.row_text(span.row)
+    );
+    let tail = span_for(&canvas, doc, "key");
+    assert_eq!(span_cells(&canvas, tail), "key");
+    assert_ne!(span.row, tail.row, "the two rows of a wrapped label differ");
+    assert_eq!(
+        [span, tail].map(|s| s.unit.and_then(|(start, end)| doc.get(start..end))),
+        [Some("press and hold a key"); 2],
+        "but both rows belong to the one label"
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+}

@@ -44,11 +44,14 @@ mod spec;
 mod tests;
 
 pub use glyph::{Dir, Stroke};
-pub use spec::{EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Terminator};
+pub use spec::{
+    DrawnLabel, EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Terminator,
+};
 
 use crate::canvas::{BorderSet, Canvas};
 use crate::error::MermaidError;
 use crate::mermaid::ast::Direction;
+use crate::mermaid::chrome::{self, Piece};
 use crate::text::{Line, Span};
 use crate::theme::Theme;
 
@@ -445,21 +448,44 @@ impl Ctx<'_> {
     }
 
     /// Wraps a drawn container in its titled frame.
-    fn frame(&self, drawn: Drawn, title: &[String]) -> Drawn {
+    ///
+    /// A frame has one top edge, so only the title's first row is drawn, and it is
+    /// clipped to the width of that edge. The clip is made *here* rather than left to
+    /// [`Canvas::framed`], because the span that maps the title back to the document has
+    /// to name the bytes behind the cells that were really painted: computing the drawn
+    /// text once and both drawing and mapping it is the only way the two cannot disagree.
+    fn frame(&self, drawn: Drawn, title: &DrawnLabel) -> Drawn {
         let styles = self.theme.diagram;
         let mut padded = Canvas::new(drawn.canvas.width(), 1, self.theme.base());
         padded.append(&drawn.canvas, self.theme.base());
         padded.push_blank_row(self.theme.base());
         let padded = padded.indent(1, 1, self.theme.base());
-        let heading = title
+        // `framed` writes a space, the title and a space into an edge `inner` columns
+        // wide, and draws no title at all below four columns.
+        let inner = usize::from(padded.width());
+        let head = title
+            .rows
             .first()
-            .map(|text| Line::new(vec![Span::new(text.clone(), styles.group_title)]));
-        let canvas = padded.framed(
+            .filter(|_| inner >= 4)
+            .map(|row| Piece {
+                text: crate::text::truncate_to_width(&row.text, inner - 1).to_string(),
+                index: row.index,
+                at: row.at,
+            })
+            .filter(|row| !row.text.is_empty());
+        let heading = head
+            .as_ref()
+            .map(|row| Line::new(vec![Span::new(row.text.clone(), styles.group_title)]));
+        let mut canvas = padded.framed(
             BorderSet::DASHED,
             styles.group_border,
             heading.as_ref(),
             self.theme.base(),
         );
+        // The title lands one column past the border and the space that follows it.
+        if let Some(head) = &head {
+            chrome::label_spans(&mut canvas, &title.label, head, 0, 2);
+        }
         // The frame adds one row and column of border plus one of padding.
         let hints = drawn
             .hints

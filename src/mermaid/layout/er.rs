@@ -25,11 +25,10 @@ use crate::error::MermaidError;
 use crate::mermaid::ast::{
     Direction, Entity, ErCardinality, ErDiagram, ErRelationship, Label, LineStyle,
 };
-use crate::text::wrap_plain;
 use crate::theme::Theme;
 
 use super::graph::{
-    self, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
+    self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
 };
 use super::record::{self, Row};
 
@@ -129,13 +128,7 @@ fn relationship(relationship: &ErRelationship) -> EdgeSpec {
             .label
             .as_ref()
             .filter(|label| !label.is_empty())
-            .map(|label| {
-                label
-                    .lines
-                    .iter()
-                    .flat_map(|line| wrap_plain(line, LABEL_WIDTH))
-                    .collect()
-            })
+            .map(|label| DrawnLabel::wrapped(label, LABEL_WIDTH))
             .unwrap_or_default(),
         tail_label: None,
         head_label: None,
@@ -254,7 +247,7 @@ mod tests {
         };
         let spec = relationship(&relation);
         assert_eq!(spec.stroke, Stroke::Dotted);
-        assert_eq!(spec.label, vec!["places".to_string()]);
+        assert_eq!(spec.label.lines(), vec!["places"]);
         assert_eq!(
             spec.head,
             Terminator::CrowFoot {

@@ -23,11 +23,10 @@ use crate::error::MermaidError;
 use crate::mermaid::ast::{
     Class, ClassAnnotation, ClassArrow, ClassDiagram, ClassRelation, Direction, LineStyle, Member,
 };
-use crate::text::wrap_plain;
 use crate::theme::Theme;
 
 use super::graph::{
-    self, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
+    self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
 };
 use super::record::{self, Row};
 
@@ -162,13 +161,7 @@ fn relation(relation: &ClassRelation) -> EdgeSpec {
             .label
             .as_ref()
             .filter(|label| !label.is_empty())
-            .map(|label| {
-                label
-                    .lines
-                    .iter()
-                    .flat_map(|line| wrap_plain(line, LABEL_WIDTH))
-                    .collect()
-            })
+            .map(|label| DrawnLabel::wrapped(label, LABEL_WIDTH))
             .unwrap_or_default(),
         tail_label: cardinality(relation.left_cardinality.as_deref()),
         head_label: cardinality(relation.right_cardinality.as_deref()),
@@ -275,7 +268,7 @@ mod tests {
         });
         assert_eq!(spec.tail_label.as_deref(), Some("1"));
         assert_eq!(spec.head_label.as_deref(), Some("0..*"));
-        assert_eq!(spec.label, vec!["places".to_string()]);
+        assert_eq!(spec.label.lines(), vec!["places"]);
         assert_eq!(spec.head, Terminator::Arrow);
     }
 

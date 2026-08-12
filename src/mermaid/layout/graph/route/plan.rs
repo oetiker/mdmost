@@ -260,16 +260,11 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
     let mut extents = Vec::with_capacity(labelled.len());
     for &index in &labelled {
         let edge = &input.edges[input.layered.segs[index].edge];
-        let text = edge
-            .label
-            .iter()
-            .map(|line| crate::text::display_width(line))
-            .max()
-            .unwrap_or(0);
+        let text = edge.label.width();
         let (across, along) = if input.vertical {
-            (text, edge.label.len())
+            (text, edge.label.height())
         } else {
-            (edge.label.len(), text)
+            (edge.label.height(), text)
         };
         let at = routes[index].dst + 1;
         spans.push((at, at + across));

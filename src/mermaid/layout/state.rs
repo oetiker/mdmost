@@ -31,11 +31,11 @@ use crate::mermaid::ast::{
     Direction, Label, NotePlacement, StateDiagram, StateEndpoint, StateId, StateKind, StateNode,
     StateNote, StateScope, Transition,
 };
-use crate::text::wrap_plain;
 use crate::theme::Theme;
 
 use super::graph::{
-    self, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke, Terminator,
+    self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke,
+    Terminator,
 };
 
 /// Widest a transition label is allowed to get before it is wrapped.
@@ -250,7 +250,7 @@ impl Plan {
             stroke: Stroke::Dotted,
             tail: Terminator::None,
             head: Terminator::None,
-            label: Vec::new(),
+            label: DrawnLabel::default(),
             tail_label: None,
             head_label: None,
         });
@@ -287,13 +287,7 @@ impl Plan {
                 .label
                 .as_ref()
                 .filter(|label| !label.is_empty())
-                .map(|label| {
-                    label
-                        .lines
-                        .iter()
-                        .flat_map(|line| wrap_plain(line, LABEL_WIDTH))
-                        .collect()
-                })
+                .map(|label| DrawnLabel::wrapped(label, LABEL_WIDTH))
                 .unwrap_or_default(),
             tail_label: None,
             head_label: None,
@@ -315,13 +309,14 @@ fn label_text(state: &StateNode) -> Label {
     }
 }
 
-/// [`label_text`] wrapped to `width`, for callers that need finished lines.
-fn label_lines(state: &StateNode, width: usize) -> Vec<String> {
-    label_text(state)
-        .lines
-        .iter()
-        .flat_map(|line| wrap_plain(line, width))
-        .collect()
+/// [`label_text`] wrapped to `width`, for callers that draw it themselves.
+///
+/// The label travels with its wrapped rows, so a composite state's frame title maps back
+/// to the description the author wrote. A state that has no description falls back to its
+/// key, which is not text from the document — `label_text` builds a `Label::line` for it,
+/// whose empty `source` emits no span at all.
+fn label_lines(state: &StateNode, width: usize) -> DrawnLabel {
+    DrawnLabel::wrapped(&label_text(state), width)
 }
 
 /// Draws state boxes for the engine.
@@ -455,10 +450,11 @@ mod tests {
         };
         let plan = Plan::of(&diagram);
         assert_eq!(plan.root.children.len(), 1, "the composite is a container");
-        assert_eq!(
-            plan.root.children[0].title.as_deref(),
-            Some(["Outer".to_string()].as_slice())
-        );
+        let title = plan.root.children[0]
+            .title
+            .as_ref()
+            .expect("the composite is titled");
+        assert_eq!(title.lines(), vec!["Outer"]);
         assert!(plan.root.nodes.is_empty(), "nothing sits beside the frame");
     }
 
@@ -579,12 +575,9 @@ mod tests {
     fn a_state_shows_its_description_rather_than_its_key() {
         let mut node = state("s1", StateKind::Simple);
         node.label = Some(Label::line("Waiting for input"));
-        assert_eq!(
-            label_lines(&node, 40),
-            vec!["Waiting for input".to_string()]
-        );
+        assert_eq!(label_lines(&node, 40).lines(), vec!["Waiting for input"]);
         let plain = state("s2", StateKind::Simple);
-        assert_eq!(label_lines(&plain, 40), vec!["s2".to_string()]);
+        assert_eq!(label_lines(&plain, 40).lines(), vec!["s2"]);
     }
 
     #[test]

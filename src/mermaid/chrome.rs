@@ -152,6 +152,24 @@ pub fn label_pieces(label: &Label, width: usize) -> Vec<Piece> {
     out
 }
 
+/// The label's own lines as pieces, with nothing wrapped away.
+///
+/// [`label_pieces`] for a caller that draws each `<br>`-separated line whole rather than
+/// wrapping it — a frame title, which is clipped to the top edge it is written into.
+/// Every piece starts at byte zero of its line, which is what it is: the whole of it.
+pub fn label_rows(label: &Label) -> Vec<Piece> {
+    label
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| Piece {
+            text: line.clone(),
+            index,
+            at: Some(0),
+        })
+        .collect()
+}
+
 /// Adds the search spans behind one drawn piece, whose first column is `(row, col)`.
 ///
 /// **One span per run [`Label::spans_for`] returns, never one span naming the whole
