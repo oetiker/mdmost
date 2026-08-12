@@ -892,12 +892,186 @@ fn indent_moves_a_hotspot_right() {
 }
 
 #[test]
-fn blit_drops_a_hotspot() {
+fn blit_moves_a_hotspot_to_the_cells_it_was_drawn_into() {
+    // **Inverted 2026-08-12 (Task 2b)**, from `blit_drops_a_hotspot`, which pinned the
+    // defect that made a link in a table cell inert. A hotspot carries its own `col`, so
+    // translating it by the blit's offset names the cells `src`'s characters were just
+    // drawn into — the same claim a `SearchSpan` makes, which a blit has always kept. A
+    // `Pin` is the one that stays dropped: it claims a row's leading columns from column
+    // zero, which a canvas sharing the row cannot claim.
     let mut host = Canvas::new(40, 4, Style::default());
     host.blit(1, 5, &marked(20), Style::default());
+    let spot = host
+        .hotspots()
+        .first()
+        .expect("the blit dropped the hotspot");
+    assert_eq!(
+        (spot.row, spot.col, spot.cols),
+        (1, 8, 6),
+        "row 0 + top 1, col 3 + left 5, width unchanged"
+    );
+}
+
+#[test]
+fn a_blit_clamps_a_hotspot_whose_cells_were_clipped() {
+    // The right edge cuts cells; the claim over them has to be cut by the same amount. An
+    // over-claiming hotspot is a region that reacts to the pointer while showing nothing
+    // of the control — the one failure a `SearchSpan` is allowed (its consumers clamp)
+    // and a hotspot is not.
+    let mut host = Canvas::new(12, 2, Style::default());
+    host.blit(0, 8, &marked(20), Style::default());
+    let spot = host.hotspots().first().expect("a partly visible control");
+    assert_eq!(
+        (spot.col, spot.cols),
+        (11, 1),
+        "col 3 + left 8 = 11, and only one of its six columns exists"
+    );
+}
+
+#[test]
+fn a_blit_drops_a_hotspot_clipped_away_entirely() {
+    let mut host = Canvas::new(10, 2, Style::default());
+    host.blit(0, 7, &marked(20), Style::default());
     assert!(
         host.hotspots().is_empty(),
-        "a canvas placed into a row it shares cannot claim a control there"
+        "the control starts at column 10 of a 10-column canvas: {:?}",
+        host.hotspots()
+    );
+}
+
+#[test]
+fn two_blitted_canvases_do_not_collide_on_target_ids() {
+    // The table's case: two cells, each numbering its controls from zero, placed side by
+    // side into one row. Without the rebase both links would answer to id 0, and hovering
+    // one would light the other.
+    let mut host = Canvas::new(40, 2, Style::default());
+    host.blit(0, 0, &marked(20), Style::default());
+    host.blit(0, 20, &marked(20), Style::default());
+    let targets: Vec<usize> = host.hotspots().iter().map(|s| s.target).collect();
+    assert_eq!(targets.len(), 2);
+    assert_ne!(
+        targets[0], targets[1],
+        "two controls in two blitted canvases share a target id"
+    );
+}
+
+#[test]
+fn a_shared_rebase_keeps_one_control_whole_across_several_blits() {
+    // `render::table::align_canvas` places one cell canvas row by row, because each row
+    // moves by its own alignment offset. A link wrapped across two of those rows is one
+    // control arriving in two blits, and only a shared `TargetRebase` keeps it one.
+    let mut src = Canvas::new(10, 2, Style::default());
+    let target = src.next_target();
+    for row in 0..2 {
+        src.add_hotspot(Hotspot {
+            row,
+            col: 0,
+            cols: 4,
+            kind: HotspotKind::Open {
+                url: "https://e.com/a".into(),
+            },
+            target,
+        });
+    }
+
+    let mut shared = Canvas::new(14, 2, Style::default());
+    let mut rebase = crate::canvas::TargetRebase::new();
+    for row in 0..2 {
+        shared.blit_rebased(
+            row,
+            row + 1,
+            &src.slice_rows(row, 1),
+            Style::default(),
+            &mut rebase,
+        );
+    }
+    let targets: Vec<usize> = shared.hotspots().iter().map(|s| s.target).collect();
+    assert_eq!(targets.len(), 2);
+    assert_eq!(
+        targets[0], targets[1],
+        "one control came apart into two across the blits"
+    );
+
+    // The counterweight: the same two blits with a remap each *do* split it, which is
+    // what makes the assertion above about `TargetRebase` and not about luck.
+    let mut split = Canvas::new(14, 2, Style::default());
+    for row in 0..2 {
+        split.blit(row, row + 1, &src.slice_rows(row, 1), Style::default());
+    }
+    let targets: Vec<usize> = split.hotspots().iter().map(|s| s.target).collect();
+    assert_ne!(targets[0], targets[1], "a fresh remap per blit splits it");
+}
+
+#[test]
+fn narrowing_a_canvas_clamps_the_hotspots_it_cuts() {
+    // The other way a claim ends up outside the canvas: the canvas got narrower under it.
+    // A table lays itself out at the width its columns negotiated and is then clipped to
+    // the page, and a link in a cut column may not go on claiming cells past the edge.
+    let mut canvas = marked(20);
+    canvas.truncate_width(6, Style::default());
+    let spot = canvas
+        .hotspots()
+        .first()
+        .expect("half the control survives");
+    assert_eq!(
+        (spot.col, spot.cols),
+        (3, 3),
+        "columns 3..6 are what is left of 3..9"
+    );
+
+    let mut gone = marked(20);
+    gone.truncate_width(3, Style::default());
+    assert!(
+        gone.hotspots().is_empty(),
+        "nothing of it is drawn any more: {:?}",
+        gone.hotspots()
+    );
+}
+
+#[test]
+fn a_clip_marker_takes_the_claim_over_the_cell_it_lands_in() {
+    // `truncate_width` answers for the columns the cut removed; this is the one that
+    // *stayed* and stopped showing the control. A cell drawing `>` that opens a link is
+    // a control the reader cannot see, which is the fault the clamp exists to prevent.
+    let mut canvas = marked(20);
+    // Content on the row, or the clip has nothing to report and stamps no marker.
+    canvas.write_str(0, 0, &"x".repeat(20), Style::default());
+    canvas.clip_with_marker(8, ">", Style::default());
+    let spot = canvas
+        .hotspots()
+        .first()
+        .expect("the control still has cells of its own");
+    assert_eq!(
+        (spot.col, spot.cols),
+        (3, 4),
+        "columns 3..7, stopping before the marker in column 7"
+    );
+
+    // And a control with nothing left but the marker's cell goes entirely.
+    let mut all_marker = marked(20);
+    all_marker.write_str(0, 0, &"x".repeat(20), Style::default());
+    all_marker.clip_with_marker(4, ">", Style::default());
+    assert!(
+        all_marker.hotspots().is_empty(),
+        "only the marker's own column was left of it: {:?}",
+        all_marker.hotspots()
+    );
+}
+
+#[test]
+fn a_slice_keeps_the_target_ids_it_copied_reachable() {
+    // `slice_rows` copies `target` verbatim, which is what lets several slices of one
+    // canvas be recognised as the same control by a shared `TargetRebase`. The counter
+    // has to come across with them: a slice numbering its next control from zero would
+    // hand out an id its own copied hotspots already hold.
+    let source = marked(20);
+    let mut slice = source.slice_rows(0, 1);
+    let used: Vec<usize> = slice.hotspots().iter().map(|s| s.target).collect();
+    assert_eq!(used, vec![0], "the id came across unchanged");
+    let next = slice.next_target();
+    assert!(
+        !used.contains(&next),
+        "the slice offered {next} while its hotspots already hold {used:?}"
     );
 }
 
@@ -914,11 +1088,10 @@ fn a_hotspot_carries_its_kind_through_a_merge() {
         },
         target,
     });
-    // append, not blit: a blit places `src` on a row it may share with other content
-    // (blit_drops_a_hotspot above) and only append/indent, which move whole rows, keep
-    // a hotspot at all (see `Hotspot`'s doc comment). A merge rebases a hotspot's row
-    // and column; it must not flatten what the hotspot IS. Before HotspotKind existed
-    // every hotspot was a copy payload and this could not be got wrong.
+    // append here, and `blit_moves_a_hotspot_to_the_cells_it_was_drawn_into` above for
+    // the other route: every merge rebases a hotspot's row and column, and none of them
+    // may flatten what the hotspot IS. Before HotspotKind existed every hotspot was a
+    // copy payload and this could not be got wrong.
     let mut outer = Canvas::new(30, 2, Style::default());
     outer.append(&inner, Style::default());
     let spot = outer

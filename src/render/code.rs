@@ -126,9 +126,11 @@ pub(crate) fn diagram_block(
     // blanking a box. Placed after the resize because the button's column is reckoned
     // from the block's width, not from the layout's.
     //
-    // A block inside a table cell is blitted into a row it shares and would lose its
-    // hotspot while keeping its cells — a drawn control that does nothing — so it is not
-    // offered one at all, exactly as a code frame is not.
+    // A block inside a table cell is not offered one at all, exactly as a code frame is
+    // not. Until 2026-08-12 (Task 2b) that was forced by `Canvas::blit` dropping
+    // hotspots — the label would have kept its cells and lost the claim behind it. A blit
+    // now carries a hotspot, so the guard stands as a product decision: one button per
+    // top-level block. `render::table::render_table_node` writes it down at length.
     //
     // The height check is the same rule read once more: `Canvas::write_str` no-ops on a
     // row that does not exist while `place` would still record the hotspot, so an empty
@@ -309,8 +311,9 @@ fn framed_code(
     pin_gutter(&mut out, gutter, padding, title.as_ref());
     // The label and the junction have already taken what they need of the top edge; the
     // button is the third occupant and the only optional one, so it is the one that
-    // yields. A block inside a table cell is blitted into a row it shares and would lose
-    // its hotspot while keeping its cells, so it is not offered one at all.
+    // yields. A block inside a table cell is not offered one at all — a product decision
+    // since Task 2b taught `Canvas::blit` to carry a hotspot; see
+    // `render::table::render_table_node`.
     if ctx.options.copy_button && ctx.table_depth == 0 {
         let occupied = top_edge_occupied(&out, title.as_ref());
         button::place(

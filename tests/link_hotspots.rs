@@ -37,6 +37,28 @@ fn render(
         .collect()
 }
 
+/// The text actually drawn in the cells a hotspot claims.
+///
+/// A hotspot is a claim about *drawn cells*, so an assertion on its column alone proves
+/// half of it — and the half that survives an offset applied to the claim and not to the
+/// cells, which is exactly the alignment bug the table tests are looking for.
+fn cells_at(markdown: &str, width: u16, row: usize, col: u16, cols: u16) -> String {
+    let doc = mdmost::Doc::parse(markdown);
+    let canvas = mdmost::render::render_document(
+        &doc,
+        width,
+        None,
+        &mdmost::Theme::default_dark(),
+        &RenderOptions::default(),
+    );
+    canvas
+        .row_text(row)
+        .chars()
+        .skip(usize::from(col))
+        .take(usize::from(cols))
+        .collect()
+}
+
 #[test]
 fn a_link_records_a_hotspot_over_its_text_and_its_printed_url() {
     let spots = hotspots("[docs](https://example.com/a)\n", 60);
@@ -152,22 +174,134 @@ fn an_autolink_records_a_hotspot_although_it_prints_no_suffix() {
 }
 
 #[test]
-fn a_link_in_a_table_cell_records_no_hotspot_because_a_cell_is_blitted() {
-    // `link()` returns early when table_depth > 0, and the pieces are tagged before
-    // that return, so the *cell's* canvas does record a hotspot. It does not survive
-    // the table: `render_table` places each cell with `Canvas::blit`, which drops
-    // hotspots on purpose — a canvas placed at an arbitrary column of a row it shares
-    // with other content cannot claim a control lives there.
+fn a_link_in_a_table_cell_records_a_hotspot_over_its_drawn_cells() {
+    // **Inverted 2026-08-12 (Task 2b)**, from
+    // `a_link_in_a_table_cell_records_no_hotspot_because_a_cell_is_blitted`, which pinned
+    // the defect: `render_table` places each cell with `Canvas::blit`, and a blit used to
+    // drop hotspots. It carries them now — a hotspot names specific cells, and after the
+    // blit the link's characters are drawn in exactly those cells.
     //
-    // Design spec §9 asks for "a link inside a table cell" to be covered, and this is
-    // what the code does today: the link is drawn, and it is inert. Making it live
-    // needs `blit` to learn how to carry a hotspot, which is a change to the canvas
-    // contract and not this task's to make. Recorded here so the gap is visible rather
-    // than assumed solved.
-    let spots = hotspots("| a |\n| --- |\n| [go](https://example.com/a) |\n", 60);
+    // `link()` returns early when table_depth > 0, so no ` (url)` suffix is printed and
+    // the claim is the label alone.
+    let markdown = "| a |\n| --- |\n| [go](https://example.com/a) |\n";
+    let spots = hotspots(markdown, 60);
+    assert_eq!(spots.len(), 1, "one link in one cell: {spots:?}");
+    let (row, col, cols, kind, _) = &spots[0];
+    assert_eq!(
+        *kind,
+        HotspotKind::Open {
+            url: "https://example.com/a".to_string()
+        }
+    );
+    assert_eq!(*cols, 2, "the label `go`, with no printed target beside it");
+    assert_eq!(
+        cells_at(markdown, 60, *row, *col, *cols),
+        "go",
+        "the claim has to be over the cells the link was drawn into"
+    );
+}
+
+#[test]
+fn a_link_in_a_right_aligned_cell_lands_on_the_cells_it_was_drawn_into() {
+    // The `align_canvas` path: a non-left-aligned cell is re-placed row by row, each row
+    // by its own offset. An offset applied to the cells and not to the claim would leave
+    // the hotspot back at the column the block renderer drew the link at, which is where
+    // left-aligned content sits — so this only fails in the alignment path, and only if
+    // the hotspot did not travel with its row.
+    let markdown = "| a | b |\n| --- | ---: |\n| padding here | [go](https://example.com/a) |\n";
+    let spots = hotspots(markdown, 60);
+    assert_eq!(spots.len(), 1, "one link: {spots:?}");
+    let (row, col, cols, _, _) = &spots[0];
+    assert_eq!(
+        cells_at(markdown, 60, *row, *col, *cols),
+        "go",
+        "the hotspot must follow the alignment offset, not the drawing order"
+    );
+}
+
+#[test]
+fn a_link_in_a_centred_cell_lands_on_the_cells_it_was_drawn_into() {
+    let markdown = "| a | b |\n| --- | :---: |\n| padding here | [go](https://example.com/a) |\n";
+    let spots = hotspots(markdown, 60);
+    assert_eq!(spots.len(), 1, "one link: {spots:?}");
+    let (row, col, cols, _, _) = &spots[0];
+    assert_eq!(cells_at(markdown, 60, *row, *col, *cols), "go");
+}
+
+#[test]
+fn a_link_in_a_table_clipped_off_the_page_records_nothing() {
+    // A narrow cell does not clip a link, it *wraps* it, and `render::document` widens a
+    // block rather than cutting it — so the only way a table cell is cut off at document
+    // level is a table wider than `MAX_BLOCK_WIDTH`. There the link goes with the cells,
+    // rather than surviving as a region that reacts to a pointer while showing nothing.
+    //
+    // The partial cut — half a link drawn, half taken — is not reachable from a document:
+    // the cut lands on a column boundary and a column is either in or out. It is covered
+    // one level in, on a nested table clipped inside its cell, by
+    // `render::tests::a_link_clipped_inside_a_cell_claims_only_the_cells_it_kept`, and at
+    // the canvas contract by `canvas::tests::a_blit_clamps_a_hotspot_whose_cells_were_clipped`.
+    let columns = 300;
+    let head: String = (0..columns).map(|i| format!("| C{i:04} ")).collect();
+    let rule: String = (0..columns).map(|_| "| --- ".to_string()).collect();
+    let body: String = (0..columns)
+        .map(|i| {
+            if i == columns - 1 {
+                "| [go](https://example.com/a) ".to_string()
+            } else {
+                format!("| v{i:04} ")
+            }
+        })
+        .collect();
+    let markdown = format!("{head}|\n{rule}|\n{body}|\n");
+
+    let doc = mdmost::Doc::parse(&markdown);
+    let canvas = mdmost::render::render_document(
+        &doc,
+        80,
+        None,
+        &mdmost::Theme::default_dark(),
+        &RenderOptions::default(),
+    );
     assert!(
-        spots.is_empty(),
-        "a table cell is blitted, so its hotspots are dropped; got {spots:?}"
+        !canvas.plain_text().contains("go"),
+        "the premise: the link's own cells were cut away"
+    );
+    assert!(
+        canvas.hotspots().is_empty(),
+        "and the claim went with them: {:?}",
+        canvas.hotspots()
+    );
+}
+
+#[test]
+fn two_links_in_two_cells_do_not_share_a_target() {
+    // Each cell canvas numbers its controls from zero, and the two arrive by two separate
+    // blits. Without the rebase both would answer to id 0 and hovering one would light
+    // the other — the collision `Canvas::merge_hotspots` exists to prevent, now reachable
+    // by a second route.
+    let spots = hotspots(
+        "| a | b |\n| --- | --- |\n| [x](https://example.com/x) | [y](https://example.com/y) |\n",
+        60,
+    );
+    assert_eq!(spots.len(), 2, "two links, two hotspots: {spots:?}");
+    assert_ne!(
+        spots[0].4, spots[1].4,
+        "two links in two cells must not share a target id"
+    );
+}
+
+// The nested-table case is not reachable from a document — GFM has no syntax for a table
+// inside a table cell, and `render::tests::table_with_cell` splices one in by hand — so it
+// is tested from inside the crate, by
+// `render::tests::a_link_in_a_nested_table_cell_records_a_hotspot`.
+
+#[test]
+fn ordinary_text_in_a_table_cell_records_nothing() {
+    // The negative half of the table case: making a cell's controls survive must not
+    // make a cell into a control.
+    assert!(
+        hotspots("| a | b |\n| --- | --- |\n| one | two |\n", 60).is_empty(),
+        "a cell is not a control"
     );
 }
 

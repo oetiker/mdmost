@@ -4869,10 +4869,17 @@ fn the_button_of_an_over_wide_table_is_pressable_once_it_is_scrolled_into_view()
 
 #[test]
 fn a_button_clipped_off_the_canvas_cannot_be_pressed_anywhere() {
-    // A block too wide even for `render::document`'s widening cap is clipped, and the
-    // hotspot survives at a column the clipped canvas no longer has while the label is
-    // drawn nowhere. That is an invisible control if any press can name that column, so
-    // this sweeps every cell of the block at every horizontal offset there is.
+    // A block too wide even for `render::document`'s widening cap is clipped, and its
+    // button's label is drawn nowhere. No press may reach it, so this sweeps every cell
+    // of the block at every horizontal offset there is.
+    //
+    // **Changed 2026-08-12 (Task 2b).** The second premise used to be that the hotspot
+    // *outlived* the clip, at a column the clipped canvas no longer had, and the sweep
+    // was the proof that no press could name that column. The clip now takes the claim
+    // with the cells (`Canvas::truncate_width`), so the control is gone rather than
+    // merely unreachable — a stronger fact, asserted here in place of the weaker one.
+    // The sweep stays: it is what would catch a claim surviving at a column that *does*
+    // exist, which is the failure this test was written for.
     let columns = 300;
     let head: String = (0..columns).map(|i| format!("| C{i:04} ")).collect();
     let rule: String = (0..columns).map(|_| "| --- ".to_string()).collect();
@@ -4885,10 +4892,10 @@ fn a_button_clipped_off_the_canvas_cannot_be_pressed_anywhere() {
             .contains(crate::render::button::LABEL),
         "the premise: the label was clipped away, so nothing is drawn to press"
     );
-    assert_eq!(
-        app.canvas().hotspots().len(),
-        1,
-        "and the premise's other half: the hotspot outlived it"
+    assert!(
+        app.canvas().hotspots().is_empty(),
+        "the clip took the claim with the cells it cut: {:?}",
+        app.canvas().hotspots()
     );
     loop {
         for y in 0..11 {

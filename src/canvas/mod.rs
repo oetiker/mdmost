@@ -156,10 +156,23 @@ pub enum HotspotKind {
 /// pager needs to know something about a region that only the renderer which drew it can
 /// know. Here that these cells are a control, and what it does when pressed.
 ///
-/// Like [`Pin`], a hotspot is a claim about a region of one row, so it travels through
-/// [`Canvas::append`] and [`Canvas::indent`] and is dropped by [`Canvas::blit`] — a
-/// canvas placed at an arbitrary column of a row it shares with other content cannot
-/// claim that a control lives there.
+/// **Unlike [`Pin`], a hotspot carries its own `col`**, and that is why it travels
+/// through [`Canvas::blit`] as well as through [`Canvas::append`] and [`Canvas::indent`].
+/// A pin claims the leading columns of a row *from column zero*, which a canvas sharing
+/// the row cannot claim; a hotspot claims a run of specific cells, and after the blit the
+/// control's characters really are drawn in exactly those cells. It is the same shape of
+/// claim a [`SearchSpan`] makes, and a blit has always translated those.
+///
+/// **Changed 2026-08-12**: a hotspot used to be dropped by `blit`, on the reading that it
+/// was a whole-row claim like a pin. It is not, and the cost of the reading was that a
+/// link inside a table cell — the one sub-canvas the renderer blits — was drawn, styled
+/// and inert.
+///
+/// A hotspot never claims a cell the canvas does not have: `blit` and
+/// [`Canvas::truncate_width`] clamp a claim to the width, and drop one that falls off the
+/// edge entirely. A `SearchSpan` puts that burden on its consumers instead; a hotspot may
+/// not, because an over-claiming hotspot is a region that reacts to the pointer while
+/// showing nothing of the control.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hotspot {
     /// The row the control is drawn on.
@@ -180,6 +193,34 @@ pub struct Hotspot {
     pub target: usize,
 }
 
+/// A running remap of [`Hotspot::target`] ids from one source canvas into a destination.
+///
+/// Every merge rebases targets so that two controls numbered independently on their own
+/// canvases cannot collide once stacked into one, and so that the several hotspots of one
+/// wrapped control keep sharing an id. Ordinarily one composition is one call, and the
+/// remap lives and dies inside it — that is what [`Canvas::blit`], [`Canvas::append`] and
+/// [`Canvas::indent`] do.
+///
+/// A caller that places **one** source canvas with **several** blits needs the remap to
+/// outlive the call, or the same source control would be issued a fresh id per blit and
+/// come apart. `render::table::align_canvas` is that caller: it moves each row of a
+/// rendered cell by that row's own alignment offset, so a link wrapped across two rows of
+/// a centred cell arrives in two blits and must still be one control. Hand those blits
+/// one `TargetRebase` — see [`Canvas::blit_rebased`].
+#[derive(Debug, Default)]
+pub struct TargetRebase {
+    /// Source target to the id issued for it in the destination.
+    map: std::collections::HashMap<usize, usize>,
+}
+
+impl TargetRebase {
+    /// A remap that has seen nothing yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 /// A rectangle of cells that is indivisible in a selection, and the source it copies.
 ///
 /// The fifth metadata channel. A diagram records one, and it is the only way the pager
@@ -192,8 +233,9 @@ pub struct Hotspot {
 /// fence lines included — not the union of the labels inside it. That is what makes the
 /// wider drag copy something that still parses as a diagram.
 ///
-/// Like [`Pin`] and [`Hotspot`], an atom is a claim about rows a block owns outright, so
-/// it travels through [`Canvas::append`] and [`Canvas::indent`] and is dropped by
+/// Like [`Pin`] — and unlike [`Hotspot`], which claims cells on a single row — an atom is
+/// a claim about rows a block owns outright, so it travels through [`Canvas::append`] and
+/// [`Canvas::indent`] and is dropped by
 /// [`Canvas::blit`]: a canvas placed at an arbitrary column of a row it shares with other
 /// content cannot claim a rectangle of that row. That is an invariant, not a live case —
 /// the only sub-canvas the renderer blits is a table cell, and a GFM table cell holds

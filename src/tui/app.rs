@@ -1677,13 +1677,14 @@ impl App {
     ///
     /// # A hotspot the viewport cut off
     ///
-    /// A block too wide even for [`crate::render::document`]'s widening keeps its
-    /// hotspot at a column its clipped canvas no longer has, so the label is drawn
-    /// nowhere while the claim survives — an invisible control, if a press could ever
-    /// name that column. None can: the horizontal scroll only reaches as far as the
-    /// canvas is *drawn*, and `canvas_pos` clamps anything beyond it to the last cell
-    /// that exists, which is never inside a button — a button sits at least two columns
-    /// inside its own block's right edge. That is asserted by
+    /// A block too wide even for [`crate::render::document`]'s widening is clipped, and
+    /// the clip now takes the claim with the cells it cuts
+    /// ([`Canvas::truncate_width`](crate::canvas::Canvas::truncate_width), since Task
+    /// 2b), so there is no hotspot left to reach. It is belt and braces either way: the
+    /// horizontal scroll only reaches as far as the canvas is *drawn*, and `canvas_pos`
+    /// clamps anything beyond it to the last cell that exists, which is never inside a
+    /// button — a button sits at least two columns inside its own block's right edge.
+    /// That is asserted by
     /// [`super::tests::a_button_clipped_off_the_canvas_cannot_be_pressed_anywhere`],
     /// which sweeps every cell at every offset for one.
     fn hotspot_at(&self, x: u16, y: u16) -> Option<&crate::canvas::Hotspot> {

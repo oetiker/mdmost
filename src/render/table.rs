@@ -18,7 +18,7 @@
 //!    zebra stripe through it with a half block; see [`gap_row`], which is where that
 //!    whole rule and its trade-offs are written down.
 
-use crate::canvas::{BorderSet, Canvas, Cell, CutMark, Rule, Side};
+use crate::canvas::{BorderSet, Canvas, Cell, CutMark, Rule, Side, TargetRebase};
 use crate::doc::{Node, NodeKind, TableInfo};
 use crate::text::{Align, display_width};
 use crate::theme::{Color, Style, Theme};
@@ -79,9 +79,17 @@ pub(crate) fn render_table_node(node: &Node, info: &TableInfo, width: u16, ctx: 
     // place across the whole pager.
     //
     // The top rule has no label of its own, so nothing but the left corner is in the way.
-    // A nested table is blitted into a row it shares and would lose its hotspot while
-    // keeping its drawn label — a control that does nothing — so only a top-level table
-    // is offered one, and the label and the hotspot are decided here together.
+    // Only a top-level table is offered one, and the label and the hotspot are decided
+    // here together.
+    //
+    // **Changed 2026-08-12 (Task 2b).** That guard used to be justified by `Canvas::blit`
+    // dropping hotspots: a nested table's button would have kept its drawn label and lost
+    // the claim behind it, a control that does nothing. A blit now carries a hotspot, so
+    // the guard is no longer forced by the canvas — it stands as a *product* decision:
+    // one button per top-level block, so a cell three tables deep does not sprout a
+    // `[copy]` in a column negotiated against every other column. If that reading is
+    // wrong the guard can go, and the button will work; nothing below this line depends
+    // on it any more.
     if ctx.options.copy_button && ctx.table_depth == 0 {
         super::button::place(
             &mut canvas,
@@ -551,16 +559,23 @@ fn alignment(info: &TableInfo, column: usize) -> Align {
 ///
 /// The block renderer always produces left-aligned content; centring and right-
 /// alignment are applied here so the alignment rule lives in exactly one place.
+///
+/// Every row moves by its own offset, so this is one canvas placed by several blits —
+/// and a link wrapped across two rows of a centred cell is one control arriving in two of
+/// them. One [`TargetRebase`] is shared across the loop so it stays one control; without
+/// it each blit would issue the link a fresh id and hovering the cell would light half of
+/// it.
 fn align_canvas(src: &Canvas, align: Align, fill: Style) -> Canvas {
     if align == Align::Left || src.is_empty() {
         return src.clone();
     }
     let width = usize::from(src.width());
     let mut out = Canvas::new(src.width(), src.height(), fill);
+    let mut rebase = TargetRebase::new();
     for row in 0..src.height() {
         let text = src.row_text(row);
         let offset = crate::canvas::align_offset(width, display_width(text.trim_end()), align);
-        out.blit(row, offset, &src.slice_rows(row, 1), fill);
+        out.blit_rebased(row, offset, &src.slice_rows(row, 1), fill, &mut rebase);
     }
     out
 }

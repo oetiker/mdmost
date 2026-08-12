@@ -2710,10 +2710,14 @@ fn a_narrow_table_drops_its_button() {
 
 #[test]
 fn a_table_inside_a_table_cell_shows_no_button() {
-    // The inner table is blitted into a row it shares, so its hotspot is dropped while
-    // its drawn `[copy]` would survive — a label with nothing behind it. Only the
-    // top-level table is offered one, so exactly one button is drawn and exactly one
-    // hotspot backs it.
+    // Only a top-level table is offered a button, so the inner one draws no `[copy]` and
+    // records nothing: exactly one button is drawn and exactly one hotspot backs it.
+    //
+    // The guard used to be justified by the blit dropping the inner table's hotspot and
+    // leaving a label with nothing behind it. Since Task 2b a blit carries a hotspot, so
+    // the guard is a product decision instead — see `render_table_node`. What this test
+    // asserts is unchanged either way, and it is now the thing that would notice if the
+    // guard were dropped by accident.
     let table = table_with_cell("| inner column |\n|---|\n| y |\n");
     let canvas = render_block(&table, 40, &Theme::default_dark(), &BUTTONS);
     canvas.check_invariants().expect("contract holds");
@@ -3553,11 +3557,11 @@ fn a_link_in_a_table_cell_records_a_hotspot_on_the_cell_canvas() {
     // every other column cannot afford a printed URL — but a link with no suffix is
     // still a link, so the pieces are tagged before that return.
     //
-    // Tested on the cell's own canvas, because it goes no further: `render_table` places
-    // a cell with `Canvas::blit`, which drops hotspots on purpose, and
-    // `a_link_in_a_table_cell_records_no_hotspot_because_a_cell_is_blitted` in
-    // `tests/link_hotspots.rs` pins that outcome. This is the half that would already be
-    // right the day `blit` learns to carry a control.
+    // Tested on the cell's own canvas: this is where the claim is *made*, and
+    // `a_link_in_a_table_cell_records_a_hotspot_over_its_drawn_cells` in
+    // `tests/link_hotspots.rs` is where it is checked to have survived the table. Since
+    // Task 2b `Canvas::blit` carries a hotspot, so both halves hold; before it, only this
+    // one did.
     let theme = Theme::default_dark();
     let ctx = Ctx::new(&theme, &PLAIN).in_table();
     let doc = Doc::parse("[go](https://example.com/a)\n");
@@ -3581,4 +3585,63 @@ fn a_link_in_a_table_cell_records_a_hotspot_on_the_cell_canvas() {
         }
     );
     assert_eq!((spots[0].col, spots[0].cols), (0, 2), "over `go`");
+}
+
+#[test]
+fn a_link_clipped_inside_a_cell_claims_only_the_cells_it_kept() {
+    // The reachable half-clipped link: a nested table negotiates its columns against the
+    // *cell's* budget and is cut to it, so the label is drawn in part. The claim has to
+    // be cut by the same amount, and to stop before the overflow chevron as well — that
+    // cell shows the chevron, not the link, and a cell that opens a URL without looking
+    // pressable is the fault the clamp exists to prevent.
+    let table =
+        table_with_cell("| h |\n|---|\n| [abcdefghijklmnopqrstuvwxyz](https://example.com/a) |\n");
+    let canvas = render_block(&table, 16, &Theme::default_dark(), &PLAIN);
+    canvas.check_invariants().expect("contract holds");
+    let spots = canvas.hotspots();
+    assert_eq!(spots.len(), 1, "one link: {spots:?}");
+    let spot = &spots[0];
+    let row = canvas.row_text(spot.row);
+    assert!(
+        row.contains(crate::render::code::OVERFLOW_MARKER),
+        "the premise: this row was cut and carries the overflow marker: {row:?}"
+    );
+    let claimed: String = row
+        .chars()
+        .skip(usize::from(spot.col))
+        .take(usize::from(spot.cols))
+        .collect();
+    assert_eq!(
+        claimed, "abcdefghijk",
+        "the claim is the drawn part of the label and nothing else, in {row:?}"
+    );
+}
+
+#[test]
+fn a_link_in_a_nested_table_cell_records_a_hotspot() {
+    // Two levels of cell, so the claim crosses two blits and two target rebases on its
+    // way out. Not reachable from a document — pipe syntax cannot put a table in a cell —
+    // so it is spliced in through `table_with_cell`, this file's precedent for the shape.
+    let table = table_with_cell("| inner |\n|---|\n| [go](https://example.com/a) |\n");
+    let canvas = render_block(&table, 60, &Theme::default_dark(), &PLAIN);
+    canvas.check_invariants().expect("contract holds");
+    let spots = canvas.hotspots();
+    assert_eq!(spots.len(), 1, "one link, two tables deep: {spots:?}");
+    assert_eq!(
+        spots[0].kind,
+        HotspotKind::Open {
+            url: "https://example.com/a".to_string()
+        }
+    );
+    let drawn: String = canvas
+        .row_text(spots[0].row)
+        .chars()
+        .skip(usize::from(spots[0].col))
+        .take(usize::from(spots[0].cols))
+        .collect();
+    assert_eq!(
+        drawn, "go",
+        "the claim has to land on the cells the link was drawn into, {} blits later",
+        2
+    );
 }
