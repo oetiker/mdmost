@@ -3,249 +3,298 @@
 > Starter pack for the next controller session. This handoff lives in ONE
 > worktree — run `git worktree list` first and confirm this is the workstream
 > you're resuming. Read this first, then `git log <handoff-commit>..HEAD` for
-> everything that changed since. Detail is NOT here — it's in git and the
-> ledger named in §6. Before you rewrite this file at your own handoff: read the
+> everything that changed since. Detail is NOT here — it's in git and the ledger
+> named in §6. Before you rewrite this file at your own handoff: read the
 > previous version (`git show HEAD:docs/controller-handoff.md`) and carry forward
 > any lesson in §4/§5 that is still true. Fresh synthesis, not blank page. On
 > merge into another branch, rewrite that branch's handoff to the merged
 > reality — do not merge or preserve this text.
 
 Handoff commit: the last commit touching this file — `git log -1 -- docs/controller-handoff.md`
-Date: 2026-08-11   Reason: context budget — controller rolling over before Task 6
+Date: 2026-08-12   Reason: context budget — controller rolling over with Task 6 unstarted
 Worktree / branch: `/scratch/oetiker/claude-worktrees/mdmost-semantic-selection` @ `semantic-selection`
 Trunk at time of writing: `main` @ `344f4e1` — **reader: if trunk has moved, §2 is provisionally stale; if trunk now contains this branch's HEAD, this file is a tombstone** (`git merge-base --is-ancestor HEAD main`)
-Sibling worktrees: the `main` checkout at `/home/oetiker/checkouts/mdmost`, which owns nothing active — its handoff is the pre-plan one and is now superseded for this workstream. This line cannot see worktrees created later; check yourself.
+Sibling worktrees: the `main` checkout at `/home/oetiker/checkouts/mdmost` (owns nothing active; its handoff is superseded for this workstream), and `/scratch/oetiker/claude-worktrees/mdmost-tryout`, a **detached** throwaway used only to build owner test binaries — never commit there. This line cannot see worktrees created later; check yourself.
 
 ## 1. Mission
 
-Execute `docs/superpowers/plans/2026-08-11-semantic-selection.md` — ten tasks
-making a selection a **range over the document** rather than a rectangle on
-screen, giving every diagram label a mapping back to its source, and giving all
-three block kinds a muted three-state `[copy]` button.
+Make a selection a **range over the document** rather than a rectangle on screen, give
+every diagram label a mapping back to its source, and give all three block kinds a muted
+three-state `[copy]` button. Plan: `docs/superpowers/plans/2026-08-11-semantic-selection.md`.
 
-The mental model that matters: **rendering is a pure function of
-`(AST, width, theme, options)`**. Anything depending on the pointer — hover, the
-selection wash, the `[copied]` flash — is a **paint-time** concern in
-`src/tui/draw.rs`, never a render-time one.
+The mental model that matters: **rendering is a pure function of `(AST, width, theme,
+options)`**. Anything depending on the pointer — hover, the selection wash, the `[copied]`
+flash — is a **paint-time** concern in `src/tui/draw.rs`, never a render-time one.
 
-**How the owner works, and it is not optional.** They review by *looking at
-rendered output*, and their findings are precise. **Answer a design question with
-a rendered sample, never with prose.** When they reframe a question, the reframe
-*is* the design — stop defending the old framing and follow it. Three of the four
-rulings in §7 came that way, and each was better than the options I had drafted.
+The second model, learned this session and now load-bearing: **a span's source is a
+byte-for-byte copy of the cells it names.** `offset_at`, `highlighted_columns` and
+`search::segments_for` all convert between bytes and columns *inside* a span by walking its
+source, and that is exact only because of this property. The single sanctioned exception is
+a one-grapheme, one-column run (an entity reference), because it has no interior position to
+resolve. Anything that would create a wider non-copying span is a much bigger change than it
+looks.
+
+**How the owner works, and it is not optional.** They review by *looking at rendered
+output*, and their findings are precise. **Answer a design question with a rendered sample,
+never with prose** — build a release binary in the tryout worktree and write them a test
+document. When they reframe a question, the reframe *is* the design. Eight rulings this
+session came that way and every one was better than what I had drafted; one of them (CRLF,
+§4.4) was better than both options I was choosing between.
 
 ## 2. Where we are now, as of the handoff commit
 
-Re-derive rather than inherit (§8). Seven commits on `semantic-selection`,
-`main` untouched.
+Re-derive rather than inherit (§8). Everything below is committed on `semantic-selection`.
 
 | Task | Commit | State |
 | --- | --- | --- |
-| 1 — cell → source offset | `89be3f7` | complete, review clean |
-| 2 — hull is a range, not a rectangle | `05c2332` | complete, review clean |
-| 3 — highlight paints from the hull | `eec0faf` | complete, **owner gate passed** |
-| 4 — `Label` carries provenance | `ffc9dc3`, `b7e5452` | complete after 1 fix round |
-| 5 — flowchart labels reach the document | `f64951c` | complete, review clean |
-| 5b — a diagram is atomic in a selection | `ab79c98` | complete, review clean |
+| 1–5b (see prior handoff) | `89be3f7`…`ab79c98` | complete, reviewed |
+| 5b fix round 1 | `be3b5d8`, `3a3dedb` | complete — **but round 1 shipped a defect, §4.1** |
+| 5b fix round 2 | `5a8a883` | complete, both blockers fixed |
+| soft-break span (owner bug) | `5361411` | complete |
+| escape/entity spans (owner ruling 7) | `e330ebe` | complete |
+| clickable-links **spec** | `e63cfd3` | approved by owner; **no plan written, deliberately (§4.9)** |
+| CRLF normalisation (owner ruling 6) | `0a3f81f` | complete |
+| 5c partial selection (owner ruling 5) | `3d639f2` | complete |
 
-**1053 tests / 30 suites**, `cargo fmt --check`, `cargo clippy --jobs 4
---all-targets -- -D warnings` and `cargo test --jobs 4` all exit 0 at `ab79c98`,
-re-run by a reviewer that did not produce the numbers.
+**1103 tests / 30 suites**; `cargo fmt --check`, `cargo clippy --jobs 4 --all-targets -- -D
+warnings` and `cargo test --jobs 4` all exit 0 at `3d639f2`, **re-derived by the controller
+on the commit, not inherited from any agent**. Across the session: zero test deletions in
+any test file; every count reconciled two ways (per-suite hand-sum *and* `#[test]`
+attributes).
 
-**Task 5b has an UNCOMMITTED fix round in the worktree** — `src/tui/select.rs`,
-`src/tui/tests.rs`, `src/canvas/mod.rs` and the design spec are modified. It was
-dispatched to `impl-task-5b-fix` and covers the two owner rulings in §7.1–7.2 plus
-two doc minors. **Check `git status` first**: if those files are still dirty and no
-`cargo` is running, that agent stalled — run the gates and commit for it rather
-than re-dispatching (§4.1). It has not been through a scoped re-review yet; that
-is owed before Task 6 starts.
+**Task 6 is the only plan task left, and it has never been started.** Tasks 7–10 follow it.
 
 `selection-review.html` is an untracked owner artifact from Task 3. Leave it.
 
-**Tasks 6–10 are not started.** Task 5b was inserted by owner ruling and is not
-in the plan file.
-
 ## 3. Do this next
 
-1. **Land the 5b fix round**: confirm it committed, then run
-   `scripts/review-package … ab79c98 HEAD` and dispatch a **scoped re-review**
-   (`re-review-prompt.md`) verdicting each of the four items ADDRESSED /
-   NOT ADDRESSED. Do not let it merge into Task 6 unreviewed.
-2. **Task 6 — the remaining six families.** Its brief must carry three things the
-   plan cannot know: (a) Task 4's finding that **14 of 15 threaded parse sites have
-   no test** — the shared `lex::label_at` makes them *look* covered, and design §6
-   risk 4 warns a shared helper does not make seven families one behaviour;
-   (b) Task 5's M3 — flowchart **edge labels and subgraph titles still carry no
-   spans**, flattened to `Vec<String>` at the shared `graph` seam that every
-   graph-drawn family uses, which is Task 6's blast radius; (c) atomicity is
-   family-agnostic, so each family gets it free once it emits spans — but 5b's
-   tests should be re-run per family.
-3. **Task 7 — the button.** The owner ruled its payload is the **whole fenced
-   block**, superseding spec §4 and plan Task 7 Step 3. The plan's own test would
-   pass either way (it asserts the payload contains `flowchart LR`, true of a
-   fenced payload too) — **require asserting the fences explicitly**, or the ruling
-   ships untested.
+1. **Task 6 — the six remaining Mermaid families.** Its brief must carry four things the
+   plan cannot know:
+   - **`Label::spans_for(index, at, text)` is the shared entry point** 5c built for exactly
+     this. Every family wraps its label, locates each drawn piece in its line, and emits one
+     `SearchSpan` per returned run with `unit: Some((source.start, source.end))`. **Do not
+     emit one span naming the whole label** — that is the shape 5c removed, and `resolve`
+     now reads two such spans from two labels the same way it reads one.
+   - **14 of 15 threaded parse sites have no test.** The shared `lex::label_at` makes them
+     *look* covered; design §6 risk 4 warns a shared helper does not make seven families one
+     behaviour.
+   - **Flowchart edge labels and subgraph titles still carry no spans.** `flowchart::edge`
+     and `group` flatten a `Label` into `Vec<String>` at the shared `graph` seam every
+     graph-drawn family uses. Whoever fixes it should thread the `Label` through rather than
+     the strings, so `spans_for` is reachable. 5c did **not** touch that seam.
+   - **`Label::from_lines`** (new, for the state diagram's `note … end note`) yields a label
+     with no raw text, and `spans_for` declines for it. If a state note should be selectable
+     character by character, that constructor is the thing to replace, not `spans_for`.
+2. **Task 7's button payload is the whole fenced block** (owner ruling 1c), superseding spec
+   §4 and plan Task 7 Step 3. The plan's own test passes either way — **require asserting
+   the fences explicitly**, or the ruling ships untested.
+3. **Tasks 8 and 10 are owner gates**: button colours, and re-recording the demo. Stop and
+   show rendered output; do not choose colours yourself.
 
-Tasks 8 (button colours) and 10 (demo) are **owner gates**: stop and show rendered
-output, do not choose colours yourself.
+After the plan: the **clickable-links spec** (§6), then its successor navigation spec.
 
 ## 4. Lessons & traps ← the irreplaceable part
 
-Carried forward and still true: **give every agent its own `CARGO_TARGET_DIR`**;
-**never read a gate's result through a pipe**; the clippy gate is
-`--all-targets -- -D warnings` because plain `cargo clippy` exits 0 on warnings;
-**verify a subagent's arithmetic, not its adjectives**; **do not choose glyphs by
-measuring them**; **do not hand-resolve snapshot conflicts**; **measure box art in
-columns, not bytes**; **backticks inside `git commit -m` are command-substituted —
-use a quoted heredoc**; **never merge into a dirty worktree**; **tombstone every
-merged branch immediately**; **use `git status --porcelain --ignored` before
-removing a worktree** (the SDD ledger is gitignored and dies with it).
+Carried forward and still true: **give every agent its own `CARGO_TARGET_DIR`**; **never
+read a gate's result through a pipe**; the clippy gate is `--all-targets -- -D warnings`
+because plain `cargo clippy` exits 0 on warnings; **verify a subagent's arithmetic, not its
+adjectives**; **do not choose glyphs by measuring them**; **do not hand-resolve snapshot
+conflicts**; **measure box art in columns, not bytes**; **backticks inside `git commit -m`
+are command-substituted — use a quoted heredoc**; **never merge into a dirty worktree**;
+**tombstone every merged branch immediately**; **`git status --porcelain --ignored` before
+removing a worktree** (the ledger is gitignored and dies with it); **`git merge` does not
+accept `-F -`**; **put `timeout: 600000` in every dispatch prompt**, and diagnose a silent
+agent by the worktree, never by the silence — *clean tree + commit* = finished silently,
+*dirty tree + no build* = stalled, *dirty tree + live build* = the backgrounding bug, message
+it to resume; **state process constraints as actions, not prohibitions**.
 
 New this session, in rough order of what they cost:
 
-1. **Subagents deadlock on long builds, and the cause is not disobedience.** The
-   Bash tool's default timeout is 120 s, shorter than this suite. On timeout the
-   harness *backgrounds* the command and says so — then the subagent ends its turn
-   anyway and the shell is killed with the turn
-   (anthropics/claude-code#50572, closed "not planned"; there is no
-   `synchronous: true`). **Put `timeout: 600000` in every dispatch prompt.** It
-   happened to three agents in a row before I understood it. Diagnose a silent
-   agent by the worktree, never by the silence: *clean tree + commit* = finished
-   silently, go read the commit; *dirty tree + no build* = stalled, run the gates
-   and commit for it; *dirty tree + live build* = this bug, message it to resume —
-   the edits are still there, so re-dispatching duplicates work.
-2. **Prohibitions don't land; actions do.** "Do not pipe the gate" was ignored by
-   three agents running. They were pattern-matching "output too long" when the real
-   signal was "call too slow". State it as an action with the mechanism attached.
-3. **This plan's own sample code and fixtures are wrong more often than not —
-   six defects in six tasks.** A `(lo.min(hi), lo.max(hi))` line that inverted a
-   deliberate fallback into a whole-document selection; a missing inclusive-column
-   `+1` that lost every selection's tail grapheme; "delete `columns_on`" when it
-   still had a live caller and would not compile; a synthesis site at
-   `state.rs:310` that constructs no `Label` at all; `render/diagram.rs` named as
-   the rebasing site when it has no `origins` in hand; and "follow `render::code`
-   for CRLF and indent" when both are solved in `doc/convert.rs::code_lines`.
-   **Brief every implementer to treat the plan's code as a draft to verify.** The
-   code they write has been sound; the plan's *transcriptions* have not.
-4. **Four of the plan's suggested fault-injection mutations turned NO test red.**
-   Not because the code was right — because the sample assertions were too weak
-   (`.any(|s| …)`, `lo >= hi`, a column-1 probe that sat before every span on its
-   row). **A mutation nothing catches is a finding about the test, not a pass.**
-   Say so in every brief, and require "watched it go red", never "verified".
-5. **The per-task review is what makes this loop work, and re-running the gates
-   independently is the part that matters.** A resumed subagent can report a stale
-   log as a fresh green run and the loop cannot tell (obra/superpowers#2113).
-   Every green claim here was re-derived by an agent that did not produce it; one
-   reviewer hand-summed 30 per-suite lines rather than trust a summary. Keep that.
-6. **The best findings came from asking a reviewer to adjudicate a specific claim
-   on the merits.** Naming the claim, the stakes, and "verify rather than assume
-   either party is right" produced the rhombus/cylinder span-drop — a real bug the
-   plan's all-`Rect` fixtures could never have caught — and the release-build
-   pointer-underflow. Generic "review this diff" would not have.
-7. **Setting a task's `owner` field re-notifies an agent that already delivered.**
-   It re-pinged `impl-task-5b`, which correctly declined the duplicate. Set owner
-   at dispatch time only.
-8. **A crash kills every subagent; the worktree survives.** Recover by reading the
-   agent's report file — the reports under §6 are written to be exactly that
-   memory, and a fresh implementer resumed from one without losing the thread.
+1. **A fix round can fix the case named first and leave the case named second.** 5b round 1
+   addressed one owner ruling and half of another, and the half it missed was the *commonest
+   gesture on a diagram*. Two independent reviewers caught it. **A "fix round complete"
+   claim is not a verdict — re-review it against the ruling's own acceptance criterion**, in
+   the ruling's words, not the implementer's.
+2. **Two reviewers reaching the same defect from opposite directions is confirmation, not
+   two opinions.** A scoped re-review (does this meet the ruling?) and an adjudication (is
+   this specific claim true?) found one root cause, two reachable drag shapes, the same
+   responsible lines. That pairing is cheap and it is the strongest signal this loop
+   produces. **Asking a reviewer to adjudicate ONE named claim, with the stakes stated and
+   "verify rather than assume either party is right", keeps producing the best findings** —
+   it found the entity-in-a-label population, the rhombus/cylinder span drop, and this one.
+3. **Dispatch at most ONE file-writing agent per worktree.** I ran two reviewers into the
+   branch worktree; one's throwaway probes made the tree dirty mid-review, and a gate run in
+   that window would have read 1065 instead of 1058. The other noticed, cut its own detached
+   worktree, and timestamped its numbers — and it *misattributed* the probes to an agent that
+   had already finished. A shared worktree makes agents misread each other's work as their
+   peer's. Read-only agents are fine; writers are not.
+4. **The owner's own suggestion beat both engineering options.** CRLF: I was choosing between
+   a copy-side clamp and a narrower anchor rule. They said "turn `\r\n` into `\n` on read",
+   which killed three downstream rules with one boundary rule and made a fourth dead. **When
+   they propose a mechanism, cost it seriously before defending yours.**
+5. **Live testing found two real bugs the entire review apparatus had missed**, one of them a
+   regression this branch shipped through a clean review. **Build the owner a release binary
+   and a test document at every natural milestone** — tryout worktree, `cargo build
+   --release`, a Markdown file that walks the new behaviour and *names what is knowingly
+   broken* so they don't report it twice. This is the highest-yield thing the controller does.
+6. **The suite tested one direction only, and that is how the regression shipped.** Task 3's
+   review checked that chrome stays *unwashed*; nothing checked that body text stays
+   *washed*. Reverting the fix across 1062 tests turned exactly ONE test red — the new one.
+   **Require both directions in every brief that touches painting or spans.**
+7. **A one-dimensional fixture set passes a half-done implementation.** Every prefix test
+   dragged label→label, the one shape where the defect is masked. The ruling anticipated a
+   half-done implementation along the *lines* axis and the tests covered that axis; nothing
+   covered the *drag-shape* axis. **Ask what axes a rule can be wrong along, and name them in
+   the brief.**
+8. **Name the CONSTRAINT, not the file.** I briefed the escape/entity fix into
+   `render/inline.rs`. It cannot live there — the alignment needs the source bytes and
+   `render` has none. It went to `doc/convert.rs`, following a precedent already in the crate.
+   My real constraint was "this is a rendering fact, not a `tui` one", and that was
+   respected. Four agents in a row correctly overruled part of their brief with evidence;
+   **brief them to treat the brief as a draft to verify, and they will**.
+9. **Plans are perishable; specs are durable.** This project's plans have carried a defect in
+   six of six tasks, and the plan's Tasks 6–10 are already drafts because they were written
+   against code many behaviour changes ago. I deliberately wrote the clickable-links **spec**
+   and no plan: the spec is behaviour and seams, the plan would name files that Task 6 is
+   about to change. **Write the plan when the work is next up.**
+10. **Four agents in a row self-reported a mutation that turned ZERO tests red, and chased
+    it.** Every one found a real hole: an unguarded verification half, an unpinned trim rule
+    that real Mermaid reaches, an entity-at-the-end case that a mid-label fixture cannot
+    expose. **Put "a mutation that turns no test red is a finding about the test, not a pass"
+    in every brief, and ask "if the code took the lazy shortcut here, would anything catch
+    it?"** This is the single most productive sentence in the dispatch template.
+11. **A failure signature that looks like a provenance bug may be a test slicing the wrong
+    string.** `Doc::source()` no longer returns what the caller passed in. Three tests failed
+    with spans "slid one byte left per line" and the production mapping was correct
+    throughout. **If you see that signature, ask WHICH STRING is being sliced first.** ~100
+    tests still slice the fixture literal; harmless while it equals the source, deliberately
+    not swept.
+12. **Setting a task's `owner` field re-notifies an agent that already delivered.** Set owner
+    at dispatch time only.
 
 ## 5. Don'ts & constraints
 
-Carried forward and still binding: **no HTML rendering**; **Mermaid is Unicode box
-art only**; **bullets and task boxes are ASCII**; **`Esc` never quits**; **do not
-widen the `NodeArt` seam**; **`render` must not depend on `tui`**;
-**`#![forbid(unsafe_code)]`**; **the status bar never lies**; **no 1000-node golden
-snapshot**; **4-core cap on every cargo invocation**; **there is no centring
-anywhere**; **`src/export/` may depend only on `doc`**; **TSV is what every reader
-receives**; **the table gap-row threshold is 30 display columns**; **the copy button
-follows what mouse capture actually did**; **do not push — creating the remote is
-the owner's step**; **tmux: kill only your own session, and check a process's parent
-with `ps -o ppid=` before killing an `mdmost`** — the owner runs this pager himself
-on this machine.
+Carried forward and still binding: **no HTML rendering**; **Mermaid is Unicode box art
+only**; **bullets and task boxes are ASCII**; **`Esc` never quits**; **do not widen the
+`NodeArt` seam**; **`render` must not depend on `tui`**; **`#![forbid(unsafe_code)]`**; **the
+status bar never lies**; **no 1000-node golden snapshot**; **4-core cap on every cargo
+invocation**; **there is no centring anywhere**; **`src/export/` may depend only on `doc`**;
+**TSV is what every reader receives**; **the table gap-row threshold is 30 display columns**;
+**the copy button follows what mouse capture actually did**; **do not push — creating the
+remote is the owner's step**; **tmux: kill only your own session, and check a process's
+parent with `ps -o ppid=` before killing an `mdmost`** — the owner runs this pager himself on
+this machine.
 
-Settled this session; do not relitigate:
+Owner rulings, all binding, all superseding written docs:
 
-- **The highlight and the clipboard are decided by ONE computation.** `extract` and
-  `highlighted_columns` share a `Resolved` whose fields and `range()` are private
-  precisely so the byte range cannot be recomputed elsewhere. Two paths that merely
-  agree today is the defect 5b exists to remove.
-- **A diagram is atomic in a selection** (§7.1) — and the whole-diagram wash covers
-  box art, a deliberate documented exception to "chrome is never highlighted".
-- **`Label`'s equality deliberately ignores `source`.** So `assert_eq!(label,
-  Label::line("Parse"))` proves nothing about provenance — assert on `label.source`
-  or on the copied bytes. This is the easiest way to write a vacuous test here.
-- **An empty `Label::source` means "not from the source ⇒ emit no span".**
-  `lex::label_at` fails closed to it. Do not invent a plausible range for
-  synthesised text, and do not "fix" `offset_of` back to `unwrap_or(0)` — offset 0
-  is a positive claim that the label began at the block's first byte.
-- **A wrapped label gives every drawn row a span naming the whole label**, so "the
-  cells under a span read its source bytes" holds only for unwrapped labels
-  (§2.2 atomicity). Anything assuming otherwise — search-hit highlighting inside a
-  diagram — will be surprised.
-- **`carry_spans` has no structural guard.** Any future shape helper that copies
-  cells by hand rather than through `blit`/`framed`/`indent` silently drops spans;
-  only `every_node_shape_puts_its_label_span_on_the_drawn_text` will notice. That
-  test is load-bearing — extend it when an eighth shape lands, never delete it.
+1. **A diagram is atomic** — but only outside one label. Three cases: press inside a label
+   and stay inside it → **the characters dragged over** (ruling 5, was "the whole label");
+   press inside a label and go wider → the whole diagram; press anywhere else inside a
+   diagram → the whole diagram immediately, wherever released, decided by **the anchor cell
+   alone**, never by comparing the drag's rectangle to cells.
+2. **The `[copy]` button's payload is the whole fenced block.**
+3. **Container prefixes are stripped entirely** from a copied block — no line keeps `> `,
+   fence lines included, and the prefix is *read from the document*, per line, never matched
+   as a pattern.
+4. **The margin beside a narrow diagram is inside it** (ruling 8). The anchor is matched by
+   row, not by the atom's columns. Deliberate — do not "fix" it.
+5. **Line endings are normalised at `Doc::parse`/`parse_plain`** — `\r\n` and a lone `\r`
+   both become `\n`. Copy-paste always gets clean `\n`.
+6. **Local `.md` links stay wholly inert** until the navigation spec lands — no hotspot, no
+   reaction. A control that lights up and then declines is worse than one never offered.
+
+Settled; do not relitigate:
+
+- **The highlight and the clipboard are ONE computation** through a shared `Resolved` with
+  private fields and a private `range()`. Two paths that merely agree today is the defect 5b
+  exists to remove. A mutation test guards this.
+- **Case 2 must never run `extend_over_markup`** — on a Mermaid line almost every byte is
+  undrawn and the walk would swallow `A[`, the arrow and half the next box. Pinned by
+  `a_drag_to_the_edge_of_a_label_stops_at_the_label`.
+- **"Confined to one label" is judged on the HULL, never on the two screen positions.** A
+  drag from inside a label onto the arrow beside it stays confined. Making it a crossing
+  would need the screen-shaped rectangle rule §2.2 refuses.
+- **A non-copying span may be one grapheme drawing one column, and nothing wider.** An emoji
+  entity declines its origin and leaves one dark cell rather than hand the column walks a
+  body they cannot walk. Fixing that means teaching `select`'s two column walks that a span
+  may be atomic — a `tui` change with its own review.
+- **`Label`'s equality deliberately ignores `source`**, so `assert_eq!` on a whole `Label`
+  proves nothing about provenance. **An empty `Label::source` means "emit no span"**; do not
+  invent a plausible range.
+- **`carry_spans` has no structural guard.** `every_node_shape_puts_its_label_span_on_the_drawn_text`
+  and its new sibling `every_node_shape_carries_every_piece_of_a_cut_label` are load-bearing —
+  extend them when an eighth shape lands, never delete them.
+- **`highlight.rs::strip_eol`'s `\r` half is dead and deliberately kept.** If someone removes
+  it, its test must be *rewritten*, not have the failing assertion deleted.
 
 ## 6. Where the detail lives
 
-- **Plan:** `docs/superpowers/plans/2026-08-11-semantic-selection.md` (Task 5b is
-  not in it — see §7.1)
-- **Design authority, amended this session:**
-  `docs/superpowers/specs/2026-08-11-semantic-selection-design.md` §2.2/§3
+- **Plan:** `docs/superpowers/plans/2026-08-11-semantic-selection.md` (Tasks 5b and 5c are
+  not in it — owner rulings)
+- **Design authority, amended repeatedly this session:**
+  `docs/superpowers/specs/2026-08-11-semantic-selection-design.md` §2.2, §3, §6 risk 1
+- **Next feature's spec, owner-approved, no plan yet:**
+  `docs/superpowers/specs/2026-08-11-clickable-links-design.md`
 - **Progress ledger — read this second, after this file:**
-  `.superpowers/sdd/2026-08-11-semantic-selection/progress.md`. Gitignored, so it
-  dies with the worktree. Every ruling, plan defect and deferred minor is in it.
-- **Per-task briefs, reports, reviews:** same directory, `task-N-{brief,report,review}.md`.
-  The reports are an agent's memory — a fresh implementer can resume from one.
-- Key files: `src/tui/select.rs` (`resolve`, `Resolved`, `offset_at`, `Bias`,
-  `source_hull`, `highlighted_columns`, `extend_over_markup:391`),
-  `src/render/code.rs` (`diagram_block`, `rebase_spans`, `document_offset`),
-  `src/doc/convert.rs:100-144` (`code_lines` — the suffix rule that solves CRLF and
-  indent in one), `src/mermaid/parse/lex.rs` (`offset_of`, `label_at`),
-  `src/mermaid/ast.rs` (`Label`, its manual `PartialEq`),
-  `src/mermaid/layout/flowchart/shape.rs` (`carry_spans`).
+  `.superpowers/sdd/2026-08-11-semantic-selection/progress.md`. Gitignored, so it dies with
+  the worktree. Every ruling, plan defect and deferred minor is in it.
+- **Per-task reports** in the same directory: `task-5b-rereview.md`,
+  `adjudication-prefix-strip.md`, `task-5b-fix2-report.md`, `diagnosis-word-separators.md`,
+  `softbreak-span-report.md`, `escape-entity-spans-report.md`, `crlf-normalise-report.md`,
+  `task-5c-report.md`. These are an agent's memory — a fresh implementer can resume from one.
+- Key files: `src/tui/select.rs` (`resolve`'s four cases — **read its doc comment before
+  touching anything**, `Resolved`, `atom_text`, `pressed_on_chrome_of`),
+  `src/mermaid/ast.rs` (`Label`, `raw`, `spans_for`, `from_lines`),
+  `src/mermaid/entity.rs` (`decode_runs`), `src/mermaid/layout/flowchart/shape.rs`
+  (`carry_spans`, `wrap`), `src/doc/mod.rs` (`normalise_line_endings`),
+  `src/doc/convert.rs` (`code_lines`, `align`, `LineOffsets`), `src/render/inline.rs`
+  (`Piece::anchored` / `synthetic` / `transcribable`).
 
 ## 7. Open questions / pending decisions
 
-1. **Owner rulings this session, all superseding written docs.** (a) A diagram is
-   atomic in a selection; wider-than-one-label washes the whole rectangle and copies
-   the fenced block — supersedes §3's former closing sentence. (b) A drag that
-   **starts** outside any label takes the whole diagram immediately — decided by the
-   anchor cell's atom, *not* by comparing rectangles to cells. (c) The `[copy]`
-   button's payload is the fenced block too — supersedes spec §4 / plan Task 7
-   Step 3. (d) Container prefixes are **stripped** from a copied block — no line
-   keeps `> `, fence lines included, and it must reuse `code_lines`' suffix rule
-   rather than a regex, which would strip a `> ` genuinely inside the Mermaid.
-2. **The 5b fix round is unreviewed** (§2).
-3. **`BASH_DEFAULT_TIMEOUT_MS` / `BASH_MAX_TIMEOUT_MS` were NOT set.** The edit to
-   `~/.claude/settings.json` was blocked by the permission classifier and the owner
-   has not applied it. Until then, every dispatch must carry `timeout: 600000`
-   explicitly (§4.1).
-4. Carried forward and still open: the owner's manual GitHub steps (create the
-   repo, `CRATES_IO_TOKEN`, Actions write) — both CI workflows are inert until then;
-   the release workflow has never executed; **Windows compiles but has never been
-   run**, and Task 9 adds motion-event handling; the light theme's heading ramp is
-   flat and non-monotone (re-measure before Task 8); the banner's internal band
-   centring was never ruled on; the RPM payload is unverified; nested diagrams are
-   never widened while nested tables are.
-5. **~14 GB of orphaned `cargo-target-mdmost-*` dirs** under `/scratch/oetiker/`,
-   plus this branch's own. No pressure at last check; ask before deleting.
+1. **Owner's manual GitHub steps, still outstanding:** create `github.com/oetiker/mdmost`,
+   add `CRATES_IO_TOKEN`, grant Actions write. Both CI workflows are inert until then, so
+   local `cargo check --target x86_64-pc-windows-msvc` is the only Windows detector.
+2. **The release workflow has never executed.** First real run is the first test.
+3. **Windows compiles but has never been run.** Mouse, clipboard and alternate screen all
+   unexercised; Task 9 adds motion-event handling.
+4. **Button colours are deliberately unnamed** (spec §8). Task 8 renders them for the owner.
+   The light theme's heading ramp is separately known to be flat and non-monotone —
+   re-measure before designing.
+5. **`&nbsp;` is a wrapping opportunity** and always was (U+00A0 passes
+   `char::is_whitespace`, so `wrap::tokenize` breaks there), contradicting the corpus calling
+   it a hard space. Flagged to the owner, not fixed, no ruling yet.
+6. **Smart punctuation would break `align`.** `convert::options()` leaves `parse.smart` at
+   false. If it is ever turned on, `--` → en dash is a 2-byte-to-3-byte transcription
+   starting with neither `\` nor `&`, and every such paragraph fails closed to no
+   provenance. Safe, but remember it before flipping that flag.
+7. **comrak's sourcepos after a lone `\r` is wrong** (`11..11` in an 11-byte document). Now
+   unreachable from this crate as a side effect of ruling 5. Upstream-worthy; not reported.
+8. **`a_crlf_fence_with_a_blank_line_still_maps_the_lines_around_it` is not CRLF coverage**
+   despite its name; it is sensitive only to a different mutation. Name kept deliberately to
+   preserve the link to the defect it was written for.
+9. Carried forward and still open: the banner's internal band centring was never ruled on;
+   the RPM payload is unverified; nested diagrams are never widened while nested tables are;
+   the demo needs re-recording once the selection work lands (plan Task 10).
+10. **`BASH_DEFAULT_TIMEOUT_MS` / `BASH_MAX_TIMEOUT_MS` were NOT set** — the settings edit
+    was blocked by the permission classifier. Until the owner applies it, every dispatch must
+    carry `timeout: 600000` explicitly.
+11. **~14 GB of orphaned `cargo-target-mdmost-*` dirs** under `/scratch/oetiker/`, plus this
+    branch's own, plus `-tryout`, `-rereview5b` and `-adjudicate` created this session.
+    `/scratch` was at 58% with 282G free. Ask the owner before deleting.
 
 ## 8. Staleness watch
 
-- **Integration state must be re-derived, never inherited.** Whether this branch is
-  merged, pushed or superseded is not knowable from this file:
-  `git merge-base --is-ancestor HEAD main`, `git log --oneline HEAD..main`,
-  `git branch -a --contains HEAD`. If this branch is merged, stop reading and go to
-  the successor's handoff.
-- **Sibling worktrees / other workstreams may exist that this file cannot name** —
-  anything started after the handoff commit is invisible here.
-- The 1053-test count and the three green gates are as of `ab79c98`, **before** the
-  uncommitted 5b fix round. Re-run them; a count that moved without an explanation
-  is the signal.
-- Line references in §6 were true at `ab79c98` and the 5b fix round touches
-  `select.rs` — verify before quoting them to a subagent.
-- The plan's remaining task text (6–10) is written against code as it was at
-  `344f4e1`, five behaviour changes ago. Treat its file lists and sample code as
-  drafts (§4.3), and expect Task 6's "same shape as Task 5" to have the usual hole.
+- **Integration state must be re-derived, never inherited.** Whether this branch is merged,
+  pushed or superseded is not knowable from this file: `git merge-base --is-ancestor HEAD
+  main`, `git log --oneline HEAD..main`, `git branch -a --contains HEAD`. If this branch is
+  merged, stop reading and go to the successor's handoff.
+- **Sibling worktrees / other workstreams may exist that this file cannot name** — anything
+  started after the handoff commit is invisible here.
+- The 1103-test count and the three green gates are as of `3d639f2`. Re-run them; a count
+  that moved without an explanation is the signal.
+- **§3's Task 6 guidance is written against 5c's design and is the freshest thing here**, but
+  the plan's own Task 6 text was written against code many changes ago — treat its file lists
+  and sample code as drafts.
+- The owner had **not yet re-tested `3d639f2`** when this was written. A binary and
+  `retest2.md` were handed over; their findings are not in this file. Ask them.
