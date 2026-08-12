@@ -225,13 +225,17 @@ impl Builder<'_> {
             ),
             None => (text, None),
         };
-        let owned = name.to_string();
+        // Keyed on the label's visible first line, not on the raw source text: see
+        // `er::Builder::intern_entity` for why the two can differ and why this is the
+        // one an author means.
+        let label = lex::label_at(self.src, name);
+        let key = label.lines.first().cloned().unwrap_or_default();
         let id = ClassId(intern(
             &mut self.classes,
-            name,
-            |class| class.name.as_str(),
+            &key,
+            |class| class.name.lines.first().map_or("", String::as_str),
             || Class {
-                name: owned,
+                name: label.clone(),
                 generic: None,
                 annotation: None,
                 members: Vec::new(),

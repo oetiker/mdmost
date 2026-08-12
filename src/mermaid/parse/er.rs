@@ -159,19 +159,24 @@ impl Builder<'_> {
         if let Some(alias) = alias
             && let Some(target) = self.entities.get_mut(id.0)
         {
-            target.alias = Some(entity::decode(alias).into_owned());
+            target.alias = Some(lex::label_at(self.src, alias));
         }
         id
     }
 
     /// Interns an entity name.
     fn intern_entity(&mut self, name: &str) -> EntityId {
+        // The key is the label's visible first line rather than the raw source text, so
+        // that a name written once plainly and once with a character entity is one
+        // entity — the same text is the same entity, which is what an author means.
+        let label = lex::label_at(self.src, name);
+        let key = label.lines.first().cloned().unwrap_or_default();
         EntityId(intern(
             &mut self.entities,
-            name,
-            |entity| entity.name.as_str(),
+            &key,
+            |entity| entity.name.lines.first().map_or("", String::as_str),
             || Entity {
-                name: name.to_string(),
+                name: label.clone(),
                 alias: None,
                 attributes: Vec::new(),
             },

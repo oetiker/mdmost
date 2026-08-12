@@ -501,7 +501,7 @@ mod classes {
     }
 ",
         );
-        let names: Vec<_> = diagram.classes.iter().map(|c| c.name.as_str()).collect();
+        let names: Vec<_> = diagram.classes.iter().map(|c| c.name.text()).collect();
         assert_eq!(names, vec!["Animal", "Duck", "Fish", "Zebra"]);
         assert_eq!(diagram.relations.len(), 3);
         assert_eq!(diagram.relations[0].left, ClassId(0));
@@ -583,15 +583,15 @@ mod classes {
         let cardinality = diagram.relations.last().expect("a relation");
         assert_eq!(cardinality.left_cardinality.as_deref(), Some("1"));
         assert_eq!(cardinality.right_cardinality.as_deref(), Some("*"));
-        assert_eq!(diagram.classes[12].name, "Customer");
-        assert_eq!(diagram.classes[13].name, "Ticket");
+        assert_eq!(diagram.classes[12].name.text(), "Customer");
+        assert_eq!(diagram.classes[13].name.text(), "Ticket");
         assert_eq!(diagram.relations[0].label, Some(Label::line("inheritance")));
     }
 
     #[test]
     fn parses_a_class_block_written_on_one_line() {
         let diagram = class_diagram("classDiagram\n    class A { +f() }\n    A <|-- B\n");
-        assert_eq!(diagram.classes[0].name, "A");
+        assert_eq!(diagram.classes[0].name.text(), "A");
         assert_eq!(diagram.classes[0].members.len(), 1);
         assert_eq!(diagram.relations.len(), 1);
     }
@@ -633,7 +633,7 @@ mod classes {
         assert_eq!(draw.classifier, Some(Classifier::Abstract));
 
         let square = &diagram.classes[1];
-        assert_eq!(square.name, "Square");
+        assert_eq!(square.name.text(), "Square");
         assert_eq!(square.generic.as_deref(), Some("Shape"));
         assert_eq!(square.annotation, Some(ClassAnnotation::Abstract));
         assert_eq!(
@@ -681,7 +681,7 @@ mod entities {
     ORDER ||--|{ LINE-ITEM : contains
     CUSTOMER }|..|{ DELIVERY-ADDRESS : uses
 ");
-        let names: Vec<_> = diagram.entities.iter().map(|e| e.name.as_str()).collect();
+        let names: Vec<_> = diagram.entities.iter().map(|e| e.name.text()).collect();
         assert_eq!(
             names,
             vec!["CUSTOMER", "ORDER", "LINE-ITEM", "DELIVERY-ADDRESS"]
@@ -735,7 +735,7 @@ mod entities {
         let person = diagram
             .entities
             .iter()
-            .find(|entity| entity.name == "PERSON")
+            .find(|entity| entity.name.text() == "PERSON")
             .expect("PERSON");
         assert_eq!(
             person.attributes[0].comment.as_deref(),
@@ -749,8 +749,22 @@ mod entities {
         let diagram = er("erDiagram
     p[Person] |o--o| c[\"Car park\"] : \"may own\"
 ");
-        assert_eq!(diagram.entities[0].alias.as_deref(), Some("Person"));
-        assert_eq!(diagram.entities[1].alias.as_deref(), Some("Car park"));
+        assert_eq!(
+            diagram.entities[0]
+                .alias
+                .as_ref()
+                .map(Label::text)
+                .as_deref(),
+            Some("Person")
+        );
+        assert_eq!(
+            diagram.entities[1]
+                .alias
+                .as_ref()
+                .map(Label::text)
+                .as_deref(),
+            Some("Car park")
+        );
         let relationship = &diagram.relationships[0];
         assert_eq!(relationship.left_cardinality, ErCardinality::ZeroOrOne);
         assert_eq!(relationship.right_cardinality, ErCardinality::ZeroOrOne);
@@ -780,9 +794,9 @@ mod pies {
         assert_eq!(chart.title.as_deref(), Some("Pets adopted by volunteers"));
         assert!(!chart.show_data);
         assert_eq!(chart.slices.len(), 3);
-        assert_eq!(chart.slices[0].label, "Dogs");
+        assert_eq!(chart.slices[0].label.text(), "Dogs");
         assert!((chart.slices[0].value - 386.0).abs() < f64::EPSILON);
-        assert_eq!(chart.slices[2].label, "Rats");
+        assert_eq!(chart.slices[2].label.text(), "Rats");
     }
 
     #[test]
@@ -834,7 +848,7 @@ mod gantts {
         assert_eq!(chart.sections[0].title.as_deref(), Some("Section"));
 
         let first = &chart.sections[0].tasks[0];
-        assert_eq!(first.name, "A task");
+        assert_eq!(first.name.text(), "A task");
         assert_eq!(first.id.as_deref(), Some("a1"));
         assert_eq!(first.end - first.start, 30 * DAY);
 

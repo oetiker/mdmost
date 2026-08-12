@@ -13,7 +13,7 @@ use mdmost::theme::Theme;
 /// A class with a name and members.
 fn class(name: &str, members: Vec<Member>) -> Class {
     Class {
-        name: name.to_string(),
+        name: Label::line(name),
         generic: None,
         annotation: None,
         members,

@@ -147,11 +147,21 @@ fn draw_head(
             let inner = header.width - 2;
             let mut label = Canvas::new(
                 u16::try_from(inner).unwrap_or(0),
-                header.lines.len(),
+                header.pieces.len(),
                 theme.base(),
             );
-            for (row, line) in header.lines.iter().enumerate() {
-                label.write_field(row, 0, inner, line, Align::Center, theme.diagram.node_text);
+            for (row, piece) in header.pieces.iter().enumerate() {
+                label.write_field(
+                    row,
+                    0,
+                    inner,
+                    &piece.text,
+                    Align::Center,
+                    theme.diagram.node_text,
+                );
+                let col =
+                    crate::canvas::align_offset(inner, display_width(&piece.text), Align::Center);
+                chrome::label_spans(&mut label, &header.label, piece, row, col);
             }
             let boxed = label.framed(
                 BorderSet::ROUNDED,
@@ -178,15 +188,22 @@ fn draw_head(
                 Align::Center,
                 theme.diagram.node_border,
             );
-            for (row, line) in header.lines.iter().enumerate() {
+            for (row, piece) in header.pieces.iter().enumerate() {
                 canvas.write_field(
                     start + 2 + row,
                     left,
                     header.width,
-                    line,
+                    &piece.text,
                     Align::Center,
                     theme.diagram.node_text,
                 );
+                let col = left
+                    + crate::canvas::align_offset(
+                        header.width,
+                        display_width(&piece.text),
+                        Align::Center,
+                    );
+                chrome::label_spans(canvas, &header.label, piece, start + 2 + row, col);
             }
         }
     }
@@ -225,12 +242,9 @@ fn draw_arrow(canvas: &mut Canvas, columns: &Columns, arrow: &Arrow, top: usize,
                 None => from + columns.right_reach,
             };
             let room = (boundary + 1).saturating_sub(at);
-            canvas.write_str(
-                row + 1,
-                at,
-                &ellipsize(&arrow.label, room),
-                theme.diagram.edge_label,
-            );
+            let text = ellipsize(&arrow.label, room);
+            canvas.write_str(row + 1, at, &text, theme.diagram.edge_label);
+            label_span(canvas, arrow, &text, row + 1, at);
         }
         return;
     }
@@ -247,7 +261,19 @@ fn draw_arrow(canvas: &mut Canvas, columns: &Columns, arrow: &Arrow, top: usize,
         let text = ellipsize(&arrow.label, room);
         let left = low + 1 + crate::canvas::align_offset(room, display_width(&text), Align::Center);
         canvas.write_str(row - 1, left, &text, theme.diagram.edge_label);
+        label_span(canvas, arrow, &text, row - 1, left);
     }
+}
+
+/// Maps one drawn message label back onto the bytes that wrote it.
+///
+/// A message is drawn on a single row, so its whole label is flattened onto one line
+/// with `\n` turned into a space. That flattening is only reversible when the label was
+/// one line to begin with; for a `<br>`-broken message the drawn text is not a piece of
+/// any line of the label and `Label::spans_for` declines, which is the honest answer —
+/// no provenance rather than provenance from somewhere else.
+fn label_span(canvas: &mut Canvas, arrow: &Arrow, text: &str, row: usize, col: usize) {
+    chrome::label_row_span(canvas, &arrow.source, text, row, col);
 }
 
 /// The glyph drawn where a message meets its receiver.
@@ -308,6 +334,12 @@ fn draw_frame(canvas: &mut Canvas, columns: &Columns, frame: &Frame, top: usize,
 }
 
 /// The caption written into a frame's top edge or a branch divider.
+///
+/// The result is assembled — a keyword, brackets and the author's text — so it is not a
+/// copy of any stretch of the source and carries no search span. The branch label inside
+/// it is, but it is then ellipsized against the frame's inner width as part of the whole
+/// caption, so where it starts in the drawn text is not known here. Mapping it would mean
+/// drawing the caption in pieces rather than as one string.
 pub(super) fn caption(kind: BlockKind, index: usize, label: Option<&str>) -> String {
     let keyword = match (kind, index) {
         (BlockKind::Loop, _) => "loop",
@@ -330,18 +362,19 @@ fn draw_note(canvas: &mut Canvas, note: &NoteBox, top: usize, theme: &Theme) {
     let inner = note.width.saturating_sub(2);
     let mut text = Canvas::new(
         u16::try_from(inner).unwrap_or(0),
-        note.lines.len(),
+        note.pieces.len(),
         theme.diagram.note,
     );
-    for (row, line) in note.lines.iter().enumerate() {
+    for (row, piece) in note.pieces.iter().enumerate() {
         text.write_field(
             row,
             1,
             inner.saturating_sub(2),
-            line,
+            &piece.text,
             Align::Left,
             theme.diagram.note,
         );
+        chrome::label_spans(&mut text, &note.source, piece, row, 1);
     }
     // Rounded, like every other box in the program (design spec §7.5). A note is
     // already set apart by its colour and its position beside a lifeline; giving it a

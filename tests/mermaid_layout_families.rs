@@ -12,7 +12,7 @@
 use mdmost::error::MermaidError;
 use mdmost::mermaid::ast::{
     Class, ClassArrow, ClassDiagram, ClassId, ClassRelation, Entity, EntityId, ErAttribute,
-    ErCardinality, ErDiagram, ErKey, ErRelationship, Field, LineStyle, Member, StateDiagram,
+    ErCardinality, ErDiagram, ErKey, ErRelationship, Field, Label, LineStyle, Member, StateDiagram,
     StateEndpoint, StateId, StateKind, StateNode, StateScope, Transition, Visibility,
 };
 use mdmost::mermaid::layout::{class, er, state};
@@ -54,7 +54,7 @@ fn class_diagram(count: usize, members: usize, pairs: &[(usize, usize, usize)]) 
     let count = count.max(1);
     let classes = (0..count)
         .map(|at| Class {
-            name: format!("C{at}"),
+            name: Label::line(format!("C{at}")),
             generic: None,
             annotation: None,
             members: (0..members)
@@ -105,7 +105,7 @@ fn er_diagram(count: usize, attributes: usize, pairs: &[(usize, usize, usize)]) 
     let count = count.max(1);
     let entities = (0..count)
         .map(|at| Entity {
-            name: format!("E{at}"),
+            name: Label::line(format!("E{at}")),
             alias: None,
             attributes: (0..attributes)
                 .map(|a| ErAttribute {
@@ -300,7 +300,8 @@ proptest! {
         if let Ok(canvas) = class::draw(&diagram, 120, &theme) {
             let text = canvas.plain_text();
             for class in &diagram.classes {
-                prop_assert!(text.contains(&class.name), "{} missing from\n{}", class.name, text);
+                let name = class.name.text();
+                prop_assert!(text.contains(&name), "{name} missing from\n{text}");
             }
         }
     }
@@ -316,7 +317,8 @@ proptest! {
         if let Ok(canvas) = er::draw(&diagram, 120, &theme) {
             let text = canvas.plain_text();
             for entity in &diagram.entities {
-                prop_assert!(text.contains(&entity.name), "{} missing from\n{}", entity.name, text);
+                let name = entity.name.text();
+                prop_assert!(text.contains(&name), "{name} missing from\n{text}");
             }
         }
     }

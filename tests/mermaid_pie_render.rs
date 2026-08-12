@@ -4,7 +4,7 @@
 //! Every case is rendered at widths 40, 80 and 120 per design spec §13.2.
 
 use mdmost::canvas::Canvas;
-use mdmost::mermaid::ast::{PieChart, PieSlice};
+use mdmost::mermaid::ast::{Label, PieChart, PieSlice};
 use mdmost::mermaid::pie;
 use mdmost::theme::Theme;
 use proptest::prelude::*;
@@ -20,7 +20,7 @@ fn chart(title: Option<&str>, show_data: bool, slices: &[(&str, f64)]) -> PieCha
         slices: slices
             .iter()
             .map(|(label, value)| PieSlice {
-                label: (*label).to_string(),
+                label: Label::line(*label),
                 value: *value,
             })
             .collect(),
@@ -241,7 +241,7 @@ proptest! {
         let slices: Vec<PieSlice> = values
             .iter()
             .zip(labels.iter().cycle())
-            .map(|(value, label)| PieSlice { label: label.clone(), value: *value })
+            .map(|(value, label)| PieSlice { label: Label::line(label.clone()), value: *value })
             .collect();
         let chart = PieChart { title: None, show_data, slices };
         if let Ok(canvas) = pie::draw(&chart, width, &Theme::default_dark()) {

@@ -101,7 +101,7 @@ fn negotiate(chart: &PieChart, width: u16, values: &[String]) -> Result<Columns,
     let natural_label = chart
         .slices
         .iter()
-        .map(|slice| display_width(&slice.label))
+        .map(|slice| display_width(&chrome::label_one_line(&slice.label)))
         .max()
         .unwrap_or(0)
         .max(display_width("Total"));
@@ -178,14 +178,16 @@ fn plot(chart: &PieChart, width: u16, theme: &Theme) -> Result<Canvas, MermaidEr
         // chart onto a striped table row and the seam appears.
         let accent = base.patch(theme.accent(index));
         body.write_str(index, 0, SWATCH, accent);
+        let drawn = ellipsize(&chrome::label_one_line(&slice.label), columns.label);
         body.write_field(
             index,
             SWATCH_COLS,
             columns.label,
-            &ellipsize(&slice.label, columns.label),
+            &drawn,
             Align::Left,
             theme.diagram.legend,
         );
+        chrome::label_row_span(&mut body, &slice.label, &drawn, index, SWATCH_COLS);
         // Bars are scaled against the largest slice, so the biggest one always fills
         // the plot area and the shape of the distribution is readable at any width.
         let fraction = if largest > 0.0 {
@@ -383,7 +385,7 @@ mod tests {
         values
             .iter()
             .map(|value| PieSlice {
-                label: String::new(),
+                label: crate::mermaid::ast::Label::default(),
                 value: *value,
             })
             .collect()

@@ -467,6 +467,12 @@ pub struct ParticipantId(pub usize);
 #[derive(Debug, Clone, PartialEq)]
 pub struct SequenceDiagram {
     /// The `title` statement, if any.
+    ///
+    /// A plain `String`, like every other chart title and section heading here: titles
+    /// are drawn by the shared chrome in [`chrome::compose`](crate::mermaid::chrome),
+    /// which centres and ellipsizes them, and none of them is a label an author selects
+    /// text out of. Making them [`Label`]s would buy provenance for the one piece of a
+    /// diagram that is furniture rather than content.
     pub title: Option<String>,
     /// Participants in column order: declared ones first in declaration order, then
     /// implicit ones in order of first use.
@@ -633,12 +639,16 @@ pub struct ClassDiagram {
 }
 
 /// A class box: name, optional annotation, fields and methods.
+///
+/// [`members`](Class::members) carry no provenance: `+int age` is drawn as `+age: int`,
+/// reordered out of tokens the source wrote apart, so no stretch of the document is a
+/// copy of the drawn cells. Only [`name`](Class::name) maps back.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Class {
     /// The class name, e.g. `Animal`. A generic parameter written `Square~Shape~` is
     /// *not* part of the name — Mermaid identifies the class as `Square` — and lives
     /// in [`generic`](Class::generic) instead.
-    pub name: String,
+    pub name: Label,
     /// The generic parameter from `Square~Shape~`, without its tildes. Member types
     /// keep theirs inline, rewritten as `List<int>`.
     pub generic: Option<String>,
@@ -852,11 +862,15 @@ pub struct ErDiagram {
 
 /// An entity box with its attribute block.
 #[derive(Debug, Clone, PartialEq)]
+///
+/// [`attributes`](Entity::attributes) carry no provenance: an attribute row is drawn as
+/// a column-aligned table built from four independent tokens, so no stretch of the
+/// source is a copy of the drawn cells and there is nothing honest to point at.
 pub struct Entity {
     /// The entity name as written, e.g. `CUSTOMER`.
-    pub name: String,
+    pub name: Label,
     /// An alias from `CUSTOMER["Customer account"]`, if any.
-    pub alias: Option<String>,
+    pub alias: Option<Label>,
     /// Attributes from the `{ … }` block, in declaration order.
     pub attributes: Vec<ErAttribute>,
 }
@@ -934,7 +948,7 @@ pub struct PieChart {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PieSlice {
     /// The quoted slice label, without its quotes.
-    pub label: String,
+    pub label: Label,
     /// The slice value. Always finite and non-negative.
     pub value: f64,
 }
@@ -991,7 +1005,7 @@ pub struct GanttSection {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GanttTask {
     /// The task name, i.e. the text before the `:`.
-    pub name: String,
+    pub name: Label,
     /// The task id, when the metadata gave one; other tasks refer to it with `after`.
     pub id: Option<String>,
     /// The task's progress state from the `done` / `active` tags.

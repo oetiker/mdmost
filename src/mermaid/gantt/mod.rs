@@ -117,7 +117,8 @@ fn negotiate(chart: &GanttChart, width: u16) -> Result<Columns, MermaidError> {
                 .iter()
                 .map(|title| display_width(title))
                 .chain(section.tasks.iter().map(|task| {
-                    display_width(&task.name) + usize::from(section.title.is_some()) * TASK_INDENT
+                    display_width(&chrome::label_one_line(&task.name))
+                        + usize::from(section.title.is_some()) * TASK_INDENT
                 }))
         })
         .max()
@@ -206,14 +207,14 @@ fn plot(
         let indent = usize::from(section.title.is_some()) * TASK_INDENT;
         for task in &section.tasks {
             let row = body.push_blank_row(base);
-            body.write_str(
-                row,
-                indent,
-                // `MIN_GUTTER` exceeds `TASK_INDENT`, so this cannot currently reach
-                // zero; saturating keeps that a local fact rather than a global one.
-                &ellipsize(&task.name, columns.gutter.saturating_sub(indent)),
-                theme.diagram.node_text,
+            // `MIN_GUTTER` exceeds `TASK_INDENT`, so this cannot currently reach zero;
+            // saturating keeps that a local fact rather than a global one.
+            let drawn = ellipsize(
+                &chrome::label_one_line(&task.name),
+                columns.gutter.saturating_sub(indent),
             );
+            body.write_str(row, indent, &drawn, theme.diagram.node_text);
+            chrome::label_row_span(&mut body, &task.name, &drawn, row, indent);
             body.write_str(row, columns.separator(), "│", theme.diagram.axis);
             draw_task(&mut body, row, &columns, task, start, end, theme);
         }

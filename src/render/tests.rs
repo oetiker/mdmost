@@ -2889,3 +2889,259 @@ fn a_mermaid_block_with_no_mapping_emits_no_diagram_spans() {
         canvas.spans()
     );
 }
+
+/// Asserts that every span the canvas carries names exactly the cells it draws.
+///
+/// The other half of `span_for`: that one proves a particular label is mapped, this
+/// proves nothing else was mapped *wrongly*. A family that emits one span naming a whole
+/// wrapped label passes the first and fails this.
+fn every_span_names_its_own_cells(canvas: &Canvas, doc: &str) {
+    for span in canvas.spans() {
+        let source = doc.get(span.source_start..span.source_end);
+        let cells = span_cells(canvas, span);
+        // The one sanctioned exception to "a span's source is a copy of its cells": an
+        // entity reference that draws exactly one column. Anything else must copy.
+        let entity = span.cols == 1
+            && source.is_some_and(|text| text.starts_with('&') && text.ends_with(';'));
+        assert!(
+            entity || source == Some(cells.as_str()),
+            "span {span:?} names {source:?} but draws {cells:?}; row {:?}",
+            canvas.row_text(span.row)
+        );
+    }
+}
+
+#[test]
+fn a_sequence_participant_maps_back_to_the_document() {
+    let doc = "```mermaid\nsequenceDiagram\n  participant A as Alice\n  A->>A: Ping\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Alice");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Alice",
+        "the participant's span must sit on its drawn head: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_sequence_message_maps_back_to_the_document() {
+    let doc = "```mermaid\nsequenceDiagram\n  participant A as Alice\n  participant B as Bob\n  A->>B: Ping\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Ping");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Ping",
+        "the message's span must sit on the drawn arrow label: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_class_name_maps_back_to_the_document() {
+    let doc = "```mermaid\nclassDiagram\n  class Animal\n  Animal <|-- Duck\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Animal");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Animal",
+        "the class name's span must sit on the drawn name: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn an_er_entity_name_maps_back_to_the_document() {
+    let doc = "```mermaid\nerDiagram\n  CUSTOMER ||--o{ ORDER : places\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "CUSTOMER");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "CUSTOMER",
+        "the entity's span must sit on the drawn name: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_pie_slice_label_maps_back_to_the_document() {
+    let doc = "```mermaid\npie\n  \"Cats\" : 40\n  \"Dogs\" : 60\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Cats");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Cats",
+        "the slice's span must sit on the drawn legend label: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_gantt_task_name_maps_back_to_the_document() {
+    let doc = "```mermaid\ngantt\n  dateFormat YYYY-MM-DD\n  section Build\n  Design :a1, 2024-01-01, 3d\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Design");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Design",
+        "the task's span must sit on the drawn task name: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_state_description_maps_back_to_the_document() {
+    let doc = "```mermaid\nstateDiagram-v2\n  s1 : Idle\n  s1 --> s2\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Idle");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Idle",
+        "the state's span must sit on its drawn description: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_wrapped_state_description_points_every_row_at_its_own_bytes() {
+    // The axis a single-line fixture cannot test: once a description wraps, every drawn
+    // row must name the bytes that drew *it*. One span naming the whole description
+    // passes `a_state_description_maps_back_to_the_document` and fails here.
+    let doc = "```mermaid\nstateDiagram-v2\n  s1 : waiting for the user to press a key\n  s1 --> s2\n```\n";
+    let canvas = render(doc, 30);
+    every_span_names_its_own_cells(&canvas, doc);
+    let named: Vec<&str> = canvas
+        .spans()
+        .iter()
+        .filter_map(|s| doc.get(s.source_start..s.source_end))
+        .collect();
+    assert!(
+        named.len() > 1,
+        "the description must wrap onto several rows, each with its own span: {named:?}"
+    );
+    let units: Vec<Option<&str>> = canvas
+        .spans()
+        .iter()
+        .map(|s| s.unit.and_then(|(start, end)| doc.get(start..end)))
+        .collect();
+    assert!(
+        units
+            .iter()
+            .all(|unit| *unit == Some("waiting for the user to press a key")),
+        "every row belongs to the one description: {units:?}"
+    );
+}
+
+#[test]
+fn a_multi_line_sequence_note_points_every_row_at_its_own_bytes() {
+    let doc =
+        "```mermaid\nsequenceDiagram\n  participant A as Alice\n  Note over A: One<br>Two\n```\n";
+    let canvas = render(doc, 60);
+    every_span_names_its_own_cells(&canvas, doc);
+    let named: Vec<&str> = canvas
+        .spans()
+        .iter()
+        .filter_map(|s| doc.get(s.source_start..s.source_end))
+        .collect();
+    assert!(
+        named.contains(&"One") && named.contains(&"Two"),
+        "each line of the note names its own bytes, `<br>` excluded: {named:?}"
+    );
+}
+
+#[test]
+fn a_pie_slice_label_cuts_its_entities_out_into_runs_of_their_own() {
+    // A decoded entity draws fewer cells than it spells, so it cannot sit inside a run
+    // whose bytes and cells line up. `&#65;` is kept alongside `&amp;` deliberately: a
+    // numeric reference has caught mutations a named one alone did not.
+    let doc = "```mermaid\npie\n  \"A&amp;B&#65;\" : 40\n  \"Dogs\" : 60\n```\n";
+    let canvas = render(doc, 60);
+    every_span_names_its_own_cells(&canvas, doc);
+    let named: Vec<&str> = canvas
+        .spans()
+        .iter()
+        .filter_map(|s| doc.get(s.source_start..s.source_end))
+        .collect();
+    assert!(
+        named.contains(&"&amp;") && named.contains(&"&#65;"),
+        "each entity reference is a run of its own: {named:?}"
+    );
+    assert!(
+        named.contains(&"Dogs"),
+        "and the plain slice still maps whole: {named:?}"
+    );
+}
+
+#[test]
+fn a_gantt_chart_indented_in_a_list_maps_back() {
+    // The list's indent is stripped from the literal comrak hands over, so a
+    // block-relative offset used as a document offset lands two bytes left per line.
+    let doc = "- item\n\n  ```mermaid\n  gantt\n  dateFormat YYYY-MM-DD\n  section Build\n  Design :a1, 2024-01-01, 3d\n  ```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Design");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Design",
+        "the list's indent is not part of the mermaid source: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_class_diagram_in_a_block_quote_maps_back() {
+    let doc = "> ```mermaid\n> classDiagram\n>   class Animal\n>   Animal <|-- Duck\n> ```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Animal");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Animal",
+        "the quote marker is not part of the mermaid source: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn an_er_alias_is_mapped_and_the_key_it_replaced_is_not() {
+    // Both directions in one fixture: the alias is what is drawn, so the alias is what
+    // is mapped, and the key — which is nowhere on the canvas — must claim no cells.
+    let doc = "```mermaid\nerDiagram\n  p[\"Person\"] |o--o| c[\"Car park\"] : owns\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Person");
+    assert_eq!(span_cells(&canvas, span), "Person");
+    every_span_names_its_own_cells(&canvas, doc);
+    let drawn: Vec<String> = canvas
+        .spans()
+        .iter()
+        .map(|s| span_cells(&canvas, s))
+        .collect();
+    assert!(
+        !drawn.iter().any(|text| text == "p" || text == "c"),
+        "an entity key that was replaced by an alias draws nothing: {drawn:?}"
+    );
+}
+
+#[test]
+fn a_sequence_actor_label_maps_back_to_the_document() {
+    // An `actor` draws its label under a stick figure rather than inside a box, which is
+    // a second painting path through `draw_head`. Removing its span emission turned no
+    // test red until this fixture existed.
+    let doc = "```mermaid\nsequenceDiagram\n  actor A as Alice\n  A->>A: Ping\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Alice");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Alice",
+        "the actor's span must sit on the label under its figure: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}

@@ -119,7 +119,7 @@ mod string_labels {
             other => panic!("expected a pie chart, got {other:?}"),
         };
         assert_eq!(chart.title.as_deref(), Some("Dogs & Cats"));
-        assert_eq!(chart.slices[0].label, "a <b");
+        assert_eq!(chart.slices[0].label.text(), "a <b");
     }
 
     #[test]
@@ -132,7 +132,7 @@ mod string_labels {
         };
         assert_eq!(chart.title.as_deref(), Some("A & B"));
         assert_eq!(chart.sections[0].title.as_deref(), Some("S <1>"));
-        assert_eq!(chart.sections[0].tasks[0].name, "Design & build");
+        assert_eq!(chart.sections[0].tasks[0].name.text(), "Design & build");
     }
 
     #[test]

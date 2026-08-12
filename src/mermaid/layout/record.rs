@@ -15,7 +15,9 @@
 //! * **Boxes have interior padding.** One blank column on each side of the text, so no
 //!   glyph ever touches the border (finding P1: nothing in the program has margins).
 
-use crate::canvas::{BorderSet, Canvas};
+use crate::canvas::{BorderSet, Canvas, align_offset};
+use crate::mermaid::ast::Label;
+use crate::mermaid::chrome;
 use crate::text::{Align, display_width, ellipsize};
 use crate::theme::{Style, Theme};
 
@@ -35,6 +37,13 @@ pub(super) struct Row {
     pub align: Align,
     /// The ink to draw it in.
     pub style: Style,
+    /// The label [`text`](Row::text) was drawn from, when it was drawn from one.
+    ///
+    /// `None` for a row assembled out of several source tokens — a class member such as
+    /// `+age: int` is built from a visibility marker, a name and a type that the source
+    /// wrote in another order, so no stretch of the document is a copy of the drawn
+    /// cells and there is nothing honest to point at.
+    pub source: Option<Label>,
 }
 
 impl Row {
@@ -44,6 +53,15 @@ impl Row {
             text: text.into(),
             align: Align::Center,
             style,
+            source: None,
+        }
+    }
+
+    /// The same row, drawn from `label`, so it can name the bytes behind its cells.
+    pub fn sourced(self, label: Label) -> Self {
+        Self {
+            source: Some(label),
+            ..self
         }
     }
 
@@ -53,6 +71,7 @@ impl Row {
             text: text.into(),
             align: Align::Left,
             style,
+            source: None,
         }
     }
 }
@@ -106,6 +125,13 @@ pub(super) fn draw(compartments: &[Vec<Row>], budget: u16, theme: &Theme) -> Can
         for row in rows {
             let index = body.push_blank_row(theme.base());
             body.write_field(index, PAD, text_width, &row.text, row.align, row.style);
+            if let Some(label) = &row.source {
+                // `write_field` aligns through `text::pad_to_width`; `align_offset` is
+                // that same rule asked rather than re-derived. The elided text is what
+                // is handed on, so a row cut down to fit names the cells it really drew.
+                let col = PAD + align_offset(text_width, display_width(&row.text), row.align);
+                chrome::label_row_span(&mut body, label, &row.text, index, col);
+            }
         }
     }
     if body.height() == 0 {

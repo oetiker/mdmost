@@ -12,8 +12,8 @@
 //! [`MermaidError::TooNarrow`].
 
 use crate::error::MermaidError;
-use crate::mermaid::ast::{NotePlacement, ParticipantKind, SequenceDiagram, SequenceItem};
-use crate::mermaid::chrome;
+use crate::mermaid::ast::{Label, NotePlacement, ParticipantKind, SequenceDiagram, SequenceItem};
+use crate::mermaid::chrome::{self, Piece};
 use crate::text::{display_width, distribute_evenly};
 
 /// Columns a self-message hook reaches out from its lifeline.
@@ -65,8 +65,10 @@ struct Profile {
 /// The head of one lifeline: the participant box or actor figure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Header {
-    /// The label, already wrapped to the profile's cap.
-    pub lines: Vec<String>,
+    /// The participant's label, whole, so a drawn row can name the bytes behind it.
+    pub label: Label,
+    /// The label, already wrapped to the profile's cap, piece by piece.
+    pub pieces: Vec<Piece>,
     /// The total width of the drawn head. Always odd, so the lifeline is centred.
     pub width: usize,
     /// Whether to draw a box or a stick figure.
@@ -86,7 +88,7 @@ impl Header {
 
     /// Rows the head occupies.
     pub fn height(&self) -> usize {
-        self.lines.len() + 2
+        self.pieces.len() + 2
     }
 }
 
@@ -222,11 +224,19 @@ fn build_headers(diagram: &SequenceDiagram, profile: Profile) -> Vec<Header> {
         .participants
         .iter()
         .map(|participant| {
-            let mut lines = chrome::label_lines(&participant.label, profile.label_cap);
-            if lines.is_empty() {
-                lines.push(String::new());
+            let mut pieces = chrome::label_pieces(&participant.label, profile.label_cap);
+            if pieces.is_empty() {
+                pieces.push(Piece {
+                    text: String::new(),
+                    index: 0,
+                    at: None,
+                });
             }
-            let text = chrome::lines_width(&lines);
+            let text = pieces
+                .iter()
+                .map(|piece| display_width(&piece.text))
+                .max()
+                .unwrap_or(0);
             let width = match participant.kind {
                 // `│ label │`
                 ParticipantKind::Participant => text + 4,
@@ -234,7 +244,8 @@ fn build_headers(diagram: &SequenceDiagram, profile: Profile) -> Vec<Header> {
                 ParticipantKind::Actor => text.max(3),
             };
             Header {
-                lines,
+                label: participant.label.clone(),
+                pieces,
                 // An odd width puts the lifeline exactly in the middle.
                 width: width | 1,
                 kind: participant.kind,

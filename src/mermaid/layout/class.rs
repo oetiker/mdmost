@@ -86,7 +86,7 @@ fn class_box(class: &Class, budget: u16, theme: &Theme) -> Canvas {
     if let Some(annotation) = &class.annotation {
         header.push(Row::centred(stereotype(annotation), styles.stereotype));
     }
-    header.push(Row::centred(display_name(class), styles.node_text));
+    header.push(Row::centred(display_name(class), styles.node_text).sourced(class.name.clone()));
 
     let mut fields = Vec::new();
     let mut methods = Vec::new();
@@ -105,10 +105,15 @@ fn class_box(class: &Class, budget: u16, theme: &Theme) -> Canvas {
 }
 
 /// The name shown in a class box, with any generic parameter restored.
+///
+/// A restored generic makes the drawn text `Square<Shape>`, which no stretch of the
+/// source spells — the tildes are gone and the angle brackets were never there — so
+/// `Label::spans_for` declines that row and it draws without provenance. A plain name
+/// is a byte-for-byte copy and maps back.
 fn display_name(class: &Class) -> String {
     match &class.generic {
-        Some(generic) => format!("{}<{generic}>", class.name),
-        None => class.name.clone(),
+        Some(generic) => format!("{}<{generic}>", class.name.text()),
+        None => class.name.text(),
     }
 }
 
@@ -195,7 +200,7 @@ mod tests {
 
     fn class(name: &str, members: Vec<Member>) -> Class {
         Class {
-            name: name.to_string(),
+            name: Label::line(name),
             generic: None,
             annotation: None,
             members,

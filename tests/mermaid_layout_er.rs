@@ -13,7 +13,7 @@ use mdmost::theme::Theme;
 /// An entity with a name and attributes.
 fn entity(name: &str, attributes: Vec<ErAttribute>) -> Entity {
     Entity {
-        name: name.to_string(),
+        name: Label::line(name),
         alias: None,
         attributes,
     }
@@ -169,7 +169,7 @@ fn a_non_identifying_relationship_is_drawn_dotted() {
 #[test]
 fn an_alias_is_shown_instead_of_the_entity_key() {
     let mut named = entity("CUSTOMER", vec![attribute("string", "name", Vec::new())]);
-    named.alias = Some("Customer account".to_string());
+    named.alias = Some(Label::line("Customer account"));
     insta::assert_snapshot!(render(&diagram(vec![named], Vec::new()), 50));
 }
 

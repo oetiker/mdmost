@@ -11,7 +11,7 @@ use crate::mermaid::entity;
 use super::lex::{self, Nesting, SrcLine};
 
 /// Parses a whole `pie` chart.
-pub fn parse(lines: &[SrcLine<'_>]) -> Result<PieChart, MermaidError> {
+pub fn parse(lines: &[SrcLine<'_>], src: &str) -> Result<PieChart, MermaidError> {
     let Some((header, body)) = lines.split_first() else {
         return Err(lex::syntax(1, "empty diagram"));
     };
@@ -27,10 +27,10 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<PieChart, MermaidError> {
         rest = after;
     }
     if !rest.is_empty() {
-        statement(&mut chart, rest, header.number)?;
+        statement(&mut chart, rest, header.number, src)?;
     }
     for line in body {
-        statement(&mut chart, line.text, line.number)?;
+        statement(&mut chart, line.text, line.number, src)?;
     }
     if chart.slices.is_empty() {
         return Err(lex::syntax(
@@ -42,13 +42,13 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<PieChart, MermaidError> {
 }
 
 /// Handles one statement of a pie chart.
-fn statement(chart: &mut PieChart, text: &str, line: usize) -> Result<(), MermaidError> {
+fn statement(chart: &mut PieChart, text: &str, line: usize, src: &str) -> Result<(), MermaidError> {
     if let Some(rest) = lex::strip_keyword(text, "showData") {
         chart.show_data = true;
         if rest.is_empty() {
             return Ok(());
         }
-        return statement(chart, rest, line);
+        return statement(chart, rest, line, src);
     }
     if let Some(rest) = lex::strip_keyword(text, "title") {
         chart.title = Some(entity::decode(lex::unquote(rest)).into_owned());
@@ -70,7 +70,7 @@ fn statement(chart: &mut PieChart, text: &str, line: usize) -> Result<(), Mermai
         ));
     }
     chart.slices.push(PieSlice {
-        label: entity::decode(lex::unquote(label)).into_owned(),
+        label: lex::label_at(src, lex::unquote(label)),
         value,
     });
     Ok(())

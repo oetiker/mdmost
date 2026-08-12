@@ -53,8 +53,8 @@ pub fn parse(src: &str) -> Result<Diagram, MermaidError> {
         "sequencediagram" => sequence::parse(&lines, src).map(Diagram::Sequence),
         "classdiagram" | "classdiagram-v2" => class::parse(&lines, src).map(Diagram::Class),
         "erdiagram" => er::parse(&lines, src).map(Diagram::Er),
-        "pie" | "pie-beta" => pie::parse(&lines).map(Diagram::Pie),
-        "gantt" => gantt::parse(&lines).map(Diagram::Gantt),
+        "pie" | "pie-beta" => pie::parse(&lines, src).map(Diagram::Pie),
+        "gantt" => gantt::parse(&lines, src).map(Diagram::Gantt),
         // Plain `stateDiagram` uses the v1 renderer in Mermaid but the same grammar
         // subset we support, so both spellings are accepted.
         "statediagram" | "statediagram-v2" => state::parse(&lines, src).map(Diagram::State),

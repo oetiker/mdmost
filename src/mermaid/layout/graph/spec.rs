@@ -55,6 +55,13 @@ impl GraphSpec {
 pub struct GroupSpec {
     /// The frame title, already split into lines. `None` draws no frame, which is what
     /// the implicit root group uses.
+    ///
+    /// **Carries no provenance, deliberately.** A caller flattens its `Label` into these
+    /// strings and the bytes behind them are lost at this seam, so a flowchart subgraph
+    /// title and a composite state's title draw without a search span. Fixing that means
+    /// threading the `Label` itself through here — not reconstructing an offset on the
+    /// far side, which would be a guess — and it is a change to every family the engine
+    /// serves, so it is not smuggled in with one of them.
     pub title: Option<Vec<String>>,
     /// A direction override for the group's own layout.
     pub direction: Option<Direction>,
@@ -82,6 +89,11 @@ pub struct EdgeSpec {
     /// The terminator drawn at the [`to`](EdgeSpec::to) end.
     pub head: Terminator,
     /// The label carried in the middle of the edge, already split into lines.
+    ///
+    /// **Carries no provenance, deliberately** — see [`GroupSpec::title`]. This is why a
+    /// flowchart edge label, a class relation label, an ER relationship label and a state
+    /// transition label all draw without a search span even though all four arrive at
+    /// their family as a `Label` that knows exactly where it came from.
     pub label: Vec<String>,
     /// A short label placed beside the [`from`](EdgeSpec::from) end, such as a class
     /// diagram cardinality (`"1"` in `"1" -- "0..*"`).
