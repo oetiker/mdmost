@@ -1540,43 +1540,63 @@ fn painted_at(app: &mut App, width: u16, height: u16, needle: &str) -> (u16, u16
 }
 
 #[test]
+fn sanitized_url_substitutes_a_control_character_without_moving_its_width() {
+    // The direct-call pin: one column in, one column out
+    // (`crate::text::cell_clusters`), so nothing measured for the status bar's own
+    // layout arithmetic moves because of the substitution. This does not prove the
+    // call site in `draw_status` still exists -- see the test below for that.
+    let hostile = "https://example.com/\u{9b}pwned";
+    let safe = super::chrome::sanitized_url(hostile);
+    assert!(
+        !safe.contains('\u{9b}'),
+        "the control character does not survive: {safe:?}"
+    );
+    assert_eq!(
+        crate::text::display_width(&safe),
+        crate::text::display_width(hostile),
+        "the substitution preserves width"
+    );
+}
+
+#[test]
 fn a_control_character_in_a_hovered_url_cannot_reach_the_terminal() {
-    // Injected directly through `App::hover_hotspot_for_test`, not through
-    // `Doc::parse` -> `classify`: whether a raw control byte can survive comrak's
-    // link-destination grammar is exactly the guarantee design spec §8 says must not
-    // be trusted, so this bypasses the parser on purpose. It goes through
-    // `chrome::draw_status` itself -- not just the `sanitized_url` helper it calls --
-    // so this fails if the call site is ever dropped, not only if the helper breaks.
+    // A real link, through the real parser and the real `classify` -- not injected
+    // past them -- carrying U+009B, the C1 form of CSI (`ESC [` in one byte on a
+    // terminal that honours 8-bit controls). CommonMark's *bare* destination grammar
+    // excludes ASCII control characters but says nothing about the C1 range, so this
+    // one is not awkward the way a literal ESC would have been: it survives
+    // `Doc::parse` into the hotspot's `url` unchanged (confirmed with a throwaway
+    // probe against this crate before writing this test), which is exactly what
+    // design spec §8 says must not be assumed either way rather than tested.
     //
-    // The load-bearing assertion is the *second* one below, not the first: ratatui's
-    // own `Buffer::set_line` already drops every Unicode `Cc` control character
-    // (verified against ESC, TAB, CR, BEL, DEL, NUL and a C1 CSI byte) before it ever
-    // reaches a cell, independent of anything this project does -- so "no raw ESC in
-    // the drawn output" holds *whether or not* `sanitized_url` is wired in, and cannot
-    // by itself prove the call site is still there. What sanitization actually changes
-    // is that the control character is replaced with a *visible* one-column marker
-    // (`text::UNPLACEABLE`, U+FFFD) instead of silently vanishing -- ratatui's own
-    // drop leaves no trace at all, which is a column miscounted between what this
-    // program's own width arithmetic assumed and what was drawn, the exact class of
-    // bug `cell_clusters` exists to prevent. That marker's presence is what a removed
-    // call site cannot fake.
-    let mut app = pager_at("hello\n", 60, 10);
-    app.hover_hotspot_for_test(crate::canvas::HotspotKind::Open {
-        url: "https://example.com/\u{1b}[31mpwned".to_string(),
-    });
+    // Hovered the same way `hovering_a_link_shows_its_full_url_in_the_status_bar`
+    // does -- real `set_pointer` against the real rendered canvas -- and drawn
+    // through `chrome::draw_status` itself, so this fails if the call site to
+    // `sanitized_url` is ever dropped, not only if the helper it calls breaks.
+    let mut app = pager_at("[here](https://example.com/\u{9b}[31mpwned)\n", 60, 10);
+    let (x, y) = painted_at(&mut app, 60, 10, "here");
+    app.set_pointer(x, y);
     let rows = painted(60, 1, |buffer, area| {
         super::chrome::draw_status(buffer, area, &app)
     });
     let status = &rows[0];
     assert!(
-        !status.contains('\u{1b}'),
-        "no raw ESC reaches the drawn status bar: {status:?}"
+        !status.contains('\u{9b}'),
+        "the raw C1 control byte does not reach the drawn status bar: {status:?}"
     );
+    // The load-bearing assertion: ratatui's own `Buffer::set_line` already drops a
+    // lone `Cc` control character silently before a cell is ever written (verified
+    // outside the project against ESC, TAB, CR, BEL, DEL, NUL and this same C1 byte),
+    // independent of anything sanitized here -- so the assertion above holds whether
+    // or not `sanitized_url` is wired in, and cannot by itself prove the call site is
+    // still there. What sanitization changes is that the control character is
+    // replaced with a *visible* one-column marker (`text::UNPLACEABLE`, U+FFFD)
+    // instead of silently vanishing without a trace, which is the width-mismatch
+    // defect class `cell_clusters` exists to prevent. That marker's presence is what
+    // a removed call site cannot fake.
     assert!(
         status.contains('\u{fffd}'),
-        "the control character is substituted, not silently dropped, which is what \
-         actually distinguishes a wired-in sanitizer from one that was never called: \
-         {status:?}"
+        "the control character is substituted, not silently dropped: {status:?}"
     );
     assert!(
         status.contains("https://example.com/"),

@@ -1775,31 +1775,6 @@ impl App {
         self.hover
     }
 
-    /// Test-only: hovers a hotspot of `kind`, injected directly into the cached
-    /// canvas rather than produced by rendering a document.
-    ///
-    /// `Doc::parse` -> `render::link::classify` is not the only way a `Hotspot`
-    /// reaches [`App::hovered`] in principle — a test that wants to prove a *display*
-    /// path is safe against untrusted content must not route that content through the
-    /// parser first, or it is only ever testing what the parser happens to do today.
-    /// See `tui::tests::a_control_character_in_a_hovered_url_cannot_reach_the_terminal`.
-    #[cfg(test)]
-    pub(crate) fn hover_hotspot_for_test(&mut self, kind: HotspotKind) {
-        self.ensure_rendered();
-        let mut canvas = self.cache.canvas().clone();
-        let target = canvas.next_target();
-        canvas.add_hotspot(crate::canvas::Hotspot {
-            row: 0,
-            col: 1,
-            cols: 1,
-            kind,
-            target,
-        });
-        let index = canvas.hotspots().len() - 1;
-        self.cache.set_canvas_for_test(canvas);
-        self.hover = Some(index);
-    }
-
     /// Takes the payload a press produced, for the event loop to copy.
     pub fn take_hotspot_copy(&mut self) -> Option<HotspotCopy> {
         self.pending_hotspot.take()
