@@ -85,9 +85,14 @@ attributes).
    - **`Label::from_lines`** (new, for the state diagram's `note … end note`) yields a label
      with no raw text, and `spans_for` declines for it. If a state note should be selectable
      character by character, that constructor is the thing to replace, not `spans_for`.
-2. **Task 7's button payload is the whole fenced block** (owner ruling 1c), superseding spec
-   §4 and plan Task 7 Step 3. The plan's own test passes either way — **require asserting
-   the fences explicitly**, or the ruling ships untested.
+2. **Task 7's button payload is the block's CONTENT, not its fences** — owner ruling
+   amended 2026-08-12, which *retires* the "whole fenced block" reading recorded here as
+   ruling 1c. All three copy buttons carry the content: the diagram button carries the
+   mermaid source, and the code frame and the Mermaid-error fallback keep carrying
+   `literal` exactly as they already do. Spec §4 and plan Task 7 Step 3 are therefore
+   correct as written and nothing shipped changes. The plan's own test passes under
+   *either* reading, so Task 7 pins the ruling in both directions
+   (`a_diagram_button_carries_the_content_and_not_the_fences`) — done.
 3. **Tasks 8 and 10 are owner gates**: button colours, and re-recording the demo. Stop and
    show rendered output; do not choose colours yourself.
 
@@ -192,7 +197,9 @@ Owner rulings, all binding, all superseding written docs:
    press inside a label and go wider → the whole diagram; press anywhere else inside a
    diagram → the whole diagram immediately, wherever released, decided by **the anchor cell
    alone**, never by comparing the drag's rectangle to cells.
-2. **The `[copy]` button's payload is the whole fenced block.**
+2. **The `[copy]` button's payload is the block's content, without its fences** (ruling
+   amended 2026-08-12; the earlier "whole fenced block" reading is retired). A *selection*
+   still yields the fenced block — the two are deliberately different.
 3. **Container prefixes are stripped entirely** from a copied block — no line keeps `> `,
    fence lines included, and the prefix is *read from the document*, per line, never matched
    as a pattern.

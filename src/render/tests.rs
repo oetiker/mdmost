@@ -3339,3 +3339,166 @@ fn a_state_transition_label_maps_back_to_the_document() {
     every_span_names_its_own_cells(&canvas, doc);
     no_span_sits_on_line_art(&canvas);
 }
+
+/// The fixture the diagram-button tests share: two boxes and an arrow.
+///
+/// At width 60 its widest row is 35 columns, so `[copy]` at column 52 lands in blank
+/// space with room to spare — [`REGION`](super::button::REGION) + 1 = 10 columns is what
+/// the button needs, and 60 - 35 leaves 25. A fixture that negotiates a narrower block
+/// than that would make every positive assertion below pass for the wrong reason.
+const DIAGRAM: &str = "```mermaid\nflowchart LR\n  A[Parse] --> B[Layout]\n```\n";
+
+#[test]
+fn a_diagram_offers_a_copy_button_carrying_its_source() {
+    let canvas = render_with(DIAGRAM, 60, &BUTTONS);
+    let top = canvas.row_text(0);
+    assert!(top.contains("[copy]"), "got {top:?}");
+    let spot = canvas.hotspots().first().expect("a hotspot");
+    assert_eq!(spot.row, 0, "the button floats at the top of the block");
+    assert_eq!(spot.cols, 6);
+    assert!(spot.text.contains("flowchart LR"), "got {:?}", spot.text);
+    assert!(
+        spot.text.contains("A[Parse] --> B[Layout]"),
+        "the whole diagram source: {:?}",
+        spot.text
+    );
+    assert!(spot.html.is_none(), "a diagram has no richer flavour");
+}
+
+#[test]
+fn a_diagram_button_carries_the_content_and_not_the_fences() {
+    // **The ruling, pinned in both directions (2026-08-12).** All three copy buttons
+    // carry the block's *content*, not its fences. `contains("flowchart LR")` alone is
+    // true under either reading, so it tests neither; these assertions are the ones that
+    // turn red if the payload ever grows its fences back.
+    let canvas = render_with(DIAGRAM, 60, &BUTTONS);
+    let spot = canvas.hotspots().first().expect("a hotspot");
+    assert_eq!(
+        spot.text, "flowchart LR\n  A[Parse] --> B[Layout]\n",
+        "the mermaid source exactly, opener and closer excluded"
+    );
+    assert!(
+        !spot.text.starts_with("```"),
+        "the opening fence is not part of the payload: {:?}",
+        spot.text
+    );
+    assert!(
+        !spot.text.contains("```"),
+        "and neither is the closing one: {:?}",
+        spot.text
+    );
+}
+
+#[test]
+fn a_diagram_button_is_off_by_default() {
+    let canvas = render(DIAGRAM, 60);
+    assert!(!canvas.row_text(0).contains("[copy]"));
+    assert!(canvas.hotspots().is_empty());
+}
+
+#[test]
+fn a_diagram_button_does_not_cover_box_art() {
+    let plain = render(DIAGRAM, 60);
+    let with_button = render_with(DIAGRAM, 60, &BUTTONS);
+    let row = with_button.row_text(0);
+    assert!(row.contains("[copy]"), "got {row:?}");
+    // Every non-blank cell the plain render drew is still there. Counted in `char`s
+    // because every box-drawing glyph is three bytes and one column.
+    for (col, ch) in plain.row_text(0).chars().enumerate() {
+        if ch != ' ' {
+            assert_eq!(
+                row.chars().nth(col),
+                Some(ch),
+                "the button overwrote drawn art at column {col}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_diagram_whose_art_reaches_the_edge_drops_its_button() {
+    // The other direction of the same rule. This flowchart lays itself out 45 columns
+    // wide in a 46-column block, so the columns `[copy]` wants are drawing, and `place`
+    // declines rather than blanking a box. A dropped button leaves no hotspot either --
+    // half of this pair would be a control that does nothing.
+    let doc = "```mermaid\nflowchart LR\n  A[Parsing the document] --> B[Laying it out]\n```\n";
+    let plain = render(doc, 46);
+    assert_eq!(
+        plain.row_text(0).trim_end().chars().count(),
+        45,
+        "the fixture must actually reach the edge: {:?}",
+        plain.row_text(0)
+    );
+    let canvas = render_with(doc, 46, &BUTTONS);
+    assert!(
+        !canvas.row_text(0).contains("[copy]"),
+        "the art survives: {:?}",
+        canvas.row_text(0)
+    );
+    assert!(
+        canvas.hotspots().is_empty(),
+        "a dropped button leaves no hotspot: {:?}",
+        canvas.hotspots()
+    );
+}
+
+#[test]
+fn a_diagram_in_a_table_cell_shows_no_button() {
+    // The same reason the code frame carries `table_depth == 0`: a block blitted into a
+    // row it shares loses its hotspot while keeping its drawn cells, leaving a control
+    // that does nothing. Verified rather than copied on faith.
+    //
+    // The paragraph is load-bearing. It negotiates a cell 50 columns wide; `DIAGRAM`
+    // alone negotiates one of 28, where the button is dropped for want of room and
+    // removing the guard changes nothing at all — a vacuous test that looked like a
+    // passing one. The `loose` render below is the control that keeps it honest: the
+    // same content at the same width *does* get a diagram button at the top level, so
+    // its absence inside the cell is the guard's doing and not the width's.
+    let content = format!("{}\n\n{DIAGRAM}", "x".repeat(50));
+    let loose = render_with(&content, 50, &BUTTONS);
+    assert!(
+        loose
+            .hotspots()
+            .iter()
+            .any(|spot| spot.text.contains("flowchart")),
+        "the control must fit a button at this width: {:?}",
+        loose.hotspots()
+    );
+
+    let table = table_with_cell(&content);
+    let canvas = render_block(&table, 80, &Theme::default_dark(), &BUTTONS);
+    canvas.check_invariants().expect("contract holds");
+    let text = canvas.plain_text();
+    assert_eq!(
+        text.matches("[copy]").count(),
+        1,
+        "the outer table's button is the only one drawn:\n{text}"
+    );
+    assert!(
+        canvas.row_text(0).contains("[copy]"),
+        "and it is in the outer table's top rule:\n{text}"
+    );
+    let spots = canvas.hotspots();
+    assert_eq!(spots.len(), 1, "one button, one hotspot: {spots:?}");
+    assert!(
+        !spots[0].text.contains("flowchart"),
+        "a diagram inside a table cell records no hotspot of its own: {spots:?}"
+    );
+}
+
+#[test]
+fn a_failed_mermaid_block_offers_exactly_one_button() {
+    // The fallback renders *source* inside a code frame and already has a button of its
+    // own (`code::fallback`). The drawn-diagram path is the other arm of the same
+    // `match`, so a block gets one button or the other and never both or neither.
+    let canvas = render_with("```mermaid\nnot a diagram at all\n```\n", 40, &BUTTONS);
+    let text = canvas.plain_text();
+    assert_eq!(
+        text.matches("[copy]").count(),
+        1,
+        "the fallback frame's button, once:\n{text}"
+    );
+    let spots = canvas.hotspots();
+    assert_eq!(spots.len(), 1, "one button, one hotspot: {spots:?}");
+    assert_eq!(spots[0].text, "not a diagram at all\n");
+}

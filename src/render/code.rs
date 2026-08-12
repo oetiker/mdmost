@@ -86,8 +86,8 @@ pub(crate) fn render_code_block(
 ///
 /// Shared with [`super::diagram::diagram`], which builds the same block at a width the
 /// viewport does not have, so that the two cannot disagree about what a diagram block
-/// *is* — the rebasing included, which is why it happens here and not at either call
-/// site.
+/// *is* — the rebasing included, and the floating `[copy]` button, which is why both
+/// happen here and not at either call site.
 ///
 /// `block` is the fence's own extent in the document, opener and closer included — the
 /// node's `source`, not anything re-derived by hunting for backticks. It is what a
@@ -119,6 +119,36 @@ pub(crate) fn diagram_block(
         });
     }
     canvas.resize_width(width, ctx.base);
+    // A diagram has no frame to hang the button on, so it floats at the top right of the
+    // block — which makes the drawing itself the only other occupant of that row. The
+    // occupied extent is therefore measured off the drawn row rather than assumed to be
+    // zero, so `place` can decline on a diagram that reaches the right edge instead of
+    // blanking a box. Placed after the resize because the button's column is reckoned
+    // from the block's width, not from the layout's.
+    //
+    // A block inside a table cell is blitted into a row it shares and would lose its
+    // hotspot while keeping its cells — a drawn control that does nothing — so it is not
+    // offered one at all, exactly as a code frame is not.
+    //
+    // The height check is the same rule read once more: `Canvas::write_str` no-ops on a
+    // row that does not exist while `place` would still record the hotspot, so an empty
+    // canvas would get a hotspot behind no label. A successful Mermaid layout always
+    // draws at least one row, so no test reaches it; it costs one comparison to keep the
+    // "both or neither" contract true by construction rather than by argument.
+    if ctx.options.copy_button && ctx.table_depth == 0 && canvas.height() > 0 {
+        let occupied =
+            u16::try_from(display_width(canvas.row_text(0).trim_end())).unwrap_or(u16::MAX);
+        button::place(
+            &mut canvas,
+            0,
+            occupied,
+            ctx.theme.code.frame,
+            // The mermaid source, opener and closer excluded: all three copy buttons
+            // carry the block's content and not its fences (owner ruling, 2026-08-12).
+            literal.to_string(),
+            None,
+        );
+    }
     canvas
 }
 
