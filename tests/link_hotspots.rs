@@ -229,6 +229,32 @@ fn a_link_in_a_centred_cell_lands_on_the_cells_it_was_drawn_into() {
 }
 
 #[test]
+fn a_link_wrapped_across_the_rows_of_a_centred_cell_stays_one_control() {
+    // `align_canvas` places a centred cell one row at a time, because each row moves by
+    // its own offset — so this link arrives in several blits. They share one
+    // `TargetRebase`, or the link would be issued an id per row and hovering it would
+    // light one row of four (design spec §2.2). The left-aligned cell takes the early
+    // return in `align_canvas` and never reaches that path, which is why this one is
+    // centred.
+    let markdown = "| a | b |\n| --- | :---: |\n| xxxxxxxxxxxxxxxxxxxx | [a fairly long label](https://example.com/a) |\n";
+    let spots = hotspots(markdown, 20);
+    assert!(
+        spots.len() >= 2,
+        "the premise: the label wraps inside its column, got {spots:?}"
+    );
+    let target = spots[0].4;
+    assert!(
+        spots.iter().all(|spot| spot.4 == target),
+        "one link, one target, however many rows it took: {spots:?}"
+    );
+    let rows: Vec<usize> = spots.iter().map(|spot| spot.0).collect();
+    assert!(
+        rows.windows(2).all(|pair| pair[0] != pair[1]),
+        "one hotspot per row: {spots:?}"
+    );
+}
+
+#[test]
 fn a_link_in_a_table_clipped_off_the_page_records_nothing() {
     // A narrow cell does not clip a link, it *wraps* it, and `render::document` widens a
     // block rather than cutting it — so the only way a table cell is cut off at document
