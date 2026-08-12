@@ -15,6 +15,7 @@ use crate::mermaid::ast::{
     Class, ClassAnnotation, ClassArrow, ClassDiagram, ClassId, ClassRelation, Classifier, Field,
     LineStyle, Member, Method, Param, Visibility,
 };
+use crate::mermaid::entity;
 
 use super::lex::{self, Nesting, SrcLine};
 use super::{direction, intern};
@@ -369,6 +370,26 @@ fn find_operator(text: &str) -> Option<Operator> {
     None
 }
 
+/// Decodes the character entities in one piece of member text.
+///
+/// Called on the leaves — a name, a type, a return type — and never on a whole member,
+/// so that a decoded `(`, `:` or `,` cannot restructure the member that spelled it: the
+/// author asked for those characters in their text, not for a different signature. This
+/// is the same seam every other family decodes at (`pie`, `gantt`, `sequence`, `er`, and
+/// `Label::parse` for the rest), reached late because a member is the one drawn Mermaid
+/// text that never becomes a [`Label`](crate::mermaid::ast::Label).
+///
+/// The result is therefore no longer a byte-for-byte copy of the source that wrote it —
+/// which is exactly the property a selection's column walk needs. Members carry no
+/// provenance today (see [`Class`](crate::mermaid::ast::Class)); whoever gives them some
+/// wants [`entity::decode_runs`], which is this decode with a run map saying which
+/// stretches are copies and which are transcriptions, and should call it from here rather
+/// than re-parsing the member. Note that a member is already a transcription for a second
+/// reason: `List~int~` is drawn `List<int>`, which no stretch of the source spells.
+fn decoded(text: &str) -> String {
+    entity::decode(text).into_owned()
+}
+
 /// Parses a member such as `+int age`, `+age: int` or `+isMammal() bool`.
 fn parse_member(text: &str, line: usize) -> Result<Member, MermaidError> {
     let text = normalise_generics(text.trim());
@@ -403,9 +424,9 @@ fn parse_member(text: &str, line: usize) -> Result<Member, MermaidError> {
             let returns = rest[close + 1..].trim().trim_start_matches(':').trim();
             Ok(Member::Method(Method {
                 visibility,
-                name: rest[..open].trim().to_string(),
+                name: decoded(rest[..open].trim()),
                 params,
-                returns: (!returns.is_empty()).then(|| returns.to_string()),
+                returns: (!returns.is_empty()).then(|| decoded(returns)),
                 classifier,
             }))
         }
@@ -416,8 +437,8 @@ fn parse_member(text: &str, line: usize) -> Result<Member, MermaidError> {
             }
             Ok(Member::Field(Field {
                 visibility,
-                name: name.to_string(),
-                ty: ty.map(str::to_string),
+                name: decoded(name),
+                ty: ty.map(decoded),
                 classifier,
             }))
         }
@@ -451,7 +472,7 @@ fn split_typed(text: &str) -> (&str, Option<&str>) {
 fn parse_param(text: &str) -> Param {
     let (name, ty) = split_typed(text);
     Param {
-        name: name.to_string(),
-        ty: ty.map(str::to_string),
+        name: decoded(name),
+        ty: ty.map(decoded),
     }
 }

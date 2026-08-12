@@ -8,6 +8,8 @@
 
 use mdmost::mermaid::ast::*;
 use mdmost::mermaid::parse::parse;
+use mdmost::mermaid::render_mermaid;
+use mdmost::theme::Theme;
 
 /// Parses `src`, failing the test with the parser's reason when it does not.
 #[track_caller]
@@ -15,6 +17,20 @@ fn ok(src: &str) -> Diagram {
     match parse(src) {
         Ok(diagram) => diagram,
         Err(error) => panic!("expected a diagram, got: {error}"),
+    }
+}
+
+/// The diagram `src` draws at width 60, as plain text.
+///
+/// Decoding is a change to what is *drawn*, so the assertions that matter are made on
+/// the canvas rather than on the AST: a parse-only test passes while the screen is still
+/// wrong.
+#[track_caller]
+fn drawn(src: &str) -> String {
+    let theme = Theme::default_dark();
+    match render_mermaid(src, 60, &theme) {
+        Ok(canvas) => canvas.plain_text(),
+        Err(error) => panic!("expected a drawn diagram, got: {error}"),
     }
 }
 
@@ -232,18 +248,7 @@ mod edge_labels {
 /// These assert the *drawn* diagram, not only the AST: the symptom an author sees is a
 /// phantom box, and a parse-only test can pass while the box is still drawn.
 mod statement_separator {
-    use mdmost::mermaid::render_mermaid;
-    use mdmost::theme::Theme;
-
-    /// The diagram `src` draws at width 60, as plain text.
-    #[track_caller]
-    fn drawn(src: &str) -> String {
-        let theme = Theme::default_dark();
-        match render_mermaid(src, 60, &theme) {
-            Ok(canvas) => canvas.plain_text(),
-            Err(error) => panic!("expected a drawn diagram, got: {error}"),
-        }
-    }
+    use super::drawn;
 
     /// How many boxes the drawn diagram has, counted by their top-left corner.
     ///
@@ -308,15 +313,12 @@ mod statement_separator {
     #[test]
     fn a_class_member_survives_the_semicolon_of_an_entity() {
         // The `class X { … }` block body is split by the same call, and used to be cut
-        // into the two members `T&gt` and `+get(): Vec&lt`.
-        //
-        // The reference is drawn as written rather than decoded, because a class member
-        // is read as plain `String`s and never becomes a `Label` — the same gap that
-        // leaves members without provenance, pre-existing and out of this fix's scope.
-        // What this pins is that the member is ONE member and its text is not cut.
+        // into the two members `T&gt` and `+get(): Vec&lt`. What this pins is that the
+        // member is ONE member and its text is not cut; that it also *decodes* is
+        // `class_members`' business.
         let art = drawn("classDiagram\n    class Box {\n        +get() Vec&lt;T&gt;\n    }\n");
         assert!(
-            art.contains("+get(): Vec&lt;T&gt;"),
+            art.contains("+get(): Vec<T>"),
             "one whole, uncut member:\n{art}"
         );
         assert_eq!(
@@ -374,6 +376,133 @@ mod statement_separator {
         // with a reference; the entity step must not have eaten it.
         let art = drawn("flowchart LR\n    A & B --> C\n");
         assert_eq!(boxes(&art), 3, "three nodes:\n{art}");
+    }
+}
+
+/// A class member's text is decoded like every other label's.
+///
+/// A member is the one piece of drawn Mermaid text that is not a `Label`: it is
+/// reassembled in the layouter out of plain `String`s the parser read apart. That is why
+/// it was the last family still drawing `Vec&lt;T&gt;` at the reader, and why these tests
+/// assert the canvas — the AST alone cannot say what the compartment shows.
+mod class_members {
+    use super::drawn;
+
+    /// The width of the drawn box, in columns, borders included.
+    ///
+    /// The canvas is padded out to the full render width, so the box is measured from its
+    /// own top border rather than from the line it sits on. Box art is one column per
+    /// glyph, so counting characters is counting columns.
+    #[track_caller]
+    fn box_columns(art: &str) -> usize {
+        let top = art
+            .lines()
+            .find(|line| line.contains('┌'))
+            .unwrap_or_else(|| panic!("no box was drawn:\n{art}"));
+        top.trim_end().chars().count()
+    }
+
+    #[test]
+    fn a_named_entity_in_a_field_type_decodes() {
+        let art = drawn("classDiagram\n    class Box {\n        +Vec&lt;T&gt; items\n    }\n");
+        assert!(art.contains("+items: Vec<T>"), "the type decodes:\n{art}");
+        assert!(!art.contains("&lt;"), "and nothing is left encoded:\n{art}");
+    }
+
+    #[test]
+    fn a_numeric_entity_in_a_return_type_decodes() {
+        // `&amp;` is the one input a wrong implementation can look right on, because the
+        // `&` that opens it is also the character it draws. A numeric reference cannot.
+        let art = drawn("classDiagram\n    class Box {\n        +get() &#65;rray\n    }\n");
+        assert!(art.contains("+get(): Array"), "decimal decodes:\n{art}");
+        let art = drawn("classDiagram\n    class Box {\n        +get() &#x42;ag\n    }\n");
+        assert!(art.contains("+get(): Bag"), "and hex decodes:\n{art}");
+    }
+
+    #[test]
+    fn mermaids_own_hash_spelling_decodes() {
+        // Mermaid documents `#…;` as a second spelling of the same escapes.
+        let art = drawn("classDiagram\n    class Box {\n        +get() Vec#lt;T#gt;\n    }\n");
+        assert!(art.contains("+get(): Vec<T>"), "the return decodes:\n{art}");
+    }
+
+    #[test]
+    fn a_parameter_name_and_type_decode() {
+        let art = drawn(
+            "classDiagram\n    class Box {\n        +add(Vec&lt;T&gt; items, &#65;) void\n    }\n",
+        );
+        assert!(
+            art.contains("+add(items: Vec<T>, A): void"),
+            "both the typed parameter and the bare one decode:\n{art}"
+        );
+    }
+
+    #[test]
+    fn a_member_name_decodes() {
+        let art = drawn("classDiagram\n    class Box {\n        +int a&amp;b\n    }\n");
+        assert!(art.contains("+a&b: int"), "the field name decodes:\n{art}");
+        // A method's name is a sixth string, read on the other side of the `(`.
+        let art = drawn("classDiagram\n    class Box {\n        +get&#65;ll() int\n    }\n");
+        assert!(
+            art.contains("+getAll(): int"),
+            "and so does a method's:\n{art}"
+        );
+    }
+
+    #[test]
+    fn an_ampersand_that_opens_nothing_is_drawn_as_written() {
+        // The other direction, and the one a too-eager decoder breaks: a literal `&` in
+        // prose or a trade name names no character and must reach the screen intact.
+        let art = drawn("classDiagram\n    class Box {\n        +owner: AT&T\n    }\n");
+        assert!(art.contains("+owner: AT&T"), "a bare `&` survives:\n{art}");
+        let art = drawn("classDiagram\n    class Box {\n        +label: a & b\n    }\n");
+        assert!(
+            art.contains("+label: a & b"),
+            "and so does a lone one:\n{art}"
+        );
+        // A body with no terminator inside the window is not a reference at all.
+        let art = drawn("classDiagram\n    class Box {\n        +who: Tom &amp Jerry\n    }\n");
+        assert!(art.contains("+who: Tom &amp Jerry"), "unterminated:\n{art}");
+    }
+
+    #[test]
+    fn a_hash_that_names_nothing_is_drawn_as_written() {
+        let art = drawn("classDiagram\n    class Box {\n        +issue: #7 filed\n    }\n");
+        assert!(art.contains("+issue: #7 filed"), "a bare `#`:\n{art}");
+    }
+
+    #[test]
+    fn a_decoded_character_does_not_restructure_the_member() {
+        // Decoding happens on the leaves, after the member has been read apart, so a
+        // character an entity names is text and never syntax. An author who wrote
+        // `&#40;` asked for a `(` inside a name, not for a method — decoding the whole
+        // member first turns that one into an unbalanced signature and fails the parse.
+        let art = drawn("classDiagram\n    class Box {\n        +int a&#40;b\n    }\n");
+        assert!(
+            art.contains("+a(b: int"),
+            "a decoded `(` opens no parameter list:\n{art}"
+        );
+        // And `&#44;` asked for a comma inside one parameter, not for two of them.
+        let art = drawn("classDiagram\n    class Box {\n        +add(a&#44;b) void\n    }\n");
+        assert!(
+            art.contains("+add(a,b): void"),
+            "a decoded `,` separates nothing:\n{art}"
+        );
+    }
+
+    #[test]
+    fn the_box_is_measured_from_the_decoded_text() {
+        // The reason this is drawn-output and not AST: a class box is as wide as its
+        // widest member, so decoding does not merely change the characters, it moves the
+        // border. The encoded spelling draws a 24-column box around a 20-column member;
+        // each of `&lt;` and `&gt;` gives back three columns, so the member is 14 and the
+        // box — a space of padding and a border on each side — is 18.
+        let art = drawn("classDiagram\n    class Box {\n        +get() Vec&lt;T&gt;\n    }\n");
+        assert_eq!(
+            box_columns(&art),
+            18,
+            "the box fits the decoded member:\n{art}"
+        );
     }
 }
 
