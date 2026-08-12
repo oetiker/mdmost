@@ -175,15 +175,55 @@ pub struct Hotspot {
     /// Groups the rows of one control.
     ///
     /// A link crossing a row boundary records several hotspots sharing this id, so
-    /// hovering any row lights every row of it (design spec §2.2). Unique per
-    /// canvas; rebased on blit exactly as rows and columns are.
+    /// hovering any row lights every row of it (design spec §2.2).
+    ///
+    /// Unique per canvas, and **rebased on blit exactly as rows and columns are** —
+    /// which is load-bearing, not tidiness. Each canvas numbers its own controls
+    /// from zero, so without a rebase a code block's `[copy]` and a table's `[copy]`
+    /// both arrive in the parent holding id 0, and hovering one would light the
+    /// other. The rebase must preserve grouping in both directions: two hotspots
+    /// that shared an id still share the new one, and two that differed still
+    /// differ.
     pub target: usize,
 }
 ```
 
 - [ ] **Step 4: Carry the kind through every existing site**
 
-`src/canvas/ops.rs` — both rebasing closures currently rebuild a `Hotspot` field by field. Replace the `text`/`html` copies with `kind: spot.kind.clone(), target: spot.target`. **Read both sites**; one is in `blit`, one in the indent path, and they are not identical.
+`src/canvas/ops.rs` — both rebasing closures currently rebuild a `Hotspot` field by field. Replace the `text`/`html` copies with `kind: spot.kind.clone()`, and **remap `target` into the destination's numbering** with a `HashMap<usize, usize>` local to the copy loop: each distinct source target gets a fresh destination target, so grouping survives and unrelated controls cannot collide. **Read both sites**; one is in `blit`, one in the indent path, and they are not identical.
+
+Two tests, one for each direction the rebase can get wrong — a naive fix that issues a fresh id per hotspot passes the first and fails the second:
+
+```rust
+#[test]
+fn two_blitted_canvases_do_not_collide_on_target_ids() {
+    let mut a = Canvas::new(10, 1);
+    let ta = a.next_target();
+    a.add_hotspot(Hotspot { row: 0, col: 0, cols: 4, kind: HotspotKind::Copy { text: "a".into(), html: None }, target: ta });
+    let mut b = Canvas::new(10, 1);
+    let tb = b.next_target();
+    b.add_hotspot(Hotspot { row: 0, col: 0, cols: 4, kind: HotspotKind::Copy { text: "b".into(), html: None }, target: tb });
+    assert_eq!(ta, tb, "each canvas numbers from zero -- that is the hazard");
+    let mut outer = Canvas::new(20, 4);
+    outer.blit(&a, 0, 0);
+    outer.blit(&b, 2, 0);
+    let targets: Vec<usize> = outer.hotspots().iter().map(|s| s.target).collect();
+    assert_ne!(targets[0], targets[1], "two unrelated controls share an id");
+}
+
+#[test]
+fn a_blit_keeps_the_rows_of_one_control_together() {
+    let mut inner = Canvas::new(10, 2);
+    let t = inner.next_target();
+    for row in 0..2 {
+        inner.add_hotspot(Hotspot { row, col: 0, cols: 4, kind: HotspotKind::Open { url: "https://e.com/a".into() }, target: t });
+    }
+    let mut outer = Canvas::new(20, 4);
+    outer.blit(&inner, 1, 0);
+    let targets: Vec<usize> = outer.hotspots().iter().map(|s| s.target).collect();
+    assert_eq!(targets[0], targets[1], "one control was split into two by the rebase");
+}
+```
 
 `src/render/button.rs` — the construction becomes:
 
