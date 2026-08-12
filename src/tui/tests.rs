@@ -1521,6 +1521,95 @@ fn the_status_bar_keeps_the_quit_hint_at_every_width() {
     }
 }
 
+/// The viewport cell `needle`'s first character sits in, on the frame drawn for `app`.
+///
+/// Read off the *painted frame*, following the same reasoning as [`painted_button`]:
+/// this is the reader's own information, and the coordinate their pointer arrives in.
+fn painted_at(app: &mut App, width: u16, height: u16, needle: &str) -> (u16, u16) {
+    let rows = framed(app, width, height);
+    for (y, line) in rows.iter().enumerate() {
+        if let Some(at) = line.find(needle) {
+            let x = crate::text::display_width(&line[..at]);
+            return (
+                u16::try_from(x).expect("a viewport column"),
+                u16::try_from(y).expect("a viewport row"),
+            );
+        }
+    }
+    panic!("{needle:?} is not on the screen: {rows:?}");
+}
+
+#[test]
+fn hovering_a_link_shows_its_full_url_in_the_status_bar() {
+    // Design spec §8: there is deliberately no confirmation prompt before a link
+    // opens, and the status bar showing exactly where it goes is the safeguard that
+    // stands in for one.
+    let mut app = pager_at("[here](https://example.com/a/path)\n", 60, 10);
+    let (x, y) = painted_at(&mut app, 60, 10, "here");
+    app.set_pointer(x, y);
+    let rows = painted(60, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        status.contains("https://example.com/a/path"),
+        "the status bar must show where the link goes; it said {status:?}"
+    );
+}
+
+#[test]
+fn hovering_a_copy_button_shows_no_url() {
+    // The status bar never lies: a hotspot that is not `Open` carries no URL, and
+    // showing one anyway would be a stale answer to a question nobody asked.
+    let mut app = pager_at("```\ncode\n```\n", 60, 10);
+    app.set_copy_button(true);
+    let (x, y) = painted_at(&mut app, 60, 10, crate::render::button::LABEL);
+    app.set_pointer(x, y);
+    let rows = painted(60, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        !status.contains("://"),
+        "a copy button hovered is not a link hovered: {status:?}"
+    );
+}
+
+#[test]
+fn a_url_too_long_for_the_status_bar_is_elided_at_the_end() {
+    // `elide_middle` is the sibling used for the *drawn* suffix, where both ends
+    // carry meaning. Here the reader checks the host first, so the host — the
+    // front — must survive, and the `…` belongs at the end instead.
+    let long = "https://example.com/a/very/long/path/that/will/certainly/overflow/a/narrow/bar";
+    let mut app = pager_at(&format!("[here]({long})\n"), 45, 10);
+    let (x, y) = painted_at(&mut app, 45, 10, "here");
+    app.set_pointer(x, y);
+    let rows = painted(45, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert_eq!(
+        crate::text::display_width(status),
+        45,
+        "the bar is exactly the terminal's width: {status:?}"
+    );
+    assert!(
+        status.contains("https://example.com"),
+        "the host survives at the front: {status:?}"
+    );
+    // The ellipsis sits right after the truncated url, not mid-string: the help chip
+    // still follows it, so it is the url's own end that must carry the mark, not the
+    // whole bar's.
+    assert!(
+        status.contains('\u{2026}'),
+        "an elided url ends in the ellipsis, not a hard cut: {status:?}"
+    );
+    assert!(
+        !status.contains("overflow/a/narrow/bar"),
+        "the tail of the url is what gets dropped, not the host: {status:?}"
+    );
+}
+
 #[test]
 fn the_help_overlay_shows_the_way_out_at_every_height() {
     // An overlay that cannot tell a trapped reader how to quit is the blocker

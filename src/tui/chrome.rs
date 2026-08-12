@@ -318,6 +318,25 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         left.push(Segment::new(Drop::Hscroll, spans));
     }
 
+    // Design spec §8: there is deliberately no "are you sure" before a link opens,
+    // and this is the safeguard that stands in for one — the reader checks the host
+    // here before committing. Only an `Open` hotspot names a URL; a hovered copy
+    // button carries no target and shows nothing, or the bar would print a stale
+    // one the moment the pointer left the last link.
+    if let Some(crate::canvas::HotspotKind::Open { url }) = app
+        .hovered()
+        .and_then(|index| app.rendered().hotspots().get(index))
+        .map(|spot| &spot.kind)
+    {
+        let mut spans = Vec::new();
+        sep(&mut spans);
+        spans.push(TermSpan::styled(
+            url.clone(),
+            term_style(theme.ui.status_accent),
+        ));
+        left.push(Segment::new(Drop::Url, spans));
+    }
+
     if let Some(notice) = app.notice() {
         let style = if notice.is_error {
             theme.ui.error
@@ -504,6 +523,14 @@ enum Drop {
     Meter,
     /// The horizontal-offset chip.
     Hscroll,
+    /// The full URL of a hovered link. Design spec §8 makes this the safeguard that
+    /// stands in for a confirmation prompt — there is deliberately no "are you
+    /// sure" before a link opens, so a reader checks the host here first. Ranked
+    /// above the breadcrumb, the search chip and the meter, because each of those
+    /// is restated somewhere else on screen and this is not; ranked below the file
+    /// name and the position, which say what is on screen at all times rather than
+    /// only while the pointer rests on a control.
+    Url,
     /// The file name, which is elided before it is given up altogether.
     Title,
     /// The position and the way out.
@@ -563,15 +590,30 @@ fn lay_out(
     bar: TermStyle,
 ) -> Vec<TermSpan<'static>> {
     let total = |segments: &[Segment]| -> usize { segments.iter().map(|s| s.width).sum() };
-    // What the file name could give up if it were elided away entirely, measured through
-    // `fit` so it cannot drift from what the elision below actually reclaims.
-    let elidable = |left: &[Segment]| -> usize {
-        title(left).map_or(0, |name| {
+    // What the file name and the hovered URL could each give up if elided away
+    // entirely, measured through `fit`/`ellipsize` so this cannot drift from what the
+    // elision below actually reclaims. Both are shrunk rather than dropped whole, the
+    // URL because design spec §8 leans on it in place of a confirmation prompt — a
+    // safeguard that silently disappears the moment a name is a little too long would
+    // fail exactly when the reader needed it.
+    let elidable = |left: &[Segment], right: &[Segment]| -> usize {
+        let title_slack = title(left).map_or(0, |name| {
             display_width(name).saturating_sub(display_width(&fit(name, 0)))
-        })
+        });
+        let url_slack = left
+            .iter()
+            .chain(right.iter())
+            .find(|segment| segment.priority == Drop::Url)
+            .and_then(|segment| segment.spans.last())
+            .map_or(0, |span| {
+                display_width(&span.content)
+                    .saturating_sub(display_width(&crate::text::ellipsize(&span.content, 0)))
+            });
+        title_slack + url_slack
     };
     // One column of clear air between the two halves, always — hence the strict `<`.
-    // `slack` is what the file name is willing to give up, when it is willing to.
+    // `slack` is what the file name and the hovered URL are willing to give up, when
+    // they are willing to.
     let fits = |left: &[Segment], right: &[Segment], slack: usize| {
         total(left) + total(right) < width + slack
     };
@@ -586,12 +628,12 @@ fn lay_out(
             .filter(|priority| *priority != Drop::Never)
             .min();
         let Some(worst) = worst else { break };
-        // From `ELIDE_TO_KEEP` up, the file name gives up its own columns rather than let
-        // a segment go: the elision used to run only *after* this loop, so a forty-column
-        // terminal silently traded the `↔ n/N` chip — on the one terminal where
-        // horizontal scrolling matters most — for a long file name, and left ten columns
-        // of the bar empty doing it.
-        if worst >= ELIDE_TO_KEEP && fits(&left, &right, elidable(&left)) {
+        // From `ELIDE_TO_KEEP` up, the file name and the hovered URL give up their own
+        // columns rather than let a segment go: the elision used to run only *after*
+        // this loop, so a forty-column terminal silently traded the `↔ n/N` chip — on
+        // the one terminal where horizontal scrolling matters most — for a long file
+        // name, and left ten columns of the bar empty doing it.
+        if worst >= ELIDE_TO_KEEP && fits(&left, &right, elidable(&left, &right)) {
             break;
         }
         left.retain(|segment| segment.priority != worst);
@@ -613,6 +655,23 @@ fn lay_out(
         let short = fit(&name.content, room);
         used -= display_width(&name.content) - display_width(&short);
         name.content = short.into();
+    }
+    // The hovered URL is the safeguard design spec §8 leans on in place of a
+    // confirmation prompt, so it is shrunk rather than silently dropped, the same
+    // way the file name is above. Elided *at the end* — `crate::text::ellipsize`,
+    // never `elide_middle` — so the host, the part a reader actually checks before
+    // committing, is the part left standing.
+    if used + 1 > width
+        && let Some(target) = left
+            .iter_mut()
+            .chain(right.iter_mut())
+            .find(|segment| segment.priority == Drop::Url)
+            .and_then(|segment| segment.spans.last_mut())
+    {
+        let room = display_width(&target.content).saturating_sub(used + 1 - width);
+        let short = crate::text::ellipsize(&target.content, room);
+        used -= display_width(&target.content) - display_width(&short);
+        target.content = short.into();
     }
     let gap = width.saturating_sub(used);
     let mut spans: Vec<TermSpan<'static>> = Vec::new();

@@ -43,6 +43,7 @@ mod diagram;
 pub mod document;
 pub(crate) mod glyphs;
 pub mod inline;
+mod link;
 pub mod table;
 
 #[cfg(test)]

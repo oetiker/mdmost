@@ -198,6 +198,32 @@ fn ordinary_prose_records_no_hotspot() {
 }
 
 #[test]
+fn an_inert_link_records_no_hotspot_but_still_draws() {
+    // `mailto:` and a relative path carry no `://` at all, so they would stay inert
+    // even against a classifier that dropped the scheme check entirely; `ftp://` is
+    // here to keep this a real exercise of the allowlist itself, not just of the
+    // "no scheme" early-out.
+    let markdown = "[mail](mailto:a@b.c) and [doc](./other.md) and [f](ftp://example.com/x)\n";
+    let spots = hotspots(markdown, 60);
+    assert!(spots.is_empty(), "inert schemes record nothing: {spots:?}");
+
+    // Not a control, but not invisible either: a link that lost its hotspot must
+    // still print its own text, or "inert" would mean "gone".
+    let doc = mdmost::Doc::parse(markdown);
+    let canvas = mdmost::render::render_document(
+        &doc,
+        60,
+        None,
+        &mdmost::Theme::default_dark(),
+        &RenderOptions::default(),
+    );
+    let text = canvas.plain_text();
+    assert!(text.contains("mail"), "the link text still draws: {text:?}");
+    assert!(text.contains("doc"), "the link text still draws: {text:?}");
+    assert!(text.contains("f"), "the link text still draws: {text:?}");
+}
+
+#[test]
 fn render_once_options_still_record_link_hotspots() {
     // A control nobody can click is worse than no control: `--render-once` draws no
     // copy button, and design spec §4 says in one line that it records no hotspot

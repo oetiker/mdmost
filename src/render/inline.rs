@@ -551,20 +551,16 @@ fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, ids: &mut usize, out
     // that simply prints no ` (url)` suffix — an autolink, a bare e-mail address, a
     // link in a table cell — and a link with no suffix is still a link.
     //
-    // Task 3 replaces this with the scheme classifier of design spec §8. Until then
-    // every non-empty target is `Open`, which is wrong for `mailto:` and for a local
-    // `.md` link, and is why Task 3 exists.
-    let control = (!target.is_empty()).then(|| {
+    // The scheme allowlist of design spec §8: only `http`/`https` earn a control, so a
+    // document the reader did not write cannot choose which desktop handler the pager
+    // launches. `mailto:` and a local `.md` link record no hotspot at all.
+    let control = super::link::classify(url).map(|kind| {
         let id = *ids;
         *ids += 1;
-        Control {
-            id,
-            // The FULL url, never the elided form the suffix draws: the status bar
-            // shows the whole thing (§8) and the opener receives it (§7).
-            kind: HotspotKind::Open {
-                url: url.to_string(),
-            },
-        }
+        // The FULL url, never the elided form the suffix draws: the status bar shows
+        // the whole thing (§8) and the opener receives it (§7). `classify` already
+        // carries it in `kind`.
+        Control { id, kind }
     });
     for piece in &mut out[before..] {
         piece.control = control.clone();
