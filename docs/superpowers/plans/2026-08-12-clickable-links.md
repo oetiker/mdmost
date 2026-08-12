@@ -709,7 +709,15 @@ fn an_inert_link_records_no_hotspot_but_still_draws() {
 
 - [ ] **Step 5: Show the full URL in the status bar on hover**
 
-In `src/tui/draw.rs`, where the status bar is composed: when `app.hovered()` names an `Open` hotspot, the status bar shows its full URL. This is the "see where it goes before you commit" safeguard and the reason there is no confirmation prompt (§8). The status bar never lies — show the whole URL, and if it does not fit, elide it *at the end* (`crate::text::ellipsize`) so the host stays visible, never in the middle.
+**The status bar is `chrome::draw_status` (`src/tui/chrome.rs:202`), not `draw.rs`** — the plan said `draw.rs` and was wrong.
+
+It is not a line you append to. It is two `Vec<Segment>` (left and right), where every segment carries a `Drop` priority: when the bar is too narrow, **whole segments are dropped, cheapest first**, and only the filename is allowed to lose characters. `Drop::Never` segments (the quit hint) never go.
+
+So the hovered URL is a **new `Segment`**, and its priority is a real decision:
+
+- §8 makes the visible URL the safeguard that stands in for a confirmation prompt. A URL silently dropped because the terminal was narrow is that safeguard failing exactly when the reader needed it. Give it a priority **above** the breadcrumb, the search chip and the meter — all of which are restated somewhere the reader can already see, which is why they are cheap.
+- It may still not fit. Elide it **at the end** (`crate::text::ellipsize`), never in the middle: `elide_middle` is right for the *drawn* suffix, where both ends carry meaning, and wrong here, because the thing the reader is checking before they commit is the **host**, which lives at the front.
+- The status bar never lies: an elided URL must show its `…`, and hovering a non-`Open` hotspot must show no URL segment at all rather than a stale one.
 
 Test in `src/tui/tests.rs`:
 
