@@ -7,13 +7,19 @@
 //! nobody has thought of yet fails closed.
 
 use crate::canvas::HotspotKind;
+use crate::doc::slug::base_slug;
 
 /// The control a link target earns, or `None` for an inert link.
 pub(crate) fn classify(url: &str) -> Option<HotspotKind> {
     let target = url.trim();
     if let Some(slug) = target.strip_prefix('#') {
+        // Folded through the identical rule a heading's own id was built with
+        // (`base_slug`, shared rather than reimplemented) — anything else risks the
+        // two drifting apart on exactly the input this project's own author writes
+        // every day: `#Über-uns` must fold to `über-uns`, not `Über-uns`, or the
+        // anchor silently resolves to nothing.
         return (!slug.is_empty()).then(|| HotspotKind::Anchor {
-            slug: slug.to_ascii_lowercase(),
+            slug: base_slug(slug),
         });
     }
     let scheme = target.split_once("://").map(|(scheme, _)| scheme)?;
@@ -74,6 +80,24 @@ mod tests {
             Some(HotspotKind::Anchor {
                 slug: "some-heading".to_string()
             })
+        );
+    }
+
+    #[test]
+    fn an_anchor_fragment_agrees_with_the_heading_slug_it_targets() {
+        // The concrete failure this guards: a heading's own id is folded with full
+        // Unicode case-folding (`Über uns` -> `über-uns`), and a link written the way
+        // a reader actually types it -- matching the heading's own capitalization --
+        // must fold to the identical slug through the same function, or the anchor
+        // silently resolves to nothing once Task 7 consumes it. This project's own
+        // documentation is German; `Über`, `Grüße`, `Straße` are not an edge case
+        // here.
+        let doc = crate::doc::Doc::parse("## Über uns\n");
+        let heading_id = doc.headings()[0].id.clone();
+        assert_eq!(heading_id, "über-uns");
+        assert_eq!(
+            classify("#Über-uns"),
+            Some(HotspotKind::Anchor { slug: heading_id })
         );
     }
 

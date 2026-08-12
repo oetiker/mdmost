@@ -38,7 +38,14 @@ impl Slugger {
 }
 
 /// The GitHub-style slug of `text`, before de-duplication.
-fn base_slug(text: &str) -> String {
+///
+/// `pub(crate)` so [`crate::render::link::classify`] can fold an `#anchor` fragment
+/// through the identical rule a heading's own id was built with. The two must never
+/// be able to drift apart: an anchor link is only ever correct if it was folded
+/// exactly the way the heading it targets was, and a second, hand-written case-fold
+/// in the classifier would be exactly that drift waiting to happen (a Unicode
+/// heading was the concrete case that caught the first version of this).
+pub(crate) fn base_slug(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for ch in text.chars() {
         if ch.is_alphanumeric() {

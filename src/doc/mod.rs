@@ -20,7 +20,7 @@
 
 mod convert;
 mod plain;
-mod slug;
+pub(crate) mod slug;
 
 #[cfg(test)]
 mod tests;

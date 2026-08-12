@@ -37,6 +37,24 @@ fn fit(text: &str, width: usize) -> String {
     }
 }
 
+/// Strips terminal control sequences out of a hovered link's URL before it reaches a
+/// `Span`.
+///
+/// `url` is untrusted document content, and the hovered-URL segment is the one place
+/// in the whole program that puts such content into a `ratatui::text::Span` outside
+/// the [`crate::canvas::Canvas`] path — everywhere else,
+/// [`Canvas::check_invariants`](crate::canvas::Canvas::check_invariants) refuses to
+/// let a raw control character survive that far, because "an ESC opens an escape
+/// sequence and a document can repaint the screen from inside a paragraph." Whether
+/// today's parser can actually produce one in a link destination is not something to
+/// rest a safety property on (design spec §8 makes the visible URL exactly that); this
+/// closes the gap regardless. [`crate::text::cell_clusters`] is the identical
+/// one-column-in, one-column-out substitution the canvas already relies on, so this
+/// draws nothing the rest of the program would not already trust.
+pub(super) fn sanitized_url(url: &str) -> String {
+    crate::text::cell_clusters(url).collect()
+}
+
 /// Draws the table-of-contents pane.
 pub fn draw_toc(buffer: &mut Buffer, area: Rect, app: &App) {
     if area.width < 4 || area.height < 3 {
@@ -331,7 +349,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         let mut spans = Vec::new();
         sep(&mut spans);
         spans.push(TermSpan::styled(
-            url.clone(),
+            sanitized_url(url),
             term_style(theme.ui.status_accent),
         ));
         left.push(Segment::new(Drop::Url, spans));

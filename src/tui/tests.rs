@@ -1540,6 +1540,33 @@ fn painted_at(app: &mut App, width: u16, height: u16, needle: &str) -> (u16, u16
 }
 
 #[test]
+fn a_control_character_in_a_hovered_url_cannot_reach_the_terminal() {
+    // Built directly, not through `Doc::parse` -> `classify`: whether a raw control
+    // byte can survive comrak's link-destination grammar is exactly the guarantee
+    // design spec §8 says must not be trusted, so this bypasses the parser on purpose
+    // and proves the *display* path -- the one place a hovered URL reaches a `Span`
+    // outside the `Canvas` path -- is safe independent of it.
+    let hostile = crate::canvas::HotspotKind::Open {
+        url: "https://example.com/\u{1b}[31mpwned".to_string(),
+    };
+    let crate::canvas::HotspotKind::Open { url } = hostile else {
+        unreachable!("constructed as Open above")
+    };
+    let safe = super::chrome::sanitized_url(&url);
+    assert!(
+        !safe.contains('\u{1b}'),
+        "no raw ESC reaches the drawn string: {safe:?}"
+    );
+    // One column in, one column out (`crate::text::cell_clusters`), so nothing
+    // measured for the status bar's layout moves because of the substitution.
+    assert_eq!(
+        crate::text::display_width(&safe),
+        crate::text::display_width(&url),
+        "the substitution preserves width"
+    );
+}
+
+#[test]
 fn hovering_a_link_shows_its_full_url_in_the_status_bar() {
     // Design spec §8: there is deliberately no confirmation prompt before a link
     // opens, and the status bar showing exactly where it goes is the safeguard that
