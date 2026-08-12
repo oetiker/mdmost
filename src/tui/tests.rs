@@ -4747,6 +4747,24 @@ fn painted_button(app: &mut App, width: u16, height: u16, skip: usize) -> (u16, 
     panic!("no [copy] label {skip} on the screen: {rows:?}");
 }
 
+/// A full click on the control at viewport `(x, y)`: press and release, nothing between.
+///
+/// **Changed 2026-08-12 (Task 5).** A `[copy]` button used to fire on the press alone.
+/// Every kind of control now activates on the release that landed on the control the
+/// press started on, so a test that presses without releasing is testing half a gesture.
+fn click_hotspot(app: &mut App, x: u16, y: u16) -> Option<super::app::Activation> {
+    app.press_hotspot(x, y);
+    app.release_hotspot(x, y)
+}
+
+/// The `(text, html)` a clicked `[copy]` button carries.
+fn copy_payload(activation: super::app::Activation) -> (String, Option<String>) {
+    match activation.kind {
+        crate::canvas::HotspotKind::Copy { text, html } => (text, html),
+        other => panic!("not a copy button: {other:?}"),
+    }
+}
+
 #[test]
 fn the_button_appears_only_once_the_mouse_has_been_captured() {
     // The gate design spec §4 asks for, from the pager's end. `RenderOptions` is part
@@ -4776,7 +4794,7 @@ fn the_button_appears_only_once_the_mouse_has_been_captured() {
 }
 
 #[test]
-fn a_press_on_the_code_button_copies_the_block_and_starts_no_drag() {
+fn a_click_on_the_code_button_copies_the_block_and_starts_no_drag() {
     let mut app = pager_at(BUTTONS, 60, 20);
     app.set_copy_button(true);
     let (x, y) = painted_button(&mut app, 60, 20, 0);
@@ -4788,10 +4806,14 @@ fn a_press_on_the_code_button_copies_the_block_and_starts_no_drag() {
         app.selection().is_none(),
         "a press on a control is not the start of a drag"
     );
-    let copy = app.take_hotspot_copy().expect("a payload");
-    assert_eq!(copy.text, "let a = 1;\n");
-    assert!(copy.html.is_none(), "code has no second flavour");
-    assert_eq!(copy.what, super::clipboard::Copied::Code);
+    let activation = app.release_hotspot(x, y).expect("the click landed");
+    let (text, html) = copy_payload(activation);
+    assert_eq!(text, "let a = 1;\n");
+    assert!(html.is_none(), "code has no second flavour");
+    assert_eq!(
+        super::clipboard::Copied::for_button(html.as_deref()),
+        super::clipboard::Copied::Code
+    );
 }
 
 #[test]
@@ -4810,17 +4832,21 @@ fn a_press_beside_the_button_is_a_drag_like_any_other() {
 }
 
 #[test]
-fn a_press_on_the_table_button_copies_a_grid_and_says_it_was_a_table() {
+fn a_click_on_the_table_button_copies_a_grid_and_says_it_was_a_table() {
     // The status bar never lies: the same control on a table has to report `Table`, or
     // a reader is told they copied code and pastes a spreadsheet.
     let mut app = pager_at(BUTTONS, 60, 20);
     app.set_copy_button(true);
     let (x, y) = painted_button(&mut app, 60, 20, 1);
     assert!(app.press_hotspot(x, y), "the table's label is a control");
-    let copy = app.take_hotspot_copy().expect("a payload");
-    assert_eq!(copy.text, "Name\tSince\nAda\t1843\n");
-    assert!(copy.html.is_some(), "a table offers the richer flavour too");
-    assert_eq!(copy.what, super::clipboard::Copied::Table);
+    let activation = app.release_hotspot(x, y).expect("the click landed");
+    let (text, html) = copy_payload(activation);
+    assert_eq!(text, "Name\tSince\nAda\t1843\n");
+    assert!(html.is_some(), "a table offers the richer flavour too");
+    assert_eq!(
+        super::clipboard::Copied::for_button(html.as_deref()),
+        super::clipboard::Copied::Table
+    );
 }
 
 #[test]
@@ -4839,7 +4865,7 @@ fn the_button_is_still_under_the_pointer_once_the_document_has_scrolled() {
         "the control moved up the screen with the block it belongs to"
     );
     assert_eq!(
-        app.take_hotspot_copy().map(|copy| copy.text),
+        app.release_hotspot(x, y).map(|it| copy_payload(it).0),
         Some("let a = 1;\n".to_string())
     );
 }
@@ -4862,7 +4888,8 @@ fn the_button_of_an_over_wide_table_is_pressable_once_it_is_scrolled_into_view()
         "the control answers at the column it is drawn in, scrolled or not"
     );
     assert_eq!(
-        app.take_hotspot_copy().map(|copy| copy.what),
+        app.release_hotspot(x, y)
+            .map(|it| super::clipboard::Copied::for_button(copy_payload(it).1.as_deref())),
         Some(super::clipboard::Copied::Table)
     );
 }
@@ -4936,9 +4963,8 @@ fn the_flash_is_painted_over_the_button_that_was_pressed() {
     let mut app = pager_at(BUTTONS, 60, 20);
     app.set_copy_button(true);
     let (x, y) = painted_button(&mut app, 60, 20, 0);
-    assert!(app.press_hotspot(x, y));
-    let copy = app.take_hotspot_copy().expect("a payload");
-    app.flash_copied(copy.row, copy.col);
+    let activation = click_hotspot(&mut app, x, y).expect("the click landed");
+    app.flash_copied(activation.row, activation.col);
     let rows = framed(&mut app, 60, 20);
     assert!(
         rows.iter()
@@ -5082,9 +5108,8 @@ fn the_copied_flash_beats_the_hover_under_the_pointer() {
     let (x, y) = painted_button(&mut app, 60, 20, 0);
     let resting = button_inks(&mut app, 60, 20, (x, y));
     app.set_pointer(x, y);
-    assert!(app.press_hotspot(x, y));
-    let copy = app.take_hotspot_copy().expect("a payload");
-    app.flash_copied(copy.row, copy.col);
+    let activation = click_hotspot(&mut app, x, y).expect("the click landed");
+    app.flash_copied(activation.row, activation.col);
     assert_eq!(app.hovered(), Some(0), "the pointer has not gone anywhere");
 
     let rows = framed(&mut app, 60, 20);
@@ -5309,6 +5334,323 @@ fn a_motion_event_is_what_lights_the_button() {
         app.hovered(),
         None,
         "a pointer on the scrollbar leaves no button lit"
+    );
+}
+
+// --- The click state machine (design spec §3) ------------------------------------
+
+/// A left button event of `kind` at screen column `column`, row `row`.
+fn button_event(
+    kind: crossterm::event::MouseEventKind,
+    column: u16,
+    row: u16,
+) -> crossterm::event::MouseEvent {
+    crossterm::event::MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    }
+}
+
+/// A left press at screen `(column, row)`.
+fn press_at(column: u16, row: u16) -> crossterm::event::MouseEvent {
+    button_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column,
+        row,
+    )
+}
+
+/// A left drag to screen `(column, row)`.
+fn drag_to(column: u16, row: u16) -> crossterm::event::MouseEvent {
+    button_event(
+        crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+        column,
+        row,
+    )
+}
+
+/// A left release at screen `(column, row)`.
+fn release_at(column: u16, row: u16) -> crossterm::event::MouseEvent {
+    button_event(
+        crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        column,
+        row,
+    )
+}
+
+/// The viewport cell the first hotspot of the `skip`th link starts in, and its target.
+///
+/// Read off the rendered canvas, which for an unscrolled pager with no pane is the
+/// viewport — the same identity every hover test above relies on.
+fn link_at(app: &mut App, skip: usize) -> (u16, u16, usize) {
+    let spot = app
+        .rendered()
+        .hotspots()
+        .iter()
+        .filter(|spot| matches!(spot.kind, crate::canvas::HotspotKind::Open { .. }))
+        .nth(skip)
+        .expect("a link hotspot");
+    (
+        spot.col,
+        u16::try_from(spot.row).expect("a viewport row"),
+        spot.target,
+    )
+}
+
+#[test]
+fn press_then_release_on_one_hotspot_fires() {
+    let mut app = pager_at("[x](https://example.com/a)\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    assert!(
+        !app.press_hotspot(x, y),
+        "a link does not claim the press: its cells are document text"
+    );
+    let fired = app.release_hotspot(x, y).expect("the click landed");
+    assert_eq!(
+        fired.kind,
+        crate::canvas::HotspotKind::Open {
+            url: "https://example.com/a".to_string()
+        },
+        "the click carries the full target, not the elided label"
+    );
+}
+
+#[test]
+fn a_press_alone_fires_nothing() {
+    // The whole of Task 5 in one assertion: activation moved to the release edge, so a
+    // button still held down has done nothing yet. This is the behaviour change — a
+    // `[copy]` button used to copy the instant it was pressed.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert!(app.press_hotspot(x, y), "the button claims the press");
+    assert!(
+        app.selection().is_none(),
+        "and starts no drag, exactly as before (design spec §5)"
+    );
+    // Nothing has been produced to copy: only the release below produces it.
+    assert!(
+        app.release_hotspot(x, y).is_some(),
+        "and the release is what fires"
+    );
+}
+
+#[test]
+fn press_drag_release_fires_nothing_and_yields_a_selection() {
+    // Selection wins every tie (design spec §3). Driven through the dispatcher, because
+    // the tie is decided by which arm claims the drag, not by `App` alone.
+    let mut app = pager_at("[x](https://example.com/a) and more text here\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    assert_eq!(app.toc_width(), 0, "the probe has no pane in the way");
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 10);
+    super::term::on_mouse(&mut app, drag_to(30, y), 60, 10);
+    // The release is asked for back *on the link*, not out at column 30 where the drag
+    // ended. Column 30 holds no control, so a build that cancelled nothing at all would
+    // answer `None` there too and the test would pass for the wrong reason; asking on the
+    // link means only a cancelled candidate can produce the `None`.
+    assert!(
+        app.release_hotspot(x, y).is_none(),
+        "a drag is not a click, even when the hand comes back"
+    );
+    assert!(app.selection().is_some(), "the gesture became a selection");
+}
+
+#[test]
+fn a_drag_that_starts_inside_a_link_still_selects_its_text() {
+    // The gesture the unification must not cost anyone: link cells are document text, so
+    // a press there begins a drag like any other and the release copies what it covered.
+    let mut app = pager_at(
+        "[label](https://example.com/a) and more text here\n",
+        60,
+        10,
+    );
+    let (x, y, _) = link_at(&mut app, 0);
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 10);
+    assert!(
+        app.selection().is_some(),
+        "a press on a link is the start of a drag"
+    );
+    super::term::on_mouse(&mut app, drag_to(x + 20, y), 60, 10);
+    app.end_selection();
+    let extract = app.take_pending_copy().expect("the drag selected text");
+    assert!(
+        extract.text.contains("label"),
+        "the selection covers the link's own label: {:?}",
+        extract.text
+    );
+}
+
+#[test]
+fn press_on_one_hotspot_and_release_on_another_fires_nothing() {
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        80,
+        10,
+    );
+    let (ax, ay, a) = link_at(&mut app, 0);
+    let (bx, by, b) = link_at(&mut app, 1);
+    assert_ne!(a, b, "the premise: two links are two controls");
+    app.press_hotspot(ax, ay);
+    assert!(
+        app.release_hotspot(bx, by).is_none(),
+        "a release on a different control is not a click on either"
+    );
+    // And the candidate did not survive the miss, waiting to fire on the next release.
+    assert!(app.release_hotspot(ax, ay).is_none());
+}
+
+#[test]
+fn moving_off_the_pressed_cell_and_back_does_not_resurrect_the_candidate() {
+    // "Moving off cancels" must mean cancelled, not suspended.
+    let mut app = pager_at("[x](https://example.com/a) tail\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 10);
+    super::term::on_mouse(&mut app, drag_to(40, y), 60, 10);
+    super::term::on_mouse(&mut app, drag_to(x, y), 60, 10);
+    assert!(app.release_hotspot(x, y).is_none());
+}
+
+#[test]
+fn a_click_across_two_rows_of_one_wrapped_link_fires_once() {
+    // A wrapped link is several hotspots sharing one `target`, and the reader pressed
+    // *the link* — not row 1 of it. Grouping by index rather than by target would call
+    // this two controls and fire nothing.
+    let mut app = pager_at(
+        "[a fairly long link label that wraps across several rows](https://example.com/x)\n",
+        24,
+        10,
+    );
+    let spots = app.rendered().hotspots().to_vec();
+    assert!(
+        spots.len() >= 2,
+        "the premise: the link wraps, got {spots:?}"
+    );
+    let target = spots[0].target;
+    assert!(
+        spots.iter().all(|spot| spot.target == target),
+        "one link, one target: {spots:?}"
+    );
+    let row = |spot: &crate::canvas::Hotspot| u16::try_from(spot.row).expect("a viewport row");
+    app.press_hotspot(spots[0].col, row(&spots[0]));
+    let fired = app
+        .release_hotspot(spots[1].col, row(&spots[1]))
+        .expect("one control, one click");
+    assert_eq!(
+        fired.kind,
+        crate::canvas::HotspotKind::Open {
+            url: "https://example.com/x".to_string()
+        }
+    );
+}
+
+#[test]
+fn a_release_that_never_saw_a_press_fires_nothing() {
+    // A button released over a control it was not pressed on — the tail of a gesture
+    // that began outside the window, say — is not a click on that control.
+    let mut app = pager_at("[x](https://example.com/a)\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    assert!(app.release_hotspot(x, y).is_none());
+}
+
+#[test]
+fn a_drag_off_the_copy_button_copies_nothing() {
+    // The behaviour this task changes, stated as a test. A press on `[copy]` starts no
+    // selection, so its drags reach no selection arm at all — the cancel has to be
+    // unguarded in the dispatcher, or the release would still copy after a drag away.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert_eq!(app.toc_width(), 0, "the probe has no pane in the way");
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 20);
+    assert!(app.selection().is_none(), "the button claimed the press");
+    super::term::on_mouse(&mut app, drag_to(x, y + 4), 60, 20);
+    assert!(
+        app.release_hotspot(x, y).is_none(),
+        "the hand travelled, so the gesture is not a click"
+    );
+}
+
+#[test]
+fn a_release_outside_the_document_cancels_the_click() {
+    // The pane, the scrollbar and the status bar are not places a control can be, so a
+    // button let go over one of them fires nothing — and leaves nothing behind either.
+    let mut app = pager_at("[x](https://example.com/a)\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 10);
+    super::term::on_mouse(&mut app, release_at(59, 9), 60, 10);
+    assert!(
+        app.release_hotspot(x, y).is_none(),
+        "the gesture is over, whatever a later release says"
+    );
+}
+
+#[test]
+fn a_press_on_nothing_clears_any_candidate_before_it() {
+    // A press is the start of a gesture, so it owns the candidate outright: whatever the
+    // last one left behind is gone, control or no control under this one. Otherwise a
+    // press on plain prose would leave the previous link armed, and the release that
+    // ended *this* gesture would fire it.
+    let mut app = pager_at(
+        "[x](https://example.com/a) and plain words after it\n",
+        60,
+        10,
+    );
+    let (x, y, _) = link_at(&mut app, 0);
+    app.press_hotspot(x, y);
+    assert!(
+        !app.press_hotspot(40, y),
+        "the premise: column 40 is prose, not a control"
+    );
+    assert!(
+        app.release_hotspot(x, y).is_none(),
+        "the second press disarmed the first"
+    );
+}
+
+#[test]
+fn a_finished_selection_is_not_ended_a_second_time() {
+    // A finished selection stays up as a highlight, so every release that follows used
+    // to re-extract it onto the clipboard — over whatever that release had just done.
+    // Harmless while a release did nothing; not harmless now one activates controls.
+    let mut app = pager_at("some words worth selecting here\n", 60, 10);
+    app.begin_selection(0, 0);
+    app.drag_selection(20, 0);
+    app.end_selection();
+    assert!(
+        app.take_pending_copy().is_some(),
+        "the premise: the drag selected something"
+    );
+    assert!(
+        app.selection().is_some(),
+        "and the highlight is still up afterwards"
+    );
+    app.end_selection();
+    assert!(
+        app.take_pending_copy().is_none(),
+        "a gesture that is over cannot be ended again"
+    );
+}
+
+#[test]
+fn a_reflow_mid_click_drops_the_candidate_rather_than_moving_it() {
+    // A target id is issued per canvas, exactly as a hotspot index is: after a render
+    // the recorded id may name a different control, or none. Dropped for the same
+    // reason the hover and the selection are.
+    let mut app = pager_at(
+        "```rust\nfn f() {}\n```\n\n[a link](https://example.com/x)\n",
+        60,
+        20,
+    );
+    app.set_copy_button(true);
+    let (x, y, _) = link_at(&mut app, 0);
+    app.press_hotspot(x, y);
+    let _ = framed(&mut app, 40, 20);
+    let (nx, ny, _) = link_at(&mut app, 0);
+    assert!(
+        app.release_hotspot(nx, ny).is_none(),
+        "a click begun on one canvas may not fire on another"
     );
 }
 

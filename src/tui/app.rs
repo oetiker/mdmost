@@ -64,24 +64,25 @@ pub enum PromptKind {
     TocFilter,
 }
 
-/// What a press on a copy button produced, waiting for the event loop to deliver it.
+/// A control that a full click landed on, handed to the event loop to act upon.
 ///
 /// The state machine touches no terminal and no display server (design spec §13), so it
-/// cannot copy: it takes the payload off the canvas and hands it over, exactly as
-/// [`Extract`] does for a finished drag. Keeping the decision here is also what lets a
-/// test press the button without taking ownership of anybody's desktop clipboard.
+/// cannot copy, open or jump: it says *which* control was activated and hands that over,
+/// exactly as [`Extract`] does for a finished drag. Keeping the decision here is also
+/// what lets a test click a button without taking ownership of anybody's clipboard.
+///
+/// **Changed 2026-08-12 (Task 5).** This replaces a `HotspotCopy` produced by the *press*.
+/// A copy button is no longer a parallel mechanism with its own firing edge (design spec
+/// §2): every kind of control now activates the same way, on a release that landed on the
+/// control the press started on.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HotspotCopy {
-    /// The canvas row the control was drawn on, for the flash.
+pub struct Activation {
+    /// The canvas row the released hotspot was drawn on, for the flash.
     pub row: usize,
-    /// The canvas column its label starts at, for the flash.
+    /// The canvas column it starts at, for the flash.
     pub col: u16,
-    /// The plain payload, which every route carries.
-    pub text: String,
-    /// The richer flavour, offered only where a flavoured clipboard exists.
-    pub html: Option<String>,
-    /// Which noun the status bar owes the reader.
-    pub what: crate::tui::clipboard::Copied,
+    /// What activating it does.
+    pub kind: HotspotKind,
 }
 
 impl PromptKind {
@@ -214,8 +215,15 @@ pub struct App {
     /// anybody chooses: [`super::term`] sets it from whether mouse capture was actually
     /// granted, and a button nobody can click is worse than no button (design spec §4).
     copy_button: bool,
-    /// The payload a press on a button produced, waiting for the event loop to copy it.
-    pending_hotspot: Option<HotspotCopy>,
+    /// The control a press landed on, as a [`Hotspot::target`](crate::canvas::Hotspot),
+    /// for as long as a release could still turn it into a click.
+    ///
+    /// A target id rather than a hotspot index, because a wrapped link is *several*
+    /// hotspots sharing one id: pressing its first row and releasing on its second is one
+    /// click on one control and must fire, while an index would call those two controls.
+    /// `None` means no click is in flight — either none was started, or a drag cancelled
+    /// the one that was, permanently for that gesture.
+    pressed: Option<usize>,
     /// The control showing its `[copied]` flash, and when it started.
     copied_flash: Option<(usize, u16, std::time::Instant)>,
     /// The control the pointer is over, as an index into the canvas's hotspots.
@@ -284,7 +292,7 @@ impl App {
             selection: None,
             pending_copy: None,
             copy_button: false,
-            pending_hotspot: None,
+            pressed: None,
             copied_flash: None,
             hover: None,
             quit: false,
@@ -786,6 +794,12 @@ impl App {
             // hotspot list. The pointer has not moved, but what is under it may have,
             // and a stale index would paint the highlight onto a different button.
             self.hover = None;
+            // And a click in flight, for the same reason one step further on: a target id
+            // is issued per canvas, so the id a press recorded may name a different
+            // control on the new one — or none. A reflow mid-click is a reflow the reader
+            // caused (a resize, a toggled option) and the click is theirs to repeat; a
+            // click that fired the wrong link would not be.
+            self.pressed = None;
             self.clamp();
         }
     }
@@ -1626,8 +1640,15 @@ impl App {
     ///
     /// A drag that never left the cell it started on is a click, not a selection, and
     /// leaves nothing behind: copying one character is not what anybody meant by it.
+    ///
+    /// A selection that is not being dragged cannot be ended, exactly as
+    /// [`App::drag_selection`] cannot extend one. A *finished* selection stays up as a
+    /// highlight until something replaces it, so without the filter every later release
+    /// would re-extract it and put it on the clipboard again — over whatever that release
+    /// had actually just done. That became reachable when a release started activating
+    /// controls (Task 5); it was latent before.
     pub fn end_selection(&mut self) {
-        let Some(mut selection) = self.selection else {
+        let Some(mut selection) = self.selection.filter(|it| it.is_dragging()) else {
             return;
         };
         selection.finish();
@@ -1708,38 +1729,78 @@ impl App {
         })
     }
 
-    /// Answers a press at document-area column `x`, row `y` if a control is there.
+    /// Records a press at document-area column `x`, row `y` as a click in flight.
     ///
-    /// Reports whether it was: a press the buttons did not claim is an ordinary press
-    /// and goes on to begin a drag, which is the precedence design spec §5 asks for —
-    /// clicking `[copy]` never starts a selection.
+    /// Nothing fires here. A click is a press *and a release* on the same control with no
+    /// drag in between (design spec §3), so all a press does is remember which control it
+    /// landed on; [`App::release_hotspot`] decides. A press on nothing remembers nothing.
+    ///
+    /// # What the answer means
+    ///
+    /// Reports whether the control **claimed the press outright**, which is to say
+    /// whether the caller should skip [`App::begin_selection`]. Only a `[copy]` button
+    /// does: it is chrome the renderer drew, there is no document text under it to
+    /// select, and design spec §5 requires that pressing it never leave a selection
+    /// behind. A link's cells *are* document text, so a press there both remembers the
+    /// click and starts a drag — and then a drag cancels the click while a plain click
+    /// leaves a one-cell selection that [`App::end_selection`] discards as a click. That
+    /// is what "selection wins every tie" buys: dragging out of a link still selects.
+    ///
+    /// # A press that lands on a different control than the last one
+    ///
+    /// The candidate is replaced, never merged. Two presses without a release cannot
+    /// happen from one mouse, but a caller that managed it would get the later one, which
+    /// is the one the hand is on.
     pub fn press_hotspot(&mut self, x: u16, y: u16) -> bool {
         self.ensure_rendered();
         let Some(spot) = self.hotspot_at(x, y) else {
+            self.pressed = None;
             return false;
         };
-        // Task 5 activates the other kinds. Doing nothing here is deliberate and
-        // temporary: a control that reacts before its action exists is the "visible
-        // and dead" failure the spec forbids (§1.1).
-        let HotspotKind::Copy { text, html } = &spot.kind else {
-            return false;
-        };
-        // Code carries one flavour and a table two, and that is the whole difference
-        // between the two nouns the status bar has for them.
-        let what = if html.is_some() {
-            crate::tui::clipboard::Copied::Table
-        } else {
-            crate::tui::clipboard::Copied::Code
-        };
-        self.pending_hotspot = Some(HotspotCopy {
+        let target = spot.target;
+        let claims = matches!(spot.kind, HotspotKind::Copy { .. });
+        self.pressed = Some(target);
+        if claims {
+            self.clear_notice();
+        }
+        claims
+    }
+
+    /// Ends a click in flight at document-area column `x`, row `y`.
+    ///
+    /// Fires — returns the [`Activation`] — only if the release landed on the *same
+    /// control* the press did. "Same control" is the hotspot's
+    /// [`target`](crate::canvas::Hotspot::target), not its position in the list: a link
+    /// wrapped across rows is
+    /// several hotspots sharing one target, and pressing its first row and releasing on
+    /// its second is one click on one control. Releasing on a *different* link, or on no
+    /// control at all, fires nothing.
+    ///
+    /// The candidate is taken whatever the answer: a release ends the gesture, and a
+    /// release that missed must not leave a candidate behind for the next one to fire.
+    pub fn release_hotspot(&mut self, x: u16, y: u16) -> Option<Activation> {
+        let pressed = self.pressed.take()?;
+        self.ensure_rendered();
+        let spot = self.hotspot_at(x, y)?;
+        if spot.target != pressed {
+            return None;
+        }
+        Some(Activation {
             row: spot.row,
             col: spot.col,
-            text: text.clone(),
-            html: html.clone(),
-            what,
-        });
-        self.clear_notice();
-        true
+            kind: spot.kind.clone(),
+        })
+    }
+
+    /// Cancels a click in flight, permanently for this gesture.
+    ///
+    /// Called for every drag, because **any** drag means the hand went travelling and the
+    /// gesture is a selection, not a click (design spec §3 — selection wins every tie).
+    /// Cancellation is not suspension: moving off the control and back onto it does not
+    /// resurrect the candidate, because the state it would need was thrown away here on
+    /// the first drag event rather than merely compared against on release.
+    pub fn cancel_hotspot_press(&mut self) {
+        self.pressed = None;
     }
 
     /// Puts the pointer at document-area column `x`, row `y`.
@@ -1774,11 +1835,6 @@ impl App {
     /// argument that keeps the `[copied]` flash out of the renderer.
     pub fn hovered(&self) -> Option<usize> {
         self.hover
-    }
-
-    /// Takes the payload a press produced, for the event loop to copy.
-    pub fn take_hotspot_copy(&mut self) -> Option<HotspotCopy> {
-        self.pending_hotspot.take()
     }
 
     /// Records that the control at canvas `(row, col)` was just used.

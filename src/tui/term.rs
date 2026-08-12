@@ -32,9 +32,10 @@ use crossterm::event::{
 };
 use crossterm::execute;
 
+use crate::canvas::HotspotKind;
 use crate::config::{Key, KeyCode, KeyMods};
 
-use super::app::{App, Focus};
+use super::app::{Activation, App, Focus};
 use super::{chrome, draw};
 
 /// How long the loop waits for input before checking the termination flag.
@@ -383,26 +384,54 @@ pub(super) fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16
         MouseEventKind::Down(MouseButton::Left) if app.focus() == Focus::Toc && !in_doc => {}
         MouseEventKind::Down(MouseButton::Left) if in_doc => {
             let (x, y) = local();
-            // A control answers the press instead of starting a drag (design spec §5):
-            // pressing `[copy]` must never leave a selection behind it. One arm rather
-            // than two so the precedence is written down where it is read, and cannot be
-            // lost by someone reordering the match.
-            if app.press_hotspot(x, y) {
-                copy_hotspot(app);
-            } else {
+            // The press only *records* the click; `Up` below fires it. A `[copy]` button
+            // claims the press outright and starts no drag (design spec §5): pressing it
+            // must never leave a selection behind. A link does not claim it — its cells
+            // are document text — so it begins a selection too, and dragging out of a
+            // link still selects. One arm rather than two so the precedence is written
+            // down where it is read, and cannot be lost by someone reordering the match.
+            if !app.press_hotspot(x, y) {
                 app.begin_selection(x, y);
             }
         }
         // A drag is reported even when the pointer has left the window, with the
         // coordinates clamped to it — which is exactly what makes the edge auto-scroll
         // in `App::drag_selection` fire.
-        MouseEventKind::Drag(MouseButton::Left) if app.selection().is_some() => {
-            let (x, y) = local();
-            app.drag_selection(x, y);
+        //
+        // Unguarded, because a press on a `[copy]` button starts no selection and its
+        // drags would otherwise reach no arm at all — and a drag is exactly the event
+        // that must cancel a click in flight, wherever the pointer is.
+        MouseEventKind::Drag(MouseButton::Left) => {
+            app.cancel_hotspot_press();
+            if app
+                .selection()
+                .is_some_and(|selection| selection.is_dragging())
+            {
+                let (x, y) = local();
+                app.drag_selection(x, y);
+            }
         }
-        MouseEventKind::Up(MouseButton::Left) if app.selection().is_some() => {
-            app.end_selection();
-            copy_selection(app);
+        MouseEventKind::Up(MouseButton::Left) => {
+            // `is_dragging`, not `is_some`: a *finished* selection stays up as a
+            // highlight, and re-ending it here would re-copy it over whatever this
+            // release actually did. Only a drag this gesture started wins the release.
+            if app
+                .selection()
+                .is_some_and(|selection| selection.is_dragging())
+            {
+                app.end_selection();
+                copy_selection(app);
+            }
+            // Both run: a plain click on a link ends a one-cell selection that
+            // `end_selection` discards as a click, and then activates the link.
+            if in_doc {
+                let (x, y) = local();
+                if let Some(activation) = app.release_hotspot(x, y) {
+                    activate(app, activation);
+                }
+            } else {
+                app.cancel_hotspot_press();
+            }
         }
         _ => {}
     }
@@ -426,20 +455,26 @@ fn copy_selection(app: &mut App) {
     app.report_copy(extract.text.len(), copied, &delivery);
 }
 
-/// Puts the payload a pressed copy button produced on the clipboard, and flashes it.
+/// Does what a clicked control does.
 ///
-/// The same division of labour as [`copy_selection`]: [`App`] decided what the press
-/// meant and produced the bytes, and the I/O — which touches the terminal and the
-/// display server — happens out here.
-fn copy_hotspot(app: &mut App) {
-    let Some(copy) = app.take_hotspot_copy() else {
-        return;
-    };
-    let delivery = super::clipboard::copy_rich(&copy.text, copy.html.as_deref());
-    // The byte count is the plain payload's: it is what every reader receives, and a
-    // reader on a remote host never got the HTML at all.
-    app.report_copy(copy.text.len(), copy.what, &delivery);
-    app.flash_copied(copy.row, copy.col);
+/// The same division of labour as [`copy_selection`]: [`App`] decided that a click landed
+/// and on what, and the I/O — which touches the terminal and the display server — happens
+/// out here.
+fn activate(app: &mut App, activation: Activation) {
+    match activation.kind {
+        HotspotKind::Copy { text, html } => {
+            let what = super::clipboard::Copied::for_button(html.as_deref());
+            let delivery = super::clipboard::copy_rich(&text, html.as_deref());
+            // The byte count is the plain payload's: it is what every reader receives,
+            // and a reader on a remote host never got the HTML at all.
+            app.report_copy(text.len(), what, &delivery);
+            app.flash_copied(activation.row, activation.col);
+        }
+        // Tasks 6 to 9 give these their actions — the opener, anchors, footnotes. Doing
+        // nothing here keeps the state machine ahead of them without inventing behaviour:
+        // the click is recognised, and what it should do does not exist yet.
+        HotspotKind::Open { .. } | HotspotKind::Anchor { .. } | HotspotKind::Footnote { .. } => {}
+    }
 }
 
 /// Converts a `crossterm` key event into the terminal-independent [`Key`].
