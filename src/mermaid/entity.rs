@@ -136,6 +136,23 @@ pub fn decode_runs(text: &str) -> (Cow<'_, str>, Vec<Run>) {
     (Cow::Owned(out), runs)
 }
 
+/// The byte length of the character reference `text` opens with, sigil and `;` included.
+///
+/// Exactly what [`decode`] will consume — this is [`entity_at`] with the character it
+/// names thrown away, not a second matcher that merely agrees with it. A caller that has
+/// to step *over* a reference rather than decode it is
+/// [`lex::split_statements`](crate::mermaid::parse::lex::split_statements), whose
+/// statement separator is the very `;` that terminates one; sharing the decision means
+/// the splitter and the decoder cannot disagree about where a reference ends, or about
+/// whether there is one at all. An `&nosuch;` the decoder passes through untouched is
+/// therefore not a reference here either, and its `;` stays a separator.
+pub fn reference_len(text: &str) -> Option<usize> {
+    if !matches!(text.as_bytes().first(), Some(b'&' | b'#')) {
+        return None;
+    }
+    entity_at(text).map(|(_, len)| len)
+}
+
 /// Reads the entity starting at the sigil `text` begins with.
 ///
 /// Returns the character it names and the byte length of the whole escape.

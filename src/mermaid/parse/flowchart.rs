@@ -33,7 +33,7 @@ pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<Flowchart, Merma
 
     // `graph TD; A-->B` puts statements on the header line.
     let (_, after_keyword) = lex::split_word(header.text);
-    let mut statements = lex::split_statements(after_keyword);
+    let mut statements = lex::split_piped_statements(after_keyword);
     if let Some(first) = statements.first() {
         let (word, rest) = lex::split_word(first);
         if let Some(dir) = direction(word) {
@@ -50,7 +50,7 @@ pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<Flowchart, Merma
     }
 
     for line in body {
-        for statement in lex::split_statements(line.text) {
+        for statement in lex::split_piped_statements(line.text) {
             builder.statement(statement, line.number)?;
         }
     }

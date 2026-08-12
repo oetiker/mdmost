@@ -222,6 +222,161 @@ mod edge_labels {
     }
 }
 
+/// A character reference ends in `;`, which is also Mermaid's statement separator.
+///
+/// A splitter that does not know that cuts a statement in half at the entity's own
+/// terminator. In a state diagram the tail then reads as a further statement and draws a
+/// node the author never wrote — silently wrong, which is worse than the hard error the
+/// same input used to raise in a class diagram.
+///
+/// These assert the *drawn* diagram, not only the AST: the symptom an author sees is a
+/// phantom box, and a parse-only test can pass while the box is still drawn.
+mod statement_separator {
+    use mdmost::mermaid::render_mermaid;
+    use mdmost::theme::Theme;
+
+    /// The diagram `src` draws at width 60, as plain text.
+    #[track_caller]
+    fn drawn(src: &str) -> String {
+        let theme = Theme::default_dark();
+        match render_mermaid(src, 60, &theme) {
+            Ok(canvas) => canvas.plain_text(),
+            Err(error) => panic!("expected a drawn diagram, got: {error}"),
+        }
+    }
+
+    /// How many boxes the drawn diagram has, counted by their top-left corner.
+    ///
+    /// A state is drawn with rounded corners and a class or flowchart node with square
+    /// ones, so both spellings count.
+    fn boxes(drawn: &str) -> usize {
+        drawn.matches(['╭', '┌']).count()
+    }
+
+    #[test]
+    fn a_state_transition_label_survives_the_semicolon_of_an_entity() {
+        let art = drawn("stateDiagram-v2\n    s1 --> s2 : press &amp; hold\n");
+        assert_eq!(
+            boxes(&art),
+            2,
+            "two states were written, so two are drawn:\n{art}"
+        );
+        assert!(
+            art.contains("press & hold"),
+            "the label decodes whole:\n{art}"
+        );
+    }
+
+    #[test]
+    fn a_state_transition_label_survives_a_numeric_entity() {
+        // `&amp;` is the one input a wrong implementation can look right on, because the
+        // `&` that opens it is also the character it draws. A numeric reference cannot
+        // be confused with what it decodes to.
+        let art = drawn("stateDiagram-v2\n    s1 --> s2 : press &#65; then &#x42;\n");
+        assert_eq!(boxes(&art), 2, "two states, no phantom:\n{art}");
+        assert!(art.contains("press A then B"), "both decode:\n{art}");
+    }
+
+    #[test]
+    fn a_state_transition_label_survives_mermaids_own_hash_spelling() {
+        // Mermaid documents `#…;` as a second spelling of the same escapes, and the
+        // decoder consumes it, so the splitter has to step over it too — a splitter that
+        // only knew `&` would cut here and the two would disagree about what a reference
+        // is. `#35;` draws the `#` it names.
+        let art = drawn("stateDiagram-v2\n    s1 --> s2 : issue #35;7 filed\n");
+        assert_eq!(boxes(&art), 2, "two states, no phantom:\n{art}");
+        assert!(art.contains("issue #7 filed"), "the label decodes:\n{art}");
+    }
+
+    #[test]
+    fn a_separator_after_a_reference_still_separates() {
+        // The step is over the reference and no further. A step that ran to the end of
+        // the line instead would swallow this genuine separator and draw two states
+        // where three were written — the same class of error as the bug, in reverse.
+        let art = drawn("stateDiagram-v2\n    s1 --> s2 : a &amp; b; s2 --> s3\n");
+        assert_eq!(boxes(&art), 3, "three states from two statements:\n{art}");
+        assert!(art.contains("a & b"), "and the label still decodes:\n{art}");
+    }
+
+    #[test]
+    fn a_class_relation_label_survives_the_semicolon_of_an_entity() {
+        let art = drawn("classDiagram\n    Cat <|-- Lion : eats &amp; sleeps\n");
+        assert_eq!(boxes(&art), 2, "two classes are drawn:\n{art}");
+        assert!(art.contains("eats & sleeps"), "the label decodes:\n{art}");
+    }
+
+    #[test]
+    fn a_class_member_survives_the_semicolon_of_an_entity() {
+        // The `class X { … }` block body is split by the same call, and used to be cut
+        // into the two members `T&gt` and `+get(): Vec&lt`.
+        //
+        // The reference is drawn as written rather than decoded, because a class member
+        // is read as plain `String`s and never becomes a `Label` — the same gap that
+        // leaves members without provenance, pre-existing and out of this fix's scope.
+        // What this pins is that the member is ONE member and its text is not cut.
+        let art = drawn("classDiagram\n    class Box {\n        +get() Vec&lt;T&gt;\n    }\n");
+        assert!(
+            art.contains("+get(): Vec&lt;T&gt;"),
+            "one whole, uncut member:\n{art}"
+        );
+        assert_eq!(
+            art.matches('├').count(),
+            1,
+            "one divider, so one member compartment:\n{art}"
+        );
+    }
+
+    #[test]
+    fn a_flowchart_pipe_label_stays_correct() {
+        // Flowchart was never affected — its `|…|` rule already shielded the label.
+        // This pins that the shared splitter did not take that away.
+        let art = drawn("flowchart LR\n    A[Start] -->|press &amp; hold| B[Stop]\n");
+        assert_eq!(boxes(&art), 2, "two nodes:\n{art}");
+        assert!(art.contains("press & hold"), "the label decodes:\n{art}");
+    }
+
+    #[test]
+    fn a_semicolon_that_is_a_real_separator_still_separates() {
+        // Both directions matter: the statement must stop being cut, and a genuine
+        // separator must keep separating.
+        let art = drawn("stateDiagram-v2\n    s1 --> s2; s2 --> s3\n");
+        assert_eq!(boxes(&art), 3, "three states from two statements:\n{art}");
+        let art = drawn("classDiagram\n    Cat <|-- Lion; Lion <|-- Cub\n");
+        assert_eq!(boxes(&art), 3, "three classes from two statements:\n{art}");
+    }
+
+    #[test]
+    fn an_ampersand_that_opens_nothing_changes_nothing() {
+        // No terminator, so no reference: the `&` is text and the later `;` is still a
+        // separator, exactly as before.
+        let art = drawn("stateDiagram-v2\n    s1 --> s2 : a & b; s2 --> s3\n");
+        assert_eq!(boxes(&art), 3, "three states:\n{art}");
+        assert!(
+            art.contains("a & b"),
+            "the ampersand is drawn as written:\n{art}"
+        );
+    }
+
+    #[test]
+    fn a_reference_the_decoder_does_not_know_still_separates() {
+        // The boundary, stated rather than stumbled into: the splitter steps over
+        // exactly what the decoder will consume, so `&nosuch;` — which decodes to
+        // itself and keeps its `;` as drawn text — separates as any other `;` does.
+        // Anything wider would be the splitter and the decoder disagreeing about what
+        // a reference is.
+        let art = drawn("stateDiagram-v2\n    s1 --> s2 : a &nosuch; s2 --> s3\n");
+        assert_eq!(boxes(&art), 3, "three states:\n{art}");
+    }
+
+    #[test]
+    fn a_flowchart_multi_node_ampersand_is_untouched() {
+        // `A & B --> C` is the flowchart's own separator syntax and has nothing to do
+        // with a reference; the entity step must not have eaten it.
+        let art = drawn("flowchart LR\n    A & B --> C\n");
+        assert_eq!(boxes(&art), 3, "three nodes:\n{art}");
+    }
+}
+
 /// `Label::spans_for` maps a *piece* of a drawn line back to source bytes, which is what
 /// makes a drag inside a diagram label copy the characters it went over (design spec
 /// §2.2). The entity is where the mapping stops being a byte offset and starts being a

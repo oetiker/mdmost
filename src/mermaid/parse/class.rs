@@ -68,7 +68,7 @@ impl Builder<'_> {
         if self.open.is_some() {
             return self.block_line(text, line);
         }
-        for statement in lex::split_top_level(text, ';', Nesting::Honour) {
+        for statement in lex::split_statements(text) {
             self.statement(statement, line)?;
         }
         Ok(())
@@ -76,7 +76,7 @@ impl Builder<'_> {
 
     /// Handles a line inside an open `class X { … }` block.
     fn block_line(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
-        for statement in lex::split_top_level(text, ';', Nesting::Honour) {
+        for statement in lex::split_statements(text) {
             // A class written on one line: `class A { +f() }`.
             let (statement, closes) = match statement.strip_suffix('}') {
                 Some(prefix) => (prefix.trim(), true),

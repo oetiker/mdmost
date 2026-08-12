@@ -103,7 +103,7 @@ impl Builder<'_> {
             }
             return Ok(());
         }
-        for statement in lex::split_top_level(text, ';', Nesting::Honour) {
+        for statement in lex::split_statements(text) {
             self.statement(statement, line)?;
         }
         Ok(())
