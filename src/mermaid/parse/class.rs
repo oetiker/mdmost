@@ -390,21 +390,41 @@ fn decoded(text: &str) -> String {
     entity::decode(text).into_owned()
 }
 
+/// Splits a leading visibility marker off a member.
+///
+/// Read from the raw member text, before [`normalise_generics`] and before any entity
+/// decoding, because the marker shares its spelling with both of them and only the source
+/// can settle who wrote what:
+///
+/// - `~` is the package-internal marker *and* Mermaid's generic delimiter. Normalising
+///   first ate the marker as an opening `~`, which lost the visibility and — because the
+///   open/closed flag was then inverted for the rest of the member — drew every later
+///   generic backwards, `Map~K,V~` as `Map>K,V<`.
+/// - `#` is the protected marker *and* Mermaid's entity sigil (`#35;`). Reading the marker
+///   here, off the source, is what keeps the two apart: the marker is one character of
+///   syntax at a fixed position and the escape decodes later, on the leaf. So `#35;count`
+///   is a protected member named `35;count` — the marker position is source, not text.
+///
+/// The mirror of that rule is the one [`decoded`] states: a decoded character is never
+/// syntax. `&#126;count` is a field an author named `~count`, not a package-internal
+/// `count`, and a decoded `~` opens no generic either.
+fn split_visibility(text: &str) -> (Option<Visibility>, &str) {
+    let visibility = match text.as_bytes().first() {
+        Some(b'+') => Visibility::Public,
+        Some(b'-') => Visibility::Private,
+        Some(b'#') => Visibility::Protected,
+        Some(b'~') => Visibility::PackageInternal,
+        _ => return (None, text),
+    };
+    (Some(visibility), text[1..].trim())
+}
+
 /// Parses a member such as `+int age`, `+age: int` or `+isMammal() bool`.
 fn parse_member(text: &str, line: usize) -> Result<Member, MermaidError> {
-    let text = normalise_generics(text.trim());
-    let mut rest = text.as_str();
-    let visibility = match rest.as_bytes().first() {
-        Some(b'+') => Some(Visibility::Public),
-        Some(b'-') => Some(Visibility::Private),
-        Some(b'#') => Some(Visibility::Protected),
-        Some(b'~') => Some(Visibility::PackageInternal),
-        _ => None,
-    };
-    if visibility.is_some() {
-        rest = rest[1..].trim();
-    }
-    let (rest, classifier) = split_classifier(rest);
+    let text = text.trim();
+    let (visibility, rest) = split_visibility(text);
+    let rest = normalise_generics(rest);
+    let (rest, classifier) = split_classifier(&rest);
 
     match rest.find('(') {
         Some(open) => {
