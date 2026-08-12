@@ -245,11 +245,24 @@ fn event_loop(
     // what is being opened and that something is happening.
     terminal.draw(|frame| draw::draw_splash(frame, app))?;
 
+    // Mouse capture is any-event tracking (`?1003h`, which is what `EnableMouseCapture`
+    // sends), so a hand crossing the window delivers one event per cell it passes over.
+    // Every one of those would otherwise cost a full frame — and a frame is a canvas
+    // lookup, a blit of the viewport and a diff — for a pointer that changed nothing the
+    // reader can see. `on_mouse` answers whether anything did; when it did not, the one
+    // frame that would have followed is skipped. Nothing else is affected: this is reset
+    // the moment the wait returns, so the poll tick that expires the `[copied]` flash
+    // still draws on time, and every other event still draws immediately.
+    let mut redraw = true;
     while !app.should_quit() && !terminate.load(Ordering::Relaxed) {
-        terminal.draw(|frame| draw::draw(frame, app))?;
+        if redraw {
+            terminal.draw(|frame| draw::draw(frame, app))?;
+        }
         // Waiting is ours, not `crossterm`'s, so that a terminal which has gone away
         // is seen as what it is rather than as a descriptor that is endlessly ready.
-        if input.wait(POLL_INTERVAL)? == Wait::Gone {
+        let waited = input.wait(POLL_INTERVAL)?;
+        redraw = true;
+        if waited == Wait::Gone {
             return Err(terminal_gone());
         }
         // The descriptor was live a moment ago, so `crossterm` may look at it. Zero
@@ -279,7 +292,7 @@ fn event_loop(
             Some(Event::Key(key)) => on_key(app, key),
             Some(Event::Mouse(mouse)) => {
                 let size = terminal.size()?;
-                on_mouse(app, mouse, size.width, size.height);
+                redraw = on_mouse(app, mouse, size.width, size.height);
             }
             _ => {}
         }
@@ -309,7 +322,11 @@ fn on_key(app: &mut App, event: KeyEvent) {
 /// The table-of-contents pane keeps its click-to-jump and is never a selection source:
 /// its entries are a generated map, not document text, so there is no source behind
 /// them to copy.
-fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16) {
+///
+/// Returns whether the frame that follows is worth painting. Every event but a pointer
+/// motion that left the same control (or none) under the hand says yes; see the note in
+/// [`event_loop`].
+pub(super) fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16) -> bool {
     let in_toc = chrome::in_toc(app, event.column);
     let body_height = height.saturating_sub(1);
     // The document area: the pane on its left, the scrollbar's gutter on its right.
@@ -325,6 +342,22 @@ fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16) {
         )
     };
     match event.kind {
+        // Motion with no button held. It arrives already, on every terminal that
+        // honoured `EnableMouseCapture`: crossterm sends `?1003h` (any-event tracking),
+        // so this arm consumes events the loop was previously throwing away rather than
+        // asking the terminal for anything new. The pointer only ever *lights* a
+        // control, never presses one, so this is the whole of what it does — and it is
+        // the one event kind allowed to answer "no frame needed".
+        MouseEventKind::Moved => {
+            return if in_doc {
+                let (x, y) = local();
+                app.set_pointer(x, y)
+            } else {
+                // The pane, the scrollbar and the status bar are not places a button
+                // can be, so a pointer that has wandered onto one leaves nothing lit.
+                app.clear_pointer()
+            };
+        }
         MouseEventKind::ScrollDown => app.on_scroll(1, in_toc),
         MouseEventKind::ScrollUp => app.on_scroll(-1, in_toc),
         // The scrollbar. Its track is the body area — everything but the status bar —
@@ -373,6 +406,7 @@ fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16) {
         }
         _ => {}
     }
+    true
 }
 
 /// Puts a finished selection on the clipboard and says what happened.

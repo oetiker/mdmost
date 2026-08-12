@@ -218,6 +218,14 @@ pub struct App {
     pending_hotspot: Option<HotspotCopy>,
     /// The control showing its `[copied]` flash, and when it started.
     copied_flash: Option<(usize, u16, std::time::Instant)>,
+    /// The control the pointer is over, as an index into the canvas's hotspots.
+    ///
+    /// An index rather than a copy of the hotspot, because what the painter needs is
+    /// *which* control, and the canvas is the only thing entitled to say where that
+    /// control is. It is dropped whenever a render replaces the canvas, alongside the
+    /// selection and for the same reason: the indices belong to the canvas they were
+    /// resolved against.
+    hover: Option<usize>,
     quit: bool,
 }
 
@@ -278,6 +286,7 @@ impl App {
             copy_button: false,
             pending_hotspot: None,
             copied_flash: None,
+            hover: None,
             quit: false,
         };
         app.refilter_toc();
@@ -773,6 +782,10 @@ impl App {
             // the honest answer, and the reader has already had the release event that
             // put their text on the clipboard.
             self.selection = None;
+            // And the hover, which names a control by its position in the old canvas's
+            // hotspot list. The pointer has not moved, but what is under it may have,
+            // and a stale index would paint the highlight onto a different button.
+            self.hover = None;
             self.clamp();
         }
     }
@@ -1674,8 +1687,20 @@ impl App {
     /// [`super::tests::a_button_clipped_off_the_canvas_cannot_be_pressed_anywhere`],
     /// which sweeps every cell at every offset for one.
     fn hotspot_at(&self, x: u16, y: u16) -> Option<&crate::canvas::Hotspot> {
+        self.cache
+            .canvas()
+            .hotspots()
+            .get(self.hotspot_index_at(x, y)?)
+    }
+
+    /// The same hit test, answering *which* control rather than handing one over.
+    ///
+    /// One implementation, so a press and a hover can never disagree about where the
+    /// button is — the thing [`App::hotspot_at`]'s note about `canvas_pos` is careful
+    /// about, one level further out.
+    fn hotspot_index_at(&self, x: u16, y: u16) -> Option<usize> {
         let pos = self.canvas_pos(x, y);
-        self.cache.canvas().hotspots().iter().find(|spot| {
+        self.cache.canvas().hotspots().iter().position(|spot| {
             spot.row == pos.row
                 && pos.col >= spot.col
                 && pos.col < spot.col.saturating_add(spot.cols)
@@ -1708,6 +1733,40 @@ impl App {
         });
         self.clear_notice();
         true
+    }
+
+    /// Puts the pointer at document-area column `x`, row `y`.
+    ///
+    /// Returns whether the *hovered control changed identity* — not whether the pointer
+    /// moved, which it did by definition. A terminal in any-event tracking mode reports
+    /// motion cell by cell, and a pager that repainted on each of those would be
+    /// re-laying-out the document for a hand sliding across a paragraph. Sweeping along
+    /// one six-column label is one change on the way in and one on the way out; the
+    /// four columns in between ask for nothing, and [`super::term`] draws nothing.
+    pub fn set_pointer(&mut self, x: u16, y: u16) -> bool {
+        self.ensure_rendered();
+        let at = self.hotspot_index_at(x, y);
+        std::mem::replace(&mut self.hover, at) != at
+    }
+
+    /// Takes the pointer off the document entirely.
+    ///
+    /// The pane, the scrollbar and the status bar are not places a control can be, and
+    /// a pointer resting on one of them must not leave a button lit behind it. Reports
+    /// a change on the same terms as [`App::set_pointer`], so leaving an already-empty
+    /// document costs nothing.
+    pub fn clear_pointer(&mut self) -> bool {
+        self.hover.take().is_some()
+    }
+
+    /// The control under the pointer, as an index into `canvas.hotspots()`.
+    ///
+    /// Read by [`super::draw`], which is where hover is applied: a hovered button is a
+    /// *painted* difference, not a rendered one. Rendering is a pure function of
+    /// `(AST, width, theme, options)` and the pointer is none of those — the same
+    /// argument that keeps the `[copied]` flash out of the renderer.
+    pub fn hovered(&self) -> Option<usize> {
+        self.hover
     }
 
     /// Takes the payload a press produced, for the event loop to copy.

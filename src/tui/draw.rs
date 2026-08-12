@@ -80,6 +80,23 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let hscroll = Offsets::new(app, doc_area.width);
     blit(buffer, doc_area, app.rendered(), scroll, &hscroll, base);
     edge_markers(buffer, doc_area, app.rendered(), scroll, &hscroll, &marks);
+    // Before the flash, and that ordering is the precedence: the pointer is necessarily
+    // over the button at the moment it is clicked, so a hover painted afterwards would
+    // repaint the one piece of feedback the press produces. `[copied]` wins.
+    let hovered = app
+        .hovered()
+        .and_then(|index| app.rendered().hotspots().get(index))
+        .map(|spot| (spot.row, spot.col, spot.cols));
+    hover_highlight(
+        buffer,
+        doc_area,
+        app.rendered(),
+        scroll,
+        &hscroll,
+        base,
+        app.theme(),
+        hovered,
+    );
     // Under the search wash and the selection, which say where the reader's attention
     // is; the flash only says what their last click did.
     copied_flash(
@@ -382,6 +399,50 @@ fn copied_flash(
         if let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) {
             target.set_style(style);
             target.set_symbol(char::from(ch).encode_utf8(&mut [0u8; 4]));
+        }
+    }
+}
+
+/// Repaints the control under the pointer in the theme's hovered shade.
+///
+/// Paint-time, exactly like [`copied_flash`] and for the same reason: the pointer is not
+/// one of the inputs a render is a function of, and threading it into one would make the
+/// cache key a mouse position. What arrives here is the region the renderer already drew
+/// — row, first column, width — so nothing is measured a second time and no cell can
+/// move: each column keeps its symbol and takes a new style.
+///
+/// The shade is derived from the cell's *own* style rather than from a slot, so the
+/// button at a table's edge hovers in the table's border colour and the one on a code
+/// fence in the fence's frame colour, without this function knowing there are two.
+/// Columns that are off screen — scrolled behind a pinned prefix, past the rail, or on a
+/// row above or below the viewport — are simply not painted, which [`Offsets`] answers.
+#[allow(clippy::too_many_arguments)]
+fn hover_highlight(
+    buffer: &mut Buffer,
+    area: Rect,
+    canvas: &Canvas,
+    top: usize,
+    left: &Offsets<'_>,
+    base: Style,
+    theme: &crate::theme::Theme,
+    at: Option<(usize, u16, u16)>,
+) {
+    let Some((row, col, cols)) = at else { return };
+    let Some(y) = row.checked_sub(top).and_then(|y| u16::try_from(y).ok()) else {
+        return;
+    };
+    let Some(cells) = canvas.row(row).filter(|_| y < area.height) else {
+        return;
+    };
+    for column in col..col.saturating_add(cols) {
+        let Some(x) = left.x_of(row, column).filter(|x| *x < left.content()) else {
+            continue;
+        };
+        let under = cells
+            .get(usize::from(column))
+            .map_or(base, |cell| base.patch(cell.style()));
+        if let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) {
+            target.set_style(term_style(theme.hovered(under)));
         }
     }
 }

@@ -4791,6 +4791,239 @@ fn the_flash_is_painted_over_the_button_that_was_pressed() {
     );
 }
 
+/// The foregrounds the `[copy]` label's own columns are painted in, left to right.
+///
+/// Read off the painted frame rather than off the theme, because "the button changed
+/// colour" is a claim about cells on a screen. A state flag says the bookkeeping ran;
+/// only this says the reader can see anything.
+fn button_inks(
+    app: &mut App,
+    width: u16,
+    height: u16,
+    at: (u16, u16),
+) -> Vec<Option<ratatui::style::Color>> {
+    let buffer = framed_buffer(app, width, height);
+    let label = u16::try_from(crate::render::button::LABEL.chars().count()).expect("a width");
+    (at.0..at.0 + label)
+        .map(|x| buffer[(x, at.1)].style().fg)
+        .collect()
+}
+
+/// The row the button is drawn on, as text.
+fn button_row(app: &mut App, width: u16, height: u16, y: u16) -> String {
+    framed(app, width, height)[usize::from(y)].clone()
+}
+
+#[test]
+fn the_pointer_over_a_button_marks_it_hovered_and_repaints_it() {
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    let resting = button_inks(&mut app, 60, 20, (x, y));
+    let before = button_row(&mut app, 60, 20, y);
+
+    assert!(
+        app.set_pointer(x, y),
+        "arriving on a control is a change worth a repaint"
+    );
+    assert_eq!(app.hovered(), Some(0), "and it is that control");
+
+    let hovered = button_inks(&mut app, 60, 20, (x, y));
+    let theme = app.theme();
+    let expected = super::draw::term_style(theme.hovered(theme.code.frame)).fg;
+    assert_eq!(
+        hovered,
+        vec![expected; resting.len()],
+        "every drawn column of the label takes the hovered ink"
+    );
+    assert_ne!(hovered, resting, "which is not the ink it had at rest");
+    assert_eq!(
+        button_row(&mut app, 60, 20, y),
+        before,
+        "hover restyles cells, it never moves one"
+    );
+}
+
+#[test]
+fn moving_within_one_button_does_not_ask_for_a_redraw() {
+    // The failure mode this return value exists to prevent: a pager that re-lays-out
+    // and repaints the whole document on every motion event a terminal emits.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert!(app.set_pointer(x, y), "the first arrival is a change");
+    for step in 1..6 {
+        assert!(
+            !app.set_pointer(x + step, y),
+            "column {} is the same button as column {x}",
+            x + step
+        );
+        assert_eq!(app.hovered(), Some(0), "and it stays hovered");
+    }
+    assert!(app.set_pointer(x - 1, y), "leaving it is a change again");
+}
+
+#[test]
+fn the_pointer_off_any_button_clears_the_hover_and_the_paint() {
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    let resting = button_inks(&mut app, 60, 20, (x, y));
+    app.set_pointer(x, y);
+    assert!(app.hovered().is_some(), "the premise");
+    assert!(app.set_pointer(0, 0), "moving away is a change");
+    assert_eq!(app.hovered(), None, "and nothing is hovered");
+    assert_eq!(
+        button_inks(&mut app, 60, 20, (x, y)),
+        resting,
+        "the label goes back to the frame's own colour"
+    );
+    // And the same for the pointer leaving the document area altogether.
+    app.set_pointer(x, y);
+    assert!(app.clear_pointer(), "leaving the pane is a change");
+    assert_eq!(app.hovered(), None);
+    assert!(!app.clear_pointer(), "and clearing nothing is not");
+}
+
+#[test]
+fn the_resting_button_is_drawn_in_the_frames_own_colour() {
+    // The owner's ruling: at rest the button keeps exactly what it draws today. This
+    // pins that, so a future shade cannot be slipped in under the hover work.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    let frame = super::draw::term_style(app.theme().code.frame).fg;
+    assert_eq!(
+        button_inks(&mut app, 60, 20, (x, y)),
+        vec![frame; 6],
+        "an unhovered [copy] is frame, exactly as it always was"
+    );
+    // The table's button too, which is drawn in the other frame style.
+    let (tx, ty) = painted_button(&mut app, 60, 20, 1);
+    let border = super::draw::term_style(app.theme().table.border).fg;
+    assert_eq!(button_inks(&mut app, 60, 20, (tx, ty)), vec![border; 6]);
+}
+
+#[test]
+fn the_copied_flash_beats_the_hover_under_the_pointer() {
+    // The pointer is necessarily over the button when it is clicked, so a hover style
+    // painted after the flash would mask the one piece of feedback the press produces.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    let resting = button_inks(&mut app, 60, 20, (x, y));
+    app.set_pointer(x, y);
+    assert!(app.press_hotspot(x, y));
+    let copy = app.take_hotspot_copy().expect("a payload");
+    app.flash_copied(copy.row, copy.col);
+    assert_eq!(app.hovered(), Some(0), "the pointer has not gone anywhere");
+
+    let rows = framed(&mut app, 60, 20);
+    assert!(
+        rows[usize::from(y)].contains(crate::render::button::FLASH),
+        "the flash is drawn: {:?}",
+        rows[usize::from(y)]
+    );
+    assert_eq!(
+        button_inks(&mut app, 60, 20, (x, y)),
+        resting,
+        "and it is drawn in the resting ink, not repainted by the hover under it"
+    );
+}
+
+#[test]
+fn a_pager_without_the_mouse_has_nothing_to_hover() {
+    // With `--mouse` off there are no hotspots at all, so there is no state to keep.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    let rows = framed(&mut app, 60, 20);
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.contains(crate::render::button::LABEL)),
+        "the premise: no button is drawn"
+    );
+    for y in 0..19 {
+        for x in 0..59 {
+            assert!(!app.set_pointer(x, y), "nothing to hover at {x},{y}");
+            assert_eq!(app.hovered(), None);
+        }
+    }
+}
+
+#[test]
+fn a_reflow_drops_the_hover_rather_than_moving_it() {
+    // The hover names a control by its index in the canvas's hotspot list, and a render
+    // replaces that list: the same index at a new width can be a different button, or
+    // none. The pointer has not moved, so nothing recomputes it — the stale index would
+    // simply be painted, lighting a control the reader is nowhere near. Dropped instead,
+    // exactly as the selection is, and for the same reason.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    app.set_pointer(x, y);
+    assert_eq!(app.hovered(), Some(0), "the premise");
+
+    let buffer = framed_buffer(&mut app, 40, 20);
+    assert_eq!(app.hovered(), None, "the reflow took the hover with it");
+    let theme = app.theme();
+    let lit: Vec<_> = [theme.code.frame, theme.table.border]
+        .iter()
+        .map(|style| super::draw::term_style(theme.hovered(*style)).fg)
+        .collect();
+    for y in 0..20 {
+        for x in 0..40 {
+            assert!(
+                !lit.contains(&buffer[(x, y)].style().fg),
+                "a hovered ink survived the reflow at {x},{y}"
+            );
+        }
+    }
+}
+
+/// A bare pointer motion over the terminal, at screen column `column`, row `row`.
+fn motion(column: u16, row: u16) -> crossterm::event::MouseEvent {
+    crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Moved,
+        column,
+        row,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    }
+}
+
+#[test]
+fn a_motion_event_is_what_lights_the_button() {
+    // The state and the paint are tested above; this is the wire they hang off. A
+    // terminal in any-event tracking mode — which is what `EnableMouseCapture` asks for
+    // — delivers the pointer as `Moved`, and until this arm existed the loop dropped
+    // every one of them on the floor. Driven through the same dispatcher the event loop
+    // calls, so a hover that works only when a test pokes `App` directly fails here.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert_eq!(app.toc_width(), 0, "the probe has no pane in the way");
+
+    assert!(
+        super::term::on_mouse(&mut app, motion(x, y), 60, 20),
+        "arriving on the control asks for the frame that shows it"
+    );
+    assert_eq!(app.hovered(), Some(0));
+    assert!(
+        !super::term::on_mouse(&mut app, motion(x + 1, y), 60, 20),
+        "and sliding along it asks for nothing"
+    );
+    assert_eq!(app.hovered(), Some(0), "while staying on it");
+    // Off the document altogether: the scrollbar's own column.
+    assert!(
+        super::term::on_mouse(&mut app, motion(59, y), 60, 20),
+        "leaving the document is a change"
+    );
+    assert_eq!(
+        app.hovered(),
+        None,
+        "a pointer on the scrollbar leaves no button lit"
+    );
+}
+
 // --- Resolving a cell to a source offset (design spec §2.1) ----------------------
 
 /// Renders `doc` at `width` directly, with no pager or terminal in the way.
