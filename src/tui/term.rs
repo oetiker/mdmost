@@ -342,6 +342,17 @@ pub(super) fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16
             event.row.min(body_height.saturating_sub(1)),
         )
     };
+    // A press is the start of a gesture and owns the click candidate outright: whatever
+    // the last gesture left armed is gone, wherever this press lands. `App::press_hotspot`
+    // enforces that for a press on the document (a press on nothing disarms the control
+    // before it), but a press on the scrollbar, on the pane, or on the chrome between them
+    // never reaches it — and a candidate that outlived those would be fired by the next
+    // release over the document, with no press behind it. Once, here, rather than in each
+    // `Down` arm, so an arm added later cannot forget it; the document's own arm re-arms
+    // it immediately.
+    if matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.cancel_hotspot_press();
+    }
     match event.kind {
         // Motion with no button held. It arrives already, on every terminal that
         // honoured `EnableMouseCapture`: crossterm sends `?1003h` (any-event tracking),
@@ -350,6 +361,14 @@ pub(super) fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16
         // control, never presses one, so this is the whole of what it does — and it is
         // the one event kind allowed to answer "no frame needed".
         MouseEventKind::Moved => {
+            // Cancels a click in flight for the same reason a drag does, and the property
+            // is spelled out in both arms rather than in whichever one a given terminal
+            // happens to use. Under SGR encoding motion with a button held arrives as
+            // `Drag(Left)` and never gets here, so this is unreachable today — but a
+            // terminal that reports held-button motion as motion would otherwise let
+            // press, move away, move back, release fire the control, which is exactly
+            // what "cancellation, not suspension" forbids.
+            app.cancel_hotspot_press();
             return if in_doc {
                 let (x, y) = local();
                 app.set_pointer(x, y)

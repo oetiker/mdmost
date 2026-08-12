@@ -5587,6 +5587,54 @@ fn a_release_outside_the_document_cancels_the_click() {
 }
 
 #[test]
+fn a_press_off_the_document_disarms_a_click_left_in_flight() {
+    // `App::press_hotspot` disarms the previous candidate, but a press on the pane, on
+    // the scrollbar or on the chrome never reaches it. The path that matters: press a
+    // link, then *lose the release* — alt-tabbing away mid-press is not something
+    // `?1003` tracking always survives — then press somewhere off the document, then let
+    // go over that same link. The generic `Up` arm sees `in_doc`, finds the candidate
+    // still armed and fires a control with no press behind it. Harmless today; from Task
+    // 6 it is a browser opening unbidden, with none of the status-bar moment design spec
+    // §8 traded the confirmation prompt for.
+    let mut app = pager_at("# Heading\n\n[x](https://example.com/a)\n", 60, 12);
+    app.act(Action::ToggleToc);
+    assert!(app.toc_width() > 0, "the premise: the pane is open");
+    let (col, y, _) = link_at(&mut app, 0);
+    let x = col + app.toc_width();
+
+    // One probe per `Down` arm that is not the document's: the pane, the scrollbar, and
+    // the status bar — which with the pane focused reaches the arm that swallows a press
+    // outside the document entirely.
+    for (px, py, what) in [
+        (1, 1, "the pane"),
+        (59, 3, "the scrollbar"),
+        (x, 11, "the status bar"),
+    ] {
+        super::term::on_mouse(&mut app, press_at(x, y), 60, 12);
+        super::term::on_mouse(&mut app, press_at(px, py), 60, 12);
+        assert!(
+            app.release_hotspot(col, y).is_none(),
+            "a press on {what} left the link armed, and the release fired it"
+        );
+    }
+}
+
+#[test]
+fn a_bare_motion_cancels_a_click_in_flight() {
+    // "Cancellation, not suspension" has to hold in both arms that can carry a moving
+    // pointer. Under SGR encoding motion with a button held arrives as `Drag(Left)`, so
+    // this is unreachable on the terminals `mdmost` meets — but a terminal that reports
+    // held-button motion as motion would otherwise let press, away, back, release fire
+    // the link, which is what the drag spelling of this test already forbids.
+    let mut app = pager_at("[x](https://example.com/a) tail\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 10);
+    super::term::on_mouse(&mut app, motion(40, y), 60, 10);
+    super::term::on_mouse(&mut app, motion(x, y), 60, 10);
+    assert!(app.release_hotspot(x, y).is_none());
+}
+
+#[test]
 fn a_press_on_nothing_clears_any_candidate_before_it() {
     // A press is the start of a gesture, so it owns the candidate outright: whatever the
     // last one left behind is gone, control or no control under this one. Otherwise a

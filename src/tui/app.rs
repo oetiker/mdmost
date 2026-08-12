@@ -1778,9 +1778,15 @@ impl App {
     ///
     /// The candidate is taken whatever the answer: a release ends the gesture, and a
     /// release that missed must not leave a candidate behind for the next one to fire.
+    ///
+    /// The render comes **before** the take, and the order is load-bearing. A target id is
+    /// issued per canvas, so [`App::ensure_rendered`] drops a click in flight along with
+    /// the hover; taking first would capture the id out of the old canvas and then match
+    /// it against the new one's, which are reused small integers. This way the guard
+    /// enforces itself no matter which side the reflow lands on.
     pub fn release_hotspot(&mut self, x: u16, y: u16) -> Option<Activation> {
-        let pressed = self.pressed.take()?;
         self.ensure_rendered();
+        let pressed = self.pressed.take()?;
         let spot = self.hotspot_at(x, y)?;
         if spot.target != pressed {
             return None;
