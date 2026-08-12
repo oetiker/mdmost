@@ -152,6 +152,34 @@ pub fn label_pieces(label: &Label, width: usize) -> Vec<Piece> {
     out
 }
 
+/// [`label_pieces`] for a caller that draws a box, where an empty label still has a row.
+///
+/// A box is a shape with a hole in it: a node with no label at all is drawn as an empty
+/// box rather than as nothing, so the wrap has to hand back one blank piece where
+/// [`label_pieces`] hands back none. Every box-drawing family had written that fallback
+/// out for itself — the flowchart node, the state node, the sequence note and the
+/// sequence participant head, four copies of the same five lines.
+///
+/// It is deliberately *not* folded into [`label_pieces`]: a caller that draws text
+/// without a box around it — an edge label, through
+/// [`DrawnLabel`](crate::mermaid::layout::graph::DrawnLabel) — asks "are there any
+/// pieces?" to decide whether to draw anything at all, and a blank piece would turn an
+/// unlabelled edge into an edge with a blank row reserved for a label.
+///
+/// The blank piece is [`unlocated`](Piece::at): it drew no cells, so there are no bytes
+/// behind it to name.
+pub fn label_pieces_or_blank(label: &Label, width: usize) -> Vec<Piece> {
+    let mut out = label_pieces(label, width);
+    if out.is_empty() {
+        out.push(Piece {
+            text: String::new(),
+            index: 0,
+            at: None,
+        });
+    }
+    out
+}
+
 /// The label's own lines as pieces, with nothing wrapped away.
 ///
 /// [`label_pieces`] for a caller that draws each `<br>`-separated line whole rather than

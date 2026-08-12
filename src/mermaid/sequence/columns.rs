@@ -224,14 +224,7 @@ fn build_headers(diagram: &SequenceDiagram, profile: Profile) -> Vec<Header> {
         .participants
         .iter()
         .map(|participant| {
-            let mut pieces = chrome::label_pieces(&participant.label, profile.label_cap);
-            if pieces.is_empty() {
-                pieces.push(Piece {
-                    text: String::new(),
-                    index: 0,
-                    at: None,
-                });
-            }
+            let pieces = chrome::label_pieces_or_blank(&participant.label, profile.label_cap);
             let text = pieces
                 .iter()
                 .map(|piece| display_width(&piece.text))

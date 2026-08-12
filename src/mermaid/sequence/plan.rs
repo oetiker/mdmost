@@ -250,14 +250,7 @@ impl Builder<'_> {
 
     /// Works out where a note box sits horizontally, or `None` if it has no target.
     fn place_note(&self, note: &crate::mermaid::ast::Note) -> Option<NoteBox> {
-        let mut pieces = chrome::label_pieces(&note.text, self.columns.label_cap);
-        if pieces.is_empty() {
-            pieces.push(Piece {
-                text: String::new(),
-                index: 0,
-                at: None,
-            });
-        }
+        let pieces = chrome::label_pieces_or_blank(&note.text, self.columns.label_cap);
         let mut targets: Vec<usize> = note
             .participants
             .iter()

@@ -6,7 +6,7 @@
 
 use crate::canvas::{BorderSet, Canvas, align_offset};
 use crate::mermaid::ast::Label;
-use crate::mermaid::chrome::{self, Piece};
+use crate::mermaid::chrome;
 use crate::mermaid::layout::graph::PortPolicy;
 use crate::text::{Align, display_width, ellipsize};
 use crate::theme::{Style, Theme};
@@ -45,18 +45,11 @@ fn box_of(label: &Label, budget: u16, cap: usize, theme: &Theme, ink: Style) -> 
         .saturating_sub(BORDER + 2 * PAD)
         .max(MIN_TEXT)
         .min(cap);
-    let mut pieces = chrome::label_pieces(label, text_budget);
+    let mut pieces = chrome::label_pieces_or_blank(label, text_budget);
     for piece in &mut pieces {
         // A shortened piece keeps its own text, so the span it emits — if any — names
         // the cells that were really painted rather than the ones that were not.
         piece.text = ellipsize(&piece.text, text_budget);
-    }
-    if pieces.is_empty() {
-        pieces.push(Piece {
-            text: String::new(),
-            index: 0,
-            at: None,
-        });
     }
     let text = pieces
         .iter()
