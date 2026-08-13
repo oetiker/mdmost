@@ -430,12 +430,13 @@ hold_cs = 280
 #   * a live pane repaints correctly — `t` moves the background to `#fdfcf9` every time;
 #   * ansidrama alone records the switch correctly (a three-scene script does it);
 #   * ansidrama driving tmux records it correctly too.
-# Only the full tour fails, and so far only the full tour. An empty re-capture does not
-# fix it, and neither does a `j`/`k` that forces a complete repaint, so the frame is not
-# merely settling early: those bytes never landed. Two guesses at the cause have since
-# been tested and killed — it is not act 5's pane kill and resize, and it is not the
-# alternate screen nano leaves behind in act 4; a short script doing either still
-# switches theme correctly. `docs/maintainer-notes.md` lists what is left to try.
+# Bisected on 2026-08-13 against ansidrama 0.2.0: **the trigger is act 6's keyboard walk**,
+# the `F F F f Enter` above. Truncate this script before it and the theme switch records
+# correctly; replace the walk with a plain `G` and it records correctly; pad the frame
+# count past the failing one and it still records correctly. It is not the capture race
+# 0.2.0 fixed either — `react_ms` at four times its default changes nothing. And a live
+# pane repaints correctly after the identical sequence, so mdmost is not the thing at
+# fault. The table of probes is in `docs/maintainer-notes.md`.
 #
 # So the tour now ends on the theme it started in by never leaving it. The document is
 # where `enter` left it — `Reading room` at the top of the viewport, which is the last

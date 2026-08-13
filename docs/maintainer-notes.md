@@ -256,22 +256,33 @@ Only the full tour fails, and **so far only the full tour**. Neither an empty re
 nor a `j`/`k` that forces a complete repaint recovers the frame, so it is not a capture
 settling early: those bytes never landed.
 
-**Two hypotheses have been tested and killed**, so nobody repeats them:
+**Bisected on 2026-08-13 against ansidrama 0.2.0. The trigger is act 6's keyboard walk.**
+Truncate `demo/mdmost.toml` at a given line, append a `t` scene and an empty scene, and
+record; that is one four-minute probe per question. Results:
 
-- *"It is the pane kill and the resize act 5 does."* No. A script that launches the same
-  two panes, kills the left one and switches theme in the resized survivor renders light
-  correctly.
-- *"It is the alternate screen, from nano in act 4."* No. The same script with a nano
-  session opened and closed before the pane kill also renders light correctly.
+| Script | Theme frame | Result |
+| --- | --- | --- |
+| acts 1–5 (through the pane close) | 807 | **light — correct** |
+| acts 1–6 up to `# No mouse from here` (hover, popup, click away) | 901 | **light — correct** |
+| same, padded with ten empty scenes | 911 | **light — correct** |
+| same, plus `G` instead of the walk | 902 | **light — correct** |
+| **the full tour — the walk `F F F f Enter`** | 906 | **DARK, captioned `theme: light`** |
 
-What remains untested, in the order worth trying: the **mouse drag** of act 2 and 3
-(many resize events, not one), an **active search highlight**, the **contents pane**,
-the raw SGR motion reports act 6 injects through the `keys` escape hatch, and simple
-**accumulation** — the failing frame is number 906 of 907, and every probe so far has
-been under 50 frames. The cheapest next step is to bisect the real script: truncate it
-after each act, append a `t` and an empty scene, and record. That is about four minutes
-a probe and roughly three probes by binary search — far cheaper than it looks, and much
-cheaper than another synthetic guess.
+So five hypotheses are dead, and nobody should re-run them: it is **not** act 5's pane
+kill and resize, **not** the alternate screen nano leaves behind, **not** accumulated
+frame count, **not** scroll position or a large repaint (`G` moves the whole screen and
+is fine), and **not** the capture race that 0.2.0's `react_ms` fixes — `react_ms = 2000`,
+four times the default, changes nothing.
+
+**And mdmost is not at fault.** In a live pane the same sequence repaints correctly every
+time: `G`, then `F F F f Enter`, then `t`, gives a background of `#fdfcf9`. Only the
+recording disagrees.
+
+What is left is the difference between a keyboard walk and any other input, inside
+ansidrama. The walk is five keystrokes that move a *painted* cursor and then follow an
+anchor; each redraws, and the last one scrolls. Worth trying next: the walk with the
+`Enter` removed, to separate the cursor from the anchor jump, and the walk replaced by
+five presses of an unbound key, to separate "five rapid keystrokes" from "the cursor".
 
 **To restore the beat**, put two `t` scenes back at the end of `demo/mdmost.toml`, record,
 and open the frame after the first one. If it is light, the bug is fixed and the tour can
