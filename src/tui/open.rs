@@ -55,6 +55,16 @@ pub enum Outcome {
 /// decision table is the part worth pinning down in a test, and a test of it must not
 /// launch a browser. See the module docs for why the URL is always exactly one `argv`
 /// entry and never passed through a shell.
+///
+/// No `--` end-of-options marker is inserted before `url`, so in isolation a URL like
+/// `-h` would be read by the opener as a flag rather than a target. That is not
+/// reachable today only because of a safety property this function does not itself
+/// hold: [`crate::render::link::classify`] emits `HotspotKind::Open` — the only route a
+/// `url` takes to get here — solely for a target whose scheme is `http` or `https`
+/// followed by `://`, so every string this function ever receives already begins with
+/// that scheme text and cannot open with a dash. A future relaxation of that allowlist
+/// (a bare `//example.com`, say) would reopen this silently; this comment is the record
+/// that the dependency exists, for whoever touches either end of it next.
 fn command_for(url: &str) -> (&'static str, Vec<String>) {
     if cfg!(target_os = "macos") {
         ("open", vec![url.to_string()])
