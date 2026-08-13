@@ -3,7 +3,7 @@
 //! Snapshots are named `<fixture>@<width>` and are reviewed with `cargo insta review`.
 
 use mdmost::canvas::Canvas;
-use mdmost::mermaid::ast::{GanttChart, GanttSection, GanttTask, TaskProgress};
+use mdmost::mermaid::ast::{GanttChart, GanttSection, GanttTask, Label, TaskProgress};
 use mdmost::mermaid::gantt;
 use mdmost::mermaid::gantt::time::{DAY, days_from_civil};
 use mdmost::theme::Theme;
@@ -20,7 +20,7 @@ fn at(year: i64, month: u32, day: u32) -> i64 {
 /// A planned, non-critical task spanning two dates.
 fn task(name: &str, start: i64, end: i64) -> GanttTask {
     GanttTask {
-        name: name.to_string(),
+        name: Label::line(name),
         id: None,
         progress: TaskProgress::Planned,
         critical: false,
@@ -263,7 +263,7 @@ proptest! {
             .iter()
             .enumerate()
             .map(|(index, (start, length))| GanttTask {
-                name: format!("task {index}"),
+                name: Label::line(format!("task {index}")),
                 id: None,
                 progress: TaskProgress::Planned,
                 critical: index % 3 == 0,

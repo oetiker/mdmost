@@ -53,12 +53,117 @@ with no span anywhere in that direction clamps to the document's start or end. T
 the only place a coordinate is interpreted rather than looked up, and it is where the
 tests should be sharpest.
 
-### 2.2 A diagram label is atomic
+### 2.2 A diagram is atomic
 
-Touching any part of a box selects that label's whole source range. Partial selection
-inside a label would need a byte mapping that survives entity decoding and `<br>`
-splitting (`Label::parse`, `src/mermaid/ast.rs`), which buys nothing a reader wants. The
-unit of selection in a diagram is the box, which is what a reader points at.
+*Amended 2026-08-11, after task 5 landed and the first drag over a real chart was
+looked at. Amended again the same day, after the review found the last see/get
+divergence left inside a diagram: the third case below. Amended a third time on
+2026-08-12, after live testing: the first case used to read "selects that label's whole
+source range, whichever part of the box it touched", on the grounds that partial
+selection would need a byte mapping surviving entity decoding and `<br>` splitting and
+that it bought nothing a reader wants. The owner, selecting text in a real chart, wanted
+exactly that. The mapping was built — `Label::spans_for`, `src/mermaid/ast.rs` — and it
+is what the next three paragraphs describe.*
+
+A drag **confined to one box** — and only such a drag; the two cases after this one take
+precedence — selects **the characters it went over**, and no more. The box is as far as
+such a drag can reach, not the least it can take: a drag over two characters of a label
+copies those two characters and lights those two cells. A label wrapped onto several rows
+behaves the same on every row, and so does one holding a decoded entity; a reader cannot
+see which boxes were easy.
+
+What makes that possible is that a label's drawn text is mapped back to its source **run
+by run** rather than as a whole. Every run a layout emits is either a byte-for-byte copy
+of the cells it names or one entity reference drawing one column — that is the property
+§2.1's column arithmetic rests on, and it is why a decoded `&amp;` is cut out into a run
+of its own rather than left inside a run whose bytes and cells have drifted apart. An
+entity drawing more than one column has no honest answer and is dropped, leaving its cell
+dark: the same call `render::inline` makes for the same reason.
+
+A label is therefore several spans, and "confined to one box" is asked of a span's
+**unit** — the label the run belongs to, recorded on the span — and not of the run's own
+range. Counting ranges would read a wrapped label as a crossing between boxes and hand
+back the whole chart for a drag over one word. The answer is the hull exactly as §2 took
+it, which is also why a drag across a `<br>` copies the `<br>` between the two rows it
+went over: nothing between the ends of a selection is dropped. What has not changed is
+that the confined case does not extend over markup — see the paragraph on that below,
+which is the reason this case exists at all.
+
+**A drag wider than one label takes the whole diagram.** Crossing from one label into
+another, or starting inside the diagram and ending outside it, expands the highlight to
+the diagram's whole rectangle and copies the **whole fenced block**, ```` ```mermaid ````
+opener and ```` ``` ```` closer included. A drag that continues past the diagram
+contributes the block first and then whatever else it covered, in document order.
+
+**A drag pressed outside any label takes the whole diagram immediately.** If the button
+goes down on box art, an arrow, a box's blank interior or the padding inside the
+rectangle, the reader has taken hold of the drawing rather than of anything written in
+it, and the answer is the whole diagram wherever the drag is released — the block on the
+clipboard, the rectangle washed. Before this case such a drag touched no label at all: it
+resolved to no source range, so the clipboard fell back to the drawn cells (§3.1) while
+the highlight stayed empty. The reader copied something and saw nothing, which is §1.
+
+This third case is decided by the **press**, on the single cell the button went down on,
+and never by comparing the drag's cells against the rectangle. A geometric rule over the
+drag would be a second rule able to disagree with the source-range one; a lookup of which
+atom, if any, holds the anchor decides before there is a range to disagree with. It is
+also the reader's own model: the press is where they choose what they are taking.
+
+**A diagram copies as clean Mermaid: the container prefix comes off every line.** A
+diagram written inside a block quote is `> ```mermaid` / `> flowchart LR`, and handing
+that over verbatim gives the reader something that pastes into another document as a quote
+containing a fence. What a reader copies a diagram *for* is to paste it, so the markers are
+removed — from every line, the ```` ```mermaid ```` opener and the ```` ``` ```` closer
+included, since those are source lines and carry the prefix too. A diagram indented into a
+list item loses that indent by the same rule.
+
+This is the one qualification of §2's "taken verbatim", and it is confined to the atom: a
+drag that leaves a quoted diagram for the quoted prose below it strips the block and keeps
+the prose exactly as written, because the reader selected prose.
+
+The prefix is **read out of the document per line, not matched as a pattern and not
+sampled once**. *Amended 2026-08-11: this paragraph previously specified one prefix, taken
+from the block's first line and required of every later line. That is not a rule
+CommonMark obeys — `>` and `> ` are the same marker, a blank quoted line is a bare `>`,
+and a document may mix them inside one quote — and an implementation of it renders three
+such documents correctly while copying broken Mermaid out of them.*
+
+The block's content, with the prefix already off, is what comrak handed the renderer, and
+an atom carries it. Each line of it is located as a **suffix** of its source line — the
+same relationship `doc::convert::code_lines` uses, and comrak's own prefix-stripping run
+backwards — so what comes off a line is what that line actually had in front of it. `> `,
+`> > `, `>`, a bare `>` and a list indent all fall out of the one rule, and a `> ` that is
+part of the Mermaid source survives, because the suffix is matched against the document
+rather than assumed. A line whose content cannot be located there — comrak expands a tab
+when it strips a container, so a tab-indented line is no longer a suffix of its source —
+is copied **exactly as the document has it**: an unstripped line is one the reader can
+still read, where a mis-stripped one is broken Mermaid.
+
+The two fence lines carry no content to match and are read straight from the source: the
+opener from the block's recorded start, which comrak places after the prefix at the
+backticks, and the closer from the first fence character on its line, which a container
+prefix cannot contain.
+
+This is not a refinement of §2's markup rule but a replacement for it inside a diagram.
+That rule extends a selection over every byte nothing drew, which in prose is a pair of
+asterisks; on a Mermaid line it is nearly the whole line, so a drag over `Read` in
+`    A[Read] --> B[Draw]` lit one word and copied `    A[Read] --> B[` — a token cut in
+half, and precisely the see/get divergence of §1. It cannot be fixed from the highlight
+side: `A[` is never drawn, so there are no cells to light.
+
+**The whole-diagram wash covers the entire rectangle — box art, arrows and interior
+blanks included. This is a deliberate exception to "chrome never highlights" (§2), and
+the only one.** It is what makes the two states legible: either one label is lit and one
+label is copied, or the diagram is a solid block and the block is what the clipboard
+gets. Lighting only the labels while copying forty bytes of Mermaid would be §1 again,
+wearing the chrome rule as a disguise.
+
+The implementation keeps a single predicate for both: the diagram records its drawn
+rectangle and its block's source range as a `Canvas::Atom`, and `select::resolve`
+answers the clipboard and the highlight from one decision. "Confined to one label" is
+judged on the resolved source hull, not on the two screen positions, so an endpoint that
+landed on a border or an arrow — already resolved to a text offset by §2.1 — is judged
+by the same rule as one the reader dragged over directly.
 
 ## 3. Diagram provenance
 
@@ -95,18 +200,28 @@ absolute. `src/render/code.rs` already does exactly this rebasing for fenced cod
 and it is the single highest-risk piece of arithmetic in this design. It is also where
 CRLF and leading-whitespace handling have already bitten this project once each.
 
-Once labels carry spans, a drag over a diagram yields the **mermaid source** between the
-first and last box touched — `A[Parse] --> B[Layout]` — and the status bar says
-`Markdown source`, like everything else. The arrows and the boxes are drawn, never
-selected.
+Once labels carry spans, a drag over a diagram yields **mermaid source** and the status
+bar says `Markdown source`, like everything else. Which source is §2.2's answer: what the
+drag went over, for a drag confined to one box, and the whole fenced block for anything
+wider and for anything pressed outside a label. The
+earlier draft of this paragraph promised the source *between* the first and last box
+touched — `A[Parse] --> B[Layout]` — which is what the implementation did and what the
+amendment above replaces; the string it produced in practice was truncated at the last
+label it could map.
 
 ### 3.1 What remains of the rendered-cells fallback
 
-It stays, and it should be rare. Content that genuinely has no source mapping — box art
-between labels, a family whose layout has not yet been given spans — still falls back to
-the drawn cells with `from_source: false`, and the status bar still says `rendered
+It stays, and it should be rare. Content that genuinely has no source mapping — a table's
+frame, a thematic break, a family whose layout has not yet been given spans — still falls
+back to the drawn cells with `from_source: false`, and the status bar still says `rendered
 text`. The fallback is not the design; it is the honest answer when the mapping is
 absent.
+
+A diagram's box art is no longer one of its cases. It used to be the example, and it was
+the one place the fallback produced the §1 shape rather than an honest answer: the cells
+were copied and nothing lit up. §2.2's third case claims the whole rectangle, so the
+fallback is reached inside a diagram only where no atom was recorded at all — a layout
+that failed, which draws no rectangle to press on either.
 
 ## 4. The copy button
 
@@ -176,6 +291,17 @@ Carried from the renderer's design authority and still binding:
    this project has already been bitten by CRLF (provenance was silently lost on every
    CRLF document) and by measuring an expanded line against a source offset. Tests must
    include a CRLF document and a diagram indented inside a list.
+
+   *Amended 2026-08-12 (owner ruling: "copy paste should always get clean \n newline"):*
+   **line endings are no longer part of this arithmetic, or of any other.**
+   `doc::normalise_line_endings` rewrites every line ending to a lone `\n` inside
+   `Doc::parse` and `Doc::parse_plain`, which between them are the only ways to build a
+   `Doc`, and the parser is handed the normalised text — so a CRLF document has ceased to
+   exist by the time anything downstream sees one, and every byte offset in the crate
+   indexes a source with no `\r` in it. The three per-line `\r` strips this risk produced
+   (two in `doc::convert`, one in `doc::plain`) are gone with it. The requirement to test
+   a CRLF document stands, and is now met by **equivalence**: a CRLF document must draw
+   the same canvas and copy the same bytes as its LF twin.
 2. **Endpoint resolution on chrome** (§2.1) — the one interpreted coordinate.
 3. **Snapshot churn.** The muted button style and the highlight change will move
    goldens. Prove any large churn is what it looks like: strip leading and trailing

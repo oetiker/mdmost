@@ -28,14 +28,14 @@ mod shape;
 use crate::canvas::Canvas;
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
-    Direction, NotePlacement, StateDiagram, StateEndpoint, StateId, StateKind, StateNode,
+    Direction, Label, NotePlacement, StateDiagram, StateEndpoint, StateId, StateKind, StateNode,
     StateNote, StateScope, Transition,
 };
-use crate::text::wrap_plain;
 use crate::theme::Theme;
 
 use super::graph::{
-    self, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke, Terminator,
+    self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke,
+    Terminator,
 };
 
 /// Widest a transition label is allowed to get before it is wrapped.
@@ -95,8 +95,8 @@ enum Slot {
     Start,
     /// A scope's `[*]` end marker.
     End,
-    /// A note, holding its already-wrapped text.
-    Note(Vec<String>),
+    /// A note, holding its own label so the drawn text can name its source bytes.
+    Note(Label),
 }
 
 /// The translated diagram: what each node is, how they are grouped and joined.
@@ -238,13 +238,7 @@ impl Plan {
         let Some(target) = ends.get(note.target.0).and_then(|end| end.entry) else {
             return;
         };
-        let lines: Vec<String> = note
-            .text
-            .lines
-            .iter()
-            .flat_map(|line| wrap_plain(line, NOTE_WIDTH))
-            .collect();
-        let node = self.push(Slot::Note(lines));
+        let node = self.push(Slot::Note(note.text.clone()));
         match group.nodes.iter().position(|&at| at == target) {
             Some(at) if note.placement == NotePlacement::LeftOf => group.nodes.insert(at, node),
             Some(at) => group.nodes.insert(at + 1, node),
@@ -256,7 +250,7 @@ impl Plan {
             stroke: Stroke::Dotted,
             tail: Terminator::None,
             head: Terminator::None,
-            label: Vec::new(),
+            label: DrawnLabel::default(),
             tail_label: None,
             head_label: None,
         });
@@ -293,13 +287,7 @@ impl Plan {
                 .label
                 .as_ref()
                 .filter(|label| !label.is_empty())
-                .map(|label| {
-                    label
-                        .lines
-                        .iter()
-                        .flat_map(|line| wrap_plain(line, LABEL_WIDTH))
-                        .collect()
-                })
+                .map(|label| DrawnLabel::wrapped(label, LABEL_WIDTH))
                 .unwrap_or_default(),
             tail_label: None,
             head_label: None,
@@ -311,19 +299,24 @@ impl Plan {
 ///
 /// The lines are the author's own; wrapping is left to whoever draws them, because a
 /// node body and a group title get different budgets (design spec §3).
-fn label_text(state: &StateNode) -> Vec<String> {
+fn label_text(state: &StateNode) -> Label {
     match state.label.as_ref().filter(|label| !label.is_empty()) {
-        Some(label) => label.lines.clone(),
-        None => vec![state.key.clone()],
+        Some(label) => label.clone(),
+        // The key is source text, but the parser records no offset for it — a state is
+        // interned from whichever transition first mentions it — so it is drawn as a
+        // label with no provenance rather than one claiming bytes nobody located.
+        None => Label::line(state.key.clone()),
     }
 }
 
-/// [`label_text`] wrapped to `width`, for callers that need finished lines.
-fn label_lines(state: &StateNode, width: usize) -> Vec<String> {
-    label_text(state)
-        .iter()
-        .flat_map(|line| wrap_plain(line, width))
-        .collect()
+/// [`label_text`] wrapped to `width`, for callers that draw it themselves.
+///
+/// The label travels with its wrapped rows, so a composite state's frame title maps back
+/// to the description the author wrote. A state that has no description falls back to its
+/// key, which is not text from the document — `label_text` builds a `Label::line` for it,
+/// whose empty `source` emits no span at all.
+fn label_lines(state: &StateNode, width: usize) -> DrawnLabel {
+    DrawnLabel::wrapped(&label_text(state), width)
 }
 
 /// Draws state boxes for the engine.
@@ -347,7 +340,7 @@ impl NodeArt for Art<'_> {
         match self.plan.slots.get(node.0) {
             Some(Slot::Start) => shape::start(theme),
             Some(Slot::End) => shape::end(theme),
-            Some(Slot::Note(lines)) => shape::note(lines, budget, theme),
+            Some(Slot::Note(label)) => shape::note(label, budget, NOTE_WIDTH, theme),
             Some(Slot::State(_)) => match self.state(node) {
                 Some(state) => match state.kind {
                     StateKind::Choice => shape::choice(theme),
@@ -377,7 +370,6 @@ impl NodeArt for Art<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mermaid::ast::Label;
 
     fn state(key: &str, kind: StateKind) -> StateNode {
         StateNode {
@@ -458,10 +450,11 @@ mod tests {
         };
         let plan = Plan::of(&diagram);
         assert_eq!(plan.root.children.len(), 1, "the composite is a container");
-        assert_eq!(
-            plan.root.children[0].title.as_deref(),
-            Some(["Outer".to_string()].as_slice())
-        );
+        let title = plan.root.children[0]
+            .title
+            .as_ref()
+            .expect("the composite is titled");
+        assert_eq!(title.lines(), vec!["Outer"]);
         assert!(plan.root.nodes.is_empty(), "nothing sits beside the frame");
     }
 
@@ -582,12 +575,9 @@ mod tests {
     fn a_state_shows_its_description_rather_than_its_key() {
         let mut node = state("s1", StateKind::Simple);
         node.label = Some(Label::line("Waiting for input"));
-        assert_eq!(
-            label_lines(&node, 40),
-            vec!["Waiting for input".to_string()]
-        );
+        assert_eq!(label_lines(&node, 40).lines(), vec!["Waiting for input"]);
         let plain = state("s2", StateKind::Simple);
-        assert_eq!(label_lines(&plain, 40), vec!["s2".to_string()]);
+        assert_eq!(label_lines(&plain, 40).lines(), vec!["s2"]);
     }
 
     #[test]

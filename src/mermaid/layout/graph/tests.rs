@@ -1,11 +1,11 @@
 //! Engine-level tests: the invariants every layout must satisfy.
 
 use crate::canvas::{BorderSet, Canvas};
-use crate::mermaid::ast::Direction;
+use crate::mermaid::ast::{Direction, Label};
 use crate::text::Align;
 use crate::theme::Theme;
 
-use super::{EdgeSpec, Fit, GraphSpec, GroupSpec, NodeIdx, Stroke, Terminator, draw};
+use super::{DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeIdx, Stroke, Terminator, draw};
 
 /// A one-letter box, so a label can never be wrapped away by the width ladder.
 fn art(node: NodeIdx, _budget: u16, theme: &Theme) -> Canvas {
@@ -175,7 +175,7 @@ fn a_node_in_two_groups_is_rejected() {
     let theme = Theme::default_dark();
     let mut spec = spec(Direction::TopToBottom, 2, &[]);
     spec.root.children.push(GroupSpec {
-        title: Some(vec!["dup".to_string()]),
+        title: Some(DrawnLabel::whole(&Label::line("dup"))),
         nodes: vec![NodeIdx(0)],
         ..GroupSpec::default()
     });
@@ -216,10 +216,10 @@ fn nested_groups_are_framed_from_the_inside_out() {
     let mut spec = spec(Direction::TopToBottom, 3, &[(0, 1), (1, 2)]);
     spec.root.nodes = vec![NodeIdx(0)];
     spec.root.children = vec![GroupSpec {
-        title: Some(vec!["outer".to_string()]),
+        title: Some(DrawnLabel::whole(&Label::line("outer"))),
         nodes: vec![NodeIdx(1)],
         children: vec![GroupSpec {
-            title: Some(vec!["inner".to_string()]),
+            title: Some(DrawnLabel::whole(&Label::line("inner"))),
             nodes: vec![NodeIdx(2)],
             ..GroupSpec::default()
         }],

@@ -4,7 +4,7 @@
 //! from. Every one of them preserves the canvas contract described in
 //! [`crate::canvas`].
 
-use super::{Anchor, BorderSet, Canvas, Cell, Hotspot, Pin, SearchSpan};
+use super::{Anchor, Atom, BorderSet, Canvas, Cell, Hotspot, Pin, SearchSpan, TargetRebase};
 use crate::error::CanvasError;
 use crate::text::{Align, Line, display_width};
 use crate::theme::Style;
@@ -52,6 +52,11 @@ impl Canvas {
     ///
     /// A double-width cell straddling the new edge is replaced by a blank, so the
     /// result is still exactly `width` columns wide. Widening is a no-op.
+    ///
+    /// A [`Hotspot`] over cells the narrowing took is clamped, and dropped when the whole
+    /// of it went: a hotspot is a claim on *drawn* cells, and these are not drawn any
+    /// more. Search spans are left alone, because their contract is the opposite one —
+    /// they are translated verbatim and consumers clamp.
     pub fn truncate_width(&mut self, width: u16, style: Style) {
         if width >= self.width {
             return;
@@ -65,6 +70,7 @@ impl Canvas {
             }
         }
         self.width = width;
+        self.clamp_hotspots();
     }
 
     /// Clips to `width` and stamps `marker` on every row that lost content.
@@ -102,6 +108,12 @@ impl Canvas {
     /// style — a border closing itself in the overflow-marker colour would be a
     /// different kind of wrong.
     ///
+    /// A [`Hotspot`] over a column the cut took is gone with it
+    /// ([`Canvas::truncate_width`]), and a hotspot over the column the marker or the
+    /// glyph *stayed* in is shortened to stop before it: that cell shows the chevron now,
+    /// not the control, and a cell that opens a link without looking like one is the same
+    /// fault as a claim on a cell that is not there.
+    ///
     /// **Callers that own a clipped-block detector must keep the marker reachable.**
     /// `render::document::ClipTest` decides whether to re-render a block wider by looking for
     /// the marker, so a caller that answered anything but [`CutMark::Marker`] for
@@ -130,6 +142,9 @@ impl Canvas {
         self.truncate_width(width, style);
 
         let marker_width = display_width(marker);
+        // Where each row's own content stops once the edge glyph has taken its columns.
+        // Collected in row order so the clamp below can binary-search it.
+        let mut edges: Vec<(usize, u16)> = Vec::new();
         for (row, _) in clipped.iter().enumerate().filter(|(_, cut)| **cut) {
             match edge(row) {
                 CutMark::Bare => continue,
@@ -139,6 +154,7 @@ impl Canvas {
                     if let Some(cut) = self.rows[row].get(keep - 1) {
                         let style = cut.style();
                         self.write_str(row, keep - 1, &glyph.to_string(), style);
+                        edges.push((row, u16::try_from(keep - 1).unwrap_or(u16::MAX)));
                         continue;
                     }
                 }
@@ -148,7 +164,36 @@ impl Canvas {
                 continue;
             }
             self.write_str(row, keep - marker_width, marker, style);
+            edges.push((row, u16::try_from(keep - marker_width).unwrap_or(u16::MAX)));
         }
+        self.revoke_hotspots_over(&edges);
+    }
+
+    /// Shortens or drops every hotspot reaching into the columns an edge glyph took.
+    ///
+    /// [`Canvas::truncate_width`] has already answered for the columns that went; this
+    /// answers for the one or two that stayed and stopped showing the control. A claim
+    /// over the "there is more to the right" chevron is a cell that opens a link and does
+    /// not look like one, which is the same fault as a claim over a cell that is not
+    /// there — the chevron is simply a more visible way to have it.
+    ///
+    /// `edges` is `(row, first overwritten column)` in ascending row order.
+    fn revoke_hotspots_over(&mut self, edges: &[(usize, u16)]) {
+        if edges.is_empty() {
+            return;
+        }
+        self.hotspots.retain_mut(|spot| {
+            let Ok(index) = edges.binary_search_by_key(&spot.row, |(row, _)| *row) else {
+                return true;
+            };
+            match clamped_claim(spot.col, spot.cols, edges[index].1) {
+                Some((_, cols)) => {
+                    spot.cols = cols;
+                    true
+                }
+                None => false,
+            }
+        });
     }
 
     /// Stamps a hollow rectangle onto the canvas, in place.
@@ -262,15 +307,40 @@ impl Canvas {
     /// * Search spans are translated verbatim, including spans whose cells were
     ///   clipped at the right edge; consumers must clamp a span to the canvas width
     ///   before highlighting it.
-    /// * `src`'s [`Pin`]s and [`Hotspot`]s are **dropped**. Both are claims about a whole
-    ///   row (see [`Pin`], [`Hotspot`]), and a blit puts `src` somewhere on a row it may
-    ///   well share with other content — a table cell is the case that matters — where it
-    ///   has no standing to make one. The operations that do keep them are
-    ///   [`Canvas::append`] and [`Canvas::indent`], which move whole rows.
+    /// * `src`'s [`Hotspot`]s are translated by the offset and kept, with their `target`
+    ///   rebased ([`Canvas::merge_hotspots`]). A hotspot carries its own `col`, so once
+    ///   translated it names specific destination cells — and after the blit the control's
+    ///   characters really are drawn in exactly those cells. That is the same claim a
+    ///   search span makes, and the same reason this operation has always translated one.
+    ///   Unlike a search span, a hotspot is **clamped** to the destination width and
+    ///   dropped when nothing of it survives the clip: a region that reacts to the pointer
+    ///   while showing nothing of the control is worse than no region.
+    /// * `src`'s [`Pin`]s and [`Atom`]s are **dropped**. A pin claims the leading columns
+    ///   of a row *from column zero* and an atom a rectangle of rows, and a blit puts
+    ///   `src` somewhere on rows it may well share with other content — a table cell is
+    ///   the case that matters — where it has no standing to make either claim. The
+    ///   operations that keep them are [`Canvas::append`] and [`Canvas::indent`], which
+    ///   move whole rows.
     /// * Cells of `src` that are blank *and* carry no style still overwrite the
     ///   destination; use [`Canvas::blit_opaque`] semantics deliberately — a canvas is
     ///   a rectangle, not a sprite with transparency.
     pub fn blit(&mut self, top: usize, left: usize, src: &Canvas, fill: Style) {
+        self.blit_rebased(top, left, src, fill, &mut TargetRebase::new());
+    }
+
+    /// [`blit`](Canvas::blit), with the hotspot target remap supplied by the caller.
+    ///
+    /// For the caller that places one source canvas with several blits and needs a
+    /// control spanning them to stay one control; see [`TargetRebase`]. Every other
+    /// caller wants [`Canvas::blit`], which is this with a remap of its own.
+    pub fn blit_rebased(
+        &mut self,
+        top: usize,
+        left: usize,
+        src: &Canvas,
+        fill: Style,
+        rebase: &mut TargetRebase,
+    ) {
         self.pad_to_height(top + src.height(), fill);
         let width = usize::from(self.width);
         for (offset, cells) in src.rows.iter().enumerate() {
@@ -297,6 +367,7 @@ impl Canvas {
             }
         }
         self.merge_metadata(src, top, left);
+        self.merge_hotspots(src, top, u16::try_from(left).unwrap_or(u16::MAX), rebase);
     }
 
     /// Translates and merges `src`'s anchors and spans into `self`.
@@ -328,18 +399,75 @@ impl Canvas {
 
     /// Translates and merges `src`'s hotspots into `self`.
     ///
-    /// Separate from [`Canvas::merge_metadata`] for the reason [`Canvas::merge_pins`] is:
-    /// a control belongs to a row a block owns outright, so it travels with the
-    /// operations that stack and inset whole rows and not with `blit`.
-    fn merge_hotspots(&mut self, src: &Canvas, top: usize, left: u16) {
-        self.hotspots
-            .extend(src.hotspots.iter().map(|spot| Hotspot {
+    /// Separate from [`Canvas::merge_metadata`] because a hotspot needs two things that
+    /// an anchor and a span do not: its target rebased, and its claim clamped.
+    ///
+    /// `target` is rebased, not copied verbatim: `src` numbered its controls from zero
+    /// on its own canvas, and `self` may already hold controls numbered from zero too
+    /// (`document::render` stacks one block canvas after another this way). Copying the
+    /// id through unchanged would let an unrelated control in each collide on the same
+    /// target, which would then light together on hover. Each *distinct* source target
+    /// gets one fresh id in `self`; two source hotspots sharing a target still share
+    /// their new one, so a control that wraps across rows stays one control. `rebase`
+    /// carries that mapping, and a caller may hand the same one to several merges that
+    /// together place one source canvas ([`TargetRebase`]).
+    ///
+    /// A claim is clamped to `self.width` and dropped when nothing of it survives, by
+    /// [`clamped_claim`]. `blit` clips cells at the right edge, and a hotspot over cells
+    /// that were clipped away would be a region reacting to a pointer with nothing of the
+    /// control under it. `append` and `indent` never clip, so there the clamp is a no-op
+    /// they pay one comparison for.
+    fn merge_hotspots(&mut self, src: &Canvas, top: usize, left: u16, rebase: &mut TargetRebase) {
+        let width = self.width;
+        for spot in &src.hotspots {
+            let Some((col, cols)) = clamped_claim(spot.col.saturating_add(left), spot.cols, width)
+            else {
+                continue;
+            };
+            let target = *rebase
+                .map
+                .entry(spot.target)
+                .or_insert_with(|| self.next_target());
+            self.hotspots.push(Hotspot {
                 row: spot.row + top,
-                col: spot.col.saturating_add(left),
-                cols: spot.cols,
-                text: spot.text.clone(),
-                html: spot.html.clone(),
-            }));
+                col,
+                cols,
+                kind: spot.kind.clone(),
+                target,
+            });
+        }
+    }
+
+    /// Drops or shortens every hotspot claiming a column the canvas no longer has.
+    ///
+    /// The counterpart of the clamp in [`Canvas::merge_hotspots`], for the other way a
+    /// claim can end up outside the canvas: the canvas itself got narrower under it. A
+    /// table wider than the page is drawn at the width its columns negotiated and then
+    /// [`Canvas::clip_with_edges`] cuts it, and a link in a column that was cut must not
+    /// go on claiming cells past the edge.
+    fn clamp_hotspots(&mut self) {
+        let width = self.width;
+        self.hotspots
+            .retain_mut(|spot| match clamped_claim(spot.col, spot.cols, width) {
+                Some((_, cols)) => {
+                    spot.cols = cols;
+                    true
+                }
+                None => false,
+            });
+    }
+
+    /// Translates and merges `src`'s atoms into `self`.
+    ///
+    /// Separate from [`Canvas::merge_metadata`] for the reason [`Canvas::merge_pins`] is:
+    /// an atom claims a rectangle of rows a block owns outright, so it travels with the
+    /// operations that stack and inset whole rows and not with `blit`.
+    fn merge_atoms(&mut self, src: &Canvas, top: usize, left: u16) {
+        self.atoms.extend(src.atoms.iter().map(|atom| Atom {
+            row: atom.row + top,
+            col: atom.col.saturating_add(left),
+            ..atom.clone()
+        }));
     }
 
     /// Appends `other` below `self`.
@@ -356,7 +484,8 @@ impl Canvas {
             .extend(other.rows.iter().map(|cells| pad_cells(cells, width, fill)));
         self.merge_metadata(other, top, 0);
         self.merge_pins(other, top, 0);
-        self.merge_hotspots(other, top, 0);
+        self.merge_hotspots(other, top, 0, &mut TargetRebase::new());
+        self.merge_atoms(other, top, 0);
     }
 
     /// Stacks canvases vertically, in order.
@@ -408,23 +537,36 @@ impl Canvas {
     /// Every row moves right by `left` in one piece, so a [`Pin`] moves with it: the
     /// columns the indent added are chrome of the container, and a gutter two spaces into
     /// a list item is still welded to the left edge of the page.
+    ///
+    /// Hotspots come across in the `blit`, which carries them; only the two channels a
+    /// blit drops are merged again here.
     pub fn indent(&self, left: u16, right: u16, fill: Style) -> Canvas {
         let mut out = Canvas::new(self.width + left + right, self.height(), fill);
         out.blit(0, usize::from(left), self, fill);
         out.merge_pins(self, 0, left);
-        out.merge_hotspots(self, 0, left);
+        out.merge_atoms(self, 0, left);
         out
     }
 
     /// Returns rows `start..start + len` as a canvas of the same width.
     ///
-    /// This is what the viewport uses to show a slice of the document. Anchors and
-    /// spans falling inside the slice are translated; the rest are dropped.
+    /// Anchors, spans, pins and hotspots falling inside the slice are translated; the
+    /// rest are dropped.
+    ///
+    /// **A hotspot keeps its `target` verbatim, and that is load-bearing.** The slice is a
+    /// different canvas but it is a *view of this one*, so two slices of the same wrapped
+    /// control still name it with the same id — which is what lets
+    /// `render::table::align_canvas` place a cell row by row and hand every one of those
+    /// blits the same [`TargetRebase`], so the control arrives whole. The counter
+    /// [`Canvas::next_target`] issues from comes across for the same reason: a slice that
+    /// numbered its next control from zero would hand out an id its copied hotspots
+    /// already hold.
     pub fn slice_rows(&self, start: usize, len: usize) -> Canvas {
         let end = (start + len).min(self.height());
         let start = start.min(end);
         let mut out = Canvas::empty(self.width);
         out.rows = self.rows[start..end].to_vec();
+        out.next_target = self.next_target;
         out.anchors = self
             .anchors
             .iter()
@@ -461,8 +603,24 @@ impl Canvas {
                 row: spot.row - start,
                 col: spot.col,
                 cols: spot.cols,
-                text: spot.text.clone(),
-                html: spot.html.clone(),
+                kind: spot.kind.clone(),
+                target: spot.target,
+            })
+            .collect();
+        // An atom that hangs off the end of the slice is *clipped*, not dropped: half a
+        // diagram on screen is still a diagram, and the source it copies does not
+        // depend on how much of it the viewport happens to show.
+        out.atoms = self
+            .atoms
+            .iter()
+            .filter_map(|atom| {
+                let top = atom.row.max(start);
+                let bottom = (atom.row + atom.rows).min(end);
+                (top < bottom).then_some(Atom {
+                    row: top - start,
+                    rows: bottom - top,
+                    ..atom.clone()
+                })
             })
             .collect();
         out
@@ -565,6 +723,22 @@ impl Canvas {
         let shortened = crate::text::ellipsize(text, usize::from(self.width));
         self.push_text(&shortened, align, style)
     }
+}
+
+/// The columns a hotspot claims, once cut back to end before `limit`.
+///
+/// `None` when the claim starts at `limit` or past it, so nothing of it is left. One
+/// function rather than a rule written three times: a blit's right edge, a narrowing
+/// ([`Canvas::truncate_width`]) and the column an edge glyph takes
+/// ([`Canvas::revoke_hotspots_over`]) all cut a claim, and they have to cut it
+/// identically — "two paths that merely agree today" is how this file grew the bugs it
+/// has already removed.
+fn clamped_claim(col: u16, cols: u16, limit: u16) -> Option<(u16, u16)> {
+    if col >= limit {
+        return None;
+    }
+    let cols = cols.min(limit - col);
+    (cols > 0).then_some((col, cols))
 }
 
 /// Copies `cells` into a row of exactly `width` columns.

@@ -104,6 +104,20 @@ pub enum Copied {
 }
 
 impl Copied {
+    /// The noun a `[copy]` button's payload earns.
+    ///
+    /// Code carries one flavour and a table two, and that is the whole difference between
+    /// the two. It lives here rather than at either call site so that the state machine
+    /// and the event loop cannot come to different conclusions about what the reader is
+    /// told they copied, and so that it can be asserted without a clipboard.
+    pub fn for_button(html: Option<&str>) -> Self {
+        if html.is_some() {
+            Copied::Table
+        } else {
+            Copied::Code
+        }
+    }
+
     /// The noun the status bar uses.
     fn what(self) -> &'static str {
         match self {

@@ -31,10 +31,57 @@
 ///
 /// A label never contains an empty `lines` vector: an empty label is `lines == [""]`
 /// only if the source really said so; otherwise use [`Label::is_empty`].
-#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+#[derive(Debug, Clone, Default)]
 pub struct Label {
     /// The label's lines, in order, without trailing newlines.
     pub lines: Vec<String>,
+    /// Where the raw label text sat in the mermaid source, before `<br>` splitting and
+    /// entity decoding.
+    ///
+    /// The range covers the text as written, so `A[Parse]` gives the range of `Parse`.
+    /// It is relative to the mermaid block, not the document; `render::diagram`
+    /// rebases it. An empty range means "synthesised, not from the source" — what a
+    /// label gets unless it records a real offset, whether because it was never read
+    /// from a document ([`Label::line`]) or because [`Label::parse`] was asked to
+    /// place it without one.
+    pub source: std::ops::Range<usize>,
+    /// The raw label text [`source`](Label::source) names, exactly as written.
+    ///
+    /// Kept because `lines` cannot be mapped back to bytes without it: `<br>` splitting,
+    /// trimming and entity decoding all move text, and the label is the only place that
+    /// knows how far. [`Label::spans_for`] is what it is for.
+    ///
+    /// The invariant that makes it usable is `raw.len() == source.len()` — the raw text
+    /// *is* those source bytes. A label built from lines that were already split
+    /// ([`Label::from_lines`]) carries a hull rather than one slice and holds an empty
+    /// `raw`, which `spans_for` reads as "no per-line provenance" and fails closed on.
+    raw: String,
+}
+
+/// Equality and hashing consider only the visible text, not where it came from.
+///
+/// `source` is provenance metadata, not part of a label's identity: a hand-built
+/// [`Label::line`] and a parsed label with the same lines must compare equal, which is
+/// how most of the test suite already asserts on labels. Deriving `PartialEq` /
+/// `Hash` over both fields would make every such comparison depend on byte offsets
+/// nobody wrote down.
+///
+/// A consequence worth knowing before writing a test: `assert_eq!(label, Label::line("Parse"))`
+/// (or against any other hand-built `Label`) proves nothing about `source` — it passes
+/// no matter what byte range the label actually carries. A test that cares about
+/// provenance must assert on `label.source` directly.
+impl PartialEq for Label {
+    fn eq(&self, other: &Self) -> bool {
+        self.lines == other.lines
+    }
+}
+
+impl Eq for Label {}
+
+impl std::hash::Hash for Label {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.lines.hash(state);
+    }
 }
 
 impl Label {
@@ -43,28 +90,53 @@ impl Label {
     ///
     /// Leading and trailing whitespace is trimmed from every resulting line. Trimming
     /// also precedes decoding, so a leading `&nbsp;` survives as a visible space.
+    ///
+    /// For a call site that knows where `text` sat in the mermaid source, prefer
+    /// [`Label::parse_at`] — this gives an empty [`Label::source`], the same "not from
+    /// the source" value [`Label::line`] gets, rather than falsely claiming `text`
+    /// began at the very start of a document.
     pub fn parse(text: &str) -> Self {
-        let mut lines = Vec::new();
-        let mut rest = text;
-        loop {
-            match find_break(rest) {
-                Some((at, len)) => {
-                    lines.push(line_text(&rest[..at]));
-                    rest = &rest[at + len..];
-                }
-                None => {
-                    lines.push(line_text(rest));
-                    break;
-                }
-            }
+        Self {
+            lines: split_lines(text),
+            source: Default::default(),
+            raw: text.to_string(),
         }
-        Self { lines }
     }
 
-    /// A single-line label holding `text` verbatim.
-    pub fn line(text: impl Into<String>) -> Self {
+    /// Builds a label from raw label text taken from offset `at` in the mermaid
+    /// source, recording that as [`Label::source`].
+    pub fn parse_at(text: &str, at: usize) -> Self {
         Self {
-            lines: vec![text.into()],
+            lines: split_lines(text),
+            source: at..at + text.len(),
+            raw: text.to_string(),
+        }
+    }
+
+    /// A single-line label holding `text` verbatim, with an empty [`Label::source`]:
+    /// this builds labels that were never read from a document, chiefly in tests.
+    pub fn line(text: impl Into<String>) -> Self {
+        let text = text.into();
+        Self {
+            lines: vec![text.clone()],
+            source: Default::default(),
+            raw: text,
+        }
+    }
+
+    /// A label whose lines were split by the caller, from `source` bytes that are a
+    /// *hull* over them rather than one slice of raw label text.
+    ///
+    /// The state diagram's multi-line `note … end note` is the case: its range grows
+    /// line by line and covers the `note` keyword's own line endings, so no single
+    /// stretch of the document is "the label text". Such a label carries no
+    /// [`raw`](Label::raw) and therefore no per-line provenance — [`Label::spans_for`]
+    /// declines rather than answering from a mapping it does not have.
+    pub fn from_lines(lines: Vec<String>, source: std::ops::Range<usize>) -> Self {
+        Self {
+            lines,
+            source,
+            raw: String::new(),
         }
     }
 
@@ -77,6 +149,129 @@ impl Label {
     pub fn text(&self) -> String {
         self.lines.join("\n")
     }
+
+    /// The source bytes behind one drawn piece of line `index`, run by run.
+    ///
+    /// A layout draws a label by wrapping [`lines`](Label::lines) and putting the
+    /// resulting pieces on the canvas; this answers, for one such piece, which source
+    /// bytes each part of it came from and where that part sits inside it. It is what
+    /// lets a selection copy the characters a reader dragged over rather than the whole
+    /// label (design spec §2.2), and a wrapped label is exactly the case that needs it:
+    /// its rows would otherwise all name the same range and no column arithmetic inside
+    /// one could be right.
+    ///
+    /// `at` is where `text` starts in `self.lines[index]`, in bytes.
+    ///
+    /// **Every run it returns is a byte-for-byte copy of the cells it names, or one
+    /// column drawn by one entity reference.** That is the property the selection's
+    /// column walks depend on (`select::offset_at`, `select::highlighted_columns`,
+    /// `search::segments_for` all convert between bytes and columns *inside* a span by
+    /// walking its source), so a decoded entity is cut out into a run of its own instead
+    /// of being left inside a run whose bytes and cells no longer line up. An entity
+    /// that draws more than one column — `&#x1F600;` — is the one thing with no honest
+    /// answer and is dropped, leaving its cell dark, which is the same call
+    /// `render::inline` makes for the same reason.
+    ///
+    /// Empty when this label has no per-line provenance to give ([`Label::raw`]), or
+    /// when `text` is not the piece of line `index` it claims to be. No provenance is
+    /// always better than provenance from somewhere else in the document.
+    pub fn spans_for(&self, index: usize, at: usize, text: &str) -> Vec<LabelSpan> {
+        if self.source.is_empty() || self.raw.len() != self.source.len() {
+            return Vec::new();
+        }
+        let (Some(line), Some(raw)) = (self.lines.get(index), self.line_source(index)) else {
+            return Vec::new();
+        };
+        let piece = at..at + text.len();
+        if line.get(piece.clone()) != Some(text) {
+            return Vec::new();
+        }
+        let base = self.source.start + raw.start;
+        let (decoded, runs) = crate::mermaid::entity::decode_runs(&self.raw[raw.clone()]);
+        if decoded != *line {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for run in runs {
+            let lo = run.text.start.max(piece.start);
+            let hi = run.text.end.min(piece.end);
+            if lo >= hi {
+                continue;
+            }
+            let cols = crate::text::display_width(&line[lo..hi]);
+            let source = if run.faithful {
+                let start = base + run.source.start;
+                start + (lo - run.text.start)..start + (hi - run.text.start)
+            } else if cols == 1 && (lo, hi) == (run.text.start, run.text.end) {
+                base + run.source.start..base + run.source.end
+            } else {
+                continue;
+            };
+            out.push(LabelSpan {
+                source,
+                col: crate::text::display_width(&line[piece.start..lo]),
+                cols,
+            });
+        }
+        out
+    }
+
+    /// Where line `index` sits in [`raw`](Label::raw), trimmed as the line was.
+    ///
+    /// The same split and the same trim [`split_lines`] made, so the two cannot
+    /// disagree about which bytes became which line.
+    fn line_source(&self, index: usize) -> Option<std::ops::Range<usize>> {
+        let raw = *split_raw(&self.raw).get(index)?;
+        let text = &self.raw[raw.0..raw.1];
+        let start = raw.0 + (text.len() - text.trim_start().len());
+        Some(start..start + text.trim().len())
+    }
+}
+
+/// One run of a drawn label piece, and the source bytes that drew it.
+///
+/// Columns are relative to the start of the piece [`Label::spans_for`] was asked about;
+/// the layout knows where that piece landed and adds its own origin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabelSpan {
+    /// The source byte range, in the same space as [`Label::source`].
+    pub source: std::ops::Range<usize>,
+    /// The first display column of the piece this run drew.
+    pub col: usize,
+    /// How many display columns it drew.
+    pub cols: usize,
+}
+
+/// Splits raw label text into lines on `<br>` variants and newlines, trimming and
+/// entity-decoding each one. Shared by [`Label::parse`] and [`Label::parse_at`], which
+/// differ only in what they record as [`Label::source`].
+fn split_lines(text: &str) -> Vec<String> {
+    split_raw(text)
+        .into_iter()
+        .map(|(start, end)| line_text(&text[start..end]))
+        .collect()
+}
+
+/// Where each line of `text` sits in it, before trimming: the split alone.
+///
+/// Split out of [`split_lines`] so that [`Label::line_source`] answers from the same
+/// walk rather than from a second one that would have to be kept in step with it.
+fn split_raw(text: &str) -> Vec<(usize, usize)> {
+    let mut lines = Vec::new();
+    let mut at = 0usize;
+    loop {
+        match find_break(&text[at..]) {
+            Some((to, len)) => {
+                lines.push((at, at + to));
+                at += to + len;
+            }
+            None => {
+                lines.push((at, text.len()));
+                break;
+            }
+        }
+    }
+    lines
 }
 
 /// Trims one line of a label and decodes its character entities.
@@ -272,6 +467,12 @@ pub struct ParticipantId(pub usize);
 #[derive(Debug, Clone, PartialEq)]
 pub struct SequenceDiagram {
     /// The `title` statement, if any.
+    ///
+    /// A plain `String`, like every other chart title and section heading here: titles
+    /// are drawn by the shared chrome in [`chrome::compose`](crate::mermaid::chrome),
+    /// which centres and ellipsizes them, and none of them is a label an author selects
+    /// text out of. Making them [`Label`]s would buy provenance for the one piece of a
+    /// diagram that is furniture rather than content.
     pub title: Option<String>,
     /// Participants in column order: declared ones first in declaration order, then
     /// implicit ones in order of first use.
@@ -438,12 +639,16 @@ pub struct ClassDiagram {
 }
 
 /// A class box: name, optional annotation, fields and methods.
+///
+/// [`members`](Class::members) carry no provenance: `+int age` is drawn as `+age: int`,
+/// reordered out of tokens the source wrote apart, so no stretch of the document is a
+/// copy of the drawn cells. Only [`name`](Class::name) maps back.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Class {
     /// The class name, e.g. `Animal`. A generic parameter written `Square~Shape~` is
     /// *not* part of the name — Mermaid identifies the class as `Square` — and lives
     /// in [`generic`](Class::generic) instead.
-    pub name: String,
+    pub name: Label,
     /// The generic parameter from `Square~Shape~`, without its tildes. Member types
     /// keep theirs inline, rewritten as `List<int>`.
     pub generic: Option<String>,
@@ -657,11 +862,15 @@ pub struct ErDiagram {
 
 /// An entity box with its attribute block.
 #[derive(Debug, Clone, PartialEq)]
+///
+/// [`attributes`](Entity::attributes) carry no provenance: an attribute row is drawn as
+/// a column-aligned table built from four independent tokens, so no stretch of the
+/// source is a copy of the drawn cells and there is nothing honest to point at.
 pub struct Entity {
     /// The entity name as written, e.g. `CUSTOMER`.
-    pub name: String,
+    pub name: Label,
     /// An alias from `CUSTOMER["Customer account"]`, if any.
-    pub alias: Option<String>,
+    pub alias: Option<Label>,
     /// Attributes from the `{ … }` block, in declaration order.
     pub attributes: Vec<ErAttribute>,
 }
@@ -739,7 +948,7 @@ pub struct PieChart {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PieSlice {
     /// The quoted slice label, without its quotes.
-    pub label: String,
+    pub label: Label,
     /// The slice value. Always finite and non-negative.
     pub value: f64,
 }
@@ -796,7 +1005,7 @@ pub struct GanttSection {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GanttTask {
     /// The task name, i.e. the text before the `:`.
-    pub name: String,
+    pub name: Label,
     /// The task id, when the metadata gave one; other tasks refer to it with `after`.
     pub id: Option<String>,
     /// The task's progress state from the `done` / `active` tags.

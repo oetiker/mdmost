@@ -6,10 +6,76 @@
 //! share the whole layout engine (design spec §6.3, §6.4, §6.7).
 
 use crate::canvas::Canvas;
-use crate::mermaid::ast::Direction;
+use crate::mermaid::ast::{Direction, Label};
+use crate::mermaid::chrome::{self, Piece};
 use crate::theme::Theme;
 
 pub use super::glyph::Stroke;
+
+/// A label the engine draws itself: the rows to paint, and the label they came from.
+///
+/// The engine draws two kinds of text of its own — the label in the middle of an edge
+/// and the title on a frame — and both used to arrive here as a bare `Vec<String>` the
+/// caller had already wrapped. That threw away which bytes of the document drew which
+/// row, so an edge label and a subgraph title could not be selected the way a node label
+/// can. Keeping the [`Label`] beside its wrapped rows is what puts
+/// [`Label::spans_for`] back within reach of the point of drawing.
+///
+/// The rows are [`Piece`]s, so wrapping is the one in
+/// [`chrome::label_pieces`](crate::mermaid::chrome::label_pieces) that every family
+/// already goes through, and the spans come out of
+/// [`chrome::label_spans`](crate::mermaid::chrome::label_spans) — one per run, never one
+/// naming the whole label, which is the only shape a *wrapped* label can be selected
+/// through.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct DrawnLabel {
+    /// The label these rows were drawn from, provenance and all.
+    pub label: Label,
+    /// One piece per drawn row, in drawing order.
+    pub rows: Vec<Piece>,
+}
+
+impl DrawnLabel {
+    /// A label wrapped to `width` columns, the way an edge label is drawn.
+    pub fn wrapped(label: &Label, width: usize) -> Self {
+        Self {
+            label: label.clone(),
+            rows: chrome::label_pieces(label, width),
+        }
+    }
+
+    /// A label whose own `<br>`-separated lines are the rows, the way a frame title is.
+    pub fn whole(label: &Label) -> Self {
+        Self {
+            label: label.clone(),
+            rows: chrome::label_rows(label),
+        }
+    }
+
+    /// True when there is nothing to draw.
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// How many rows are drawn.
+    pub fn height(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// The width of the widest drawn row, in columns.
+    pub fn width(&self) -> usize {
+        self.rows
+            .iter()
+            .map(|row| crate::text::display_width(&row.text))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The drawn rows as text, for callers that only need what is painted.
+    pub fn lines(&self) -> Vec<&str> {
+        self.rows.iter().map(|row| row.text.as_str()).collect()
+    }
+}
 
 /// Identifies a node. Ids are dense: `NodeIdx(0)` .. `NodeIdx(node_count - 1)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -53,9 +119,15 @@ impl GraphSpec {
 /// special handling anywhere else in the engine.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GroupSpec {
-    /// The frame title, already split into lines. `None` draws no frame, which is what
-    /// the implicit root group uses.
-    pub title: Option<Vec<String>>,
+    /// The frame title, split into rows. `None` draws no frame, which is what the
+    /// implicit root group uses.
+    ///
+    /// **Carries its provenance**: the [`Label`] travels with the rows, so the title a
+    /// flowchart subgraph or a composite state draws into its top edge maps back to the
+    /// document it was written in. Only the first row is drawn — a frame has one top
+    /// edge — and it is clipped to that edge, so the span names the clipped text and not
+    /// the whole title.
+    pub title: Option<DrawnLabel>,
     /// A direction override for the group's own layout.
     pub direction: Option<Direction>,
     /// Nodes belonging directly to this group, in declaration order.
@@ -81,12 +153,26 @@ pub struct EdgeSpec {
     pub tail: Terminator,
     /// The terminator drawn at the [`to`](EdgeSpec::to) end.
     pub head: Terminator,
-    /// The label carried in the middle of the edge, already split into lines.
-    pub label: Vec<String>,
+    /// The label carried in the middle of the edge, wrapped into rows.
+    ///
+    /// **Carries its provenance** — see [`GroupSpec::title`]. A flowchart edge label, a
+    /// class relation label, an ER relationship label and a state transition label all
+    /// arrive at their family as a [`Label`] that knows where it came from, and it
+    /// travels the rest of the way here. An empty one is an edge with no label.
+    pub label: DrawnLabel,
     /// A short label placed beside the [`from`](EdgeSpec::from) end, such as a class
     /// diagram cardinality (`"1"` in `"1" -- "0..*"`).
+    ///
+    /// **A bare string, with no provenance, deliberately.** The class parser reads a
+    /// cardinality as a quoted `String` and never builds a `Label` for it, so there is no
+    /// byte range to thread: giving this field a `DrawnLabel` would mean synthesising an
+    /// empty `Label` whose empty `source` emits nothing anyway, and dressing "no
+    /// provenance" up as provenance is worse than saying it. Should a cardinality ever
+    /// want to be selectable, the change belongs in the parser — `lex::label_at` on the
+    /// cardinality text — and this field becomes a `DrawnLabel` then.
     pub tail_label: Option<String>,
-    /// A short label placed beside the [`to`](EdgeSpec::to) end.
+    /// A short label placed beside the [`to`](EdgeSpec::to) end. See
+    /// [`tail_label`](EdgeSpec::tail_label) for why it carries no provenance either.
     pub head_label: Option<String>,
 }
 
@@ -99,7 +185,7 @@ impl EdgeSpec {
             stroke: Stroke::Solid,
             tail: Terminator::None,
             head: Terminator::Arrow,
-            label: Vec::new(),
+            label: DrawnLabel::default(),
             tail_label: None,
             head_label: None,
         }

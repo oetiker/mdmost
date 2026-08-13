@@ -13,18 +13,25 @@
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
     Class, ClassAnnotation, ClassArrow, ClassDiagram, ClassId, ClassRelation, Classifier, Field,
-    Label, LineStyle, Member, Method, Param, Visibility,
+    LineStyle, Member, Method, Param, Visibility,
 };
+use crate::mermaid::entity;
 
 use super::lex::{self, Nesting, SrcLine};
 use super::{direction, intern};
 
 /// Parses a whole `classDiagram`.
-pub fn parse(lines: &[SrcLine<'_>]) -> Result<ClassDiagram, MermaidError> {
+///
+/// `src` is the full mermaid source `lines` was lexed from; it is kept only so that
+/// label text — always a subslice of it — can report where it came from.
+pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<ClassDiagram, MermaidError> {
     let Some((header, body)) = lines.split_first() else {
         return Err(lex::syntax(1, "empty diagram"));
     };
-    let mut builder = Builder::default();
+    let mut builder = Builder {
+        src,
+        ..Builder::default()
+    };
     let (_, rest) = lex::split_word(header.text);
     if !rest.is_empty() {
         builder.line(rest, header.number)?;
@@ -44,22 +51,25 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<ClassDiagram, MermaidError> {
 
 /// Accumulates classes and relations.
 #[derive(Debug, Default)]
-struct Builder {
+struct Builder<'a> {
     direction: Option<crate::mermaid::ast::Direction>,
     classes: Vec<Class>,
     relations: Vec<ClassRelation>,
     /// The class whose `{ … }` block is currently open, and the line it opened on.
     current: Option<ClassId>,
     open: Option<usize>,
+    /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
+    /// offset — every label text this parser touches is a subslice of it.
+    src: &'a str,
 }
 
-impl Builder {
+impl Builder<'_> {
     /// Handles one source line, which may hold several `;`-separated statements.
     fn line(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         if self.open.is_some() {
             return self.block_line(text, line);
         }
-        for statement in lex::split_top_level(text, ';', Nesting::Honour) {
+        for statement in lex::split_statements(text) {
             self.statement(statement, line)?;
         }
         Ok(())
@@ -67,7 +77,7 @@ impl Builder {
 
     /// Handles a line inside an open `class X { … }` block.
     fn block_line(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
-        for statement in lex::split_top_level(text, ';', Nesting::Honour) {
+        for statement in lex::split_statements(text) {
             // A class written on one line: `class A { +f() }`.
             let (statement, closes) = match statement.strip_suffix('}') {
                 Some(prefix) => (prefix.trim(), true),
@@ -198,7 +208,7 @@ impl Builder {
             line: operator.line,
             left_cardinality: left_cardinality.map(str::to_string),
             right_cardinality: right_cardinality.map(str::to_string),
-            label: label.map(|label| Label::parse(lex::unquote(label))),
+            label: label.map(|label| lex::label_at(self.src, lex::unquote(label))),
         }))
     }
 
@@ -216,13 +226,17 @@ impl Builder {
             ),
             None => (text, None),
         };
-        let owned = name.to_string();
+        // Keyed on the label's visible first line, not on the raw source text: see
+        // `er::Builder::intern_entity` for why the two can differ and why this is the
+        // one an author means.
+        let label = lex::label_at(self.src, name);
+        let key = label.lines.first().cloned().unwrap_or_default();
         let id = ClassId(intern(
             &mut self.classes,
-            name,
-            |class| class.name.as_str(),
+            &key,
+            |class| class.name.lines.first().map_or("", String::as_str),
             || Class {
-                name: owned,
+                name: label.clone(),
                 generic: None,
                 annotation: None,
                 members: Vec::new(),
@@ -356,21 +370,61 @@ fn find_operator(text: &str) -> Option<Operator> {
     None
 }
 
+/// Decodes the character entities in one piece of member text.
+///
+/// Called on the leaves — a name, a type, a return type — and never on a whole member,
+/// so that a decoded `(`, `:` or `,` cannot restructure the member that spelled it: the
+/// author asked for those characters in their text, not for a different signature. This
+/// is the same seam every other family decodes at (`pie`, `gantt`, `sequence`, `er`, and
+/// `Label::parse` for the rest), reached late because a member is the one drawn Mermaid
+/// text that never becomes a [`Label`](crate::mermaid::ast::Label).
+///
+/// The result is therefore no longer a byte-for-byte copy of the source that wrote it —
+/// which is exactly the property a selection's column walk needs. Members carry no
+/// provenance today (see [`Class`](crate::mermaid::ast::Class)); whoever gives them some
+/// wants [`entity::decode_runs`], which is this decode with a run map saying which
+/// stretches are copies and which are transcriptions, and should call it from here rather
+/// than re-parsing the member. Note that a member is already a transcription for a second
+/// reason: `List~int~` is drawn `List<int>`, which no stretch of the source spells.
+fn decoded(text: &str) -> String {
+    entity::decode(text).into_owned()
+}
+
+/// Splits a leading visibility marker off a member.
+///
+/// Read from the raw member text, before [`normalise_generics`] and before any entity
+/// decoding, because the marker shares its spelling with both of them and only the source
+/// can settle who wrote what:
+///
+/// - `~` is the package-internal marker *and* Mermaid's generic delimiter. Normalising
+///   first ate the marker as an opening `~`, which lost the visibility and — because the
+///   open/closed flag was then inverted for the rest of the member — drew every later
+///   generic backwards, `Map~K,V~` as `Map>K,V<`.
+/// - `#` is the protected marker *and* Mermaid's entity sigil (`#35;`). Reading the marker
+///   here, off the source, is what keeps the two apart: the marker is one character of
+///   syntax at a fixed position and the escape decodes later, on the leaf. So `#35;count`
+///   is a protected member named `35;count` — the marker position is source, not text.
+///
+/// The mirror of that rule is the one [`decoded`] states: a decoded character is never
+/// syntax. `&#126;count` is a field an author named `~count`, not a package-internal
+/// `count`, and a decoded `~` opens no generic either.
+fn split_visibility(text: &str) -> (Option<Visibility>, &str) {
+    let visibility = match text.as_bytes().first() {
+        Some(b'+') => Visibility::Public,
+        Some(b'-') => Visibility::Private,
+        Some(b'#') => Visibility::Protected,
+        Some(b'~') => Visibility::PackageInternal,
+        _ => return (None, text),
+    };
+    (Some(visibility), text[1..].trim())
+}
+
 /// Parses a member such as `+int age`, `+age: int` or `+isMammal() bool`.
 fn parse_member(text: &str, line: usize) -> Result<Member, MermaidError> {
-    let text = normalise_generics(text.trim());
-    let mut rest = text.as_str();
-    let visibility = match rest.as_bytes().first() {
-        Some(b'+') => Some(Visibility::Public),
-        Some(b'-') => Some(Visibility::Private),
-        Some(b'#') => Some(Visibility::Protected),
-        Some(b'~') => Some(Visibility::PackageInternal),
-        _ => None,
-    };
-    if visibility.is_some() {
-        rest = rest[1..].trim();
-    }
-    let (rest, classifier) = split_classifier(rest);
+    let text = text.trim();
+    let (visibility, rest) = split_visibility(text);
+    let rest = normalise_generics(rest);
+    let (rest, classifier) = split_classifier(&rest);
 
     match rest.find('(') {
         Some(open) => {
@@ -390,9 +444,9 @@ fn parse_member(text: &str, line: usize) -> Result<Member, MermaidError> {
             let returns = rest[close + 1..].trim().trim_start_matches(':').trim();
             Ok(Member::Method(Method {
                 visibility,
-                name: rest[..open].trim().to_string(),
+                name: decoded(rest[..open].trim()),
                 params,
-                returns: (!returns.is_empty()).then(|| returns.to_string()),
+                returns: (!returns.is_empty()).then(|| decoded(returns)),
                 classifier,
             }))
         }
@@ -403,8 +457,8 @@ fn parse_member(text: &str, line: usize) -> Result<Member, MermaidError> {
             }
             Ok(Member::Field(Field {
                 visibility,
-                name: name.to_string(),
-                ty: ty.map(str::to_string),
+                name: decoded(name),
+                ty: ty.map(decoded),
                 classifier,
             }))
         }
@@ -438,7 +492,7 @@ fn split_typed(text: &str) -> (&str, Option<&str>) {
 fn parse_param(text: &str) -> Param {
     let (name, ty) = split_typed(text);
     Param {
-        name: name.to_string(),
-        ty: ty.map(str::to_string),
+        name: decoded(name),
+        ty: ty.map(decoded),
     }
 }

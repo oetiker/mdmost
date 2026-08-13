@@ -321,3 +321,145 @@ fn section_numbers_are_readable_but_quieter_than_every_heading() {
         }
     }
 }
+
+/// The `[copy]` button under the pointer, in every theme.
+///
+/// The hovered style is *derived* — the resting button is the frame it is drawn in, and
+/// hovering blends that colour towards the theme's own ink. Two things have to hold and
+/// neither implies the other. It has to stay a legible piece of chrome, so the 3:1
+/// non-text floor applies to it exactly as it does to the frame it came from. And it has
+/// to move *away* from the page: lighter on a dark theme, darker on a light one, which
+/// is what the owner asked for and what a shift in the wrong direction would fail.
+///
+/// Measured at `HOVER_SHIFT = 0.6`, against the page: dark 3.27:1 at rest and 8.16:1
+/// hovered, light 3.45:1 and 7.51:1. Against a code surface: 3.03 → 7.55 and
+/// 3.08 → 6.70. Blending the same distance towards the *background* instead — the shift
+/// inverted — measures 1.52:1 and 1.53:1, well under the floor, which is what makes this
+/// test a guard on the direction rather than a restatement of the palette's own numbers.
+#[test]
+fn the_hovered_copy_button_stays_legible_in_every_theme() {
+    for theme in themes() {
+        let name = &theme.name;
+        for (slot, resting, ground) in [
+            (
+                "the hovered code button",
+                theme.code.frame,
+                theme.palette.bg,
+            ),
+            (
+                "the hovered code button on a surface",
+                theme.code.frame,
+                theme.palette.surface,
+            ),
+            (
+                "the hovered table button",
+                theme.table.border,
+                theme.palette.bg,
+            ),
+            (
+                "the hovered table button on a striped row",
+                theme.table.border,
+                theme.palette.surface,
+            ),
+        ] {
+            let hovered = theme.hovered(resting);
+            at_least(name, slot, fg(slot, hovered), ground, GRAPHIC_FLOOR);
+            // Louder than the resting button, not merely different from it: a shift
+            // that dimmed the control the pointer is on would read as it going away.
+            let (rest, over) = (
+                contrast(fg(slot, resting), ground),
+                contrast(fg(slot, hovered), ground),
+            );
+            assert!(
+                over > rest,
+                "{name}: {slot} measures {over:.2}:1 against its ground, no clearer \
+                 than the {rest:.2}:1 it has at rest"
+            );
+            // And in the direction the theme's own polarity asks for.
+            let (before, after) = (fg(slot, resting).luminance(), fg(slot, hovered).luminance());
+            if theme.is_dark {
+                assert!(
+                    after > before,
+                    "{name}: {slot} must go lighter on a dark theme \
+                     ({before:.3} → {after:.3})"
+                );
+            } else {
+                assert!(
+                    after < before,
+                    "{name}: {slot} must go darker on a light theme \
+                     ({before:.3} → {after:.3})"
+                );
+            }
+            // Perceptibly, which a floor and a direction both allow to be one step.
+            let shift = (after - before).abs();
+            assert!(
+                shift >= 0.05,
+                "{name}: {slot} shifts by {shift:.3} in luminance, which nobody sees"
+            );
+        }
+    }
+}
+
+/// A link under the pointer, in every theme.
+///
+/// Same terms as [`the_hovered_copy_button_stays_legible_in_every_theme`]: the shade is
+/// derived, not chosen for this slot, so both the 3:1 non-text floor and the direction
+/// of travel — lighter on a dark theme, darker on a light one — have to hold here too,
+/// even though a link's resting colour (`theme.text.link`) is a different slot from the
+/// button's frame and was never checked against this floor before.
+///
+/// Measured at `HOVER_SHIFT = 0.6`, against the page: dark 7.32:1 at rest and 10.51:1
+/// hovered, light 5.83:1 and 9.67:1. Against a table's striped row: dark 6.77:1 →
+/// 9.72:1 and light 5.20:1 → 8.63:1. Blending towards the *background* instead — the
+/// shift inverted — measures 2.19:1 (dark) and 1.84:1 (light) against the page, both
+/// far under the floor, which is what makes this test a guard on the direction rather
+/// than a restatement of the palette's own numbers.
+#[test]
+fn the_hovered_link_stays_legible_in_every_theme() {
+    for theme in themes() {
+        let name = &theme.name;
+        for (slot, resting, ground) in [
+            ("the hovered link", theme.text.link, theme.palette.bg),
+            (
+                "the hovered link on a striped row",
+                theme.text.link,
+                theme.palette.surface,
+            ),
+        ] {
+            let hovered = theme.hovered(resting);
+            at_least(name, slot, fg(slot, hovered), ground, GRAPHIC_FLOOR);
+            // Louder than the resting link, not merely different from it: a shift that
+            // dimmed the control the pointer is on would read as it going away.
+            let (rest, over) = (
+                contrast(fg(slot, resting), ground),
+                contrast(fg(slot, hovered), ground),
+            );
+            assert!(
+                over > rest,
+                "{name}: {slot} measures {over:.2}:1 against its ground, no clearer \
+                 than the {rest:.2}:1 it has at rest"
+            );
+            // And in the direction the theme's own polarity asks for.
+            let (before, after) = (fg(slot, resting).luminance(), fg(slot, hovered).luminance());
+            if theme.is_dark {
+                assert!(
+                    after > before,
+                    "{name}: {slot} must go lighter on a dark theme \
+                     ({before:.3} → {after:.3})"
+                );
+            } else {
+                assert!(
+                    after < before,
+                    "{name}: {slot} must go darker on a light theme \
+                     ({before:.3} → {after:.3})"
+                );
+            }
+            // Perceptibly, which a floor and a direction both allow to be one step.
+            let shift = (after - before).abs();
+            assert!(
+                shift >= 0.05,
+                "{name}: {slot} shifts by {shift:.3} in luminance, which nobody sees"
+            );
+        }
+    }
+}

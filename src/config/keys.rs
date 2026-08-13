@@ -69,6 +69,10 @@ pub enum Action {
     SaveConfig,
     /// Unwind: clear the search, close an overlay, close the table of contents.
     Cancel,
+    /// Move the keyboard cursor to the next control (link, button) on screen.
+    CursorNext,
+    /// Move the keyboard cursor to the previous control on screen.
+    CursorPrev,
 }
 
 impl Action {
@@ -95,6 +99,8 @@ impl Action {
         Action::ToggleSearchMode,
         Action::ToggleToc,
         Action::Confirm,
+        Action::CursorNext,
+        Action::CursorPrev,
         Action::CycleTheme,
         Action::ToggleLineNumbers,
         Action::SaveConfig,
@@ -133,6 +139,8 @@ impl Action {
             Action::Help => "help",
             Action::Quit => "quit",
             Action::Cancel => "cancel",
+            Action::CursorNext => "cursor_next",
+            Action::CursorPrev => "cursor_prev",
         }
     }
 
@@ -166,6 +174,8 @@ impl Action {
             Action::Help => "Show or hide this help",
             Action::Quit => "Quit",
             Action::Cancel => "Clear the search, close the overlay or pane",
+            Action::CursorNext => "Move the keyboard cursor to the next link or button",
+            Action::CursorPrev => "Move the keyboard cursor to the previous link or button",
         }
     }
 
@@ -187,6 +197,8 @@ impl Action {
             | Action::NextHeading
             | Action::ToggleToc
             | Action::Confirm
+            | Action::CursorNext
+            | Action::CursorPrev
             | Action::ReportPosition => ActionGroup::Navigation,
             Action::SearchForward
             | Action::SearchBackward
@@ -591,6 +603,13 @@ impl KeyBindings {
             (Key::ctrl('r'), Action::ToggleSearchMode),
             (Key::plain(KeyCode::Tab), Action::ToggleToc),
             (Key::plain(KeyCode::Enter), Action::Confirm),
+            // "Follow": `f` is otherwise free (`ctrl-f` is `PageDown`), and this is what
+            // reaches a link over SSH or in a terminal with no mouse support — design
+            // spec §4 resolves the gating rule that hides `[copy]` buttons this way for
+            // links, rather than repealing it: a link is content, not chrome, and a
+            // pager that hides content is hiding the document.
+            (Key::char('f'), Action::CursorNext),
+            (Key::char('F'), Action::CursorPrev),
             (Key::char('t'), Action::CycleTheme),
             (Key::char('['), Action::PrevHeading),
             (Key::char(']'), Action::NextHeading),

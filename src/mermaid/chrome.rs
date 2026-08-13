@@ -6,7 +6,7 @@
 //! finished plot inside the width budget, sub-cell bar fills and label fitting. That
 //! furniture lives here so none of it is written twice (design spec §14).
 
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, SearchSpan};
 use crate::error::MermaidError;
 use crate::mermaid::ast::Label;
 use crate::text::{Align, display_width, ellipsize, wrap_plain};
@@ -110,19 +110,143 @@ pub fn eighths_of(fraction: f64, cells: usize) -> usize {
     eighths.max(0.0) as usize
 }
 
-/// Wraps a [`Label`] into plain lines of at most `width` display columns.
+/// One drawn piece of a wrapped [`Label`], and where it came from inside the label.
 ///
-/// The label's own `<br>`-separated lines are honoured first, then each is wrapped.
-/// A zero width yields no lines at all.
-pub fn label_lines(label: &Label, width: usize) -> Vec<String> {
+/// A plain `Vec<String>` of wrapped lines answers "what do I draw" and throws away
+/// "which bytes drew it", which is exactly what [`Label::spans_for`] needs. This is the
+/// wrap every family goes through, so no family can lose that answer by accident.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Piece {
+    /// The text to draw. A caller that shortens it before drawing — with
+    /// [`ellipsize`](crate::text::ellipsize), say — must put the shortened text here,
+    /// because a span has to name the bytes behind the cells that were really painted.
+    pub text: String,
+    /// Which line of [`Label::lines`] this is a piece of.
+    pub index: usize,
+    /// Where it starts in that line, in bytes, or `None` when it could not be located.
+    pub at: Option<usize>,
+}
+
+/// Wraps a [`Label`] to `width` columns, keeping each piece's place inside its line.
+///
+/// The label's own `<br>`-separated lines are honoured first, then each is wrapped; a
+/// zero width yields no pieces at all. On top of the wrap sits the forward scan that
+/// locates each piece back in the line it came from:
+/// [`wrap_plain`] drops the whitespace at a break and can drop a grapheme cluster wider
+/// than the whole budget, so the pieces of a line are in order but not adjacent. A piece
+/// the scan cannot find is left unlocated and draws without provenance, rather than
+/// claiming bytes chosen by a guess.
+pub fn label_pieces(label: &Label, width: usize) -> Vec<Piece> {
     if width == 0 {
         return Vec::new();
     }
+    let mut out = Vec::new();
+    for (index, line) in label.lines.iter().enumerate() {
+        let mut cursor = 0usize;
+        for text in wrap_plain(line, width) {
+            let at = line[cursor..].find(&text).map(|found| cursor + found);
+            cursor = at.map_or(cursor, |at| at + text.len());
+            out.push(Piece { text, index, at });
+        }
+    }
+    out
+}
+
+/// [`label_pieces`] for a caller that draws a box, where an empty label still has a row.
+///
+/// A box is a shape with a hole in it: a node with no label at all is drawn as an empty
+/// box rather than as nothing, so the wrap has to hand back one blank piece where
+/// [`label_pieces`] hands back none. Every box-drawing family had written that fallback
+/// out for itself — the flowchart node, the state node, the sequence note and the
+/// sequence participant head, four copies of the same five lines.
+///
+/// It is deliberately *not* folded into [`label_pieces`]: a caller that draws text
+/// without a box around it — an edge label, through
+/// [`DrawnLabel`](crate::mermaid::layout::graph::DrawnLabel) — asks "are there any
+/// pieces?" to decide whether to draw anything at all, and a blank piece would turn an
+/// unlabelled edge into an edge with a blank row reserved for a label.
+///
+/// The blank piece is [`unlocated`](Piece::at): it drew no cells, so there are no bytes
+/// behind it to name.
+pub fn label_pieces_or_blank(label: &Label, width: usize) -> Vec<Piece> {
+    let mut out = label_pieces(label, width);
+    if out.is_empty() {
+        out.push(Piece {
+            text: String::new(),
+            index: 0,
+            at: None,
+        });
+    }
+    out
+}
+
+/// The label's own lines as pieces, with nothing wrapped away.
+///
+/// [`label_pieces`] for a caller that draws each `<br>`-separated line whole rather than
+/// wrapping it — a frame title, which is clipped to the top edge it is written into.
+/// Every piece starts at byte zero of its line, which is what it is: the whole of it.
+pub fn label_rows(label: &Label) -> Vec<Piece> {
     label
         .lines
         .iter()
-        .flat_map(|line| wrap_plain(line, width))
+        .enumerate()
+        .map(|(index, line)| Piece {
+            text: line.clone(),
+            index,
+            at: Some(0),
+        })
         .collect()
+}
+
+/// Adds the search spans behind one drawn piece, whose first column is `(row, col)`.
+///
+/// **One span per run [`Label::spans_for`] returns, never one span naming the whole
+/// label.** A reader dragging inside a box gets the characters they went over (design
+/// spec §2.2), which is only possible if each drawn run names its own bytes; the label
+/// survives as the [`unit`](SearchSpan::unit) every run of it shares, which is what
+/// `select::resolve` asks "did this drag stay inside one label?" of.
+///
+/// Emits nothing when the label carries no source — `Label::line`, a label
+/// `lex::label_at` refused to place, or a `Label::from_lines` hull — because a span at
+/// byte zero of the document is worse than no span at all.
+pub fn label_spans(canvas: &mut Canvas, label: &Label, piece: &Piece, row: usize, col: usize) {
+    let (Some(at), false) = (piece.at, label.source.is_empty()) else {
+        return;
+    };
+    let unit = Some((label.source.start, label.source.end));
+    for span in label.spans_for(piece.index, at, &piece.text) {
+        canvas.add_span(SearchSpan {
+            source_start: span.source.start,
+            source_end: span.source.end,
+            unit,
+            row,
+            col: u16::try_from(col + span.col).unwrap_or(u16::MAX),
+            cols: u16::try_from(span.cols).unwrap_or(u16::MAX),
+        });
+    }
+}
+
+/// A label flattened onto one row: its lines joined by a space.
+///
+/// What a chart with one row per item draws — a pie slice, a gantt task, a message
+/// arrow. The join is not reversible, which is exactly why [`label_row_span`] hands the
+/// flattened text back to `Label::spans_for` rather than assuming it is line zero: a
+/// one-line label passes that check and a `<br>`-broken one does not.
+pub fn label_one_line(label: &Label) -> String {
+    label.lines.join(" ")
+}
+
+/// Adds the spans behind a label drawn whole on one row, starting at `(row, col)`.
+///
+/// `text` is what was really painted, shortening included. Emits nothing when `text` is
+/// not the label's first line as written — see [`label_one_line`].
+pub fn label_row_span(canvas: &mut Canvas, label: &Label, text: &str, row: usize, col: usize) {
+    let piece = Piece {
+        text: text.to_string(),
+        index: 0,
+        at: Some(0),
+    };
+    label_spans(canvas, label, &piece, row, col);
 }
 
 /// The width of the widest line in `lines`.

@@ -236,3 +236,27 @@ fn source_offsets_agree_with_the_plain_text() {
         );
     }
 }
+
+/// The same walk over a title that contains an escape.
+///
+/// It reads [`Node::source`] against the node's own text and declines an offset when
+/// the two are not a byte-for-byte copy — which used to mean that one `\*` anywhere in
+/// the title cost *every* letter of the art its search highlight. With `doc` cutting
+/// the run at its escapes, the loss is the one character the doc comment there always
+/// claimed it was.
+#[test]
+fn an_escaped_title_keeps_the_offsets_of_its_other_letters() {
+    let doc = Doc::parse("# Quick \\* fox\n");
+    let heading = &doc.root().children[0];
+    let (text, origins) = text_with_origins(heading);
+    assert_eq!(text, "Quick * fox", "fixture: the escape is resolved");
+    let source = doc.source();
+    for (offset, ch) in origins.iter().zip(text.chars()) {
+        let start = offset.expect("every letter of an escaped title keeps its offset");
+        assert_eq!(
+            source[start..start + ch.len_utf8()].chars().next(),
+            Some(ch),
+            "the recorded offset does not point at {ch:?}"
+        );
+    }
+}

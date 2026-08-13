@@ -12,22 +12,28 @@
 
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
-    ArrowHead, EdgeStroke, FlowEdge, FlowNode, Flowchart, Group, Label, NodeId, NodeShape,
+    ArrowHead, EdgeStroke, FlowEdge, FlowNode, Flowchart, Group, NodeId, NodeShape,
 };
 
 use super::lex::{self, Nesting, SrcLine};
 use super::{direction, intern};
 
 /// Parses a whole `flowchart` / `graph` diagram.
-pub fn parse(lines: &[SrcLine<'_>]) -> Result<Flowchart, MermaidError> {
-    let mut builder = Builder::default();
+///
+/// `src` is the full mermaid source `lines` was lexed from; it is kept only so that
+/// label text — always a subslice of it — can report where it came from.
+pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<Flowchart, MermaidError> {
+    let mut builder = Builder {
+        src,
+        ..Builder::default()
+    };
     let Some((header, body)) = lines.split_first() else {
         return Err(lex::syntax(1, "empty diagram"));
     };
 
     // `graph TD; A-->B` puts statements on the header line.
     let (_, after_keyword) = lex::split_word(header.text);
-    let mut statements = lex::split_statements(after_keyword);
+    let mut statements = lex::split_piped_statements(after_keyword);
     if let Some(first) = statements.first() {
         let (word, rest) = lex::split_word(first);
         if let Some(dir) = direction(word) {
@@ -44,7 +50,7 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<Flowchart, MermaidError> {
     }
 
     for line in body {
-        for statement in lex::split_statements(line.text) {
+        for statement in lex::split_piped_statements(line.text) {
             builder.statement(statement, line.number)?;
         }
     }
@@ -53,7 +59,7 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<Flowchart, MermaidError> {
 
 /// Accumulates nodes, edges and the subgraph tree while statements are read.
 #[derive(Debug, Default)]
-struct Builder {
+struct Builder<'a> {
     direction: crate::mermaid::ast::Direction,
     nodes: Vec<FlowNode>,
     edges: Vec<FlowEdge>,
@@ -61,9 +67,12 @@ struct Builder {
     stack: Vec<Group>,
     /// Keys of every subgraph seen, used to reject edges that point at one.
     subgraph_keys: Vec<String>,
+    /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
+    /// offset — every label text this parser touches is a subslice of it.
+    src: &'a str,
 }
 
-impl Builder {
+impl Builder<'_> {
     /// Handles one `;`-separated statement.
     fn statement(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         if self.stack.is_empty() {
@@ -96,21 +105,25 @@ impl Builder {
 
     /// Opens a `subgraph id [Title]` container.
     fn open_subgraph(&mut self, rest: &str, line: usize) -> Result<(), MermaidError> {
+        let src = self.src;
         let (key, title) = match shape_at(rest, 0) {
             // `subgraph one [Title]` / `subgraph one["Title"]`
-            Some(shape) if shape.start > 0 => (
-                Some(rest[..shape.start].trim().to_string()),
-                Some(Label::parse(lex::unquote(&shape.text))),
-            ),
+            Some(shape) if shape.start > 0 => {
+                let text = lex::unquote(shape.text);
+                (
+                    Some(rest[..shape.start].trim().to_string()),
+                    Some(lex::label_at(src, text)),
+                )
+            }
             _ => {
                 let name = lex::unquote(rest);
                 if name.is_empty() {
                     (None, None)
                 } else if name.chars().all(lex::is_ident_char) {
                     // Mermaid uses the bare word as both id and title.
-                    (Some(name.to_string()), Some(Label::parse(name)))
+                    (Some(name.to_string()), Some(lex::label_at(src, name)))
                 } else {
-                    (None, Some(Label::parse(name)))
+                    (None, Some(lex::label_at(src, name)))
                 }
             }
         };
@@ -170,7 +183,7 @@ impl Builder {
                         stroke: link.stroke,
                         tail: link.tail,
                         head: link.head,
-                        label: link.label.as_deref().map(Label::parse),
+                        label: link.label.map(|text| lex::label_at(self.src, text)),
                     });
                 }
             }
@@ -192,6 +205,7 @@ impl Builder {
 
     /// Declares or updates a single node, returning its id.
     fn node(&mut self, text: &str, line: usize) -> Result<NodeId, MermaidError> {
+        let src = self.src;
         let (key, rest) = lex::take_ident(text);
         if key.is_empty() {
             return Err(lex::syntax(
@@ -229,7 +243,7 @@ impl Builder {
             |node| node.key.as_str(),
             || FlowNode {
                 key: key_owned.clone(),
-                label: Label::parse(key),
+                label: lex::label_at(src, key),
                 shape: NodeShape::Rect,
             },
         );
@@ -241,7 +255,8 @@ impl Builder {
             && let Some(node) = self.nodes.get_mut(index)
         {
             node.shape = shape.shape;
-            node.label = Label::parse(lex::unquote(&shape.text));
+            let text = lex::unquote(shape.text);
+            node.label = lex::label_at(src, text);
         }
         Ok(NodeId(index))
     }
@@ -281,11 +296,13 @@ impl Builder {
 
 /// A link operator found in a statement.
 #[derive(Debug)]
-struct Link {
+struct Link<'a> {
     stroke: EdgeStroke,
     tail: ArrowHead,
     head: ArrowHead,
-    label: Option<String>,
+    /// The `|text|` or `-- text -->` label, still a slice of the mermaid source so
+    /// `lex::label_at` can recover its offset.
+    label: Option<&'a str>,
     /// Byte offset of the first character of the operator.
     start: usize,
     /// Byte offset just past the operator (and its `|label|`, if any).
@@ -319,7 +336,7 @@ fn stroke_of(run: &str) -> EdgeStroke {
 }
 
 /// Finds the next link operator at or after `from`, at the top level of `text`.
-fn find_link(text: &str, from: usize, line: usize) -> Result<Option<Link>, MermaidError> {
+fn find_link(text: &str, from: usize, line: usize) -> Result<Option<Link<'_>>, MermaidError> {
     let bytes = text.as_bytes();
     let mut scanner = lex::Scanner::default();
     for (at, ch) in text.char_indices() {
@@ -347,14 +364,14 @@ fn find_link(text: &str, from: usize, line: usize) -> Result<Option<Link>, Merma
 }
 
 /// Completes a link once its opening run has been read.
-fn finish_link(
-    text: &str,
+fn finish_link<'a>(
+    text: &'a str,
     line: usize,
     start: usize,
     run: &str,
     run_end: usize,
     tail: ArrowHead,
-) -> Result<Link, MermaidError> {
+) -> Result<Link<'a>, MermaidError> {
     let bytes = text.as_bytes();
     let mut stroke = stroke_of(run);
     let mut label = None;
@@ -383,7 +400,7 @@ fn finish_link(
             if run.len() == 2
                 && let Some((mid, close_start, close_end, close_head)) = closing_run(text, run_end)
             {
-                label = Some(mid.to_string());
+                label = Some(mid);
                 head = close_head;
                 stroke = stroke_of(&text[close_start..close_end]);
                 end = close_end + usize::from(close_head == ArrowHead::Arrow);
@@ -396,7 +413,7 @@ fn finish_link(
     if text[bar..].starts_with('|') {
         match text[bar + 1..].find('|') {
             Some(close) => {
-                label = Some(text[bar + 1..bar + 1 + close].to_string());
+                label = Some(&text[bar + 1..bar + 1 + close]);
                 end = bar + 1 + close + 1;
             }
             None => return Err(lex::syntax(line, "unterminated `|` edge label")),
@@ -407,7 +424,7 @@ fn finish_link(
         stroke,
         tail,
         head,
-        label: label.map(|text| lex::unquote(&text).to_string()),
+        label: label.map(lex::unquote),
         start,
         end,
     })
@@ -447,10 +464,11 @@ fn closing_run(text: &str, from: usize) -> Option<(&str, usize, usize, ArrowHead
 
 /// A bracketed shape following a node identifier.
 #[derive(Debug)]
-struct Shape {
+struct Shape<'a> {
     shape: NodeShape,
-    /// The inner label text, brackets and decorations removed.
-    text: String,
+    /// The inner label text, brackets and decorations removed. Still a slice of the
+    /// mermaid source, so `lex::label_at` can recover its offset.
+    text: &'a str,
     /// Byte offset of the opening bracket.
     start: usize,
     /// Byte offset just past the closing bracket.
@@ -461,7 +479,7 @@ struct Shape {
 ///
 /// Bracket forms outside design spec §6.1 keep their label and degrade to
 /// [`NodeShape::Rect`].
-fn shape_at(text: &str, from: usize) -> Option<Shape> {
+fn shape_at(text: &str, from: usize) -> Option<Shape<'_>> {
     let bytes = text.as_bytes();
     let start = (from..text.len())
         .find(|&at| text.is_char_boundary(at) && matches!(bytes[at], b'[' | b'(' | b'{' | b'>'))?;
@@ -494,7 +512,7 @@ fn shape_at(text: &str, from: usize) -> Option<Shape> {
     let (shape, inner) = classify_shape(whole);
     Some(Shape {
         shape,
-        text: inner.to_string(),
+        text: inner,
         start,
         end,
     })

@@ -22,11 +22,17 @@ use super::intern;
 use super::lex::{self, Nesting, SrcLine};
 
 /// Parses a whole `sequenceDiagram`.
-pub fn parse(lines: &[SrcLine<'_>]) -> Result<SequenceDiagram, MermaidError> {
+///
+/// `src` is the full mermaid source `lines` was lexed from; it is kept only so that
+/// label text — always a subslice of it — can report where it came from.
+pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<SequenceDiagram, MermaidError> {
     let Some((header, body)) = lines.split_first() else {
         return Err(lex::syntax(1, "empty diagram"));
     };
-    let mut builder = Builder::default();
+    let mut builder = Builder {
+        src,
+        ..Builder::default()
+    };
     let (_, rest) = lex::split_word(header.text);
     if !rest.is_empty() {
         builder.statement(rest, header.number)?;
@@ -53,14 +59,17 @@ struct Frame {
 
 /// Accumulates participants and the statement tree.
 #[derive(Debug, Default)]
-struct Builder {
+struct Builder<'a> {
     title: Option<String>,
     participants: Vec<Participant>,
     items: Vec<SequenceItem>,
     stack: Vec<Frame>,
+    /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
+    /// offset — every label text this parser touches is a subslice of it.
+    src: &'a str,
 }
 
-impl Builder {
+impl Builder<'_> {
     /// Handles one source line.
     fn statement(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         let (word, rest) = lex::split_word(text);
@@ -106,7 +115,7 @@ impl Builder {
                         branches: Vec::new(),
                     }),
                     items: Vec::new(),
-                    label: label_of(rest),
+                    label: label_of(rest, self.src),
                     line,
                 });
                 return Ok(());
@@ -141,7 +150,7 @@ impl Builder {
         if let Some(participant) = self.participants.get_mut(index) {
             participant.kind = kind;
             if let Some(alias) = alias {
-                participant.label = Label::parse(lex::unquote(alias));
+                participant.label = lex::label_at(self.src, lex::unquote(alias));
             }
         }
         Ok(())
@@ -165,10 +174,11 @@ impl Builder {
         if participants.is_empty() {
             return Err(lex::syntax(line, "note without a participant"));
         }
+        let text = lex::unquote(text);
         self.push(SequenceItem::Note(Note {
             placement,
             participants,
-            text: Label::parse(lex::unquote(text)),
+            text: lex::label_at(self.src, text),
         }));
         Ok(())
     }
@@ -185,7 +195,7 @@ impl Builder {
             label: frame.label.take(),
             items: std::mem::take(&mut frame.items),
         });
-        frame.label = label_of(rest);
+        frame.label = label_of(rest, self.src);
         Ok(())
     }
 
@@ -229,12 +239,13 @@ impl Builder {
             _ => (target, false, false),
         };
         let to = self.participant(target, line)?;
+        let label = lex::unquote(label);
         self.push(SequenceItem::Message(Message {
             from,
             to,
             line: arrow.line,
             head: arrow.head,
-            label: Label::parse(lex::unquote(label)),
+            label: lex::label_at(self.src, label),
             activates,
             deactivates,
         }));
@@ -260,13 +271,14 @@ impl Builder {
 
     /// Interns a participant key, preserving declaration order.
     fn intern_participant(&mut self, key: &str) -> usize {
+        let src = self.src;
         intern(
             &mut self.participants,
             key,
             |participant| participant.key.as_str(),
             || Participant {
                 key: key.to_string(),
-                label: Label::parse(key),
+                label: lex::label_at(src, key),
                 kind: ParticipantKind::Participant,
             },
         )
@@ -289,9 +301,9 @@ impl Builder {
 }
 
 /// Turns the text after a block keyword into an optional label.
-fn label_of(rest: &str) -> Option<Label> {
+fn label_of(rest: &str, src: &str) -> Option<Label> {
     let rest = lex::unquote(rest.trim());
-    (!rest.is_empty()).then(|| Label::parse(rest))
+    (!rest.is_empty()).then(|| lex::label_at(src, rest))
 }
 
 /// A message arrow found in a statement.

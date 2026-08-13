@@ -45,12 +45,33 @@ env = { COLORTERM = "truecolor", DISPLAY = "", WAYLAND_DISPLAY = "", LESS = "", 
 # login shell, and the pane then inherits *that* prompt instead of this one.
 launch = '''tmux -L mdmost-demo -f demo/tmux.conf new-session -s demo -x 100 -y 30 "PS1='$ ' bash --norc --noprofile -i" \; split-window -h -t demo "${CARGO_TARGET_DIR:-target}/release/mdmost --mouse --config demo/config.toml demo/tour.md"'''
 
+# The hero image is dressed as a window, so a reader meeting it on the README knows at a
+# glance that they are looking at a terminal and not a web app. The bar is keyed to the
+# dark theme's own background (`#11141b`, `src/theme/builtin.rs`) one step lighter, and
+# the title text to a muted form of its foreground — not ansidrama's greys, which sit
+# beside this palette rather than in it.
+#
+# The bar is fixed, and would be even if the tour changed theme again: a title bar that
+# changed colour mid-tour would read as a second window opening. Dark is the theme the
+# tour opens and closes in, and the card and the closing frame — the two frames a looping
+# viewer lands on — are both dark.
+[chrome]
+style = "macos"
+title = "mdmost — demo/tour.md"
+padding = 14
+bar = "#1c212c"
+text = "#8d95a8"
+
 # ─── Act 1: the split ────────────────────────────────────────────────────────────
 # `less` on the left, `mdmost` on the right, the same file in both.
 
+# The opening card holds three times the length of an ordinary beat, and so does the
+# closing one at the foot of this file. The demo loops, so those two are the only frames
+# a viewer arriving mid-play can orient on, and at the old 260 the card was gone before
+# the second line had been read.
 [[scene]]
 card = { lines = ["mdmost", "less, but it knows what Markdown means"], fg = "#fef9c3" }
-hold_cs = 260
+hold_cs = 780
 
 [[scene]]
 click = { x = 20, y = 25 }
@@ -156,6 +177,16 @@ hold_cs = 260
 
 # The fenced block's `[copy]` button — the Rust source that was written, not the
 # coloured cells that were drawn.
+#
+# Four pages down from the top puts the frame's top edge on row 1 of the pane, which is
+# where its button is. It used to be row 16, and the row is the fragile half of this
+# coordinate: the column is pinned to the frame's right edge and has not moved, but the
+# row is wherever four `Space` presses happen to land the block, and that is a function
+# of everything the renderer does above it. A miss here is silent — the click lands on
+# document text, copies nothing, and the `prefix ]` two scenes later pastes the previous
+# buffer a second time. So: after any change to the renderer or to `demo/tour.md`, put a
+# 49-column pane on the file, press `Space` four times, and read the row off the screen
+# before believing this number.
 [[scene]]
 click = { x = 76, y = 30 }
 hold_cs = 30
@@ -165,7 +196,7 @@ keys = ["Space", "Space", "Space"]
 hold_cs = 140
 
 [[scene]]
-click = { x = 94, y = 16 }
+click = { x = 94, y = 1 }
 hold_cs = 220
 
 [[scene]]
@@ -197,10 +228,18 @@ hold_cs = 30
 keys = ["C-b", "]"]
 hold_cs = 300
 
+# One more capture of the same screen, sending nothing. This paste is the largest of the
+# three and `nano` redraws it in more than one write; a single capture can settle between
+# the writes and freeze the pane one paste short of the truth, and the next act closes
+# `nano` before a later frame could ever correct it. An empty `keys` re-captures, which
+# is all this needs.
+[[scene]]
+keys = []
+hold_cs = 200
+
 # ─── Act 5: full width ───────────────────────────────────────────────────────────
 # The left pane closes and mdmost takes all hundred columns: the contents pane opens
-# into the margin the body cap leaves, the wide diagram finally draws and scrolls, and
-# the theme cycles back to where the loop started.
+# into the margin the body cap leaves, and the wide diagram finally draws and scrolls.
 
 [[scene]]
 keys = ["C-x"]
@@ -217,6 +256,24 @@ hold_cs = 40
 [[scene]]
 keys = ["Enter"]
 hold_cs = 300
+
+# Three sacrificial `g`s, and they are here to buy time rather than to do anything.
+#
+# ansidrama sends the next key once the terminal has been quiet for `settle_ms`, and
+# `bash` exiting is quiet for longer than that *before* tmux notices the EOF and closes
+# the pane. So the key after this `Enter` is a coin toss: it reaches either mdmost or a
+# shell that is already gone. Recorded once with a single scene here and the `Tab` fell
+# into the dying pane — the contents never opened, the four `Down`s scrolled the
+# document instead of the list, and every beat of act 5 after it was a different demo.
+#
+# Each keystroke costs one whole quiet window, so three of them are about a second of
+# real time; `g` is the one key that can be thrown away safely, because act 4 left the
+# document at the top and `g` is where it already is. Whichever of the three lands
+# first, the screen does not change, and by the last one the pane is certainly gone.
+[[scene]]
+keys = ["g", "g", "g"]
+type_cs = 30
+hold_cs = 60
 
 [[scene]]
 keys = ["Tab"]
@@ -244,26 +301,144 @@ hold_cs = 280
 keys = ["g"]
 hold_cs = 140
 
+# ─── Act 6: a link, a footnote, and then no mouse at all ─────────────────────────
+# The search is the lift to the last section, and it is still the search beat: the
+# match lands centred, which puts the three controls of that section — an `http` link,
+# a `#heading` reference and a footnote marker — on rows 19, 22 and 24 of a hundred-
+# column frame. Every coordinate below is read off that layout, so a change to
+# `demo/tour.md` above this section moves all of them.
 [[scene]]
 keys = ["/"]
 hold_cs = 100
 
 [[scene]]
-text = "diagram"
+text = "Where a link"
 hold_cs = 60
+
+[[scene]]
+keys = ["Enter"]
+hold_cs = 220
+
+# Hover, spelled as a raw SGR motion report rather than as a scene.
+#
+# ansidrama moves its pointer *silently*: `Recorder::move_to` pushes one frame per cell
+# and sends no bytes, so a recorded pointer never lights anything and a recorded click
+# arrives with no motion before it. The escape hatch — a raw escape in `keys` goes to
+# the terminal untouched — is what delivers the one event mdmost needs, `\e[<35;x;yM`
+# being motion with no button held. The cost is that a `keys` frame draws the text
+# caret instead of the pointer, so this frame shows the link lit and its URL in the
+# status bar with no arrow resting on it. Fixing that means teaching `move_to` to emit
+# these reports itself, which is a change to ansidrama, not to this script.
+[[scene]]
+keys = ["\u001B[<35;12;19M"]
+hold_cs = 240
+
+# The same report at the marker before the click, and not only for tidiness: hover is
+# sticky without it. A pointer that never reported leaving the link would leave the URL
+# standing in the status bar for the rest of the recording, over a footnote it has
+# nothing to do with.
+[[scene]]
+keys = ["\u001B[<35;28;24M"]
+hold_cs = 60
+
+# The note opens in a box *above* its marker — twelve rows will not fit in the five
+# below it — and the page behind it does not move.
+[[scene]]
+click = { x = 28, y = 24 }
+hold_cs = 300
+
+# `↓ 8 more` in the box's bottom edge, and the cursor keys spend themselves on the note
+# rather than on the document. Scrolling the document would dismiss the note, so this
+# is the only reading of `Down` that could be right. The counter walks 8 → 7 → 6 → 5 while
+# the document stays at 75%.
+[[scene]]
+keys = ["Down", "Down", "Down"]
+type_cs = 22
+hold_cs = 240
+
+# Dismissed by a click outside the box, **not** by `Esc`: `hold_cs` is a duration written
+# into the WebP, not a sleep. ansidrama sends the next scene's key as soon as the terminal settles, so an
+# `Escape` scene lays an ESC byte a few milliseconds in front of the next keystroke and
+# mdmost reads the pair as `M-F`. Recorded that way once, and the note stayed up for the
+# rest of the take: the swallowed `F` cost the walk below its first step, and `enter`
+# landed back on the marker it had never left. A click outside is what design spec §6
+# gives for dismissal in any case, and it takes the pointer somewhere the eye can
+# follow. (90, 6) is blank canvas to the right of the code frame, well clear of both
+# the box and any control.
+[[scene]]
+keys = ["\u001B[<35;90;6M"]
+hold_cs = 40
+
+[[scene]]
+click = { x = 90, y = 6 }
+hold_cs = 200
+
+# No mouse from here. `F` walks backwards from the end of the document, which is where
+# these three controls are: one press lights the marker, the second the `#reading-room`
+# reference, and `enter` follows it — the heading comes to the top of the viewport and
+# nothing has left the document. Backwards rather than forwards because these three are
+# the last controls in the file and one press reaches them; `f` would set out from the
+# first `[copy]` button ten screens above and scroll the whole document back down again
+# to get here. (It *would* get here: the cursor scrolls its target into view as of
+# `4fea1ee`. Before that it did not, and the first four `f` presses lit nothing a viewer
+# could see — which is why this walk was written backwards in the first place.)
+#
+# Three back, one forward, and that is deliberate. The walk *could* stop at the second
+# press, on the anchor `enter` is about to follow — but only a link carries a URL, and the
+# status bar's URL segment is the safeguard design spec §8 puts in place of an "are you
+# sure" prompt. A footnote marker and an anchor both show nothing there, correctly, so a
+# walk that touched only those two would never once show a mouseless reader where a
+# control leads. The third `F` reaches `the project page` and the bar names the host with
+# no pointer anywhere on screen — which is the whole of what `4fea1ee` added, and what the
+# paragraph on screen has been claiming since act 6 was written.
+#
+# Then `f` steps forward, back onto the anchor. It also makes the point that the walk goes
+# both ways, and it is why `enter` below still follows `#reading-room` rather than opening
+# a browser — which, with `DISPLAY` emptied for act 4, would put a launch failure in the
+# status bar as the tour's closing note.
+[[scene]]
+keys = ["F"]
+hold_cs = 200
+
+[[scene]]
+keys = ["F"]
+hold_cs = 220
+
+[[scene]]
+keys = ["F"]
+hold_cs = 300
+
+[[scene]]
+keys = ["f"]
+hold_cs = 240
 
 [[scene]]
 keys = ["Enter"]
 hold_cs = 280
 
-# No `Escape` before the theme keys: an ESC byte immediately followed by `t` arrives as
-# `M-t` and swallows the keystroke, so the cycle would end one theme short of where it
-# started — and the loop would jump. The match highlight simply stays up through both
-# themes instead, which is the better picture anyway.
+# ─── Act 7: the closing panel ────────────────────────────────────────────────────
+# **There was a theme beat here — `t` to light, `t` back to dark — and it is gone,
+# because it could not be recorded truthfully.** In the recording, and only at this point
+# in it, the first `t` produced a frame that was still the *dark* screen with `theme:
+# light` in its status bar, and held it for 2.8 seconds. A status bar that names a theme
+# the screen is not wearing is the one thing this project says a status bar may never do,
+# and it is worse on the hero image than on any other screen. The previous recording
+# shipped with that frame in it.
+#
+# It is not mdmost. Three things were ruled out before the beat was cut, and the notes in
+# `docs/maintainer-notes.md` carry the detail so the beat can come back:
+#   * a live pane repaints correctly — `t` moves the background to `#fdfcf9` every time;
+#   * ansidrama alone records the switch correctly (a three-scene script does it);
+#   * ansidrama driving tmux records it correctly too.
+# Only the full tour fails, at the end, after act 5 has killed a pane and resized the
+# survivor — which points at emulator state in ansidrama rather than at anything here.
+# An empty re-capture does not fix it, and neither does a `j`/`k` that forces a complete
+# repaint, so the frame is not merely settling early: those bytes never landed.
+#
+# So the tour now ends on the theme it started in by never leaving it. The document is
+# where `enter` left it — `Reading room` at the top of the viewport, which is the last
+# thing act 6 proved a keyboard can reach — and that frame is held three times over for
+# the same reason as the opening card: it is where a looping viewer lands.
 [[scene]]
-keys = ["t"]
-hold_cs = 280
-
-[[scene]]
-keys = ["t"]
-hold_cs = 300
+keys = []
+hold_cs = 900

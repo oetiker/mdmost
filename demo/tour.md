@@ -47,7 +47,7 @@ scrolls sideways instead of being mangled.
 
 ### A diagram that gave up on reflow
 
-The pipeline below wants one hundred and eighty-eight columns. There is no
+The pipeline below wants one hundred and twenty-seven columns. There is no
 width at which folding it would be kind, so under sixty-five it declines to
 draw and hands you its source instead, saying how much room it would need.
 Give it the room and it draws — and then only the diagram scrolls, while the
@@ -90,3 +90,42 @@ fn reading(s: &Sample) -> Option<Reading> {
 
 Copy a table and it arrives as tab-separated values. Copy a paragraph and it
 arrives as Markdown. The status bar says which, every time.
+
+## Where a link goes
+
+A link is content, not chrome, so it is never hidden. Rest the pointer on
+[the project page](https://github.com/oetiker/mdmost) and the status bar names
+the host before you commit to it; click it and the URL goes to your browser. A
+reference to a heading in this same document, such as
+[Reading room](#reading-room), scrolls there instead of leaving. Without a
+mouse, `f` walks a cursor from one link to the next and `enter` follows
+whatever it has landed on[^cursor].
+
+### Following one without a mouse
+
+Nothing here is hidden when the mouse was not captured. A `[copy]` button is
+chrome and comes and goes with the pointer, but a link is part of the document
+and stays, so `F` steps back through the links this page is showing and `enter`
+follows the one it stopped on.
+
+A `#heading` reference is followed without leaving: the heading it names comes
+to the top of the viewport and the document is where it was. Only an `http` or
+`https` target is handed to a browser — every other scheme is left as the plain
+text it was written as, and nothing is opened by accident.
+
+[^cursor]: The cursor is painted, not rendered. It is a difference in how the
+    screen is drawn, so moving it never re-lays the page, and it disturbs
+    neither a selection nor a search highlight nor where you were reading.
+
+    It walks *controls*, not cells. A link that wrapped across three rows is
+    one control and is visited once — which is also why a link inside a table
+    cell is reached in the same breath as one in a paragraph.
+
+    Three things share the walk:
+
+    - a link, which opens or scrolls;
+    - a `[copy]` button, which copies its block;
+    - a footnote marker, which opens a box like this one.
+
+    A note longer than its box scrolls inside it, and the page behind it does
+    not move.

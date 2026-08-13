@@ -32,9 +32,10 @@ use crossterm::event::{
 };
 use crossterm::execute;
 
+use crate::canvas::HotspotKind;
 use crate::config::{Key, KeyCode, KeyMods};
 
-use super::app::{App, Focus};
+use super::app::{Activation, App, Focus};
 use super::{chrome, draw};
 
 /// How long the loop waits for input before checking the termination flag.
@@ -245,11 +246,24 @@ fn event_loop(
     // what is being opened and that something is happening.
     terminal.draw(|frame| draw::draw_splash(frame, app))?;
 
+    // Mouse capture is any-event tracking (`?1003h`, which is what `EnableMouseCapture`
+    // sends), so a hand crossing the window delivers one event per cell it passes over.
+    // Every one of those would otherwise cost a full frame — and a frame is a canvas
+    // lookup, a blit of the viewport and a diff — for a pointer that changed nothing the
+    // reader can see. `on_mouse` answers whether anything did; when it did not, the one
+    // frame that would have followed is skipped. Nothing else is affected: this is reset
+    // the moment the wait returns, so the poll tick that expires the `[copied]` flash
+    // still draws on time, and every other event still draws immediately.
+    let mut redraw = true;
     while !app.should_quit() && !terminate.load(Ordering::Relaxed) {
-        terminal.draw(|frame| draw::draw(frame, app))?;
+        if redraw {
+            terminal.draw(|frame| draw::draw(frame, app))?;
+        }
         // Waiting is ours, not `crossterm`'s, so that a terminal which has gone away
         // is seen as what it is rather than as a descriptor that is endlessly ready.
-        if input.wait(POLL_INTERVAL)? == Wait::Gone {
+        let waited = input.wait(POLL_INTERVAL)?;
+        redraw = true;
+        if waited == Wait::Gone {
             return Err(terminal_gone());
         }
         // The descriptor was live a moment ago, so `crossterm` may look at it. Zero
@@ -279,7 +293,7 @@ fn event_loop(
             Some(Event::Key(key)) => on_key(app, key),
             Some(Event::Mouse(mouse)) => {
                 let size = terminal.size()?;
-                on_mouse(app, mouse, size.width, size.height);
+                redraw = on_mouse(app, mouse, size.width, size.height);
             }
             _ => {}
         }
@@ -299,7 +313,12 @@ fn on_key(app: &mut App, event: KeyEvent) {
         return;
     }
     if let Some(key) = convert_key(event) {
-        app.on_key(key);
+        // The state machine cannot fire a control itself (design spec §13); an `enter`
+        // on the keyboard cursor hands the activation back exactly as a mouse release
+        // does, and it is carried out through the one dispatch both share.
+        if let Some(activation) = app.on_key(key).into_activation() {
+            activate(app, activation);
+        }
     }
 }
 
@@ -309,7 +328,11 @@ fn on_key(app: &mut App, event: KeyEvent) {
 /// The table-of-contents pane keeps its click-to-jump and is never a selection source:
 /// its entries are a generated map, not document text, so there is no source behind
 /// them to copy.
-fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16) {
+///
+/// Returns whether the frame that follows is worth painting. Every event but a pointer
+/// motion that left the same control (or none) under the hand says yes; see the note in
+/// [`event_loop`].
+pub(super) fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16) -> bool {
     let in_toc = chrome::in_toc(app, event.column);
     let body_height = height.saturating_sub(1);
     // The document area: the pane on its left, the scrollbar's gutter on its right.
@@ -324,9 +347,63 @@ fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16) {
             event.row.min(body_height.saturating_sub(1)),
         )
     };
+    // A press is the start of a gesture and owns the click candidate outright: whatever
+    // the last gesture left armed is gone, wherever this press lands. `App::press_hotspot`
+    // enforces that for a press on the document (a press on nothing disarms the control
+    // before it), but a press on the scrollbar, on the pane, or on the chrome between them
+    // never reaches it — and a candidate that outlived those would be fired by the next
+    // release over the document, with no press behind it. Once, here, rather than in each
+    // `Down` arm, so an arm added later cannot forget it; the document's own arm re-arms
+    // it immediately.
+    if matches!(event.kind, MouseEventKind::Down(MouseButton::Left)) {
+        app.cancel_hotspot_press();
+    }
     match event.kind {
-        MouseEventKind::ScrollDown => app.on_scroll(1, in_toc),
-        MouseEventKind::ScrollUp => app.on_scroll(-1, in_toc),
+        // Motion with no button held. It arrives already, on every terminal that
+        // honoured `EnableMouseCapture`: crossterm sends `?1003h` (any-event tracking),
+        // so this arm consumes events the loop was previously throwing away rather than
+        // asking the terminal for anything new. The pointer only ever *lights* a
+        // control, never presses one, so this is the whole of what it does — and it is
+        // the one event kind allowed to answer "no frame needed".
+        MouseEventKind::Moved => {
+            // Cancels a click in flight for the same reason a drag does, and the property
+            // is spelled out in both arms rather than in whichever one a given terminal
+            // happens to use. Under SGR encoding motion with a button held arrives as
+            // `Drag(Left)` and never gets here, so this is unreachable today — but a
+            // terminal that reports held-button motion as motion would otherwise let
+            // press, move away, move back, release fire the control, which is exactly
+            // what "cancellation, not suspension" forbids.
+            app.cancel_hotspot_press();
+            return if in_doc {
+                let (x, y) = local();
+                app.set_pointer(x, y)
+            } else {
+                // The pane, the scrollbar and the status bar are not places a button
+                // can be, so a pointer that has wandered onto one leaves nothing lit.
+                app.clear_pointer()
+            };
+        }
+        // The wheel over an open footnote popup scrolls **the note, not the document**
+        // (design spec §6). It has to: a document scroll dismisses the popup, so a
+        // notch that reached `App::on_scroll` would close the note the reader was
+        // trying to read further into. Outside the box the wheel means what it always
+        // did.
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+            let delta = if event.kind == MouseEventKind::ScrollDown {
+                1
+            } else {
+                -1
+            };
+            let (x, y) = local();
+            if in_doc && app.popup_contains(x, y) {
+                // The reader's own `scroll_step`, so one notch moves the note by as much
+                // as it moves the page.
+                let step = isize::try_from(app.config().scroll_step).unwrap_or(1);
+                app.scroll_popup(delta * step);
+            } else {
+                app.on_scroll(delta, in_toc);
+            }
+        }
         // The scrollbar. Its track is the body area — everything but the status bar —
         // exactly as `draw`'s `bar_area` is. Note what the drag and the release do
         // *not* look at: the column. A one-column bar is impossible to stay on while
@@ -350,29 +427,58 @@ fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16) {
         MouseEventKind::Down(MouseButton::Left) if app.focus() == Focus::Toc && !in_doc => {}
         MouseEventKind::Down(MouseButton::Left) if in_doc => {
             let (x, y) = local();
-            // A control answers the press instead of starting a drag (design spec §5):
-            // pressing `[copy]` must never leave a selection behind it. One arm rather
-            // than two so the precedence is written down where it is read, and cannot be
-            // lost by someone reordering the match.
-            if app.press_hotspot(x, y) {
-                copy_hotspot(app);
-            } else {
+            // The press only *records* the click; `Up` below fires it. A `[copy]` button
+            // claims the press outright and starts no drag (design spec §5): pressing it
+            // must never leave a selection behind. A link does not claim it — its cells
+            // are document text — so it begins a selection too, and dragging out of a
+            // link still selects. One arm rather than two so the precedence is written
+            // down where it is read, and cannot be lost by someone reordering the match.
+            if !app.press_hotspot(x, y) {
                 app.begin_selection(x, y);
             }
         }
         // A drag is reported even when the pointer has left the window, with the
         // coordinates clamped to it — which is exactly what makes the edge auto-scroll
         // in `App::drag_selection` fire.
-        MouseEventKind::Drag(MouseButton::Left) if app.selection().is_some() => {
-            let (x, y) = local();
-            app.drag_selection(x, y);
+        //
+        // Unguarded, because a press on a `[copy]` button starts no selection and its
+        // drags would otherwise reach no arm at all — and a drag is exactly the event
+        // that must cancel a click in flight, wherever the pointer is.
+        MouseEventKind::Drag(MouseButton::Left) => {
+            app.cancel_hotspot_press();
+            if app
+                .selection()
+                .is_some_and(|selection| selection.is_dragging())
+            {
+                let (x, y) = local();
+                app.drag_selection(x, y);
+            }
         }
-        MouseEventKind::Up(MouseButton::Left) if app.selection().is_some() => {
-            app.end_selection();
-            copy_selection(app);
+        MouseEventKind::Up(MouseButton::Left) => {
+            // `is_dragging`, not `is_some`: a *finished* selection stays up as a
+            // highlight, and re-ending it here would re-copy it over whatever this
+            // release actually did. Only a drag this gesture started wins the release.
+            if app
+                .selection()
+                .is_some_and(|selection| selection.is_dragging())
+            {
+                app.end_selection();
+                copy_selection(app);
+            }
+            // Both run: a plain click on a link ends a one-cell selection that
+            // `end_selection` discards as a click, and then activates the link.
+            if in_doc {
+                let (x, y) = local();
+                if let Some(activation) = app.release_hotspot(x, y) {
+                    activate(app, activation);
+                }
+            } else {
+                app.cancel_hotspot_press();
+            }
         }
         _ => {}
     }
+    true
 }
 
 /// Puts a finished selection on the clipboard and says what happened.
@@ -392,20 +498,42 @@ fn copy_selection(app: &mut App) {
     app.report_copy(extract.text.len(), copied, &delivery);
 }
 
-/// Puts the payload a pressed copy button produced on the clipboard, and flashes it.
+/// Does what a clicked control does.
 ///
-/// The same division of labour as [`copy_selection`]: [`App`] decided what the press
-/// meant and produced the bytes, and the I/O — which touches the terminal and the
-/// display server — happens out here.
-fn copy_hotspot(app: &mut App) {
-    let Some(copy) = app.take_hotspot_copy() else {
-        return;
-    };
-    let delivery = super::clipboard::copy_rich(&copy.text, copy.html.as_deref());
-    // The byte count is the plain payload's: it is what every reader receives, and a
-    // reader on a remote host never got the HTML at all.
-    app.report_copy(copy.text.len(), copy.what, &delivery);
-    app.flash_copied(copy.row, copy.col);
+/// The same division of labour as [`copy_selection`]: [`App`] decided that a click landed
+/// and on what, and the I/O — which touches the terminal and the display server — happens
+/// out here.
+fn activate(app: &mut App, activation: Activation) {
+    // Kept before the kind is moved out, so the two arms that hand the activation on can
+    // put it back together.
+    let (row, col) = (activation.row, activation.col);
+    match activation.kind {
+        HotspotKind::Copy { text, html } => {
+            let what = super::clipboard::Copied::for_button(html.as_deref());
+            let delivery = super::clipboard::copy_rich(&text, html.as_deref());
+            // The byte count is the plain payload's: it is what every reader receives,
+            // and a reader on a remote host never got the HTML at all.
+            app.report_copy(text.len(), what, &delivery);
+            app.flash_copied(activation.row, activation.col);
+        }
+        HotspotKind::Open { url } => {
+            // No flash on success: [`copied_flash`](super::draw) paints the literal word
+            // `[copied]` into the nine columns a `[copy]` button reserves for it
+            // (`render::button::REGION`), and a link reserves no such region. The
+            // browser appearing is the confirmation; only a failure needs the status
+            // bar, and the status bar never lies about what happened.
+            if let super::open::Outcome::Failed(why) = super::open::open(&url) {
+                app.notify(why, true);
+            }
+        }
+        // Anchor and Footnote are pure state — no terminal, no display server — so
+        // `App::activate` owns them; only `Copy` and `Open` need this function's I/O.
+        // The whole activation goes over, not just the kind: a footnote popup is
+        // anchored to the cell the marker was drawn in, and that cell is here.
+        kind @ (HotspotKind::Anchor { .. } | HotspotKind::Footnote { .. }) => {
+            app.activate(Activation { row, col, kind });
+        }
+    }
 }
 
 /// Converts a `crossterm` key event into the terminal-independent [`Key`].

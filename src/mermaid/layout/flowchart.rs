@@ -8,12 +8,12 @@ mod shape;
 
 use crate::canvas::Canvas;
 use crate::error::MermaidError;
-use crate::mermaid::ast::{ArrowHead, EdgeStroke, Flowchart, Group, NodeId};
-use crate::text::wrap_plain;
+use crate::mermaid::ast::{ArrowHead, EdgeStroke, Flowchart, Group, Label, NodeId};
 use crate::theme::Theme;
 
 use super::graph::{
-    self, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke, Terminator,
+    self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke,
+    Terminator,
 };
 
 /// Widest an edge label is allowed to get before it is wrapped.
@@ -94,13 +94,7 @@ fn edge(edge: &crate::mermaid::ast::FlowEdge) -> EdgeSpec {
             .label
             .as_ref()
             .filter(|label| !label.is_empty())
-            .map(|label| {
-                label
-                    .lines
-                    .iter()
-                    .flat_map(|line| wrap_plain(line, LABEL_WIDTH))
-                    .collect()
-            })
+            .map(|label| DrawnLabel::wrapped(label, LABEL_WIDTH))
             .unwrap_or_default(),
         tail_label: None,
         head_label: None,
@@ -121,8 +115,16 @@ fn group(group: &Group) -> GroupSpec {
         title: group
             .title
             .as_ref()
-            .map(|title| title.lines.clone())
-            .or_else(|| group.key.clone().map(|key| vec![key])),
+            .map(DrawnLabel::whole)
+            // A subgraph written without a title draws its key, which is an identifier
+            // and not label text the parser located: `Label::line` gives it the empty
+            // `source` that emits no span, rather than a guessed one.
+            .or_else(|| {
+                group
+                    .key
+                    .as_ref()
+                    .map(|key| DrawnLabel::whole(&Label::line(key.clone())))
+            }),
         direction: group.direction,
         nodes: group.nodes.iter().map(|&NodeId(id)| NodeIdx(id)).collect(),
         children: group.children.iter().map(self::group).collect(),

@@ -23,11 +23,10 @@ use crate::error::MermaidError;
 use crate::mermaid::ast::{
     Class, ClassAnnotation, ClassArrow, ClassDiagram, ClassRelation, Direction, LineStyle, Member,
 };
-use crate::text::wrap_plain;
 use crate::theme::Theme;
 
 use super::graph::{
-    self, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
+    self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
 };
 use super::record::{self, Row};
 
@@ -86,7 +85,7 @@ fn class_box(class: &Class, budget: u16, theme: &Theme) -> Canvas {
     if let Some(annotation) = &class.annotation {
         header.push(Row::centred(stereotype(annotation), styles.stereotype));
     }
-    header.push(Row::centred(display_name(class), styles.node_text));
+    header.push(Row::centred(display_name(class), styles.node_text).sourced(class.name.clone()));
 
     let mut fields = Vec::new();
     let mut methods = Vec::new();
@@ -105,10 +104,15 @@ fn class_box(class: &Class, budget: u16, theme: &Theme) -> Canvas {
 }
 
 /// The name shown in a class box, with any generic parameter restored.
+///
+/// A restored generic makes the drawn text `Square<Shape>`, which no stretch of the
+/// source spells — the tildes are gone and the angle brackets were never there — so
+/// `Label::spans_for` declines that row and it draws without provenance. A plain name
+/// is a byte-for-byte copy and maps back.
 fn display_name(class: &Class) -> String {
     match &class.generic {
-        Some(generic) => format!("{}<{generic}>", class.name),
-        None => class.name.clone(),
+        Some(generic) => format!("{}<{generic}>", class.name.text()),
+        None => class.name.text(),
     }
 }
 
@@ -157,13 +161,7 @@ fn relation(relation: &ClassRelation) -> EdgeSpec {
             .label
             .as_ref()
             .filter(|label| !label.is_empty())
-            .map(|label| {
-                label
-                    .lines
-                    .iter()
-                    .flat_map(|line| wrap_plain(line, LABEL_WIDTH))
-                    .collect()
-            })
+            .map(|label| DrawnLabel::wrapped(label, LABEL_WIDTH))
             .unwrap_or_default(),
         tail_label: cardinality(relation.left_cardinality.as_deref()),
         head_label: cardinality(relation.right_cardinality.as_deref()),
@@ -195,7 +193,7 @@ mod tests {
 
     fn class(name: &str, members: Vec<Member>) -> Class {
         Class {
-            name: name.to_string(),
+            name: Label::line(name),
             generic: None,
             annotation: None,
             members,
@@ -270,7 +268,7 @@ mod tests {
         });
         assert_eq!(spec.tail_label.as_deref(), Some("1"));
         assert_eq!(spec.head_label.as_deref(), Some("0..*"));
-        assert_eq!(spec.label, vec!["places".to_string()]);
+        assert_eq!(spec.label.lines(), vec!["places"]);
         assert_eq!(spec.head, Terminator::Arrow);
     }
 

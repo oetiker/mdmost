@@ -36,34 +36,121 @@ const NAMED: &[(&str, char)] = &[
 /// Long enough for `#1114111`, short enough that a lone `&` in prose costs a glance.
 const MAX_BODY: usize = 9;
 
+/// One run of decoded text, and the bytes of the raw text that produced it.
+///
+/// A [`faithful`](Run::faithful) run is a byte-for-byte copy of its source, which is what
+/// lets a selection resolve a column *inside* it back to a byte (design spec §2.1). An
+/// unfaithful run is one decoded entity: `&amp;` draws `&`, and nothing in those five
+/// bytes copies the one they drew, so the whole reference is what produced that
+/// character and there is no honest sub-range inside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Run {
+    /// Byte range in the decoded string.
+    pub text: std::ops::Range<usize>,
+    /// Byte range in the raw text handed to [`decode_runs`].
+    pub source: std::ops::Range<usize>,
+    /// Whether the decoded bytes are a copy of the source bytes.
+    pub faithful: bool,
+}
+
 /// Decodes the entity escapes in `text`, once.
 ///
 /// Scanning is strictly left to right and the output is never re-read, so `&amp;lt;` is
 /// the literal text `&lt;` rather than `<`: an author who escaped their escape gets
 /// what they asked for. Unrecognised escapes are copied through untouched.
 pub fn decode(text: &str) -> Cow<'_, str> {
+    decode_runs(text).0
+}
+
+/// Decodes `text` and reports where each run of the result came from.
+///
+/// [`decode`]'s own implementation, so the two cannot drift: a run map that disagreed
+/// with the text it maps would hand a selection bytes from the wrong place. The runs
+/// tile the decoded text end to end and in order, so concatenating them reproduces it.
+pub fn decode_runs(text: &str) -> (Cow<'_, str>, Vec<Run>) {
     if !text.contains(['&', '#']) {
-        return Cow::Borrowed(text);
+        return (
+            Cow::Borrowed(text),
+            vec![Run {
+                text: 0..text.len(),
+                source: 0..text.len(),
+                faithful: true,
+            }],
+        );
     }
     let mut out = String::with_capacity(text.len());
+    let mut runs: Vec<Run> = Vec::new();
     let mut rest = text;
-    while let Some(at) = rest.find(['&', '#']) {
-        out.push_str(&rest[..at]);
-        let tail = &rest[at..];
+    // Where `rest` starts in `text`, and where the faithful run in progress started in
+    // each of the two, so that a copied stretch is emitted as one run rather than one
+    // per gap between entities.
+    let mut at = 0usize;
+    let (mut run_source, mut run_text) = (0usize, 0usize);
+    while let Some(gap) = rest.find(['&', '#']) {
+        out.push_str(&rest[..gap]);
+        let tail = &rest[gap..];
+        let sigil = at + gap;
         match entity_at(tail) {
             Some((ch, len)) => {
+                if sigil > run_source {
+                    runs.push(Run {
+                        text: run_text..out.len(),
+                        source: run_source..sigil,
+                        faithful: true,
+                    });
+                }
+                let drawn = out.len();
                 out.push(ch);
+                runs.push(Run {
+                    text: drawn..out.len(),
+                    source: sigil..sigil + len,
+                    faithful: false,
+                });
                 rest = &tail[len..];
+                at = sigil + len;
+                run_source = at;
+                run_text = out.len();
             }
             None => {
-                // Not an escape: keep the sigil and resume after it.
+                // Not an escape: keep the sigil and resume after it. It is a copy of
+                // itself, so the run in progress simply continues over it.
                 out.push_str(&tail[..1]);
                 rest = &tail[1..];
+                at = sigil + 1;
             }
         }
     }
     out.push_str(rest);
-    Cow::Owned(out)
+    if text.len() > run_source {
+        runs.push(Run {
+            text: run_text..out.len(),
+            source: run_source..text.len(),
+            faithful: true,
+        });
+    }
+    debug_assert!(
+        runs.iter()
+            .all(|run| !run.faithful || out[run.text.clone()] == text[run.source.clone()]),
+        "a faithful run must copy its source"
+    );
+    (Cow::Owned(out), runs)
+}
+
+/// The byte length of the character reference `text` opens with, sigil and `;` included.
+///
+/// Exactly what [`decode`] will consume — this is [`entity_at`] with the character it
+/// names thrown away, not a second matcher that merely agrees with it. A caller that has
+/// to step *over* a reference rather than decode it is
+/// [`lex::split_statements`](crate::mermaid::parse::lex::split_statements), whose
+/// statement separator is the very `;` that terminates one; sharing the decision means
+/// the splitter and the decoder cannot disagree about where a reference ends, or about
+/// whether there is one at all. An `&nosuch;` the decoder passes through untouched is
+/// therefore not a reference here either, and its `;` stays a separator.
+pub fn reference_len(text: &str) -> Option<usize> {
+    if !matches!(text.as_bytes().first(), Some(b'&' | b'#')) {
+        return None;
+    }
+    entity_at(text).map(|(_, len)| len)
 }
 
 /// Reads the entity starting at the sigil `text` begins with.

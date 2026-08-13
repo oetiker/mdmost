@@ -8,12 +8,15 @@ use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color as TermColor, Modifier, Style as TermStyle};
+use ratatui::text::Span as TermSpan;
+use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
 use crate::canvas::{BorderSet, Canvas, Cell, Rule, Side};
 use crate::theme::{Attributes, Color, Style};
 
 use super::app::{App, Overlay};
 use super::chrome;
+use super::select;
 
 /// Drawn in the first column when content is scrolled off to the left.
 const LEFT_MARKER: &str = "\u{2039}";
@@ -79,6 +82,61 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     let hscroll = Offsets::new(app, doc_area.width);
     blit(buffer, doc_area, app.rendered(), scroll, &hscroll, base);
     edge_markers(buffer, doc_area, app.rendered(), scroll, &hscroll, &marks);
+    // Before the flash, and that ordering is the precedence: the pointer is necessarily
+    // over the button at the moment it is clicked, so a hover painted afterwards would
+    // repaint the one piece of feedback the press produces. `[copied]` wins.
+    //
+    // A control can be several hotspots — a link wrapped across rows, or wrapped inside
+    // a centred table cell (design spec §2.2) — sharing one `target`. Resolving the
+    // hovered index to its target and painting every hotspot that shares it is what
+    // keeps such a control looking like one thing under the pointer, rather than
+    // visibly breaking at the row boundary that lit it.
+    let hovered_spots: Vec<(usize, u16, u16)> = app
+        .hovered()
+        .and_then(|index| app.rendered().hotspots().get(index))
+        .map(|hovered| {
+            app.rendered()
+                .hotspots()
+                .iter()
+                .filter(|spot| spot.target == hovered.target)
+                .map(|spot| (spot.row, spot.col, spot.cols))
+                .collect()
+        })
+        .unwrap_or_default();
+    hover_highlight(
+        buffer,
+        doc_area,
+        app.rendered(),
+        scroll,
+        &hscroll,
+        base,
+        app.theme(),
+        &hovered_spots,
+    );
+    // The keyboard cursor, resolved to every hotspot of its control exactly as the
+    // pointer's hover is above — a wrapped link is several hotspots sharing one
+    // target, and `f`/`F` land on the control, not on one row of it (design spec §4).
+    let cursor_spots: Vec<(usize, u16, u16)> = app
+        .cursor_target()
+        .map(|target| {
+            app.rendered()
+                .hotspots()
+                .iter()
+                .filter(|spot| spot.target == target)
+                .map(|spot| (spot.row, spot.col, spot.cols))
+                .collect()
+        })
+        .unwrap_or_default();
+    cursor_highlight(
+        buffer,
+        doc_area,
+        app.rendered(),
+        scroll,
+        &hscroll,
+        base,
+        app.theme(),
+        &cursor_spots,
+    );
     // Under the search wash and the selection, which say where the reader's attention
     // is; the flash only says what their last click did.
     copied_flash(
@@ -99,6 +157,11 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     if app.rendered().is_empty() {
         empty_notice(buffer, doc_area, dim_style);
     }
+    // The footnote popup goes over the document and under everything else. Over,
+    // because it is a box the reader asked for and the page is its background; under
+    // the chrome, because the status bar is not a place a box may cover and the help
+    // overlay is modal — it dims the whole document area, popup included.
+    footnote_popup(buffer, doc_area, app);
 
     if toc_width > 0 {
         chrome::draw_toc(buffer, toc_area, app);
@@ -385,6 +448,95 @@ fn copied_flash(
     }
 }
 
+/// Repaints the control under the pointer in the theme's hovered shade.
+///
+/// Paint-time, exactly like [`copied_flash`] and for the same reason: the pointer is not
+/// one of the inputs a render is a function of, and threading it into one would make the
+/// cache key a mouse position. What arrives here is the region the renderer already drew
+/// — row, first column, width — so nothing is measured a second time and no cell can
+/// move: each column keeps its symbol and takes a new style.
+///
+/// The shade is derived from the cell's *own* style rather than from a slot, so the
+/// button at a table's edge hovers in the table's border colour and the one on a code
+/// fence in the fence's frame colour, without this function knowing there are two.
+/// Columns that are off screen — scrolled behind a pinned prefix, past the rail, or on a
+/// row above or below the viewport — are simply not painted, which [`Offsets`] answers.
+///
+/// `at` is every region of the hovered control, not one: a wrapped link is several
+/// hotspots sharing a `target`, and the caller has already resolved that grouping — this
+/// function just paints each region it is handed. An empty slice paints nothing, which is
+/// what an unhovered frame gets.
+#[allow(clippy::too_many_arguments)]
+fn hover_highlight(
+    buffer: &mut Buffer,
+    area: Rect,
+    canvas: &Canvas,
+    top: usize,
+    left: &Offsets<'_>,
+    base: Style,
+    theme: &crate::theme::Theme,
+    at: &[(usize, u16, u16)],
+) {
+    for &(row, col, cols) in at {
+        let Some(y) = row.checked_sub(top).and_then(|y| u16::try_from(y).ok()) else {
+            continue;
+        };
+        let Some(cells) = canvas.row(row).filter(|_| y < area.height) else {
+            continue;
+        };
+        for column in col..col.saturating_add(cols) {
+            let Some(x) = left.x_of(row, column).filter(|x| *x < left.content()) else {
+                continue;
+            };
+            let under = cells
+                .get(usize::from(column))
+                .map_or(base, |cell| base.patch(cell.style()));
+            if let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) {
+                target.set_style(term_style(theme.hovered(under)));
+            }
+        }
+    }
+}
+
+/// Paints the keyboard cursor onto every hotspot of the control it is on.
+///
+/// The same shape as [`hover_highlight`] — a control the cursor sits on gets the same
+/// tint a hovered one does, plus reverse video: a reader without a mouse needs a mark
+/// they can find at a glance, and one indistinguishable from a pointer that is not
+/// there would not be a cursor at all. `at` is every region of the control, already
+/// resolved by the caller from its `target`, exactly as hover's grouping is.
+#[allow(clippy::too_many_arguments)]
+fn cursor_highlight(
+    buffer: &mut Buffer,
+    area: Rect,
+    canvas: &Canvas,
+    top: usize,
+    left: &Offsets<'_>,
+    base: Style,
+    theme: &crate::theme::Theme,
+    at: &[(usize, u16, u16)],
+) {
+    for &(row, col, cols) in at {
+        let Some(y) = row.checked_sub(top).and_then(|y| u16::try_from(y).ok()) else {
+            continue;
+        };
+        let Some(cells) = canvas.row(row).filter(|_| y < area.height) else {
+            continue;
+        };
+        for column in col..col.saturating_add(cols) {
+            let Some(x) = left.x_of(row, column).filter(|x| *x < left.content()) else {
+                continue;
+            };
+            let under = cells
+                .get(usize::from(column))
+                .map_or(base, |cell| base.patch(cell.style()));
+            if let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) {
+                target.set_style(term_style(theme.hovered(under).with(Attributes::REVERSE)));
+            }
+        }
+    }
+}
+
 /// What [`edge_markers`] needs to know about the theme, gathered once per frame.
 ///
 /// Together rather than one argument each: they are three answers to the same question —
@@ -613,6 +765,103 @@ fn leading_rule(cells: &[Cell], style: Style) -> Option<Rule> {
     })
 }
 
+/// Paints the footnote popup over the document.
+///
+/// Paint-time, like [`hover_highlight`] and [`copied_flash`] before it: the note was
+/// laid out once by the ordinary renderer when the popup opened, and this copies cells.
+/// Nothing here measures, wraps or styles a single character of the footnote — that is
+/// what "a popup is another width, not a second rendering path" means in practice, and a
+/// special case for a list or a code span appearing in this function would be the sign
+/// that the shared path had been left.
+///
+/// The body is painted in the *document's* own background rather than in the help
+/// overlay's panel wash. Two reasons: the note's cells were rendered against that
+/// background, so they need no patching and a code fence inside the note keeps its own
+/// frame colour; and a framed inset over the page is the visual language the document
+/// already speaks — a code frame, a table and an image placeholder are all exactly this.
+/// Only the border and its title borrow the help overlay's slots, so the pager's boxes
+/// agree with each other without a new theme slot that every theme would have to grow.
+fn footnote_popup(buffer: &mut Buffer, area: Rect, app: &App) {
+    let Some(popup) = app.popup() else { return };
+    let theme = app.theme();
+    let at = popup.area();
+    let rect = Rect::new(
+        area.x.saturating_add(at.left),
+        area.y.saturating_add(at.top),
+        at.width.min(area.width.saturating_sub(at.left)),
+        at.height.min(area.height.saturating_sub(at.top)),
+    );
+    if rect.width < 3 || rect.height < 3 {
+        return;
+    }
+    let base = theme.base();
+    let on_page = |style: Style| Style {
+        bg: base.bg,
+        ..style
+    };
+    Clear.render(rect, buffer);
+    buffer.set_style(rect, term_style(base));
+    let mut block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(term_style(on_page(theme.ui.help_border)))
+        .title(TermSpan::styled(
+            format!(" [{}] ", popup.label()),
+            term_style(on_page(theme.ui.help_title)),
+        ));
+    // A note taller than its box says how much more there is and how to reach it, the
+    // way the help overlay does. A box that silently held back half a footnote would be
+    // the pager lying by omission about the document.
+    let hidden = popup.hidden_rows();
+    if popup.max_scroll() > 0 {
+        let note = if hidden > 0 {
+            format!(" \u{2193} {hidden} more ")
+        } else {
+            " \u{2191} back ".to_string()
+        };
+        block = block.title_bottom(TermSpan::styled(
+            note,
+            term_style(on_page(theme.ui.help_title)),
+        ));
+    }
+    block.render(rect, buffer);
+
+    // The note itself: canvas cells straight into buffer cells, from the row the reader
+    // has scrolled to. The inner region is the border plus one column of padding on each
+    // side — nothing in this program is welded to its own border.
+    let inner = Rect::new(
+        rect.x.saturating_add(crate::tui::popup::CHROME_COLS / 2),
+        rect.y.saturating_add(1),
+        rect.width.saturating_sub(crate::tui::popup::CHROME_COLS),
+        rect.height.saturating_sub(crate::tui::popup::CHROME_ROWS),
+    );
+    let canvas = popup.canvas();
+    for y in 0..inner.height {
+        let Some(cells) = canvas.row(popup.scroll() + usize::from(y)) else {
+            break;
+        };
+        for x in 0..inner.width {
+            let Some(cell) = cells.get(usize::from(x)) else {
+                break;
+            };
+            let Some(target) = buffer.cell_mut((inner.x + x, inner.y + y)) else {
+                continue;
+            };
+            target.set_style(term_style(base.patch(cell.style())));
+            if cell.is_continuation() {
+                // The lead is always on screen here — the note starts at its own column
+                // zero — so ratatui wants the owned cell left empty.
+                target.set_symbol("");
+            } else if cell.width() == 2 && x + 1 >= inner.width {
+                // A wide glyph whose other half falls outside the box, drawn as a space
+                // rather than as half a character. Same rule as `blit`'s.
+                target.set_symbol(" ");
+            } else {
+                target.set_symbol(cell.text());
+            }
+        }
+    }
+}
+
 /// Says so, rather than showing a screenful of nothing (usability P14).
 fn empty_notice(buffer: &mut Buffer, area: Rect, style: TermStyle) {
     if area.width < 4 || area.height == 0 {
@@ -664,24 +913,24 @@ fn highlight_selection(buffer: &mut Buffer, area: Rect, app: &App, top: usize, l
         return;
     };
     let style = app.theme().ui.selection;
-    let width = app.rendered().width();
+    let canvas = app.rendered();
     for y in 0..area.height {
         let row = top + usize::from(y);
-        if app.rendered().row(row).is_none() {
+        if canvas.row(row).is_none() {
             break;
         }
-        let Some(columns) = selection.columns_on(row, width) else {
-            continue;
-        };
-        for col in columns {
-            let Some(x) = left.x_of(row, col) else {
-                continue;
-            };
-            if x >= area.width {
-                continue;
-            }
-            if let Some(cell) = buffer.cell_mut((area.x + x, area.y + y)) {
-                cell.set_style(patch_term(cell.style(), style));
+        let ranges = select::highlighted_columns(canvas, app.doc().source(), selection, row);
+        for columns in ranges {
+            for col in columns {
+                let Some(x) = left.x_of(row, col) else {
+                    continue;
+                };
+                if x >= area.width {
+                    continue;
+                }
+                if let Some(cell) = buffer.cell_mut((area.x + x, area.y + y)) {
+                    cell.set_style(patch_term(cell.style(), style));
+                }
             }
         }
     }

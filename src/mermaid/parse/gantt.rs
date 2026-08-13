@@ -23,11 +23,14 @@ use super::lex::{self, Nesting, SrcLine};
 const DEFAULT_DATE_FORMAT: &str = "YYYY-MM-DD";
 
 /// Parses a whole `gantt` chart.
-pub fn parse(lines: &[SrcLine<'_>]) -> Result<GanttChart, MermaidError> {
+pub fn parse(lines: &[SrcLine<'_>], src: &str) -> Result<GanttChart, MermaidError> {
     let Some((header, body)) = lines.split_first() else {
         return Err(lex::syntax(1, "empty diagram"));
     };
-    let mut builder = Builder::default();
+    let mut builder = Builder {
+        src,
+        ..Builder::default()
+    };
     let (_, rest) = lex::split_word(header.text);
     if !rest.is_empty() {
         builder.statement(rest, header.number)?;
@@ -44,7 +47,10 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<GanttChart, MermaidError> {
 
 /// Accumulates sections while resolving task dates.
 #[derive(Debug)]
-struct Builder {
+struct Builder<'a> {
+    /// The full mermaid source, passed to `lex::label_at` to compute a task name's
+    /// byte range.
+    src: &'a str,
     title: Option<String>,
     date_format: String,
     axis_format: Option<String>,
@@ -55,9 +61,10 @@ struct Builder {
     previous_end: Option<i64>,
 }
 
-impl Default for Builder {
+impl Default for Builder<'_> {
     fn default() -> Self {
         Self {
+            src: "",
             title: None,
             date_format: DEFAULT_DATE_FORMAT.to_string(),
             axis_format: None,
@@ -68,7 +75,7 @@ impl Default for Builder {
     }
 }
 
-impl Builder {
+impl Builder<'_> {
     /// Handles one source line.
     fn statement(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         let (word, rest) = lex::split_word(text);
@@ -144,7 +151,7 @@ impl Builder {
         }
         if let Some(section) = self.sections.last_mut() {
             section.tasks.push(GanttTask {
-                name: entity::decode(lex::unquote(name)).into_owned(),
+                name: lex::label_at(self.src, lex::unquote(name)),
                 id: spec.id,
                 progress: spec.progress,
                 critical: spec.critical,

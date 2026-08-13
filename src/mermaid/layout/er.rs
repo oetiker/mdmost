@@ -22,12 +22,13 @@ mod attribute;
 
 use crate::canvas::Canvas;
 use crate::error::MermaidError;
-use crate::mermaid::ast::{Direction, Entity, ErCardinality, ErDiagram, ErRelationship, LineStyle};
-use crate::text::wrap_plain;
+use crate::mermaid::ast::{
+    Direction, Entity, ErCardinality, ErDiagram, ErRelationship, Label, LineStyle,
+};
 use crate::theme::Theme;
 
 use super::graph::{
-    self, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
+    self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
 };
 use super::record::{self, Row};
 
@@ -79,7 +80,8 @@ impl NodeArt for Art<'_> {
 /// Draws one entity as a name compartment over its attribute table.
 fn entity_box(entity: &Entity, budget: u16, theme: &Theme) -> Canvas {
     let styles = theme.diagram;
-    let header = vec![Row::centred(display_name(entity), styles.node_text)];
+    let shown = display_label(entity);
+    let header = vec![Row::centred(shown.text(), styles.node_text).sourced(shown.clone())];
     let attributes = attribute::table(&entity.attributes)
         .into_iter()
         .map(|text| Row::left(text, styles.node_text))
@@ -87,10 +89,10 @@ fn entity_box(entity: &Entity, budget: u16, theme: &Theme) -> Canvas {
     record::draw(&[header, attributes], budget, theme)
 }
 
-/// The name shown in an entity box: the alias when the source gave one.
-fn display_name(entity: &Entity) -> String {
-    match entity.alias.as_deref().map(str::trim) {
-        Some(alias) if !alias.is_empty() => alias.to_string(),
+/// The label shown in an entity box: the alias when the source gave one.
+fn display_label(entity: &Entity) -> Label {
+    match &entity.alias {
+        Some(alias) if !alias.is_empty() => alias.clone(),
         _ => entity.name.clone(),
     }
 }
@@ -126,13 +128,7 @@ fn relationship(relationship: &ErRelationship) -> EdgeSpec {
             .label
             .as_ref()
             .filter(|label| !label.is_empty())
-            .map(|label| {
-                label
-                    .lines
-                    .iter()
-                    .flat_map(|line| wrap_plain(line, LABEL_WIDTH))
-                    .collect()
-            })
+            .map(|label| DrawnLabel::wrapped(label, LABEL_WIDTH))
             .unwrap_or_default(),
         tail_label: None,
         head_label: None,
@@ -172,7 +168,7 @@ mod tests {
 
     fn entity(name: &str, attributes: Vec<ErAttribute>) -> Entity {
         Entity {
-            name: name.to_string(),
+            name: Label::line(name),
             alias: None,
             attributes,
         }
@@ -214,10 +210,12 @@ mod tests {
     #[test]
     fn an_alias_is_shown_instead_of_the_key() {
         let mut named = entity("CUSTOMER", Vec::new());
-        named.alias = Some("Customer account".to_string());
-        assert_eq!(display_name(&named), "Customer account");
-        named.alias = Some("  ".to_string());
-        assert_eq!(display_name(&named), "CUSTOMER");
+        named.alias = Some(Label::line("Customer account"));
+        assert_eq!(display_label(&named).text(), "Customer account");
+        // The parse path trims, so a blank alias arrives as an empty label and the
+        // entity falls back to its own name.
+        named.alias = Some(Label::parse("  "));
+        assert_eq!(display_label(&named).text(), "CUSTOMER");
     }
 
     #[test]
@@ -249,7 +247,7 @@ mod tests {
         };
         let spec = relationship(&relation);
         assert_eq!(spec.stroke, Stroke::Dotted);
-        assert_eq!(spec.label, vec!["places".to_string()]);
+        assert_eq!(spec.label.lines(), vec!["places"]);
         assert_eq!(
             spec.head,
             Terminator::CrowFoot {

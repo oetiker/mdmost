@@ -5,11 +5,28 @@
 //! Individual tests then check what the output actually says.
 
 use super::*;
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, Hotspot, HotspotKind};
 use crate::doc::Doc;
 use crate::text::display_width;
 use crate::theme::{Attributes, Theme};
 use crate::tui::icons::is_private_use;
+
+/// The plain-text copy payload of a `[copy]` hotspot, for tests that only ever deal
+/// with the `Copy` kind and would rather assert on the payload directly.
+fn copy_text(spot: &Hotspot) -> &str {
+    match &spot.kind {
+        HotspotKind::Copy { text, .. } => text,
+        other => panic!("expected a Copy hotspot, got {other:?}"),
+    }
+}
+
+/// The richer clipboard flavour of a `[copy]` hotspot, if it carries one.
+fn copy_html(spot: &Hotspot) -> Option<&str> {
+    match &spot.kind {
+        HotspotKind::Copy { html, .. } => html.as_deref(),
+        other => panic!("expected a Copy hotspot, got {other:?}"),
+    }
+}
 
 /// Options the readable assertions below are written against.
 ///
@@ -2445,52 +2462,60 @@ fn a_row_that_exactly_fits_is_not_shortened_because_another_row_overflows() {
     assert_eq!(usize::from(span.cols), 16);
 }
 
+/// The source a document was parsed from, which is what its spans index.
+///
+/// A test that slices its own CRLF string literal instead is slicing a text nothing in
+/// the crate ever holds: line endings are normalised in `Doc::parse`, so the file's
+/// bytes and the document's stop being the same length there. Slicing the wrong one of
+/// the two reports a mapping bug that is not there.
+fn parsed_source(markdown: &str) -> String {
+    Doc::parse(markdown).source().to_string()
+}
+
 #[test]
 fn a_crlf_authored_fence_maps_to_the_source_without_the_carriage_return() {
-    // comrak keeps a CRLF document's `\r` inside a code block's `literal`
-    // (`literal == "let needle = 1;\r\n"`), but `LineOffsets::line` strips it from the
-    // *source* line `doc::convert::code_lines` searches — so before that function
-    // stripped it too, `text.ends_with(line)` could never hold and every line of every
-    // code block in a CRLF document got no provenance at all. `doc::literal_lines`'s
-    // split and `bridge::highlight`'s both split only on `\n`, so the `\r` travels
-    // with the same line on both sides and the row alignment between `origins` and the
-    // drawn lines was never in question — only the byte match was broken.
+    // comrak copies a fenced block's bytes into `literal` verbatim, `\r` included, and
+    // `convert::code_lines` used to strip that `\r` back off line by line so that
+    // `text.ends_with(line)` could hold against a source line `LineOffsets::line` had
+    // already stripped. Normalising at the read retires both strips: there is no `\r`
+    // in the document, so the two sides agree without either of them saying so.
     let markdown = "```rust\r\nlet needle = 1;\r\n```\r\n";
+    let doc = parsed_source(markdown);
     let canvas = render(markdown, 40);
     let span = canvas
         .spans()
         .iter()
-        .find(|s| markdown[s.source_start..s.source_end].contains("needle"))
+        .find(|s| doc[s.source_start..s.source_end].contains("needle"))
         .expect("a CRLF-authored code line must still map to its source");
-    let text = &markdown[s_range(span)];
-    assert_eq!(text, "let needle = 1;");
+    assert_eq!(&doc[s_range(span)], "let needle = 1;");
     assert!(
-        !text.contains('\r'),
-        "a copy must never carry the line's own carriage return: {text:?}"
+        !doc.contains('\r'),
+        "the document a span indexes has no carriage return left in it: {doc:?}"
     );
 }
 
 #[test]
 fn a_crlf_fence_with_a_blank_line_still_maps_the_lines_around_it() {
-    // The blank-line branch of `code_lines` returns early, without advancing the
-    // search index, before ever reaching the `ends_with` match this fix repairs — so
-    // it needs its own coverage: a CRLF literal's blank line is `"\r"`, not `""`, and
-    // has to be recognised as empty *after* the `\r` is stripped, or every line after
-    // it searches from the wrong index.
+    // The blank-line branch of `code_lines` returns early, without advancing the search
+    // index, before ever reaching the `ends_with` match — so it needs its own coverage.
+    // Before normalisation the point was that a CRLF literal's blank line is `"\r"` and
+    // had to be recognised as empty *after* stripping; it now arrives as `""` like any
+    // other, and what is pinned here is that the lines around it map either way.
     let markdown = "```rust\r\nlet needle = 1;\r\n\r\nlet other = 2;\r\n```\r\n";
+    let doc = parsed_source(markdown);
     let canvas = render(markdown, 40);
     let needle = canvas
         .spans()
         .iter()
-        .find(|s| markdown[s.source_start..s.source_end].contains("needle"))
+        .find(|s| doc[s.source_start..s.source_end].contains("needle"))
         .expect("the line before the blank line must map");
-    assert_eq!(&markdown[s_range(needle)], "let needle = 1;");
+    assert_eq!(&doc[s_range(needle)], "let needle = 1;");
     let other = canvas
         .spans()
         .iter()
-        .find(|s| markdown[s.source_start..s.source_end].contains("other"))
+        .find(|s| doc[s.source_start..s.source_end].contains("other"))
         .expect("the line after the blank line must map");
-    assert_eq!(&markdown[s_range(other)], "let other = 2;");
+    assert_eq!(&doc[s_range(other)], "let other = 2;");
 }
 
 #[test]
@@ -2526,8 +2551,8 @@ fn a_code_frame_offers_a_copy_button() {
     let spot = canvas.hotspots().first().expect("a hotspot");
     assert_eq!(spot.row, 0);
     assert_eq!(spot.cols, 6);
-    assert_eq!(spot.text, "let a = 1;\n");
-    assert_eq!(spot.html, None, "code has one flavour");
+    assert_eq!(copy_text(spot), "let a = 1;\n");
+    assert_eq!(copy_html(spot), None, "code has one flavour");
 }
 
 #[test]
@@ -2586,7 +2611,7 @@ fn a_failed_mermaid_block_offers_its_source() {
         .hotspots()
         .first()
         .expect("a hotspot on the fallback");
-    assert_eq!(spot.text, "not a diagram at all\n");
+    assert_eq!(copy_text(spot), "not a diagram at all\n");
 }
 
 #[test]
@@ -2620,7 +2645,7 @@ fn a_code_block_in_a_table_cell_shows_no_button() {
     let spots = canvas.hotspots();
     assert_eq!(spots.len(), 1, "one button, one hotspot: {spots:?}");
     assert!(
-        !spots[0].text.contains("let value"),
+        !copy_text(&spots[0]).contains("let value"),
         "a code block inside a table cell must record no hotspot of its own: {spots:?}"
     );
 }
@@ -2654,14 +2679,11 @@ fn a_table_offers_a_copy_button_with_both_flavours() {
         bracket,
         "the hotspot covers the drawn label"
     );
-    assert_eq!(spot.text, "name\trole\nada\tdesign\n");
+    assert_eq!(copy_text(spot), "name\trole\nada\tdesign\n");
     assert!(
-        spot.html
-            .as_deref()
-            .unwrap_or_default()
-            .starts_with("<table>"),
+        copy_html(spot).unwrap_or_default().starts_with("<table>"),
         "a table offers the richer flavour too: {:?}",
-        spot.html
+        copy_html(spot)
     );
 }
 
@@ -2688,10 +2710,14 @@ fn a_narrow_table_drops_its_button() {
 
 #[test]
 fn a_table_inside_a_table_cell_shows_no_button() {
-    // The inner table is blitted into a row it shares, so its hotspot is dropped while
-    // its drawn `[copy]` would survive — a label with nothing behind it. Only the
-    // top-level table is offered one, so exactly one button is drawn and exactly one
-    // hotspot backs it.
+    // Only a top-level table is offered a button, so the inner one draws no `[copy]` and
+    // records nothing: exactly one button is drawn and exactly one hotspot backs it.
+    //
+    // The guard used to be justified by the blit dropping the inner table's hotspot and
+    // leaving a label with nothing behind it. Since Task 2b a blit carries a hotspot, so
+    // the guard is a product decision instead — see `render_table_node`. What this test
+    // asserts is unchanged either way, and it is now the thing that would notice if the
+    // guard were dropped by accident.
     let table = table_with_cell("| inner column |\n|---|\n| y |\n");
     let canvas = render_block(&table, 40, &Theme::default_dark(), &BUTTONS);
     canvas.check_invariants().expect("contract holds");
@@ -2706,5 +2732,916 @@ fn a_table_inside_a_table_cell_shows_no_button() {
         1,
         "and exactly one hotspot backs it: {:?}",
         canvas.hotspots()
+    );
+}
+
+/// The drawn cells a span claims, as text.
+///
+/// A span is a claim about *both* sides of the mapping — these document bytes are
+/// drawn at these cells — so a provenance test that checks only `source_start..
+/// source_end` proves half of it. Reading the cells back is the other half.
+fn span_cells(canvas: &Canvas, span: &crate::canvas::SearchSpan) -> String {
+    canvas
+        .row_text(span.row)
+        .chars()
+        .skip(usize::from(span.col))
+        .take(usize::from(span.cols))
+        .collect()
+}
+
+/// The span whose document bytes are exactly `text`, panicking when there is none.
+fn span_for<'a>(canvas: &'a Canvas, doc: &str, text: &str) -> &'a crate::canvas::SearchSpan {
+    canvas
+        .spans()
+        .iter()
+        .find(|s| doc.get(s.source_start..s.source_end) == Some(text))
+        .unwrap_or_else(|| {
+            panic!(
+                "no span covers {text:?}; spans map to {:?}",
+                canvas
+                    .spans()
+                    .iter()
+                    .map(|s| doc.get(s.source_start..s.source_end))
+                    .collect::<Vec<_>>()
+            )
+        })
+}
+
+#[test]
+fn a_flowchart_label_maps_back_to_the_document() {
+    let doc = "# Chart\n\n```mermaid\nflowchart LR\n  A[Parse] --> B[Layout]\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Parse");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Parse",
+        "the span must sit on the drawn label: {:?}",
+        canvas.row_text(span.row)
+    );
+}
+
+#[test]
+fn a_flowchart_label_maps_back_in_a_crlf_document() {
+    // A diagram label is rebased from a block-relative offset onto a document one, and
+    // that arithmetic used to have to account for the `\r` comrak keeps in the fenced
+    // literal. Since line endings are normalised at the read there is no `\r` to
+    // account for — kept as a fixture because a CRLF document is still what an author
+    // on Windows hands the pager, and the rebasing must land on the label either way.
+    let markdown =
+        "# Chart\r\n\r\n```mermaid\r\nflowchart LR\r\n  A[Parse] --> B[Layout]\r\n```\r\n";
+    let doc = parsed_source(markdown);
+    let canvas = render(markdown, 60);
+    let span = span_for(&canvas, &doc, "Parse");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Parse",
+        "a CRLF document maps its labels too: {:?}",
+        canvas.row_text(span.row)
+    );
+}
+
+#[test]
+fn a_flowchart_indented_in_a_list_maps_back() {
+    // The list's two-column indent is stripped from the literal comrak hands over, so a
+    // block-relative offset used as a document offset lands two bytes left per line.
+    let doc = "- item\n\n  ```mermaid\n  flowchart LR\n    A[Parse] --> B[Layout]\n  ```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Parse");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Parse",
+        "the list's indent is not part of the mermaid source: {:?}",
+        canvas.row_text(span.row)
+    );
+}
+
+#[test]
+fn every_flowchart_label_span_names_its_own_drawn_text() {
+    // The whole mapping in one assertion: every span the diagram emits must have the
+    // document bytes it names drawn at the cells it claims. A span that is right about
+    // one label and wrong about the next passes the tests above and fails here.
+    let doc = "```mermaid\nflowchart LR\n  A[Parse] --> B[Layout]\n  B --> C[Draw]\n```\n";
+    let canvas = render(doc, 60);
+    let mapped: Vec<String> = canvas
+        .spans()
+        .iter()
+        .map(|s| span_cells(&canvas, s))
+        .collect();
+    assert_eq!(
+        mapped,
+        vec!["Parse", "Layout", "Draw"],
+        "every drawn label carries a span, in layout order"
+    );
+    for span in canvas.spans() {
+        assert_eq!(
+            doc.get(span.source_start..span.source_end),
+            Some(span_cells(&canvas, span).as_str()),
+            "span {span:?} names bytes other than the ones it draws"
+        );
+    }
+}
+
+/// The second half of this test used to assert the opposite: both drawn lines named the
+/// *whole* label, because the label was the unit of selection. Design spec §2.2 was
+/// amended after live testing — a drag inside a box copies the characters it went over —
+/// and a row naming the whole label cannot answer that. So each row names its own bytes
+/// now, and the label survives as the `unit` the rows share.
+#[test]
+fn a_multi_line_label_points_every_drawn_line_at_its_own_bytes() {
+    let doc = "```mermaid\nflowchart LR\n  A[One<br>Two] --> B[End]\n```\n";
+    let canvas = render(doc, 60);
+    let drawn: Vec<String> = canvas
+        .spans()
+        .iter()
+        .map(|s| span_cells(&canvas, s).trim().to_string())
+        .collect();
+    assert_eq!(drawn, vec!["One", "Two", "End"], "each line is drawn");
+    let named: Vec<Option<&str>> = canvas
+        .spans()
+        .iter()
+        .map(|s| doc.get(s.source_start..s.source_end))
+        .collect();
+    assert_eq!(
+        named,
+        vec![Some("One"), Some("Two"), Some("End")],
+        "each drawn line names the bytes that drew it, `<br>` excluded"
+    );
+    let units: Vec<Option<&str>> = canvas
+        .spans()
+        .iter()
+        .take(2)
+        .map(|s| s.unit.and_then(|(start, end)| doc.get(start..end)))
+        .collect();
+    assert_eq!(
+        units,
+        vec![Some("One<br>Two"), Some("One<br>Two")],
+        "but both rows belong to one label, which is what a selection asks about"
+    );
+}
+
+#[test]
+fn a_mermaid_block_with_no_mapping_emits_no_diagram_spans() {
+    // `origins` is empty for a block the document could not locate. A block-relative
+    // offset used as a document offset would then point into whatever text happens to
+    // sit at that byte, which is worse than no provenance at all.
+    let literal = "flowchart LR\n  A[Parse] --> B[Layout]\n";
+    let theme = Theme::default_dark();
+    let ctx = Ctx::new(&theme, &PLAIN);
+    let canvas = code::render_code_block(
+        Some("mermaid"),
+        literal,
+        true,
+        &[],
+        crate::doc::SourceSpan::default(),
+        60,
+        ctx,
+    );
+    assert!(
+        canvas.plain_text().contains("Parse"),
+        "the diagram still draws:\n{}",
+        canvas.plain_text()
+    );
+    assert!(
+        canvas.spans().is_empty(),
+        "but claims no document bytes: {:?}",
+        canvas.spans()
+    );
+}
+
+/// Asserts that every span the canvas carries names exactly the cells it draws.
+///
+/// The other half of `span_for`: that one proves a particular label is mapped, this
+/// proves nothing else was mapped *wrongly*. A family that emits one span naming a whole
+/// wrapped label passes the first and fails this.
+fn every_span_names_its_own_cells(canvas: &Canvas, doc: &str) {
+    for span in canvas.spans() {
+        let source = doc.get(span.source_start..span.source_end);
+        let cells = span_cells(canvas, span);
+        // The one sanctioned exception to "a span's source is a copy of its cells": an
+        // entity reference that draws exactly one column. Anything else must copy.
+        let entity = span.cols == 1
+            && source.is_some_and(|text| text.starts_with('&') && text.ends_with(';'));
+        assert!(
+            entity || source == Some(cells.as_str()),
+            "span {span:?} names {source:?} but draws {cells:?}; row {:?}",
+            canvas.row_text(span.row)
+        );
+    }
+}
+
+#[test]
+fn a_sequence_participant_maps_back_to_the_document() {
+    let doc = "```mermaid\nsequenceDiagram\n  participant A as Alice\n  A->>A: Ping\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Alice");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Alice",
+        "the participant's span must sit on its drawn head: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_sequence_message_maps_back_to_the_document() {
+    let doc = "```mermaid\nsequenceDiagram\n  participant A as Alice\n  participant B as Bob\n  A->>B: Ping\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Ping");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Ping",
+        "the message's span must sit on the drawn arrow label: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_class_name_maps_back_to_the_document() {
+    let doc = "```mermaid\nclassDiagram\n  class Animal\n  Animal <|-- Duck\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Animal");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Animal",
+        "the class name's span must sit on the drawn name: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn an_er_entity_name_maps_back_to_the_document() {
+    let doc = "```mermaid\nerDiagram\n  CUSTOMER ||--o{ ORDER : places\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "CUSTOMER");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "CUSTOMER",
+        "the entity's span must sit on the drawn name: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_pie_slice_label_maps_back_to_the_document() {
+    let doc = "```mermaid\npie\n  \"Cats\" : 40\n  \"Dogs\" : 60\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Cats");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Cats",
+        "the slice's span must sit on the drawn legend label: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_gantt_task_name_maps_back_to_the_document() {
+    let doc = "```mermaid\ngantt\n  dateFormat YYYY-MM-DD\n  section Build\n  Design :a1, 2024-01-01, 3d\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Design");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Design",
+        "the task's span must sit on the drawn task name: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_state_description_maps_back_to_the_document() {
+    let doc = "```mermaid\nstateDiagram-v2\n  s1 : Idle\n  s1 --> s2\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Idle");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Idle",
+        "the state's span must sit on its drawn description: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_wrapped_state_description_points_every_row_at_its_own_bytes() {
+    // The axis a single-line fixture cannot test: once a description wraps, every drawn
+    // row must name the bytes that drew *it*. One span naming the whole description
+    // passes `a_state_description_maps_back_to_the_document` and fails here.
+    let doc = "```mermaid\nstateDiagram-v2\n  s1 : waiting for the user to press a key\n  s1 --> s2\n```\n";
+    let canvas = render(doc, 30);
+    every_span_names_its_own_cells(&canvas, doc);
+    let named: Vec<&str> = canvas
+        .spans()
+        .iter()
+        .filter_map(|s| doc.get(s.source_start..s.source_end))
+        .collect();
+    assert!(
+        named.len() > 1,
+        "the description must wrap onto several rows, each with its own span: {named:?}"
+    );
+    let units: Vec<Option<&str>> = canvas
+        .spans()
+        .iter()
+        .map(|s| s.unit.and_then(|(start, end)| doc.get(start..end)))
+        .collect();
+    assert!(
+        units
+            .iter()
+            .all(|unit| *unit == Some("waiting for the user to press a key")),
+        "every row belongs to the one description: {units:?}"
+    );
+}
+
+#[test]
+fn a_multi_line_sequence_note_points_every_row_at_its_own_bytes() {
+    let doc =
+        "```mermaid\nsequenceDiagram\n  participant A as Alice\n  Note over A: One<br>Two\n```\n";
+    let canvas = render(doc, 60);
+    every_span_names_its_own_cells(&canvas, doc);
+    let named: Vec<&str> = canvas
+        .spans()
+        .iter()
+        .filter_map(|s| doc.get(s.source_start..s.source_end))
+        .collect();
+    assert!(
+        named.contains(&"One") && named.contains(&"Two"),
+        "each line of the note names its own bytes, `<br>` excluded: {named:?}"
+    );
+}
+
+#[test]
+fn a_pie_slice_label_cuts_its_entities_out_into_runs_of_their_own() {
+    // A decoded entity draws fewer cells than it spells, so it cannot sit inside a run
+    // whose bytes and cells line up. `&#65;` is kept alongside `&amp;` deliberately: a
+    // numeric reference has caught mutations a named one alone did not.
+    let doc = "```mermaid\npie\n  \"A&amp;B&#65;\" : 40\n  \"Dogs\" : 60\n```\n";
+    let canvas = render(doc, 60);
+    every_span_names_its_own_cells(&canvas, doc);
+    let named: Vec<&str> = canvas
+        .spans()
+        .iter()
+        .filter_map(|s| doc.get(s.source_start..s.source_end))
+        .collect();
+    assert!(
+        named.contains(&"&amp;") && named.contains(&"&#65;"),
+        "each entity reference is a run of its own: {named:?}"
+    );
+    assert!(
+        named.contains(&"Dogs"),
+        "and the plain slice still maps whole: {named:?}"
+    );
+}
+
+#[test]
+fn a_gantt_chart_indented_in_a_list_maps_back() {
+    // The list's indent is stripped from the literal comrak hands over, so a
+    // block-relative offset used as a document offset lands two bytes left per line.
+    let doc = "- item\n\n  ```mermaid\n  gantt\n  dateFormat YYYY-MM-DD\n  section Build\n  Design :a1, 2024-01-01, 3d\n  ```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Design");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Design",
+        "the list's indent is not part of the mermaid source: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn a_class_diagram_in_a_block_quote_maps_back() {
+    let doc = "> ```mermaid\n> classDiagram\n>   class Animal\n>   Animal <|-- Duck\n> ```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Animal");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Animal",
+        "the quote marker is not part of the mermaid source: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+#[test]
+fn an_er_alias_is_mapped_and_the_key_it_replaced_is_not() {
+    // Both directions in one fixture: the alias is what is drawn, so the alias is what
+    // is mapped, and the key — which is nowhere on the canvas — must claim no cells.
+    let doc = "```mermaid\nerDiagram\n  p[\"Person\"] |o--o| c[\"Car park\"] : owns\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Person");
+    assert_eq!(span_cells(&canvas, span), "Person");
+    every_span_names_its_own_cells(&canvas, doc);
+    let drawn: Vec<String> = canvas
+        .spans()
+        .iter()
+        .map(|s| span_cells(&canvas, s))
+        .collect();
+    assert!(
+        !drawn.iter().any(|text| text == "p" || text == "c"),
+        "an entity key that was replaced by an alias draws nothing: {drawn:?}"
+    );
+}
+
+#[test]
+fn a_sequence_actor_label_maps_back_to_the_document() {
+    // An `actor` draws its label under a stick figure rather than inside a box, which is
+    // a second painting path through `draw_head`. Removing its span emission turned no
+    // test red until this fixture existed.
+    let doc = "```mermaid\nsequenceDiagram\n  actor A as Alice\n  A->>A: Ping\n```\n";
+    let canvas = render(doc, 60);
+    let span = span_for(&canvas, doc, "Alice");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Alice",
+        "the actor's span must sit on the label under its figure: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+}
+
+/// Asserts that no span sits on line art — an edge's own glyphs or a frame's border.
+///
+/// The other direction of the edge-label mapping: a span that names a label but is
+/// placed on the arrow beside it draws box-drawing characters, and no label a reader can
+/// select is made of those. Mermaid is Unicode box art only, so any drawn cell in the
+/// box-drawing block came from the engine's pen and not from the author's text.
+fn no_span_sits_on_line_art(canvas: &Canvas) {
+    for span in canvas.spans() {
+        let cells = span_cells(canvas, span);
+        assert!(
+            !cells.chars().any(is_line_art),
+            "span {span:?} draws line art {cells:?}; row {:?}",
+            canvas.row_text(span.row)
+        );
+    }
+}
+
+/// True for the glyphs the graph engine draws lines, arrowheads and frames with.
+fn is_line_art(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{2500}'..='\u{257F}' | '▶' | '◀' | '▲' | '▼' | '◆' | '◇' | '△' | '▽'
+    )
+}
+
+#[test]
+fn a_flowchart_edge_label_maps_back_to_the_document() {
+    // The label rides in the middle of the arrow, and it is long enough to wrap: every
+    // drawn row must name the bytes that drew *it*, because one span naming the whole
+    // label would put the same range on two rows and no column inside either could be
+    // right.
+    let doc = "```mermaid\nflowchart LR\n  A[Parse] -->|needs a fresh token| B[Layout]\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "needs a fresh");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "needs a fresh",
+        "the edge label's first row must sit on its own drawn text: {:?}",
+        canvas.row_text(span.row)
+    );
+    let tail = span_for(&canvas, doc, "token");
+    assert_eq!(
+        span_cells(&canvas, tail),
+        "token",
+        "and the wrapped remainder on its own: {:?}",
+        canvas.row_text(tail.row)
+    );
+    assert_ne!(span.row, tail.row, "the two rows of a wrapped label differ");
+    assert_eq!(
+        [span, tail].map(|s| s.unit.and_then(|(start, end)| doc.get(start..end))),
+        [Some("needs a fresh token"); 2],
+        "but both rows belong to the one label"
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+}
+
+#[test]
+fn a_flowchart_subgraph_title_maps_back_to_the_document() {
+    // A frame draws the first line of its title into its top edge, so that line — and
+    // not the whole `<br>`-broken label — is what the span may name.
+    let doc =
+        "```mermaid\nflowchart LR\n  subgraph one [Front<br>Back]\n    A[Parse]\n  end\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "Front");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Front",
+        "the title's span must sit on the drawn top edge: {:?}",
+        canvas.row_text(span.row)
+    );
+    let drawn: Vec<String> = canvas
+        .spans()
+        .iter()
+        .map(|s| span_cells(&canvas, s))
+        .collect();
+    assert!(
+        !drawn.iter().any(|text| text == "Back"),
+        "the line the frame never draws claims no cells: {drawn:?}"
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+}
+
+#[test]
+fn a_composite_state_title_maps_back_to_the_document() {
+    // A composite state is drawn as a frame, and its description is the frame's title.
+    let doc = "```mermaid\nstateDiagram-v2\n  state \"Doing work\" as w {\n    started --> stopped\n  }\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "Doing work");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Doing work",
+        "the composite's span must sit on its drawn frame title: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+
+    // The same title over a narrower frame, where the top edge has no room for it: a
+    // frame clips its title, and the span may only name the bytes behind the cells that
+    // survived the clip. An implementation that names the whole title regardless passes
+    // the assertions above and fails these.
+    let narrow =
+        "```mermaid\nstateDiagram-v2\n  state \"Doing work\" as w {\n    a --> b\n  }\n```\n";
+    let canvas = render(narrow, 80);
+    let span = span_for(&canvas, narrow, "Doing ");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "Doing ",
+        "a clipped title names only what is drawn: {:?}",
+        canvas.row_text(span.row)
+    );
+    every_span_names_its_own_cells(&canvas, narrow);
+    no_span_sits_on_line_art(&canvas);
+}
+
+#[test]
+fn a_class_relation_label_maps_back_to_the_document() {
+    // A relation label wraps at the same budget an edge label does, so it is the same
+    // two-row case, reached through the class family's own producer.
+    let doc = "```mermaid\nclassDiagram\n  Animal <|-- Duck : quacks a great deal\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "quacks a great");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "quacks a great",
+        "the relation label's first row must sit on its own text: {:?}",
+        canvas.row_text(span.row)
+    );
+    let tail = span_for(&canvas, doc, "deal");
+    assert_eq!(span_cells(&canvas, tail), "deal");
+    assert_ne!(span.row, tail.row, "the two rows of a wrapped label differ");
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+}
+
+#[test]
+fn an_er_relationship_label_maps_back_to_the_document() {
+    // The entity fixture of the six: a decoded reference draws fewer cells than it
+    // spells, so it has to be cut out into a run of its own, and `&#65;` is kept beside
+    // `&amp;` because a mutation a named reference alone cannot expose has survived on
+    // this project before. It sits in the ER family because `&` separates statements in
+    // the flowchart, class and state lexers, so none of those three can carry an entity
+    // in an edge label at all.
+    let doc =
+        "```mermaid\nerDiagram\n  CUSTOMER ||--o{ ORDER : \"places &amp; pays &#65; lot\"\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "places ");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "places ",
+        "the relationship label's first row must sit on its own text: {:?}",
+        canvas.row_text(span.row)
+    );
+    let tail = span_for(&canvas, doc, "lot");
+    assert_eq!(span_cells(&canvas, tail), "lot");
+    assert_ne!(span.row, tail.row, "the two rows of a wrapped label differ");
+    let named: Vec<&str> = canvas
+        .spans()
+        .iter()
+        .filter_map(|s| doc.get(s.source_start..s.source_end))
+        .collect();
+    assert!(
+        named.contains(&"&amp;") && named.contains(&"&#65;"),
+        "each entity reference is a run of its own: {named:?}"
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+}
+
+#[test]
+fn a_state_transition_label_maps_back_to_the_document() {
+    let doc = "```mermaid\nstateDiagram-v2\n  s1 --> s2 : press and hold a key\n```\n";
+    let canvas = render(doc, 80);
+    let span = span_for(&canvas, doc, "press and hold a");
+    assert_eq!(
+        span_cells(&canvas, span),
+        "press and hold a",
+        "the transition label's first row must sit on its own text: {:?}",
+        canvas.row_text(span.row)
+    );
+    let tail = span_for(&canvas, doc, "key");
+    assert_eq!(span_cells(&canvas, tail), "key");
+    assert_ne!(span.row, tail.row, "the two rows of a wrapped label differ");
+    assert_eq!(
+        [span, tail].map(|s| s.unit.and_then(|(start, end)| doc.get(start..end))),
+        [Some("press and hold a key"); 2],
+        "but both rows belong to the one label"
+    );
+    every_span_names_its_own_cells(&canvas, doc);
+    no_span_sits_on_line_art(&canvas);
+}
+
+/// The fixture the diagram-button tests share: two boxes and an arrow.
+///
+/// At width 60 its widest row is 35 columns, so `[copy]` at column 52 lands in blank
+/// space with room to spare — [`REGION`](super::button::REGION) + 1 = 10 columns is what
+/// the button needs, and 60 - 35 leaves 25. A fixture that negotiates a narrower block
+/// than that would make every positive assertion below pass for the wrong reason.
+const DIAGRAM: &str = "```mermaid\nflowchart LR\n  A[Parse] --> B[Layout]\n```\n";
+
+#[test]
+fn a_diagram_offers_a_copy_button_carrying_its_source() {
+    let canvas = render_with(DIAGRAM, 60, &BUTTONS);
+    let top = canvas.row_text(0);
+    assert!(top.contains("[copy]"), "got {top:?}");
+    let spot = canvas.hotspots().first().expect("a hotspot");
+    assert_eq!(spot.row, 0, "the button floats at the top of the block");
+    assert_eq!(spot.cols, 6);
+    assert!(
+        copy_text(spot).contains("flowchart LR"),
+        "got {:?}",
+        copy_text(spot)
+    );
+    assert!(
+        copy_text(spot).contains("A[Parse] --> B[Layout]"),
+        "the whole diagram source: {:?}",
+        copy_text(spot)
+    );
+    assert!(copy_html(spot).is_none(), "a diagram has no richer flavour");
+}
+
+#[test]
+fn a_diagram_button_carries_the_content_and_not_the_fences() {
+    // **The ruling, pinned in both directions (2026-08-12).** All three copy buttons
+    // carry the block's *content*, not its fences. `contains("flowchart LR")` alone is
+    // true under either reading, so it tests neither; these assertions are the ones that
+    // turn red if the payload ever grows its fences back.
+    let canvas = render_with(DIAGRAM, 60, &BUTTONS);
+    let spot = canvas.hotspots().first().expect("a hotspot");
+    assert_eq!(
+        copy_text(spot),
+        "flowchart LR\n  A[Parse] --> B[Layout]\n",
+        "the mermaid source exactly, opener and closer excluded"
+    );
+    assert!(
+        !copy_text(spot).starts_with("```"),
+        "the opening fence is not part of the payload: {:?}",
+        copy_text(spot)
+    );
+    assert!(
+        !copy_text(spot).contains("```"),
+        "and neither is the closing one: {:?}",
+        copy_text(spot)
+    );
+}
+
+#[test]
+fn a_diagram_button_is_off_by_default() {
+    let canvas = render(DIAGRAM, 60);
+    assert!(!canvas.row_text(0).contains("[copy]"));
+    assert!(canvas.hotspots().is_empty());
+}
+
+#[test]
+fn a_diagram_button_does_not_cover_box_art() {
+    let plain = render(DIAGRAM, 60);
+    let with_button = render_with(DIAGRAM, 60, &BUTTONS);
+    let row = with_button.row_text(0);
+    assert!(row.contains("[copy]"), "got {row:?}");
+    // Every non-blank cell the plain render drew is still there. Counted in `char`s
+    // because every box-drawing glyph is three bytes and one column.
+    for (col, ch) in plain.row_text(0).chars().enumerate() {
+        if ch != ' ' {
+            assert_eq!(
+                row.chars().nth(col),
+                Some(ch),
+                "the button overwrote drawn art at column {col}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_diagram_whose_art_reaches_the_edge_drops_its_button() {
+    // The other direction of the same rule. This flowchart lays itself out 45 columns
+    // wide in a 46-column block, so the columns `[copy]` wants are drawing, and `place`
+    // declines rather than blanking a box. A dropped button leaves no hotspot either --
+    // half of this pair would be a control that does nothing.
+    let doc = "```mermaid\nflowchart LR\n  A[Parsing the document] --> B[Laying it out]\n```\n";
+    let plain = render(doc, 46);
+    assert_eq!(
+        plain.row_text(0).trim_end().chars().count(),
+        45,
+        "the fixture must actually reach the edge: {:?}",
+        plain.row_text(0)
+    );
+    let canvas = render_with(doc, 46, &BUTTONS);
+    assert!(
+        !canvas.row_text(0).contains("[copy]"),
+        "the art survives: {:?}",
+        canvas.row_text(0)
+    );
+    assert!(
+        canvas.hotspots().is_empty(),
+        "a dropped button leaves no hotspot: {:?}",
+        canvas.hotspots()
+    );
+}
+
+#[test]
+fn a_diagram_in_a_table_cell_shows_no_button() {
+    // The same reason the code frame carries `table_depth == 0`: a block blitted into a
+    // row it shares loses its hotspot while keeping its drawn cells, leaving a control
+    // that does nothing. Verified rather than copied on faith.
+    //
+    // The paragraph is load-bearing. It negotiates a cell 50 columns wide; `DIAGRAM`
+    // alone negotiates one of 28, where the button is dropped for want of room and
+    // removing the guard changes nothing at all — a vacuous test that looked like a
+    // passing one. The `loose` render below is the control that keeps it honest: the
+    // same content at the same width *does* get a diagram button at the top level, so
+    // its absence inside the cell is the guard's doing and not the width's.
+    let content = format!("{}\n\n{DIAGRAM}", "x".repeat(50));
+    let loose = render_with(&content, 50, &BUTTONS);
+    assert!(
+        loose
+            .hotspots()
+            .iter()
+            .any(|spot| copy_text(spot).contains("flowchart")),
+        "the control must fit a button at this width: {:?}",
+        loose.hotspots()
+    );
+
+    let table = table_with_cell(&content);
+    let canvas = render_block(&table, 80, &Theme::default_dark(), &BUTTONS);
+    canvas.check_invariants().expect("contract holds");
+    let text = canvas.plain_text();
+    assert_eq!(
+        text.matches("[copy]").count(),
+        1,
+        "the outer table's button is the only one drawn:\n{text}"
+    );
+    assert!(
+        canvas.row_text(0).contains("[copy]"),
+        "and it is in the outer table's top rule:\n{text}"
+    );
+    let spots = canvas.hotspots();
+    assert_eq!(spots.len(), 1, "one button, one hotspot: {spots:?}");
+    assert!(
+        !copy_text(&spots[0]).contains("flowchart"),
+        "a diagram inside a table cell records no hotspot of its own: {spots:?}"
+    );
+}
+
+#[test]
+fn a_failed_mermaid_block_offers_exactly_one_button() {
+    // The fallback renders *source* inside a code frame and already has a button of its
+    // own (`code::fallback`). The drawn-diagram path is the other arm of the same
+    // `match`, so a block gets one button or the other and never both or neither.
+    let canvas = render_with("```mermaid\nnot a diagram at all\n```\n", 40, &BUTTONS);
+    let text = canvas.plain_text();
+    assert_eq!(
+        text.matches("[copy]").count(),
+        1,
+        "the fallback frame's button, once:\n{text}"
+    );
+    let spots = canvas.hotspots();
+    assert_eq!(spots.len(), 1, "one button, one hotspot: {spots:?}");
+    assert_eq!(copy_text(&spots[0]), "not a diagram at all\n");
+}
+
+#[test]
+fn an_inline_canvas_numbers_its_controls_from_its_own_counter() {
+    // `Hotspot::target` is unique *per canvas*, and `Canvas::next_target` is what issues
+    // the ids. A link numbers its control while there is no canvas yet — inside
+    // `inline::link`, before anything is wrapped — so those ids are rebased onto the
+    // canvas's own counter as the hotspots are recorded.
+    //
+    // Tested here rather than through a document because every consumer of an inline
+    // canvas merges it into another one, and `Canvas::merge_hotspots` rebases again;
+    // the raw canvas is the only place the invariant is observable, and it is what a
+    // caller placing a *second* kind of control on it would rely on.
+    let theme = Theme::default_dark();
+    let ctx = Ctx::new(&theme, &PLAIN);
+    let doc = Doc::parse("[a](https://example.com/a) and [b](https://example.com/b)\n");
+    let paragraph = &doc.root().children[0];
+    let mut canvas = inline::render_inline(&paragraph.children, 60, theme.base(), ctx);
+    let used: Vec<usize> = canvas.hotspots().iter().map(|spot| spot.target).collect();
+    assert_eq!(used.len(), 2, "two links, two hotspots: {used:?}");
+    let next = canvas.next_target();
+    assert!(
+        !used.contains(&next),
+        "the canvas offered {next} while its links already hold {used:?}"
+    );
+}
+
+#[test]
+fn a_link_in_a_table_cell_records_a_hotspot_on_the_cell_canvas() {
+    // `inline::link` returns early inside a table, because a column negotiated against
+    // every other column cannot afford a printed URL — but a link with no suffix is
+    // still a link, so the pieces are tagged before that return.
+    //
+    // Tested on the cell's own canvas: this is where the claim is *made*, and
+    // `a_link_in_a_table_cell_records_a_hotspot_over_its_drawn_cells` in
+    // `tests/link_hotspots.rs` is where it is checked to have survived the table. Since
+    // Task 2b `Canvas::blit` carries a hotspot, so both halves hold; before it, only this
+    // one did.
+    let theme = Theme::default_dark();
+    let ctx = Ctx::new(&theme, &PLAIN).in_table();
+    let doc = Doc::parse("[go](https://example.com/a)\n");
+    let paragraph = &doc.root().children[0];
+    let canvas = inline::render_inline(&paragraph.children, 20, theme.base(), ctx);
+    assert_eq!(
+        canvas.plain_text().trim_end(),
+        "go",
+        "a table cell prints the label and no target"
+    );
+    let spots = canvas.hotspots();
+    assert_eq!(
+        spots.len(),
+        1,
+        "a table-cell link is still a link: {spots:?}"
+    );
+    assert_eq!(
+        spots[0].kind,
+        HotspotKind::Open {
+            url: "https://example.com/a".to_string()
+        }
+    );
+    assert_eq!((spots[0].col, spots[0].cols), (0, 2), "over `go`");
+}
+
+#[test]
+fn a_link_clipped_inside_a_cell_claims_only_the_cells_it_kept() {
+    // The reachable half-clipped link: a nested table negotiates its columns against the
+    // *cell's* budget and is cut to it, so the label is drawn in part. The claim has to
+    // be cut by the same amount, and to stop before the overflow chevron as well — that
+    // cell shows the chevron, not the link, and a cell that opens a URL without looking
+    // pressable is the fault the clamp exists to prevent.
+    let table =
+        table_with_cell("| h |\n|---|\n| [abcdefghijklmnopqrstuvwxyz](https://example.com/a) |\n");
+    let canvas = render_block(&table, 16, &Theme::default_dark(), &PLAIN);
+    canvas.check_invariants().expect("contract holds");
+    let spots = canvas.hotspots();
+    assert_eq!(spots.len(), 1, "one link: {spots:?}");
+    let spot = &spots[0];
+    let row = canvas.row_text(spot.row);
+    assert!(
+        row.contains(crate::render::code::OVERFLOW_MARKER),
+        "the premise: this row was cut and carries the overflow marker: {row:?}"
+    );
+    let claimed: String = row
+        .chars()
+        .skip(usize::from(spot.col))
+        .take(usize::from(spot.cols))
+        .collect();
+    assert_eq!(
+        claimed, "abcdefghijk",
+        "the claim is the drawn part of the label and nothing else, in {row:?}"
+    );
+}
+
+#[test]
+fn a_link_in_a_nested_table_cell_records_a_hotspot() {
+    // Two levels of cell, so the claim crosses two blits and two target rebases on its
+    // way out. Not reachable from a document — pipe syntax cannot put a table in a cell —
+    // so it is spliced in through `table_with_cell`, this file's precedent for the shape.
+    let table = table_with_cell("| inner |\n|---|\n| [go](https://example.com/a) |\n");
+    let canvas = render_block(&table, 60, &Theme::default_dark(), &PLAIN);
+    canvas.check_invariants().expect("contract holds");
+    let spots = canvas.hotspots();
+    assert_eq!(spots.len(), 1, "one link, two tables deep: {spots:?}");
+    assert_eq!(
+        spots[0].kind,
+        HotspotKind::Open {
+            url: "https://example.com/a".to_string()
+        }
+    );
+    let drawn: String = canvas
+        .row_text(spots[0].row)
+        .chars()
+        .skip(usize::from(spots[0].col))
+        .take(usize::from(spots[0].cols))
+        .collect();
+    assert_eq!(
+        drawn, "go",
+        "the claim has to land on the cells the link was drawn into, {} blits later",
+        2
     );
 }

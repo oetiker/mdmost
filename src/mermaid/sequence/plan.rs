@@ -10,9 +10,9 @@
 //! frame always encloses exactly the rows its contents used.
 
 use crate::mermaid::ast::{
-    BlockKind, MessageHead, MessageLine, NotePlacement, SequenceDiagram, SequenceItem,
+    BlockKind, Label, MessageHead, MessageLine, NotePlacement, SequenceDiagram, SequenceItem,
 };
-use crate::mermaid::chrome;
+use crate::mermaid::chrome::{self, Piece};
 use crate::text::ellipsize;
 
 use super::columns::Columns;
@@ -33,6 +33,8 @@ pub(super) struct Arrow {
     pub head: MessageHead,
     /// The message text, already shortened to the layout's label cap.
     pub label: String,
+    /// The message's label, whole, so the drawn text can name its source bytes.
+    pub source: Label,
 }
 
 /// One branch of a block frame.
@@ -69,8 +71,10 @@ pub(super) struct NoteBox {
     pub left: usize,
     /// Total width of the box, borders included.
     pub width: usize,
-    /// The wrapped note text.
-    pub lines: Vec<String>,
+    /// The wrapped note text, piece by piece.
+    pub pieces: Vec<Piece>,
+    /// The note's label, whole, so a drawn row can name the bytes behind it.
+    pub source: Label,
 }
 
 /// One activation bar.
@@ -154,7 +158,7 @@ impl Builder<'_> {
                     let from = self.participant(message.from.0);
                     let to = self.participant(message.to.0);
                     let label = ellipsize(
-                        &message.label.text().replace('\n', " "),
+                        &chrome::label_one_line(&message.label),
                         self.columns.label_cap,
                     );
                     let row = if from == to {
@@ -177,6 +181,7 @@ impl Builder<'_> {
                         line: message.line,
                         head: message.head,
                         label,
+                        source: message.label.clone(),
                     });
                     if message.activates {
                         self.activate(to, row);
@@ -187,7 +192,7 @@ impl Builder<'_> {
                 }
                 SequenceItem::Note(note) => {
                     if let Some(placed) = self.place_note(note) {
-                        self.row += placed.lines.len() + 2;
+                        self.row += placed.pieces.len() + 2;
                         self.plan.notes.push(placed);
                     }
                 }
@@ -225,9 +230,10 @@ impl Builder<'_> {
             };
             marks.push(Branch {
                 row,
-                label: branch.label.as_ref().map(|label| {
-                    ellipsize(&label.text().replace('\n', " "), self.columns.label_cap)
-                }),
+                label: branch
+                    .label
+                    .as_ref()
+                    .map(|label| ellipsize(&chrome::label_one_line(label), self.columns.label_cap)),
             });
             self.walk(&branch.items, depth + 1);
         }
@@ -244,12 +250,7 @@ impl Builder<'_> {
 
     /// Works out where a note box sits horizontally, or `None` if it has no target.
     fn place_note(&self, note: &crate::mermaid::ast::Note) -> Option<NoteBox> {
-        let lines = chrome::label_lines(&note.text, self.columns.label_cap);
-        let lines = if lines.is_empty() {
-            vec![String::new()]
-        } else {
-            lines
-        };
+        let pieces = chrome::label_pieces_or_blank(&note.text, self.columns.label_cap);
         let mut targets: Vec<usize> = note
             .participants
             .iter()
@@ -260,7 +261,12 @@ impl Builder<'_> {
         let first = *targets.first()?;
         let last = *targets.last()?;
 
-        let natural = chrome::lines_width(&lines) + 4;
+        let natural = pieces
+            .iter()
+            .map(|piece| crate::text::display_width(&piece.text))
+            .max()
+            .unwrap_or(0)
+            + 4;
         let total = self.columns.width;
         let (width, left) = match note.placement {
             NotePlacement::Over => {
@@ -292,7 +298,8 @@ impl Builder<'_> {
             top: self.row,
             left,
             width,
-            lines,
+            pieces,
+            source: note.text.clone(),
         })
     }
 

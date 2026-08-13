@@ -20,12 +20,16 @@ use super::lex::{self, Nesting, SrcLine};
 use super::{direction, intern};
 
 /// Parses a whole `stateDiagram` / `stateDiagram-v2`.
-pub fn parse(lines: &[SrcLine<'_>]) -> Result<StateDiagram, MermaidError> {
+///
+/// `src` is the full mermaid source `lines` was lexed from; it is kept only so that
+/// label text — always a subslice of it — can report where it came from.
+pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<StateDiagram, MermaidError> {
     let Some((header, body)) = lines.split_first() else {
         return Err(lex::syntax(1, "empty diagram"));
     };
     let mut builder = Builder {
         stack: vec![(None, StateScope::default())],
+        src,
         ..Builder::default()
     };
     let (_, rest) = lex::split_word(header.text);
@@ -44,21 +48,32 @@ struct PendingNote {
     placement: NotePlacement,
     target: StateId,
     lines: Vec<String>,
+    /// A hull over every line accumulated so far: from the first line's start to the
+    /// last line's end, so it also covers the newlines, per-line indentation and any
+    /// blank or `%%` line `preprocess` dropped in between — not only the note's own
+    /// text. `None` until the first line arrives. Grown on each push rather than
+    /// recovered from `lines` afterwards, because by then the text has been copied
+    /// into owned `String`s and lost its position.
+    source: Option<std::ops::Range<usize>>,
     line: usize,
 }
 
 /// Accumulates the state arena and the scope stack.
 #[derive(Debug, Default)]
-struct Builder {
+struct Builder<'a> {
     direction: Option<Direction>,
     states: Vec<StateNode>,
     /// Open scopes; the last entry is the innermost. Entry 0 is the diagram root and
     /// has no owning state.
     stack: Vec<(Option<StateId>, StateScope)>,
     note: Option<PendingNote>,
+    /// The full mermaid source, passed to `lex::label_at` (and, for the multi-line
+    /// note form, `lex::offset_of` directly) to compute a label's byte offset — every
+    /// label text this parser touches is a subslice of it.
+    src: &'a str,
 }
 
-impl Builder {
+impl Builder<'_> {
     /// Handles one source line, which may hold several `;`-separated statements.
     fn line(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         if self.note.is_some() {
@@ -69,15 +84,26 @@ impl Builder {
                     self.scope().notes.push(StateNote {
                         placement: note.placement,
                         target: note.target,
-                        text: Label { lines: note.lines },
+                        text: Label::from_lines(note.lines, note.source.unwrap_or_default()),
                     });
                 }
             } else if let Some(note) = self.note.as_mut() {
+                // A line that fails `offset_of` (should never happen — `text` is
+                // always a slice of `self.src`) contributes no position information
+                // rather than a wrong one: `note.source` simply stops growing, so the
+                // final range covers only the lines that did check out.
+                if let Some(at) = lex::offset_of(self.src, text) {
+                    let end = at + text.len();
+                    note.source = Some(match note.source.take() {
+                        Some(range) => range.start..end,
+                        None => at..end,
+                    });
+                }
                 note.lines.push(text.to_string());
             }
             return Ok(());
         }
-        for statement in lex::split_top_level(text, ';', Nesting::Honour) {
+        for statement in lex::split_statements(text) {
             self.statement(statement, line)?;
         }
         Ok(())
@@ -129,8 +155,9 @@ impl Builder {
         // `s2 : This is a description`.
         if let Some((key, description)) = lex::split_once_top_level(text, ':', Nesting::Honour) {
             let id = self.intern_state(key);
+            let description = lex::unquote(description);
             if let Some(state) = self.states.get_mut(id.0) {
-                state.label = Some(Label::parse(lex::unquote(description)));
+                state.label = Some(lex::label_at(self.src, description));
             }
             return Ok(());
         }
@@ -164,7 +191,8 @@ impl Builder {
         if let Some(description) = description
             && let Some(state) = self.states.get_mut(id.0)
         {
-            state.label = Some(Label::parse(lex::unquote(description)));
+            let description = lex::unquote(description);
+            state.label = Some(lex::label_at(self.src, description));
         }
         if let Some(stereotype) = stereotype {
             let kind = match stereotype.to_ascii_lowercase().as_str() {
@@ -222,10 +250,11 @@ impl Builder {
         let target = self.intern_state(lex::unquote(target));
         match text {
             Some(text) => {
+                let text = lex::unquote(text);
                 let note = StateNote {
                     placement,
                     target,
-                    text: Label::parse(lex::unquote(text)),
+                    text: lex::label_at(self.src, text),
                 };
                 self.scope().notes.push(note);
             }
@@ -234,6 +263,7 @@ impl Builder {
                     placement,
                     target,
                     lines: Vec::new(),
+                    source: None,
                     line,
                 });
             }
@@ -258,7 +288,7 @@ impl Builder {
             label: label
                 .map(lex::unquote)
                 .filter(|label| !label.is_empty())
-                .map(Label::parse),
+                .map(|label| lex::label_at(self.src, label)),
         };
         self.scope().transitions.push(transition);
         Ok(())

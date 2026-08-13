@@ -37,6 +37,26 @@ fn fit(text: &str, width: usize) -> String {
     }
 }
 
+/// Strips terminal control sequences out of untrusted text before it reaches a `Span`.
+///
+/// Everywhere but here, [`Canvas::check_invariants`](crate::canvas::Canvas::check_invariants)
+/// refuses to let a raw control character survive into a drawn cell, because "an ESC
+/// opens an escape sequence and a document can repaint the screen from inside a
+/// paragraph." This function exists for the handful of spots in the status bar that
+/// build a `ratatui::text::Span` straight from document-derived text, bypassing that
+/// path entirely: the hovered link's URL, and — since a `HotspotKind::Open` failure
+/// message embeds the URL it failed to open (`src/tui/open.rs`) — the notice line too.
+/// Neither of those was written by the reader.
+///
+/// Named for what it does, not for which call site first needed it: a second caller
+/// that forgets to route through this would reopen exactly the gap this closes.
+/// [`crate::text::cell_clusters`] is the identical one-column-in, one-column-out
+/// substitution the canvas already relies on, so this draws nothing the rest of the
+/// program would not already trust.
+pub(super) fn sanitized(text: &str) -> String {
+    crate::text::cell_clusters(text).collect()
+}
+
 /// Draws the table-of-contents pane.
 pub fn draw_toc(buffer: &mut Buffer, area: Rect, app: &App) {
     if area.width < 4 || area.height < 3 {
@@ -318,6 +338,40 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         left.push(Segment::new(Drop::Hscroll, spans));
     }
 
+    // Design spec §8: there is deliberately no "are you sure" before a link opens,
+    // and this is the safeguard that stands in for one — the reader checks the host
+    // here before committing. Only an `Open` hotspot names a URL; a hovered copy
+    // button carries no target and shows nothing, or the bar would print a stale
+    // one the moment the pointer left the last link.
+    //
+    // The keyboard cursor gets the identical treatment, and for the reader it matters
+    // for most: a mouse hover already puts the URL here, but the cursor is what a
+    // reader with no mouse has *instead* of a hover, and without this the safeguard
+    // the design spec calls out simply does not exist for them — nothing else on the
+    // status bar says where `enter` is about to send them.
+    //
+    // The hover wins when both are live at once, because it is the more recent
+    // signal: the pointer only has a hovered control while it is sitting on one right
+    // now, whereas the cursor can sit on a control long after the reader's attention
+    // (and, if the terminal supports it, their hand on the mouse) moved elsewhere.
+    // Nothing needs to reconcile disagreement here — [`super::app::App::cursor_hotspot`]
+    // resolves the cursor's *target* to a hotspot the same way `enter` does, so this
+    // can never point somewhere `enter` would not.
+    if let Some(crate::canvas::HotspotKind::Open { url }) = app
+        .hovered()
+        .and_then(|index| app.rendered().hotspots().get(index))
+        .or_else(|| app.cursor_hotspot())
+        .map(|spot| &spot.kind)
+    {
+        let mut spans = Vec::new();
+        sep(&mut spans);
+        spans.push(TermSpan::styled(
+            sanitized(url),
+            term_style(theme.ui.status_accent),
+        ));
+        left.push(Segment::new(Drop::Url, spans));
+    }
+
     if let Some(notice) = app.notice() {
         let style = if notice.is_error {
             theme.ui.error
@@ -332,7 +386,12 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
                 term_style(style),
             ));
         }
-        spans.push(TermSpan::styled(notice.text.clone(), term_style(style)));
+        // A notice is usually app-generated ("copied 12 bytes...") and sanitizing
+        // those is a no-op, but an `Open` failure embeds the URL it could not launch
+        // (`src/tui/open.rs`) — document content, not app content — so every notice
+        // goes through the same substitution as the hovered URL above rather than
+        // trusting each `notify` caller to remember which kind it produced.
+        spans.push(TermSpan::styled(sanitized(&notice.text), term_style(style)));
         left.push(Segment::new(Drop::Context, spans));
     } else if let Some(index) = app.current_heading()
         && let Some(entry) = app.toc().entries().get(index)
@@ -504,6 +563,14 @@ enum Drop {
     Meter,
     /// The horizontal-offset chip.
     Hscroll,
+    /// The full URL of a hovered link. Design spec §8 makes this the safeguard that
+    /// stands in for a confirmation prompt — there is deliberately no "are you
+    /// sure" before a link opens, so a reader checks the host here first. Ranked
+    /// above the breadcrumb, the search chip and the meter, because each of those
+    /// is restated somewhere else on screen and this is not; ranked below the file
+    /// name and the position, which say what is on screen at all times rather than
+    /// only while the pointer rests on a control.
+    Url,
     /// The file name, which is elided before it is given up altogether.
     Title,
     /// The position and the way out.
@@ -563,15 +630,30 @@ fn lay_out(
     bar: TermStyle,
 ) -> Vec<TermSpan<'static>> {
     let total = |segments: &[Segment]| -> usize { segments.iter().map(|s| s.width).sum() };
-    // What the file name could give up if it were elided away entirely, measured through
-    // `fit` so it cannot drift from what the elision below actually reclaims.
-    let elidable = |left: &[Segment]| -> usize {
-        title(left).map_or(0, |name| {
+    // What the file name and the hovered URL could each give up if elided away
+    // entirely, measured through `fit`/`ellipsize` so this cannot drift from what the
+    // elision below actually reclaims. Both are shrunk rather than dropped whole, the
+    // URL because design spec §8 leans on it in place of a confirmation prompt — a
+    // safeguard that silently disappears the moment a name is a little too long would
+    // fail exactly when the reader needed it.
+    let elidable = |left: &[Segment], right: &[Segment]| -> usize {
+        let title_slack = title(left).map_or(0, |name| {
             display_width(name).saturating_sub(display_width(&fit(name, 0)))
-        })
+        });
+        let url_slack = left
+            .iter()
+            .chain(right.iter())
+            .find(|segment| segment.priority == Drop::Url)
+            .and_then(|segment| segment.spans.last())
+            .map_or(0, |span| {
+                display_width(&span.content)
+                    .saturating_sub(display_width(&crate::text::ellipsize(&span.content, 0)))
+            });
+        title_slack + url_slack
     };
     // One column of clear air between the two halves, always — hence the strict `<`.
-    // `slack` is what the file name is willing to give up, when it is willing to.
+    // `slack` is what the file name and the hovered URL are willing to give up, when
+    // they are willing to.
     let fits = |left: &[Segment], right: &[Segment], slack: usize| {
         total(left) + total(right) < width + slack
     };
@@ -586,12 +668,12 @@ fn lay_out(
             .filter(|priority| *priority != Drop::Never)
             .min();
         let Some(worst) = worst else { break };
-        // From `ELIDE_TO_KEEP` up, the file name gives up its own columns rather than let
-        // a segment go: the elision used to run only *after* this loop, so a forty-column
-        // terminal silently traded the `↔ n/N` chip — on the one terminal where
-        // horizontal scrolling matters most — for a long file name, and left ten columns
-        // of the bar empty doing it.
-        if worst >= ELIDE_TO_KEEP && fits(&left, &right, elidable(&left)) {
+        // From `ELIDE_TO_KEEP` up, the file name and the hovered URL give up their own
+        // columns rather than let a segment go: the elision used to run only *after*
+        // this loop, so a forty-column terminal silently traded the `↔ n/N` chip — on
+        // the one terminal where horizontal scrolling matters most — for a long file
+        // name, and left ten columns of the bar empty doing it.
+        if worst >= ELIDE_TO_KEEP && fits(&left, &right, elidable(&left, &right)) {
             break;
         }
         left.retain(|segment| segment.priority != worst);
@@ -613,6 +695,23 @@ fn lay_out(
         let short = fit(&name.content, room);
         used -= display_width(&name.content) - display_width(&short);
         name.content = short.into();
+    }
+    // The hovered URL is the safeguard design spec §8 leans on in place of a
+    // confirmation prompt, so it is shrunk rather than silently dropped, the same
+    // way the file name is above. Elided *at the end* — `crate::text::ellipsize`,
+    // never `elide_middle` — so the host, the part a reader actually checks before
+    // committing, is the part left standing.
+    if used + 1 > width
+        && let Some(target) = left
+            .iter_mut()
+            .chain(right.iter_mut())
+            .find(|segment| segment.priority == Drop::Url)
+            .and_then(|segment| segment.spans.last_mut())
+    {
+        let room = display_width(&target.content).saturating_sub(used + 1 - width);
+        let short = crate::text::ellipsize(&target.content, room);
+        used -= display_width(&target.content) - display_width(&short);
+        target.content = short.into();
     }
     let gap = width.saturating_sub(used);
     let mut spans: Vec<TermSpan<'static>> = Vec::new();

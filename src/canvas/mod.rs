@@ -67,6 +67,19 @@ pub struct SearchSpan {
     pub source_start: usize,
     /// End byte offset (exclusive) in the document source.
     pub source_end: usize,
+    /// The atomic unit this span is one piece of, as `(start, end)` source offsets, or
+    /// `None` when the span stands for itself.
+    ///
+    /// A diagram label is the only thing that has one, and it exists because a label is
+    /// no longer one span: it wraps onto several rows, and a decoded entity inside it is
+    /// cut out into a run of its own, so that every span's source stays a copy of the
+    /// cells it names (`mermaid::ast::Label::spans_for`). `select::resolve` still has to
+    /// ask "did this drag stay inside one label?" (design spec §2.2), and it cannot ask
+    /// that of the pieces — so each piece names the whole it belongs to.
+    ///
+    /// It is not a second source range: nothing is ever copied or washed from it. It is
+    /// a boundary the selection compares its hull against, and the answer stays the hull.
+    pub unit: Option<(usize, usize)>,
     /// The row the text was rendered on.
     pub row: usize,
     /// The first column the text occupies.
@@ -103,20 +116,63 @@ pub struct Pin {
     pub cols: u16,
 }
 
-/// A region of a row that is a control, and what clicking it copies.
+/// What a [`Hotspot`] does when it is activated.
+///
+/// One hit-test serves all four, which is the point: the copy button was a parallel
+/// mechanism and is now one case of a general one. A hotspot is a claim on drawn
+/// *cells*, which is why it is exempt from the byte-for-byte rule a `SearchSpan`
+/// obeys — a link's printed ` (url)` suffix is part of the control and part of no
+/// source range (design spec §2.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HotspotKind {
+    /// The copy button: plain text always, a richer flavour where one exists.
+    Copy {
+        /// The plain-text payload. Always present: the only thing OSC 52 can carry.
+        text: String,
+        /// A richer flavour offered to a local clipboard only.
+        html: Option<String>,
+    },
+    /// An `http`/`https` link. Carries the **full** URL, never the elided form
+    /// drawn on screen (`render::inline::elide_middle`).
+    Open {
+        /// The untruncated target.
+        url: String,
+    },
+    /// A `#heading` reference into this document, as a GFM slug.
+    Anchor {
+        /// Matched against `doc::Heading::id`, the same enumeration the TOC uses.
+        slug: String,
+    },
+    /// A footnote reference marker.
+    Footnote {
+        /// The footnote's identifier as the document spells it.
+        id: String,
+    },
+}
+
+/// A region of a row that is a control, and what activating it does.
 ///
 /// The fourth metadata channel, and it exists for the reason the other three do: the
 /// pager needs to know something about a region that only the renderer which drew it can
-/// know. Here that these cells are a button, and what it puts on the clipboard.
+/// know. Here that these cells are a control, and what it does when pressed.
 ///
-/// The payload is text, not a source byte range, because the two are not the same
-/// answer: the source of a fence inside a block quote carries `> ` on every interior
-/// line, and copying that is not what the button promises.
+/// **Unlike [`Pin`], a hotspot carries its own `col`**, and that is why it travels
+/// through [`Canvas::blit`] as well as through [`Canvas::append`] and [`Canvas::indent`].
+/// A pin claims the leading columns of a row *from column zero*, which a canvas sharing
+/// the row cannot claim; a hotspot claims a run of specific cells, and after the blit the
+/// control's characters really are drawn in exactly those cells. It is the same shape of
+/// claim a [`SearchSpan`] makes, and a blit has always translated those.
 ///
-/// Like [`Pin`], a hotspot is a claim about a region of one row, so it travels through
-/// [`Canvas::append`] and [`Canvas::indent`] and is dropped by [`Canvas::blit`] — a
-/// canvas placed at an arbitrary column of a row it shares with other content cannot
-/// claim that a control lives there.
+/// **Changed 2026-08-12**: a hotspot used to be dropped by `blit`, on the reading that it
+/// was a whole-row claim like a pin. It is not, and the cost of the reading was that a
+/// link inside a table cell — the one sub-canvas the renderer blits — was drawn, styled
+/// and inert.
+///
+/// A hotspot never claims a cell the canvas does not have: `blit` and
+/// [`Canvas::truncate_width`] clamp a claim to the width, and drop one that falls off the
+/// edge entirely. A `SearchSpan` puts that burden on its consumers instead; a hotspot may
+/// not, because an over-claiming hotspot is a region that reacts to the pointer while
+/// showing nothing of the control.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hotspot {
     /// The row the control is drawn on.
@@ -125,10 +181,120 @@ pub struct Hotspot {
     pub col: u16,
     /// How many display columns it occupies.
     pub cols: u16,
-    /// The plain-text payload. Always present: the only thing OSC 52 can carry.
-    pub text: String,
-    /// A richer flavour offered to a local clipboard only. `None` for a code block.
-    pub html: Option<String>,
+    /// What activating it does.
+    pub kind: HotspotKind,
+    /// Groups the rows of one control.
+    ///
+    /// A link crossing a row boundary records several hotspots sharing this id, so
+    /// hovering any row lights every row of it (design spec §2.2). Unique per canvas;
+    /// rebased on merge exactly as rows and columns are, so two controls that were
+    /// numbered independently on their own canvases never collide once stacked into
+    /// one (see [`Canvas::next_target`]).
+    pub target: usize,
+}
+
+/// A running remap of [`Hotspot::target`] ids from one source canvas into a destination.
+///
+/// Every merge rebases targets so that two controls numbered independently on their own
+/// canvases cannot collide once stacked into one, and so that the several hotspots of one
+/// wrapped control keep sharing an id. Ordinarily one composition is one call, and the
+/// remap lives and dies inside it — that is what [`Canvas::blit`], [`Canvas::append`] and
+/// [`Canvas::indent`] do.
+///
+/// A caller that places **one** source canvas with **several** blits needs the remap to
+/// outlive the call, or the same source control would be issued a fresh id per blit and
+/// come apart. `render::table::align_canvas` is that caller: it moves each row of a
+/// rendered cell by that row's own alignment offset, so a link wrapped across two rows of
+/// a centred cell arrives in two blits and must still be one control. Hand those blits
+/// one `TargetRebase` — see [`Canvas::blit_rebased`].
+#[derive(Debug, Default)]
+pub struct TargetRebase {
+    /// Source target to the id issued for it in the destination.
+    map: std::collections::HashMap<usize, usize>,
+}
+
+impl TargetRebase {
+    /// A remap that has seen nothing yet.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// A rectangle of cells that is indivisible in a selection, and the source it copies.
+///
+/// The fifth metadata channel. A diagram records one, and it is the only way the pager
+/// can know that a rectangle of cells is *one thing*: a diagram's labels carry
+/// [`SearchSpan`]s and the box art between them carries nothing, so a drag from one
+/// label to the next would otherwise light two words and put the punctuation between
+/// them on the clipboard, truncated wherever the last label ended (design spec §2.2).
+///
+/// `source_start..source_end` is the **whole** construct — for a Mermaid fence, the
+/// fence lines included — not the union of the labels inside it. That is what makes the
+/// wider drag copy something that still parses as a diagram.
+///
+/// Like [`Pin`] — and unlike [`Hotspot`], which claims cells on a single row — an atom is
+/// a claim about rows a block owns outright, so it travels through [`Canvas::append`] and
+/// [`Canvas::indent`] and is dropped by
+/// [`Canvas::blit`]: a canvas placed at an arbitrary column of a row it shares with other
+/// content cannot claim a rectangle of that row. That is an invariant, not a live case —
+/// the only sub-canvas the renderer blits is a table cell, and a GFM table cell holds
+/// inline content, so no document puts a diagram inside one. Nothing to go looking for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Atom {
+    /// The first row of the rectangle.
+    pub row: usize,
+    /// How many rows it covers.
+    pub rows: usize,
+    /// The first column it occupies.
+    pub col: u16,
+    /// How many display columns it occupies.
+    pub cols: u16,
+    /// Start byte offset in the document source.
+    pub source_start: usize,
+    /// End byte offset (exclusive) in the document source.
+    pub source_end: usize,
+    /// The block's content with its container prefix already off — comrak's `literal`.
+    ///
+    /// Carried rather than re-derived from `source_start..source_end`, because *what the
+    /// prefix was* is not a question the source range can answer. A quoted block's lines
+    /// need not carry the same bytes: `>` and `> ` are the same marker, a blank quoted
+    /// line is a bare `>` — which is what `CommonMark` itself produces for one — and a
+    /// document may mix them freely inside one quote. Sampling one line's prefix and
+    /// requiring every other line to start with that exact string renders correctly and
+    /// *copies wrong*, putting a stray `>` inside the Mermaid: the see/get divergence an
+    /// [`Atom`] exists to remove. comrak already stripped the prefix when it parsed the
+    /// block, so its answer is the authority; `select::extract` checks that answer back
+    /// against the document line by line rather than trusting it blind, and leaves a line
+    /// it cannot locate alone (design spec §2.2).
+    ///
+    /// Content only: the fence lines are not in it. They are read from the document
+    /// instead — the opener because `source_start` already points past the prefix at it,
+    /// the closer because the fence character the opener begins with locates it on its
+    /// own line.
+    pub content: String,
+}
+
+impl Atom {
+    /// Whether the rectangle covers `row`.
+    pub fn covers_row(&self, row: usize) -> bool {
+        row >= self.row && row < self.row + self.rows
+    }
+
+    /// The columns the rectangle occupies, as a half-open interval.
+    pub fn columns(&self) -> std::ops::Range<u16> {
+        self.col..self.col.saturating_add(self.cols)
+    }
+
+    /// Whether `span`'s bytes lie inside the construct this atom copies.
+    ///
+    /// How the pager tells a diagram's own labels from every other span on the canvas.
+    /// Containment in the source, not overlap on screen: the drawn rectangle is padded
+    /// out to the block width and a row of it belongs to nothing else, but the source
+    /// range is exactly the fence and its contents.
+    pub fn contains_span(&self, span: &SearchSpan) -> bool {
+        span.source_start >= self.source_start && span.source_end <= self.source_end
+    }
 }
 
 /// A rectangle of styled cells, exactly [`Canvas::width`] columns wide on every row.
@@ -140,6 +306,9 @@ pub struct Canvas {
     spans: Vec<SearchSpan>,
     pins: Vec<Pin>,
     hotspots: Vec<Hotspot>,
+    /// The next id [`Canvas::next_target`] issues.
+    next_target: usize,
+    atoms: Vec<Atom>,
 }
 
 impl Canvas {
@@ -159,6 +328,8 @@ impl Canvas {
             spans: Vec::new(),
             pins: Vec::new(),
             hotspots: Vec::new(),
+            next_target: 0,
+            atoms: Vec::new(),
         }
     }
 
@@ -246,6 +417,21 @@ impl Canvas {
         self.spans.push(span);
     }
 
+    /// Replaces every span with what `map` returns for it, dropping the ones it maps to
+    /// `None`.
+    ///
+    /// The one channel a canvas can carry that is not a claim about its own cells: a
+    /// span's byte offsets belong to the document, and a canvas assembled from a
+    /// fragment of it — a Mermaid block's own text — has to have them rebased before it
+    /// joins the document (`render::code::diagram_block`). Dropping is part of the
+    /// contract, not a convenience: a span whose offsets cannot be rebased must leave,
+    /// because a *wrong* offset copies bytes from elsewhere in the document while a
+    /// missing one merely falls back to the drawn cells.
+    pub fn map_spans(&mut self, map: impl FnMut(&SearchSpan) -> Option<SearchSpan>) {
+        let spans = std::mem::take(&mut self.spans);
+        self.spans = spans.iter().filter_map(map).collect();
+    }
+
     /// The pinned chrome prefixes recorded in this canvas.
     pub fn pins(&self) -> &[Pin] {
         &self.pins
@@ -269,6 +455,27 @@ impl Canvas {
     /// Records a control.
     pub fn add_hotspot(&mut self, hotspot: Hotspot) {
         self.hotspots.push(hotspot);
+    }
+
+    /// Issues the next control id for this canvas. See [`Hotspot::target`].
+    pub fn next_target(&mut self) -> usize {
+        self.next_target += 1;
+        self.next_target - 1
+    }
+
+    /// The indivisible regions recorded in this canvas.
+    pub fn atoms(&self) -> &[Atom] {
+        &self.atoms
+    }
+
+    /// Records that a rectangle of cells is one thing, copied as `source_start..end`.
+    ///
+    /// A rectangle with no rows or no columns is not recorded: nothing can be dragged
+    /// over it, so an entry for it could only ever be a way to get the wrong answer.
+    pub fn add_atom(&mut self, atom: Atom) {
+        if atom.rows > 0 && atom.cols > 0 && atom.source_end > atom.source_start {
+            self.atoms.push(atom);
+        }
     }
 
     /// How many leading columns of each row are chrome; one entry per row.

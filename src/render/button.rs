@@ -11,7 +11,7 @@
 //! nothing, which is exactly what the mouse gate in `RenderOptions::copy_button` exists
 //! to prevent. [`place`] emits both or neither.
 
-use crate::canvas::{Canvas, Hotspot};
+use crate::canvas::{Canvas, Hotspot, HotspotKind};
 use crate::theme::Style;
 
 /// What the button says at rest.
@@ -53,12 +53,13 @@ pub(crate) fn place(
     let label_len = u16::try_from(LABEL.chars().count()).unwrap_or(6);
     let label_col = width.saturating_sub(label_len + 2);
     out.write_str(row, usize::from(label_col), LABEL, style);
+    let target = out.next_target();
     out.add_hotspot(Hotspot {
         row,
         col: label_col,
         cols: label_len,
-        text,
-        html,
+        kind: HotspotKind::Copy { text, html },
+        target,
     });
     true
 }

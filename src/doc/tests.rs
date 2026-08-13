@@ -369,3 +369,241 @@ fn a_fenced_block_holding_one_blank_line_has_exactly_one_empty_span() {
     assert_eq!(lines.len(), 1, "one literal line, so one entry");
     assert!(lines[0].is_empty(), "a blank line points at nothing");
 }
+
+/// Every text node of `source`, as `(text, start, end)`, in document order.
+fn text_nodes(source: &str) -> Vec<(String, usize, usize)> {
+    let doc = Doc::parse(source);
+    let mut out = Vec::new();
+    doc.root().walk(&mut |node| {
+        if let NodeKind::Text(text) = &node.kind {
+            out.push((text.clone(), node.source.start, node.source.end));
+        }
+    });
+    out
+}
+
+/// Asserts that every text node either copies its source byte for byte or is a single
+/// character transcribed from the whole of the source it names.
+fn assert_faithful(source: &str, nodes: &[(String, usize, usize)]) {
+    for (text, start, end) in nodes {
+        let bytes = source.get(*start..*end).expect("a span inside the source");
+        assert!(
+            bytes == text || text.chars().count() == 1,
+            "the node {text:?} names {bytes:?}, which it neither copies nor transcribes"
+        );
+    }
+}
+
+#[test]
+fn an_escape_splits_its_text_node_at_the_backslash() {
+    // comrak hands the whole run to one text node whose source is a byte longer than
+    // its text, and a node whose lengths disagree can carry no provenance at all — so
+    // one escape used to cost the whole paragraph its spans. Split at the escape, the
+    // two prose runs are exact copies again and only the backslash is left over, which
+    // is undrawn markup like the `**` around a bold word.
+    let source = "Alpha \\* beta.\n";
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![
+            ("Alpha ".to_string(), 0, 6),
+            ("*".to_string(), 7, 8),
+            (" beta.".to_string(), 8, 14),
+        ]
+    );
+    assert_faithful(source, &nodes);
+}
+
+#[test]
+fn an_entity_becomes_one_node_naming_the_whole_entity() {
+    // Nothing in `&amp;` is a copy of the `&` it draws, so the transcribed character
+    // takes the entity entire: those five bytes are exactly what produced that one cell.
+    let source = "Alpha &amp; beta.\n";
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![
+            ("Alpha ".to_string(), 0, 6),
+            ("&".to_string(), 6, 11),
+            (" beta.".to_string(), 11, 17),
+        ]
+    );
+    assert_eq!(
+        source.get(6..11),
+        Some("&amp;"),
+        "the whole entity, no less"
+    );
+    assert_faithful(source, &nodes);
+}
+
+#[test]
+fn a_numeric_entity_is_transcribed_like_a_named_one() {
+    for (source, expected) in [
+        ("Alpha &#65; beta.\n", ("A".to_string(), 6, 11)),
+        ("Alpha &#x41; beta.\n", ("A".to_string(), 6, 12)),
+    ] {
+        let nodes = text_nodes(source);
+        assert_eq!(nodes.len(), 3, "{source:?} splits into three runs");
+        assert_eq!(nodes[1], expected, "{source:?}");
+        assert_faithful(source, &nodes);
+    }
+}
+
+#[test]
+fn an_escaped_backslash_is_aligned_by_rewinding_onto_it() {
+    // `\\` is the case a forward-only walk gets wrong: the first backslash of the pair
+    // compares equal to the single backslash it draws, so the walk sails past it and
+    // only notices one byte later, with the escape already behind it. The alignment
+    // has to be able to step back onto it.
+    let source = "Alpha \\\\ beta.\n";
+    assert_eq!(source.get(6..8), Some("\\\\"), "fixture: two backslashes");
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![
+            ("Alpha ".to_string(), 0, 6),
+            ("\\".to_string(), 7, 8),
+            (" beta.".to_string(), 8, 14),
+        ]
+    );
+    assert_faithful(source, &nodes);
+}
+
+#[test]
+fn two_entities_in_a_row_are_aligned_by_rewinding_onto_the_second() {
+    // The same trap as `\\`, one construct along: the `&` opening the second entity
+    // compares equal to the `&` the first one drew.
+    let source = "Alpha &amp;&amp; beta\n";
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![
+            ("Alpha ".to_string(), 0, 6),
+            ("&".to_string(), 6, 11),
+            ("&".to_string(), 11, 16),
+            (" beta".to_string(), 16, 21),
+        ]
+    );
+    assert_faithful(source, &nodes);
+}
+
+#[test]
+fn a_text_node_that_copies_its_source_is_left_whole() {
+    // `&notreal;` is not an entity, so comrak passes it through and the node is
+    // already an exact copy. Nothing to split, and no new nodes to surprise a walk.
+    let source = "&notreal; x\n";
+    assert_eq!(text_nodes(source), vec![("&notreal; x".to_string(), 0, 11)]);
+}
+
+#[test]
+fn a_text_node_that_cannot_be_aligned_keeps_its_whole_source() {
+    // `&fjlig;` expands to *two* characters. The alignment anchors an entity to one,
+    // so this one does not re-synchronise and the node is left exactly as comrak
+    // reported it — no provenance, which is what it had before, rather than a split
+    // at a guessed position. Fail closed, per grapheme where it can and per node
+    // where it cannot.
+    let source = "Alpha &fjlig; beta\n";
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![("Alpha fj beta".to_string(), 0, 18)],
+        "one node, unsplit"
+    );
+    assert_ne!(
+        source.get(nodes[0].1..nodes[0].2),
+        Some(nodes[0].0.as_str()),
+        "and it is still the node that cannot carry provenance"
+    );
+}
+
+#[test]
+fn an_escape_inside_markup_is_split_like_any_other() {
+    // The alignment runs over every text node, not only the ones in a bare paragraph.
+    for (source, expected) in [
+        (
+            "# Alpha \\* beta\n",
+            vec![("Alpha ", 2, 8), ("*", 9, 10), (" beta", 10, 15)],
+        ),
+        (
+            "> Alpha \\* beta\n",
+            vec![("Alpha ", 2, 8), ("*", 9, 10), (" beta", 10, 15)],
+        ),
+        (
+            "- Alpha \\* beta\n",
+            vec![("Alpha ", 2, 8), ("*", 9, 10), (" beta", 10, 15)],
+        ),
+    ] {
+        let nodes = text_nodes(source);
+        let expected: Vec<(String, usize, usize)> = expected
+            .into_iter()
+            .map(|(t, a, b)| (t.to_string(), a, b))
+            .collect();
+        assert_eq!(nodes, expected, "{source:?}");
+        assert_faithful(source, &nodes);
+    }
+}
+
+// --- Line endings are normalised where the document is read ---------------------
+
+#[test]
+fn a_crlf_document_reads_as_the_same_document_as_its_lf_twin() {
+    // The whole rule in one assertion. `Doc` derives `PartialEq`, so this compares the
+    // stored source, every node's kind, every node's byte range, the heading list and
+    // the version hash at once: if a single `\r` survived anywhere, or if one offset
+    // were still counted against the file as it was on disk, this would fail.
+    let crlf = "# Title\r\n\r\nAlpha beta\r\ndelta zeta\r\n\r\n```rust\r\nlet a = 1;\r\n```\r\n";
+    let lf = "# Title\n\nAlpha beta\ndelta zeta\n\n```rust\nlet a = 1;\n```\n";
+    assert_eq!(Doc::parse(crlf), Doc::parse(lf));
+    assert_eq!(Doc::parse(crlf).source(), lf);
+    assert!(!Doc::parse(crlf).source().contains('\r'));
+}
+
+#[test]
+fn a_lone_carriage_return_is_a_line_ending_too() {
+    // Not the owner's case, and normalised anyway on evidence rather than symmetry.
+    // `CommonMark` counts a lone `\r` as a line ending and comrak agrees — it reports a
+    // `SoftBreak` for `"Alpha\rBeta\n"` — but its sourcepos for what follows is wrong:
+    // probed, `Text("Beta")` comes back as the empty span `11..11` in an 11-byte
+    // document instead of `6..10`. Leaving the lone `\r` alone would therefore leave a
+    // document whose provenance is already broken; normalising costs one branch and
+    // makes it a document like any other. It cannot change the document's *shape*,
+    // because comrak already breaks the line there.
+    assert_eq!(Doc::parse("Alpha\rBeta\n"), Doc::parse("Alpha\nBeta\n"));
+    assert_eq!(Doc::parse("Alpha\rBeta\n").source(), "Alpha\nBeta\n");
+    // `\n\r` is two line endings, not one: the paragraph must break in two.
+    assert_eq!(Doc::parse("Alpha\n\rBeta\n"), Doc::parse("Alpha\n\nBeta\n"));
+}
+
+#[test]
+fn both_other_ways_into_a_document_normalise_on_the_same_boundary() {
+    // `parse` is not the only constructor: `parse_plain` builds its own tree, with its
+    // own offsets, and `parse_auto` chooses between them. A `\r` reaching either would
+    // be a `\r` on the clipboard of a `git log | mdmost` pipe.
+    let crlf = "commit abc\r\n\r\n    a line\r\n";
+    let lf = "commit abc\n\n    a line\n";
+    assert_eq!(Doc::parse_plain(crlf), Doc::parse_plain(lf));
+    assert_eq!(Doc::parse_auto(crlf), Doc::parse_auto(lf));
+    assert!(!Doc::parse_auto(crlf).source().contains('\r'));
+}
+
+#[test]
+fn a_crlf_code_blocks_literal_carries_no_carriage_return() {
+    // comrak copies a fenced block's bytes into `literal` verbatim, `\r` included, and
+    // `convert::code_lines` used to strip that `\r` back off line by line. Normalising
+    // at the read is what makes that strip unnecessary: there is no `\r` left to keep.
+    let doc = Doc::parse("```rust\r\nlet a = 1;\r\n\r\nlet b = 2;\r\n```\r\n");
+    let block = find(doc.root(), &|n| {
+        matches!(n.kind, NodeKind::CodeBlock { .. })
+    })
+    .expect("a fenced block");
+    let NodeKind::CodeBlock { literal, lines, .. } = &block.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "let a = 1;\n\nlet b = 2;\n");
+    // Provenance survives, and every located line reads back clean from the source.
+    let located: Vec<&str> = lines
+        .iter()
+        .map(|s| &doc.source()[s.start..s.end])
+        .collect();
+    assert_eq!(located, vec!["let a = 1;", "", "let b = 2;"]);
+}

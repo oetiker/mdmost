@@ -5,7 +5,7 @@
 //! module drives the real application logic, and [`super::draw`] is left with nothing
 //! but painting.
 
-use crate::canvas::Canvas;
+use crate::canvas::{Canvas, HotspotKind};
 use crate::config::{Action, Config, Key, KeyCode};
 use crate::doc::Doc;
 use crate::render::RenderOptions;
@@ -15,6 +15,7 @@ use crate::toc::{FilterHit, Toc};
 
 use super::cache::RenderCache;
 use super::draw::Offsets;
+use super::popup::{self, Popup};
 use super::select::{Extract, Pos, Selection};
 
 /// The narrowest terminal the table-of-contents pane is offered in.
@@ -44,6 +45,24 @@ fn is_count_digit(key: Key) -> bool {
     matches!(key.code, KeyCode::Char(ch) if ch.is_ascii_digit()) && key.mods.is_empty()
 }
 
+/// How far `action` scrolls a footnote popup, or `None` if it is not a movement key.
+///
+/// The movement keys only. `Top` and `Bottom` are deliberately *not* here: a reader who
+/// presses `G` with a popup up means the end of the document, and taking them would make
+/// the popup modal in the one way it is not (see [`Overlay`]).
+fn popup_scroll(action: Action, height: usize, times: usize) -> Option<isize> {
+    let rows = |per: usize| isize::try_from(per.saturating_mul(times)).unwrap_or(isize::MAX);
+    match action {
+        Action::LineDown => Some(rows(1)),
+        Action::LineUp => Some(-rows(1)),
+        Action::HalfPageDown => Some(rows((height / 2).max(1))),
+        Action::HalfPageUp => Some(-rows((height / 2).max(1))),
+        Action::PageDown => Some(rows(height.saturating_sub(1).max(1))),
+        Action::PageUp => Some(-rows(height.saturating_sub(1).max(1))),
+        _ => None,
+    }
+}
+
 /// Which pane the keyboard is talking to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -64,24 +83,50 @@ pub enum PromptKind {
     TocFilter,
 }
 
-/// What a press on a copy button produced, waiting for the event loop to deliver it.
+/// A control that a full click landed on, handed to the event loop to act upon.
 ///
 /// The state machine touches no terminal and no display server (design spec §13), so it
-/// cannot copy: it takes the payload off the canvas and hands it over, exactly as
-/// [`Extract`] does for a finished drag. Keeping the decision here is also what lets a
-/// test press the button without taking ownership of anybody's desktop clipboard.
+/// cannot copy, open or jump: it says *which* control was activated and hands that over,
+/// exactly as [`Extract`] does for a finished drag. Keeping the decision here is also
+/// what lets a test click a button without taking ownership of anybody's clipboard.
+///
+/// **Changed 2026-08-12 (Task 5).** This replaces a `HotspotCopy` produced by the *press*.
+/// A copy button is no longer a parallel mechanism with its own firing edge (design spec
+/// §2): every kind of control now activates the same way, on a release that landed on the
+/// control the press started on.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HotspotCopy {
-    /// The canvas row the control was drawn on, for the flash.
+pub struct Activation {
+    /// The canvas row the released hotspot was drawn on, for the flash.
     pub row: usize,
-    /// The canvas column its label starts at, for the flash.
+    /// The canvas column it starts at, for the flash.
     pub col: u16,
-    /// The plain payload, which every route carries.
-    pub text: String,
-    /// The richer flavour, offered only where a flavoured clipboard exists.
-    pub html: Option<String>,
-    /// Which noun the status bar owes the reader.
-    pub what: crate::tui::clipboard::Copied,
+    /// What activating it does.
+    pub kind: HotspotKind,
+}
+
+/// What handling one key produced, for [`super::term`] to act on.
+///
+/// [`App::on_key`] cannot fire a control itself — the state machine touches no
+/// terminal or display server (design spec §13) — so it hands back what an `enter` on
+/// the keyboard cursor produced, the same way [`App::release_hotspot`] hands back a
+/// mouse click. Most keys produce an empty outcome; [`Default`] is that outcome.
+#[derive(Debug, Default)]
+pub struct KeyOutcome {
+    activation: Option<Activation>,
+}
+
+impl KeyOutcome {
+    /// Whether the key fired a control under the keyboard cursor.
+    pub fn fired_activation(&self) -> bool {
+        self.activation.is_some()
+    }
+
+    /// Takes the activation, for the caller that carries out `Open`/`Copy` I/O and
+    /// dispatches the rest through [`App::activate`] — the one place that logic lives,
+    /// whether the click came from a mouse or a keyboard.
+    pub fn into_activation(self) -> Option<Activation> {
+        self.activation
+    }
 }
 
 impl PromptKind {
@@ -102,6 +147,24 @@ impl PromptKind {
 }
 
 /// The overlay currently covering the document, if any.
+///
+/// # Why the footnote popup is not one of these
+///
+/// It lives beside this enum, in [`App::popup`], and the difference is not cosmetic.
+///
+/// * **These are modal; the popup is not.** [`App::on_key`] routes *every* key to the
+///   prompt or the help overlay before the bindings are consulted. The popup must not
+///   do that: `q` still quits, `/` still searches, and scrolling the document is how the
+///   reader *dismisses* the popup — a key path that could not exist if the popup owned
+///   the keyboard the way these two do.
+/// * **These fill the screen; the popup is anchored to a cell.** It carries a rectangle,
+///   a rendered canvas and a scroll offset, and it must stay on the document area it is
+///   anchored inside. None of that has a meaning for `Help` or `Prompt`.
+/// * **An enum is one-at-a-time.** A popup and a prompt can be up together — the reader
+///   opens a footnote and then presses `/` — and the help overlay deliberately covers
+///   the popup. Making them variants of one type would forbid combinations nobody asked
+///   to forbid, and would put a [`Canvas`] inside a `Clone + PartialEq` enum that
+///   [`App::on_key`] clones on every keystroke at a prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Overlay {
     /// Nothing is covering the document.
@@ -191,6 +254,12 @@ pub struct App {
     toc_filter: String,
     toc_hits: Vec<FilterHit>,
     overlay: Overlay,
+    /// The footnote popup that is up, if any. See [`Overlay`] for why it is not one.
+    ///
+    /// Dropped by anything that moves the marker it is anchored to — a document scroll,
+    /// a horizontal scroll, a reflow — because a box pointing at a sentence that is no
+    /// longer under it is worse than no box (design spec §6).
+    popup: Option<Popup>,
     /// The first help row on screen, for a help overlay taller than the terminal.
     help_scroll: usize,
     /// The digits typed in front of a movement key, `less`-style.
@@ -214,10 +283,42 @@ pub struct App {
     /// anybody chooses: [`super::term`] sets it from whether mouse capture was actually
     /// granted, and a button nobody can click is worse than no button (design spec §4).
     copy_button: bool,
-    /// The payload a press on a button produced, waiting for the event loop to copy it.
-    pending_hotspot: Option<HotspotCopy>,
+    /// The control a press landed on, as a [`Hotspot::target`](crate::canvas::Hotspot),
+    /// for as long as a release could still turn it into a click.
+    ///
+    /// A target id rather than a hotspot index, because a wrapped link is *several*
+    /// hotspots sharing one id: pressing its first row and releasing on its second is one
+    /// click on one control and must fire, while an index would call those two controls.
+    /// `None` means no click is in flight — either none was started, or a drag cancelled
+    /// the one that was, permanently for that gesture.
+    pressed: Option<usize>,
     /// The control showing its `[copied]` flash, and when it started.
     copied_flash: Option<(usize, u16, std::time::Instant)>,
+    /// The control the pointer is over, as an index into the canvas's hotspots.
+    ///
+    /// An index rather than a copy of the hotspot, because what the painter needs is
+    /// *which* control, and the canvas is the only thing entitled to say where that
+    /// control is. It is dropped whenever a render replaces the canvas, alongside the
+    /// selection and for the same reason: the indices belong to the canvas they were
+    /// resolved against.
+    hover: Option<usize>,
+    /// The control the keyboard cursor sits on, as a
+    /// [`Hotspot::target`](crate::canvas::Hotspot), for a reader with no mouse.
+    ///
+    /// A target rather than a hotspot index — unlike [`App::hover`] — because `f`/`F`
+    /// must step *per control*, and a control that wraps across rows or inside a
+    /// centred table cell is several hotspots sharing one target (design spec §2.2,
+    /// §4). Stepping by index would stall on the second row of a wrapped link instead
+    /// of advancing past it. Dropped on reflow for the same reason `hover` and
+    /// `pressed` are: a target id is issued per canvas.
+    cursor: Option<usize>,
+    /// The [`Activation`] a keyboard `Confirm` just produced, for [`App::on_key`]'s
+    /// caller to carry out.
+    ///
+    /// Mirrors [`App::pending_copy`]: the state machine touches no terminal or
+    /// display server (design spec §13), so firing a control from the keyboard is
+    /// handed over the same way a finished drag is, rather than acted on here.
+    pending_activation: Option<Activation>,
     quit: bool,
 }
 
@@ -267,6 +368,7 @@ impl App {
             toc_filter: String::new(),
             toc_hits: Vec::new(),
             overlay: Overlay::None,
+            popup: None,
             help_scroll: 0,
             pending_count: String::new(),
             notice,
@@ -276,8 +378,11 @@ impl App {
             selection: None,
             pending_copy: None,
             copy_button: false,
-            pending_hotspot: None,
+            pressed: None,
             copied_flash: None,
+            hover: None,
+            cursor: None,
+            pending_activation: None,
             quit: false,
         };
         app.refilter_toc();
@@ -625,6 +730,10 @@ impl App {
     /// was touched. A press anywhere else on the track jumps there first and then
     /// grabs, so the reader can carry straight on dragging.
     pub fn scrollbar_press(&mut self, height: u16, row: u16) {
+        // The scrollbar is outside the popup, and a click outside dismisses it. Said
+        // here rather than left to the scroll that usually follows, because grabbing the
+        // thumb without moving it scrolls nothing and would otherwise leave the box up.
+        self.close_popup();
         self.ensure_rendered();
         let (start, length) = self.scrollbar_thumb(height);
         let top = usize::from(row) * 2;
@@ -726,6 +835,15 @@ impl App {
         // A drag cannot survive this: its anchor is a row of a track that is about to
         // change height, and the reflow moves every line under it.
         self.bar_grab = None;
+        // Nor can the footnote popup, and for the same reason one step over: its anchor
+        // is a *viewport* row, and its rectangle was measured against a document area
+        // that is about to change shape. Said here rather than left to
+        // `ensure_rendered`'s stale block, which is what covers reflow: staleness is
+        // keyed on the render width, so a height-only resize never fires it — and under
+        // `--width` no resize fires it at all. The box would then survive with geometry
+        // the viewport no longer has: clipped away by the painter, invisible, and still
+        // eating every movement key from a state the reader has no way to see.
+        self.popup = None;
         let anchor = self.source_offset_at(self.scroll);
         self.size = (width, height);
         self.ensure_rendered();
@@ -773,8 +891,38 @@ impl App {
             // the honest answer, and the reader has already had the release event that
             // put their text on the clipboard.
             self.selection = None;
+            // And the hover, which names a control by its position in the old canvas's
+            // hotspot list. The pointer has not moved, but what is under it may have,
+            // and a stale index would paint the highlight onto a different button.
+            self.hover = None;
+            // And the keyboard cursor, for the same reason: it too names a control by a
+            // target id issued per canvas, and a reflow issues a new one.
+            self.cursor = None;
+            // And a click in flight, for the same reason one step further on: a target id
+            // is issued per canvas, so the id a press recorded may name a different
+            // control on the new one — or none. A reflow mid-click is a reflow the reader
+            // caused (a resize, a toggled option) and the click is theirs to repeat; a
+            // click that fired the wrong link would not be.
+            self.pressed = None;
+            // And the footnote popup, one step further still: it is anchored to the cell
+            // its marker was drawn in, and a reflow moves that cell. The box would keep
+            // its place on screen while the sentence it belongs to moved out from under
+            // it.
+            self.popup = None;
             self.clamp();
         }
+    }
+
+    /// Puts away anything anchored to a document cell, because the document just moved.
+    ///
+    /// Called by every path that changes where the document sits under the viewport —
+    /// the vertical scroll, the horizontal scroll, and (in [`App::ensure_rendered`]) a
+    /// reflow. Design spec §6 lists "scrolling the document" as one of the three ways a
+    /// footnote popup is dismissed, and the reason is the anchor: the box points at the
+    /// marker it was opened from, and a box left pointing at whatever has scrolled into
+    /// that cell would be a claim about the document that is no longer true.
+    fn moved_document(&mut self) {
+        self.popup = None;
     }
 
     /// Clamps the scroll offsets into range.
@@ -809,6 +957,7 @@ impl App {
 
     /// Scrolls by `delta` rows, clamped at both ends.
     pub fn scroll_by(&mut self, delta: isize) {
+        self.moved_document();
         self.ensure_rendered();
         let max = self.max_scroll();
         let target = if delta >= 0 {
@@ -822,6 +971,7 @@ impl App {
 
     /// Puts `row` at the top of the viewport, clamped.
     pub fn scroll_to(&mut self, row: usize) {
+        self.moved_document();
         self.ensure_rendered();
         self.scroll = row.min(self.max_scroll());
         self.track_toc();
@@ -829,6 +979,7 @@ impl App {
 
     /// Brings `row` into view, leaving a little context above it when scrolling up.
     pub fn reveal(&mut self, row: usize) {
+        self.moved_document();
         self.ensure_rendered();
         let height = self.viewport_height();
         let margin = (height / 5).min(3);
@@ -848,6 +999,7 @@ impl App {
     /// readable in its surroundings. A row already comfortably on screen is left
     /// where it is, so stepping through nearby matches does not lurch.
     pub fn reveal_centered(&mut self, row: usize) {
+        self.moved_document();
         self.ensure_rendered();
         let height = self.viewport_height();
         let margin = (height / 4).max(1);
@@ -958,16 +1110,16 @@ impl App {
 /// Key and mouse handling.
 impl App {
     /// Handles one key press.
-    pub fn on_key(&mut self, key: Key) {
+    pub fn on_key(&mut self, key: Key) -> KeyOutcome {
         self.clear_notice();
         if let Overlay::Prompt { kind, input } = &self.overlay {
             let (kind, input) = (*kind, input.clone());
             self.prompt_key(kind, input, key);
-            return;
+            return KeyOutcome::default();
         }
         if self.overlay == Overlay::Help {
             self.help_key(key);
-            return;
+            return KeyOutcome::default();
         }
         match self.config.keys.action(&key) {
             Some(action) => {
@@ -988,6 +1140,9 @@ impl App {
                 );
             }
         }
+        KeyOutcome {
+            activation: self.pending_activation.take(),
+        }
     }
 
     /// Handles one action, dispatching on the focused pane.
@@ -999,6 +1154,18 @@ impl App {
     pub fn act_with_count(&mut self, action: Action, count: Option<usize>) {
         let height = self.viewport_height();
         let times = count.unwrap_or(1).max(1);
+        // "Long footnotes scroll: the wheel over the popup, **or the cursor keys while
+        // it is open**" (design spec §6). Only the movement keys are taken, and only
+        // while a popup is up: everything else — `q`, `/`, `f`, `Esc` — still reaches
+        // the document, which is the whole difference between this and an `Overlay`.
+        // Without this the one key a reader would try to scroll a long note with would
+        // scroll the document instead and, by doing so, dismiss the note.
+        if self.popup.is_some()
+            && let Some(delta) = popup_scroll(action, height, times)
+        {
+            self.scroll_popup(delta);
+            return;
+        }
         let lines =
             |per: usize| -> isize { isize::try_from(per.saturating_mul(times)).unwrap_or(0) };
         match action {
@@ -1022,13 +1189,28 @@ impl App {
             Action::PrevMatch => self.repeat(times, |app| app.step_match(app.search_backward)),
             Action::ToggleSearchMode => self.toggle_search_mode(),
             Action::Confirm if self.focus == Focus::Toc => self.jump_to_selected_heading(),
-            Action::Confirm => {}
+            // Fires through the same channel a finished drag uses: `act_with_count` is
+            // not allowed to touch a terminal (design spec §13), so the activation is
+            // handed to `pending_activation` for `on_key` to hand further to
+            // `super::term`, which does the I/O and, for `Anchor`/`Footnote`, calls
+            // back into `App::activate`.
+            Action::Confirm => self.pending_activation = self.activate_cursor(),
+            Action::CursorNext if self.focus == Focus::Document => self.cursor_step(true),
+            Action::CursorPrev if self.focus == Focus::Document => self.cursor_step(false),
+            // The table of contents has no controls of its own to cycle through: `f`/`F`
+            // do nothing while it has focus, rather than reaching into the narrowed
+            // document behind it.
+            Action::CursorNext | Action::CursorPrev => {}
             Action::ScrollLeft => {
+                // Sideways is still the document moving under the anchor, so the popup
+                // goes for the same reason it does on a vertical scroll.
+                self.moved_document();
                 self.hscroll = self
                     .hscroll
                     .saturating_sub(HSCROLL_STEP.saturating_mul(u16::try_from(times).unwrap_or(1)));
             }
             Action::ScrollRight => {
+                self.moved_document();
                 self.ensure_rendered();
                 self.hscroll = self
                     .hscroll
@@ -1145,8 +1327,20 @@ impl App {
     /// on purpose. `Esc` therefore peels state off one layer at a time and, when
     /// there is nothing left to peel, says so.
     fn cancel(&mut self) {
-        // Outermost layer, and the newest: a highlight the reader just made is the most
-        // recent thing they did, so it is the first thing `Esc` should undo.
+        // The outermost layer of all: a box drawn over the document, which is the one
+        // piece of state here the reader can see the edges of. `Esc` never quits (design
+        // spec §10), which is exactly what leaves it free to close this.
+        if self.popup.take().is_some() {
+            self.notify("footnote closed", false);
+            return;
+        }
+        // Then the newest: a reader steps the keyboard cursor onto a
+        // control to look at it, and `Esc` is how they say "never mind" without
+        // following it — the same standing this gives a fresh selection just below.
+        if self.cursor.take().is_some() {
+            self.notify("cursor dropped", false);
+            return;
+        }
         if self.selection.take().is_some() {
             self.notify("selection cleared", false);
             return;
@@ -1320,6 +1514,162 @@ impl App {
                 self.focus = Focus::Document;
             }
             None => self.notify("that heading was not rendered", true),
+        }
+    }
+
+    /// Does what activating a hotspot does to the app's own state.
+    ///
+    /// Kinds that touch the terminal or the display server — [`HotspotKind::Open`],
+    /// [`HotspotKind::Copy`] — are handled entirely by [`super::term::activate`], which
+    /// owns that I/O (design spec §13); this covers the kinds that are pure state, so a
+    /// test can drive them without a terminal. Task 9 gives `Footnote` its behaviour;
+    /// until then it is recognised and does nothing, the same stance `term::activate`
+    /// took for `Anchor` before this task.
+    ///
+    /// # Why the whole [`Activation`] and not just its kind
+    ///
+    /// **Changed 2026-08-13 (Task 9b).** A footnote popup is anchored to the marker that
+    /// opened it, so *where* the control was drawn is part of what activating it means —
+    /// and the row and column were already in hand at both call sites, the mouse's and
+    /// the keyboard's. Passing the kind alone would have meant a second hit test here to
+    /// find the control the caller had just resolved.
+    pub fn activate(&mut self, activation: Activation) {
+        match activation.kind {
+            HotspotKind::Anchor { slug } => self.activate_anchor(&slug),
+            HotspotKind::Footnote { id } => {
+                self.open_footnote(&id, activation.row, activation.col);
+            }
+            // `Copy` and `Open` touch the clipboard and the display server, which the
+            // state machine may not (design spec §13); `super::term::activate` owns them.
+            HotspotKind::Copy { .. } | HotspotKind::Open { .. } => {}
+        }
+    }
+
+    /// Opens the popup holding the footnote named `id`, anchored to the marker drawn at
+    /// canvas `(row, col)`.
+    ///
+    /// # The note comes from the ordinary renderer
+    ///
+    /// [`crate::render::render_blocks`] lays out the definition's children at the box's
+    /// inner width — the same `render_sequence` walk
+    /// [`crate::render::render_document`] enters for every top-level block of the page,
+    /// entered one level down. That is the whole of the popup's rendering: a popup is
+    /// *another width*, not a second rendering path, so a list, a code span or a table
+    /// inside a footnote is laid out by the code that lays them out everywhere else.
+    ///
+    /// `render_document` itself is the wrong entry point here despite what the brief
+    /// said, and for a mundane reason: it takes a whole [`Doc`], and a footnote
+    /// definition is a node inside one. It would also apply the document's own side
+    /// margins, its lone-`#` title banner and its section numbering to the inside of a
+    /// popup — three whole-document decisions that a footnote is not a document for.
+    ///
+    /// # The status bar never lies
+    ///
+    /// A name matching no definition names itself in the notice and opens nothing, the
+    /// same stance [`App::activate_anchor`] takes for a slug that matches no heading.
+    fn open_footnote(&mut self, id: &str, row: usize, col: u16) {
+        self.ensure_rendered();
+        if popup::definition(self.doc.root(), id).is_none() {
+            self.notify(format!("no footnote named {id}"), true);
+            return;
+        }
+        let screen = (self.viewport_width(), self.popup_screen_height());
+        if !popup::fits(screen) {
+            self.notify("the terminal is too small for a footnote popup", false);
+            return;
+        }
+        // [`App::cursor_step`] now scrolls the cursor into view the instant `f`/`F`
+        // move it, so the keyboard route no longer hands this a marker off screen in
+        // practice. This guard is kept anyway: a box anchored to a cell that is not on
+        // the viewport would be a box pointing nowhere, and there is no other reason
+        // to trust `row`/`col` blindly here than the invariant above, which lives in a
+        // different method and could drift out of sync with this one.
+        if self.viewport_cell(row, col).is_none() {
+            self.reveal(row);
+            self.ensure_rendered();
+        }
+        let anchor = self.viewport_cell(row, col).unwrap_or((0, 0));
+        let width = popup::inner_width(screen.0);
+        // `copy_button: false`, whatever the pager is running with: a `[copy]` on a code
+        // fence inside the popup would be a control, and controls inside a popup are
+        // inert (design spec §1.1). A button that cannot be pressed is worse than no
+        // button (§4), so the renderer is told not to draw one.
+        let options = RenderOptions {
+            copy_button: false,
+            ..self.render_options()
+        };
+        let (canvas, label) = {
+            let Some(node) = popup::definition(self.doc.root(), id) else {
+                return;
+            };
+            let label = match &node.kind {
+                crate::doc::NodeKind::FootnoteDefinition { name, number } => {
+                    crate::render::block::footnote_label(name, *number)
+                }
+                _ => id.to_string(),
+            };
+            (
+                crate::render::render_blocks(&node.children, width, &self.theme, &options),
+                label,
+            )
+        };
+        // `None` when neither the room above the marker nor the room below it can hold a
+        // box that does not cover the marker itself (see `popup::place`). Reported, not
+        // swallowed: a marker that reacts to a click and then does nothing visible is
+        // exactly the control design spec §1.1 refuses to offer.
+        match Popup::new(canvas, label, anchor, screen, self.theme.base()) {
+            Some(popup) => self.popup = Some(popup),
+            None => self.notify("no room beside the marker for the footnote", false),
+        }
+    }
+
+    /// The rows of the document area a popup may occupy.
+    ///
+    /// The viewport, not the terminal: the status bar is not a place a box may cover,
+    /// and neither is the row the marker itself is on when the box opens downwards.
+    fn popup_screen_height(&self) -> u16 {
+        u16::try_from(self.viewport_height()).unwrap_or(u16::MAX)
+    }
+
+    /// Where canvas cell `(row, col)` is drawn in the document area, when it is drawn.
+    ///
+    /// The painter's own arithmetic, run forwards: [`Offsets::x_of`] is what
+    /// [`super::draw`] positions every highlight with, so a popup can never disagree
+    /// with the pixels about which cell its marker was in. `None` for a cell that is
+    /// off the top or bottom of the viewport, behind a pinned prefix, or past the
+    /// right-hand rail.
+    fn viewport_cell(&self, row: usize, col: u16) -> Option<(u16, u16)> {
+        let y = u16::try_from(row.checked_sub(self.scroll)?).ok()?;
+        if usize::from(y) >= self.viewport_height() {
+            return None;
+        }
+        let offsets = Offsets::scrolled_to(
+            self.reach(),
+            self.pinned(),
+            self.hscroll,
+            self.viewport_width(),
+        );
+        let x = offsets.x_of(row, col)?;
+        (x < offsets.content()).then_some((x, y))
+    }
+
+    /// Scrolls the heading `slug` names to the top row, or says it found none.
+    ///
+    /// Slugs are resolved through the same [`Toc`] the table of contents and `[`/`]`
+    /// use — [`Toc::index_of`] against [`doc::Heading::id`](crate::doc::Heading), then
+    /// [`Toc::row_of`] for where that heading actually rendered — so an anchor and the
+    /// TOC can never disagree about which heading a duplicated title means. The status
+    /// bar never lies: a slug matching nothing names itself in the notice and leaves
+    /// the scroll position untouched, rather than guessing.
+    fn activate_anchor(&mut self, slug: &str) {
+        self.ensure_rendered();
+        match self
+            .toc
+            .index_of(slug)
+            .and_then(|index| self.toc.row_of(index))
+        {
+            Some(row) => self.scroll_to(row),
+            None => self.notify(format!("no heading matches #{slug}"), true),
         }
     }
 
@@ -1613,8 +1963,15 @@ impl App {
     ///
     /// A drag that never left the cell it started on is a click, not a selection, and
     /// leaves nothing behind: copying one character is not what anybody meant by it.
+    ///
+    /// A selection that is not being dragged cannot be ended, exactly as
+    /// [`App::drag_selection`] cannot extend one. A *finished* selection stays up as a
+    /// highlight until something replaces it, so without the filter every later release
+    /// would re-extract it and put it on the clipboard again — over whatever that release
+    /// had actually just done. That became reachable when a release started activating
+    /// controls (Task 5); it was latent before.
     pub fn end_selection(&mut self) {
-        let Some(mut selection) = self.selection else {
+        let Some(mut selection) = self.selection.filter(|it| it.is_dragging()) else {
             return;
         };
         selection.finish();
@@ -1664,55 +2021,342 @@ impl App {
     ///
     /// # A hotspot the viewport cut off
     ///
-    /// A block too wide even for [`crate::render::document`]'s widening keeps its
-    /// hotspot at a column its clipped canvas no longer has, so the label is drawn
-    /// nowhere while the claim survives — an invisible control, if a press could ever
-    /// name that column. None can: the horizontal scroll only reaches as far as the
-    /// canvas is *drawn*, and `canvas_pos` clamps anything beyond it to the last cell
-    /// that exists, which is never inside a button — a button sits at least two columns
-    /// inside its own block's right edge. That is asserted by
+    /// A block too wide even for [`crate::render::document`]'s widening is clipped, and
+    /// the clip now takes the claim with the cells it cuts
+    /// ([`Canvas::truncate_width`](crate::canvas::Canvas::truncate_width), since Task
+    /// 2b), so there is no hotspot left to reach. It is belt and braces either way: the
+    /// horizontal scroll only reaches as far as the canvas is *drawn*, and `canvas_pos`
+    /// clamps anything beyond it to the last cell that exists, which is never inside a
+    /// button — a button sits at least two columns inside its own block's right edge.
+    /// That is asserted by
     /// [`super::tests::a_button_clipped_off_the_canvas_cannot_be_pressed_anywhere`],
     /// which sweeps every cell at every offset for one.
     fn hotspot_at(&self, x: u16, y: u16) -> Option<&crate::canvas::Hotspot> {
+        self.cache
+            .canvas()
+            .hotspots()
+            .get(self.hotspot_index_at(x, y)?)
+    }
+
+    /// The same hit test, answering *which* control rather than handing one over.
+    ///
+    /// One implementation, so a press and a hover can never disagree about where the
+    /// button is — the thing [`App::hotspot_at`]'s note about `canvas_pos` is careful
+    /// about, one level further out.
+    fn hotspot_index_at(&self, x: u16, y: u16) -> Option<usize> {
+        // The popup covers the document, so the controls under it are covered too:
+        // nothing beneath the box lights, presses or fires. One guard rather than three,
+        // because a press, a release and a hover that disagreed about what the box hides
+        // would be a link that highlights through a popup and then opens a browser from
+        // a click the reader aimed at a footnote. Links drawn *inside* the popup are
+        // inert for the same reason from the other side (design spec §1.1): the note's
+        // own canvas is never consulted here at all.
+        if self.popup_contains(x, y) {
+            return None;
+        }
         let pos = self.canvas_pos(x, y);
-        self.cache.canvas().hotspots().iter().find(|spot| {
+        self.cache.canvas().hotspots().iter().position(|spot| {
             spot.row == pos.row
                 && pos.col >= spot.col
                 && pos.col < spot.col.saturating_add(spot.cols)
         })
     }
 
-    /// Answers a press at document-area column `x`, row `y` if a control is there.
+    /// Records a press at document-area column `x`, row `y` as a click in flight.
     ///
-    /// Reports whether it was: a press the buttons did not claim is an ordinary press
-    /// and goes on to begin a drag, which is the precedence design spec §5 asks for —
-    /// clicking `[copy]` never starts a selection.
+    /// Nothing fires here. A click is a press *and a release* on the same control with no
+    /// drag in between (design spec §3), so all a press does is remember which control it
+    /// landed on; [`App::release_hotspot`] decides. A press on nothing remembers nothing.
+    ///
+    /// # What the answer means
+    ///
+    /// Reports whether the control **claimed the press outright**, which is to say
+    /// whether the caller should skip [`App::begin_selection`]. Only a `[copy]` button
+    /// does: it is chrome the renderer drew, there is no document text under it to
+    /// select, and design spec §5 requires that pressing it never leave a selection
+    /// behind. A link's cells *are* document text, so a press there both remembers the
+    /// click and starts a drag — and then a drag cancels the click while a plain click
+    /// leaves a one-cell selection that [`App::end_selection`] discards as a click. That
+    /// is what "selection wins every tie" buys: dragging out of a link still selects.
+    ///
+    /// # A press that lands on a different control than the last one
+    ///
+    /// The candidate is replaced, never merged. Two presses without a release cannot
+    /// happen from one mouse, but a caller that managed it would get the later one, which
+    /// is the one the hand is on.
+    ///
+    /// # A press while a footnote popup is up
+    ///
+    /// Inside the box, the popup swallows it: no control fires, no selection starts, and
+    /// the popup stays. Outside it, the popup is dismissed (design spec §6) and the press
+    /// then does what it always did — the click is not eaten by the dismissal, because a
+    /// reader who clicks a link beside an open note means to follow it.
     pub fn press_hotspot(&mut self, x: u16, y: u16) -> bool {
         self.ensure_rendered();
+        if self.popup.is_some() {
+            if self.popup_contains(x, y) {
+                // Claimed outright, exactly as a `[copy]` button claims one: there is no
+                // document text under the box to select.
+                self.pressed = None;
+                return true;
+            }
+            self.close_popup();
+        }
         let Some(spot) = self.hotspot_at(x, y) else {
+            self.pressed = None;
             return false;
         };
-        // Code carries one flavour and a table two, and that is the whole difference
-        // between the two nouns the status bar has for them.
-        let what = if spot.html.is_some() {
-            crate::tui::clipboard::Copied::Table
-        } else {
-            crate::tui::clipboard::Copied::Code
-        };
-        self.pending_hotspot = Some(HotspotCopy {
-            row: spot.row,
-            col: spot.col,
-            text: spot.text.clone(),
-            html: spot.html.clone(),
-            what,
-        });
-        self.clear_notice();
-        true
+        let target = spot.target;
+        let claims = matches!(spot.kind, HotspotKind::Copy { .. });
+        self.pressed = Some(target);
+        if claims {
+            self.clear_notice();
+        }
+        claims
     }
 
-    /// Takes the payload a press produced, for the event loop to copy.
-    pub fn take_hotspot_copy(&mut self) -> Option<HotspotCopy> {
-        self.pending_hotspot.take()
+    /// Ends a click in flight at document-area column `x`, row `y`.
+    ///
+    /// Fires — returns the [`Activation`] — only if the release landed on the *same
+    /// control* the press did. "Same control" is the hotspot's
+    /// [`target`](crate::canvas::Hotspot::target), not its position in the list: a link
+    /// wrapped across rows is
+    /// several hotspots sharing one target, and pressing its first row and releasing on
+    /// its second is one click on one control. Releasing on a *different* link, or on no
+    /// control at all, fires nothing.
+    ///
+    /// The candidate is taken whatever the answer: a release ends the gesture, and a
+    /// release that missed must not leave a candidate behind for the next one to fire.
+    ///
+    /// The render comes **before** the take, and the order is load-bearing. A target id is
+    /// issued per canvas, so [`App::ensure_rendered`] drops a click in flight along with
+    /// the hover; taking first would capture the id out of the old canvas and then match
+    /// it against the new one's, which are reused small integers. This way the guard
+    /// enforces itself no matter which side the reflow lands on.
+    pub fn release_hotspot(&mut self, x: u16, y: u16) -> Option<Activation> {
+        self.ensure_rendered();
+        let pressed = self.pressed.take()?;
+        let spot = self.hotspot_at(x, y)?;
+        if spot.target != pressed {
+            return None;
+        }
+        Some(Activation {
+            row: spot.row,
+            col: spot.col,
+            kind: spot.kind.clone(),
+        })
+    }
+
+    /// Cancels a click in flight, permanently for this gesture.
+    ///
+    /// Called for every drag, because **any** drag means the hand went travelling and the
+    /// gesture is a selection, not a click (design spec §3 — selection wins every tie).
+    /// Cancellation is not suspension: moving off the control and back onto it does not
+    /// resurrect the candidate, because the state it would need was thrown away here on
+    /// the first drag event rather than merely compared against on release.
+    pub fn cancel_hotspot_press(&mut self) {
+        self.pressed = None;
+    }
+
+    /// Puts the pointer at document-area column `x`, row `y`.
+    ///
+    /// Returns whether the *hovered control changed identity* — not whether the pointer
+    /// moved, which it did by definition. A terminal in any-event tracking mode reports
+    /// motion cell by cell, and a pager that repainted on each of those would be
+    /// re-laying-out the document for a hand sliding across a paragraph. Sweeping along
+    /// one six-column label is one change on the way in and one on the way out; the
+    /// four columns in between ask for nothing, and [`super::term`] draws nothing.
+    pub fn set_pointer(&mut self, x: u16, y: u16) -> bool {
+        self.ensure_rendered();
+        let at = self.hotspot_index_at(x, y);
+        std::mem::replace(&mut self.hover, at) != at
+    }
+
+    /// Takes the pointer off the document entirely.
+    ///
+    /// The pane, the scrollbar and the status bar are not places a control can be, and
+    /// a pointer resting on one of them must not leave a button lit behind it. Reports
+    /// a change on the same terms as [`App::set_pointer`], so leaving an already-empty
+    /// document costs nothing.
+    pub fn clear_pointer(&mut self) -> bool {
+        self.hover.take().is_some()
+    }
+
+    /// The control under the pointer, as an index into `canvas.hotspots()`.
+    ///
+    /// Read by [`super::draw`], which is where hover is applied: a hovered button is a
+    /// *painted* difference, not a rendered one. Rendering is a pure function of
+    /// `(AST, width, theme, options)` and the pointer is none of those — the same
+    /// argument that keeps the `[copied]` flash out of the renderer.
+    pub fn hovered(&self) -> Option<usize> {
+        self.hover
+    }
+
+    /// The control the keyboard cursor is on, as a
+    /// [`Hotspot::target`](crate::canvas::Hotspot).
+    ///
+    /// Read by [`super::draw`] the same way [`App::hovered`] is: the cursor is a
+    /// painted difference, not a rendered one (design spec §4 — the keyboard cursor is
+    /// paint-time, exactly like hover).
+    pub fn cursor_target(&self) -> Option<usize> {
+        self.cursor
+    }
+
+    /// The hotspot the keyboard cursor is on, if any.
+    ///
+    /// Resolved the same way [`App::activate_cursor`] resolves it — the first hotspot
+    /// carrying the cursor's target — so [`super::chrome`]'s status-bar URL can never
+    /// disagree with `enter` about which control the cursor means. `pub` for exactly
+    /// that reader: [`App::hovered`] hands `super::chrome` an *index* into
+    /// `rendered().hotspots()` because a hovered position is one cell that is either on
+    /// a hotspot or is not, but the cursor is a `target`, several hotspots for a
+    /// wrapped control, so the lookup has to happen somewhere and doing it twice (once
+    /// here, once in [`App::activate_cursor`]) is the drift this avoids.
+    pub fn cursor_hotspot(&self) -> Option<&crate::canvas::Hotspot> {
+        let target = self.cursor?;
+        self.rendered()
+            .hotspots()
+            .iter()
+            .find(|spot| spot.target == target)
+    }
+
+    /// Every control in the whole document, once each, in the order the renderer drew
+    /// them.
+    ///
+    /// A control is a `target`, not a hotspot: a wrapped link or one wrapped inside a
+    /// centred table cell is several hotspots sharing one, and `f`/`F` must land on
+    /// each control once, not once per row it happens to span (design spec §2.2, §4).
+    ///
+    /// **The whole document, not the viewport.** `f`/`F` walk every control there is
+    /// and bring the one they land on into view — like `n`/`N` walk every search hit,
+    /// not just the ones already on screen — rather than being limited to whatever
+    /// happens to be visible when the reader presses the key. The alternative (only
+    /// cycling controls already on screen) reads as simpler, but it means a control
+    /// past the fold is unreachable by keyboard until the reader scrolls to it by some
+    /// other means first, which defeats the reason `f`/`F` exist: a link is content,
+    /// never hidden, and content that scrolling past does not remove from `f`'s reach.
+    /// [`App::cursor_step`] is what keeps the promise "on screen" true instead: it
+    /// scrolls to whatever `f`/`F` lands on, so the cursor is always visible the
+    /// instant it moves, never merely reachable in principle.
+    fn control_targets(&self) -> Vec<usize> {
+        let mut targets = Vec::new();
+        for spot in self.cache.canvas().hotspots() {
+            if !targets.contains(&spot.target) {
+                targets.push(spot.target);
+            }
+        }
+        targets
+    }
+
+    /// Moves the keyboard cursor to the next (`forward`) or previous control in the
+    /// document, wrapping at either end, and scrolls it into view.
+    ///
+    /// This is what makes every link reachable without a mouse (design spec §4): a
+    /// `[copy]` button hides when mouse capture was refused because a control nobody
+    /// can click is worse than none, but a link is content, not chrome, and hiding it
+    /// would hide the document. The cursor is what resolves that for links instead of
+    /// repealing the rule for buttons — a button the cursor lands on still only exists
+    /// in the canvas when `copy_button` let the renderer draw it.
+    ///
+    /// # Scrolling to follow the cursor
+    ///
+    /// [`App::control_targets`] walks the whole document, so the control `f`/`F` lands
+    /// on may be off screen — the *next* one is by definition, past the last screenful.
+    /// Left alone, that is exactly the defect this method exists to close: the cursor
+    /// would move somewhere the reader cannot see, `enter` would activate whatever that
+    /// was sight unseen, and for an `Open` control that means a browser opening on a
+    /// link nobody looked at. [`App::reveal_centered`] and [`App::reveal_columns`] are
+    /// the same pair [`App::step_match`] uses to keep a search hit on screen, used here
+    /// for the same reason: a control landing on the last visible row shows nothing of
+    /// its surroundings, and one past the right edge of a wide table or long code line
+    /// is off screen sideways even once the row is on screen vertically.
+    fn cursor_step(&mut self, forward: bool) {
+        self.ensure_rendered();
+        let targets = self.control_targets();
+        if targets.is_empty() {
+            self.cursor = None;
+            return;
+        }
+        let at = self
+            .cursor
+            .and_then(|target| targets.iter().position(|&t| t == target));
+        let last = targets.len() - 1;
+        let next = match (at, forward) {
+            (Some(index), true) => {
+                if index == last {
+                    0
+                } else {
+                    index + 1
+                }
+            }
+            (Some(index), false) => {
+                if index == 0 {
+                    last
+                } else {
+                    index - 1
+                }
+            }
+            (None, true) => 0,
+            (None, false) => last,
+        };
+        self.cursor = Some(targets[next]);
+        if let Some(spot) = self.cursor_hotspot() {
+            let (row, col, cols) = (spot.row, spot.col, spot.cols);
+            self.reveal_centered(row);
+            self.reveal_columns(row, col, cols);
+        }
+    }
+
+    /// Builds the [`Activation`] an `enter` on the keyboard cursor fires, if the
+    /// cursor is on a control.
+    ///
+    /// One hit test with [`App::release_hotspot`]'s counterpart: both resolve a
+    /// target to the first hotspot that carries it, because every hotspot sharing a
+    /// target carries the same `kind` — what activating the control does does not
+    /// depend on which row of it fired.
+    fn activate_cursor(&mut self) -> Option<Activation> {
+        self.ensure_rendered();
+        let spot = self.cursor_hotspot()?;
+        Some(Activation {
+            row: spot.row,
+            col: spot.col,
+            kind: spot.kind.clone(),
+        })
+    }
+
+    /// The footnote popup that is up, if any.
+    ///
+    /// Read by [`super::draw`], which paints it, and by [`super::term`], which routes
+    /// the wheel to whichever of the note and the document the pointer is over.
+    pub fn popup(&self) -> Option<&Popup> {
+        self.popup.as_ref()
+    }
+
+    /// Whether document-area cell `(x, y)` is covered by the popup.
+    pub fn popup_contains(&self, x: u16, y: u16) -> bool {
+        self.popup
+            .as_ref()
+            .is_some_and(|popup| popup.contains(x, y))
+    }
+
+    /// Scrolls the note inside the popup by `delta` rows, clamped at both ends.
+    ///
+    /// **The note moves; the document does not.** A wheel notch over the popup that
+    /// scrolled the page would scroll the marker out from under the box and, by the
+    /// dismissal rule, close the very note the reader was trying to read.
+    pub fn scroll_popup(&mut self, delta: isize) {
+        if let Some(popup) = self.popup.as_mut() {
+            popup.scroll_by(delta);
+        }
+    }
+
+    /// Puts the popup away, for a click that landed outside it.
+    ///
+    /// No notice: a click elsewhere is the reader getting on with something, and a
+    /// status bar that announced it would be saying what they can already see. `Esc`
+    /// does say so, because there the box is all that press did.
+    fn close_popup(&mut self) {
+        self.popup = None;
     }
 
     /// Records that the control at canvas `(row, col)` was just used.

@@ -7,6 +7,7 @@ fn span(source_start: usize, source_end: usize, row: usize, col: u16, cols: u16)
     SearchSpan {
         source_start,
         source_end,
+        unit: None,
         row,
         col,
         cols,

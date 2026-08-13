@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 
 use super::app::{App, AppOptions, Focus, Overlay, PromptKind};
 use super::help;
+use crate::canvas::HotspotKind;
 use crate::config::{Action, Config, Key, KeyBindings, KeyCode};
 use crate::doc::Doc;
 use crate::search::SearchMode;
@@ -1519,6 +1520,334 @@ fn the_status_bar_keeps_the_quit_hint_at_every_width() {
             "the quit hint survives at width {width}: {bar:?}"
         );
     }
+}
+
+/// The viewport cell `needle`'s first character sits in, on the frame drawn for `app`.
+///
+/// Read off the *painted frame*, following the same reasoning as [`painted_button`]:
+/// this is the reader's own information, and the coordinate their pointer arrives in.
+fn painted_at(app: &mut App, width: u16, height: u16, needle: &str) -> (u16, u16) {
+    let rows = framed(app, width, height);
+    for (y, line) in rows.iter().enumerate() {
+        if let Some(at) = line.find(needle) {
+            let x = crate::text::display_width(&line[..at]);
+            return (
+                u16::try_from(x).expect("a viewport column"),
+                u16::try_from(y).expect("a viewport row"),
+            );
+        }
+    }
+    panic!("{needle:?} is not on the screen: {rows:?}");
+}
+
+#[test]
+fn sanitized_substitutes_a_control_character_without_moving_its_width() {
+    // The direct-call pin: one column in, one column out
+    // (`crate::text::cell_clusters`), so nothing measured for the status bar's own
+    // layout arithmetic moves because of the substitution. This does not prove either
+    // call site in `draw_status` still exists -- see the tests below for that.
+    let hostile = "https://example.com/\u{9b}pwned";
+    let safe = super::chrome::sanitized(hostile);
+    assert!(
+        !safe.contains('\u{9b}'),
+        "the control character does not survive: {safe:?}"
+    );
+    assert_eq!(
+        crate::text::display_width(&safe),
+        crate::text::display_width(hostile),
+        "the substitution preserves width"
+    );
+}
+
+#[test]
+fn a_control_character_in_a_hovered_url_cannot_reach_the_terminal() {
+    // A real link, through the real parser and the real `classify` -- not injected
+    // past them -- carrying U+009B, the C1 form of CSI (`ESC [` in one byte on a
+    // terminal that honours 8-bit controls). CommonMark's *bare* destination grammar
+    // excludes ASCII control characters but says nothing about the C1 range, so this
+    // one is not awkward the way a literal ESC would have been: it survives
+    // `Doc::parse` into the hotspot's `url` unchanged (confirmed with a throwaway
+    // probe against this crate before writing this test), which is exactly what
+    // design spec §8 says must not be assumed either way rather than tested.
+    //
+    // Hovered the same way `hovering_a_link_shows_its_full_url_in_the_status_bar`
+    // does -- real `set_pointer` against the real rendered canvas -- and drawn
+    // through `chrome::draw_status` itself, so this fails if the call site to
+    // `sanitized` is ever dropped, not only if the helper it calls breaks.
+    let mut app = pager_at("[here](https://example.com/\u{9b}[31mpwned)\n", 60, 10);
+    let (x, y) = painted_at(&mut app, 60, 10, "here");
+    app.set_pointer(x, y);
+    let rows = painted(60, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        !status.contains('\u{9b}'),
+        "the raw C1 control byte does not reach the drawn status bar: {status:?}"
+    );
+    // The load-bearing assertion is the one below, not the one above. `\u{9b}` never
+    // survives to `status` *either way* -- that is what the assertion above pins, and
+    // it is true for two different reasons depending on whether the call site exists:
+    //
+    // * with `sanitized` wired in, the raw byte is replaced with `text::UNPLACEABLE`
+    //   (U+FFFD) *before* the string ever reaches a `Span`, so ratatui draws an
+    //   ordinary printable character in its place;
+    // * with the call site removed, the raw byte reaches `Span`/`Buffer::set_line`
+    //   unsanitized, and ratatui's own buffer-writing code silently drops it there --
+    //   verified outside this project against ESC, TAB, CR, BEL, DEL, NUL and this
+    //   same C1 byte, none of which are ever placed in a cell. Nothing stands in for
+    //   it: the character is simply gone, one column short of what this program's own
+    //   width arithmetic assumed.
+    //
+    // So "no raw `\u{9b}` in the output" cannot distinguish the two cases, and is not
+    // the proof. Whether a *marker* took its place is: only the sanitized path leaves
+    // one, which is the width-mismatch defect class `cell_clusters` exists to
+    // prevent. That marker's presence is what a removed call site cannot fake.
+    assert!(
+        status.contains('\u{fffd}'),
+        "the control character is substituted, not silently dropped: {status:?}"
+    );
+    assert!(
+        status.contains("https://example.com/"),
+        "the rest of the url still draws: {status:?}"
+    );
+}
+
+#[test]
+fn a_control_character_in_a_failed_open_notice_cannot_reach_the_terminal() {
+    // `open::open` embeds the URL it could not launch into `Outcome::Failed`'s message
+    // (`src/tui/open.rs`), and `term::activate` hands that straight to `App::notify`.
+    // The URL there is document content the reader did not write, exactly as much as
+    // the hovered URL above is -- Task 6 is what made this call site carry untrusted
+    // text, so it gets the identical proof. `notify` itself is exercised directly
+    // rather than through a real failed spawn, because `App` never touches a process
+    // (design spec §13): the state machine only needs to be handed the message a real
+    // failure would have produced.
+    // `Drop::Context` -- what carries the notice -- is the very first segment the bar
+    // sheds for space (see `chrome::Drop`), so the buffer has to be wide enough that
+    // nothing competes it away before sanitization is even reached. The message is a
+    // realistic length for what `open::open` actually produces; this test is about
+    // sanitization, not the drop order.
+    let mut app = pager_at("[here](https://example.com/x)\n", 200, 10);
+    app.notify(
+        "could not open https://example.com/\u{9b}pwned: no such file or directory",
+        true,
+    );
+    let rows = painted(200, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        !status.contains('\u{9b}'),
+        "the raw C1 control byte does not reach the drawn status bar: {status:?}"
+    );
+    // As with the hovered-URL test above, the absence of the raw byte alone cannot
+    // distinguish a wired-in sanitizer from a dropped call site -- ratatui silently
+    // drops raw controls either way. The marker's presence is the proof that
+    // `chrome::sanitized` actually ran on `notice.text`.
+    assert!(
+        status.contains('\u{fffd}'),
+        "the control character is substituted, not silently dropped: {status:?}"
+    );
+    assert!(
+        status.contains("could not open https://example.com/"),
+        "the rest of the notice still draws: {status:?}"
+    );
+}
+
+#[test]
+fn hovering_a_link_shows_its_full_url_in_the_status_bar() {
+    // Design spec §8: there is deliberately no confirmation prompt before a link
+    // opens, and the status bar showing exactly where it goes is the safeguard that
+    // stands in for one.
+    let mut app = pager_at("[here](https://example.com/a/path)\n", 60, 10);
+    let (x, y) = painted_at(&mut app, 60, 10, "here");
+    app.set_pointer(x, y);
+    let rows = painted(60, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        status.contains("https://example.com/a/path"),
+        "the status bar must show where the link goes; it said {status:?}"
+    );
+}
+
+#[test]
+fn the_keyboard_cursor_shows_its_url_in_the_status_bar_too() {
+    // Task 11, defect 2. Design spec §8 calls the status bar URL the stand-in for a
+    // confirmation prompt before a link opens, but `chrome::draw_status` read
+    // `app.hovered()` only — so the one reader who needs that safeguard most, the
+    // one with no mouse who reached the link with `f`, never saw it.
+    //
+    // 200 columns, not the 60 the hover test above uses: `Drop::Url` is a
+    // high-priority segment that survives even a 60-column bar, so a narrow buffer
+    // here would happen to pass either way, which is exactly the shape of vacuous
+    // test this plan has shipped before against `Drop::Context`. 200 columns removes
+    // any doubt that the segment was actually drawn rather than merely surviving
+    // by luck of the width picked.
+    let mut app = pager_at("[here](https://example.com/a/path)\n", 200, 10);
+    app.on_key(Key::char('f'));
+    let rows = painted(200, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        status.contains("https://example.com/a/path"),
+        "the keyboard cursor must show where the link goes, same as a hover does; \
+         it said {status:?}"
+    );
+}
+
+#[test]
+fn a_hover_wins_over_the_keyboard_cursor_in_the_status_bar() {
+    // Both a hover and a cursor can be live at once with `--mouse`: the reader
+    // walked the document with `f`, then reached for the mouse and rested it on a
+    // *different* link without pressing anything. The hover is the more recent
+    // signal of where the reader is actually looking, so it wins — see the
+    // reasoning in `chrome::draw_status` beside the `.or_else` this exercises.
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        200,
+        10,
+    );
+    // `f` lands on `a` first (`control_targets` walks the canvas in draw order).
+    app.on_key(Key::char('f'));
+    assert!(
+        app.cursor_hotspot().is_some_and(|spot| spot.kind
+            == HotspotKind::Open {
+                url: "https://example.com/a".into()
+            }),
+        "the premise: the cursor is on `a`"
+    );
+    let (x, y) = painted_at(&mut app, 200, 10, "b");
+    app.set_pointer(x, y);
+
+    let rows = painted(200, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        status.contains("https://example.com/b"),
+        "the hover must win over the cursor; it said {status:?}"
+    );
+    assert!(
+        !status.contains("https://example.com/a"),
+        "and the cursor's url must not also show; it said {status:?}"
+    );
+}
+
+#[test]
+fn an_anchor_scrolls_its_heading_to_the_top_row() {
+    // Filler both before *and after* the target: `scroll_to` (like the TOC's own
+    // jump) clamps to `max_scroll`, so a heading with too little content below it
+    // cannot reach the very top row without leaving blank space beneath the last
+    // line -- the brief's original document (filler only above) hit exactly that
+    // clamp and never got the heading to row 0.
+    let doc = format!(
+        "[go](#target)\n\n{}\n## Target\n\n{}",
+        "filler\n\n".repeat(40),
+        "filler\n\n".repeat(40)
+    );
+    let mut app = pager_at(&doc, 60, 10);
+    app.activate(activation(HotspotKind::Anchor {
+        slug: "target".to_string(),
+    }));
+    let rows = framed(&mut app, 60, 10);
+    assert!(
+        rows[0].contains("Target"),
+        "the target heading lands on the top row: {rows:?}"
+    );
+}
+
+#[test]
+fn a_duplicate_heading_resolves_to_the_right_one() {
+    // Slugger suffixes duplicates -1, -2. `#setup-1` is the SECOND "Setup".
+    let doc = format!(
+        "## Setup\n\n{}\n## Setup\n\nsecond\n",
+        "filler\n\n".repeat(40)
+    );
+    let mut app = pager_at(&doc, 60, 10);
+    app.activate(activation(HotspotKind::Anchor {
+        slug: "setup-1".to_string(),
+    }));
+    let rows = framed(&mut app, 60, 10);
+    assert!(
+        rows.iter().any(|row| row.contains("second")),
+        "the second Setup's body is on screen: {rows:?}"
+    );
+}
+
+#[test]
+fn an_unknown_anchor_reports_and_does_not_move() {
+    // Wide enough that the notice is not the first segment the bar's own width-based
+    // elision (`Drop::Context` is the cheapest priority) gives up; the assertion is
+    // about the anchor, not about the bar's unrelated elision policy.
+    let mut app = pager_at("# A\n\nbody\n", 80, 10);
+    let before = app.scroll();
+    app.activate(activation(HotspotKind::Anchor {
+        slug: "nope".to_string(),
+    }));
+    assert_eq!(app.scroll(), before, "it must scroll nowhere");
+    let rows = framed(&mut app, 80, 10);
+    let status = rows.last().expect("a status row");
+    assert!(
+        status.contains("nope"),
+        "the status bar never lies -- it must say the anchor matched nothing: {status:?}"
+    );
+}
+
+#[test]
+fn hovering_a_copy_button_shows_no_url() {
+    // The status bar never lies: a hotspot that is not `Open` carries no URL, and
+    // showing one anyway would be a stale answer to a question nobody asked.
+    let mut app = pager_at("```\ncode\n```\n", 60, 10);
+    app.set_copy_button(true);
+    let (x, y) = painted_at(&mut app, 60, 10, crate::render::button::LABEL);
+    app.set_pointer(x, y);
+    let rows = painted(60, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        !status.contains("://"),
+        "a copy button hovered is not a link hovered: {status:?}"
+    );
+}
+
+#[test]
+fn a_url_too_long_for_the_status_bar_is_elided_at_the_end() {
+    // `elide_middle` is the sibling used for the *drawn* suffix, where both ends
+    // carry meaning. Here the reader checks the host first, so the host — the
+    // front — must survive, and the `…` belongs at the end instead.
+    let long = "https://example.com/a/very/long/path/that/will/certainly/overflow/a/narrow/bar";
+    let mut app = pager_at(&format!("[here]({long})\n"), 45, 10);
+    let (x, y) = painted_at(&mut app, 45, 10, "here");
+    app.set_pointer(x, y);
+    let rows = painted(45, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert_eq!(
+        crate::text::display_width(status),
+        45,
+        "the bar is exactly the terminal's width: {status:?}"
+    );
+    assert!(
+        status.contains("https://example.com"),
+        "the host survives at the front: {status:?}"
+    );
+    // The ellipsis sits right after the truncated url, not mid-string: the help chip
+    // still follows it, so it is the url's own end that must carry the mark, not the
+    // whole bar's.
+    assert!(
+        status.contains('\u{2026}'),
+        "an elided url ends in the ellipsis, not a hard cut: {status:?}"
+    );
+    assert!(
+        !status.contains("overflow/a/narrow/bar"),
+        "the tail of the url is what gets dropped, not the host: {status:?}"
+    );
 }
 
 #[test]
@@ -3146,20 +3475,918 @@ fn extract_over_code(markdown: &str) -> select::Extract {
     drag_over(&canvas, markdown, "let a = 1;")
 }
 
-/// Now that a code fence carries spans, every survivor in this file that exercises
-/// `extract` on a code block asserts `from_source == true` — the suite lost its only
-/// negative case for the flag. A drawn Mermaid diagram is still genuinely spanless (it
-/// is box art, not source text; design spec §3), so a drag wholly inside one pins the
-/// other half of the contract: `Extract::from_source` still says `false` for content
-/// that really has no mapping, rather than having drifted to always-true.
+/// A press that lands on the drawing rather than on a label takes the diagram whole
+/// (design spec §2.2, third case).
+///
+/// This test used to assert the opposite — that such a drag fell back to the drawn cells
+/// with `from_source == false` — and that was the last see/get divergence left inside a
+/// diagram: `resolve` found no hull, so the clipboard got `───` while the highlight
+/// stayed empty. The reader copied something and saw nothing. The owner's ruling is that
+/// a drag which starts outside a label area selects the entire diagram immediately, so
+/// the clipboard and the wash both answer for the whole rectangle here. The negative case
+/// this test used to carry for `Extract::from_source` moved to
+/// [`a_drag_over_a_thematic_break_falls_back_to_what_is_drawn`], which is chrome that
+/// belongs to no atom and so still has no mapping at all.
 #[test]
-fn a_drag_over_a_diagram_still_falls_back_to_what_is_drawn() {
+fn a_press_on_a_diagrams_box_art_takes_the_diagram_whole() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    // The row above the label is the top edge of both boxes: drawing, and nothing else.
+    let (label, _, _) = drawn(&canvas, "Read");
+    let edge = label - 1;
+    let on_art = drag(Pos::new(edge, 0), Pos::new(edge, 6));
+    let extract =
+        select::extract(&canvas, FITTING_FENCE, on_art).expect("the drag covered drawn cells");
+    assert!(
+        extract.from_source,
+        "the rectangle is one thing and it has a source range, got {:?}",
+        extract.text
+    );
+    assert_eq!(
+        extract.text,
+        FITTING_FENCE.trim_end_matches('\n'),
+        "the whole fenced block, opener and closer included"
+    );
+    // And the wash is the whole rectangle — the see/get half, which is why this test
+    // changed at all. Pinned against the drag that crosses both labels, whose wash
+    // `the_whole_diagram_wash_covers_its_box_art` already fixes to the rectangle and no
+    // more: every row of the canvas has to light identically, or the two ways of asking
+    // for the whole diagram disagree.
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (_, to, cols) = drawn(&canvas, "Draw");
+    let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+    for on in 0..canvas.height() {
+        assert_eq!(
+            select::highlighted_columns(&canvas, FITTING_FENCE, on_art, on),
+            select::highlighted_columns(&canvas, FITTING_FENCE, across, on),
+            "row {on} washes the same for a press on the art as for a drag across both boxes"
+        );
+    }
+    assert!(
+        !select::highlighted_columns(&canvas, FITTING_FENCE, on_art, edge).is_empty(),
+        "the top edge lights up, or the equality above compares two empty washes"
+    );
+}
+
+/// The other half of the contract the test above used to carry: `from_source` still says
+/// `false` for content the renderer really never mapped, rather than having drifted to
+/// always-true now that fences and labels both carry spans.
+///
+/// A thematic break is the case that is left. It is drawing with no source range of its
+/// own, and — unlike a diagram's box art — it belongs to no atom, so nothing claims it.
+#[test]
+fn a_drag_over_a_thematic_break_falls_back_to_what_is_drawn() {
+    let source = "Above it.\n\n---\n\nBelow it.\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (above, _, _) = drawn(&canvas, "Above it.");
+    let (below, _, _) = drawn(&canvas, "Below it.");
+    let rule = (above + 1..below)
+        .find(|&row| canvas.row_text(row).trim_start().starts_with('─'))
+        .expect("the thematic break is drawn as a rule");
+    let text = canvas.row_text(rule);
+    let from = u16::try_from(crate::text::display_width(
+        &text[..text.len() - text.trim_start().len()],
+    ))
+    .expect("a test canvas is narrow");
+    let extract = select::extract(
+        &canvas,
+        source,
+        drag(Pos::new(rule, from), Pos::new(rule, from + 6)),
+    )
+    .expect("the drag covered drawn cells");
+    assert!(
+        !extract.from_source,
+        "a rule has no source span; the pager must not claim it does, got {:?}",
+        extract.text
+    );
+    assert!(
+        extract.text.starts_with('─'),
+        "what is copied is the drawing the reader pointed at, got {:?}",
+        extract.text
+    );
+}
+
+/// A diagram too wide for the viewport is laid out by `render::diagram` instead of by
+/// `render::code`, and that second path has to rebase its spans too — it is a separate
+/// call site, and handing it no mapping would lose every wide diagram's provenance
+/// while every test on the fitting path stayed green.
+#[test]
+fn a_widened_diagram_maps_its_labels_back_to_the_document() {
+    let mut app = pager(WIDE_FENCE);
+    let canvas = app.canvas().clone();
+    assert!(canvas.width() > 80, "this chart had to be widened");
+    // The label is wrapped onto two rows in this chart, and each row names the bytes it
+    // drew (design spec §2.2). This used to filter on the spans naming the whole label,
+    // which is the rule the amendment removed; the filter is the label's `unit` now, and
+    // the assertion is stronger than it was — each span's source is *exactly* the text
+    // under it, which is the property every column walk in the selection depends on.
+    let label = WIDE_FENCE
+        .find("Parse Markdown")
+        .expect("the fixture's label");
+    let mapped: Vec<(String, &str)> = canvas
+        .spans()
+        .iter()
+        .filter(|s| s.unit == Some((label, label + "Parse Markdown".len())))
+        .map(|s| {
+            let drawn: String = canvas
+                .row_text(s.row)
+                .chars()
+                .skip(usize::from(s.col))
+                .take(usize::from(s.cols))
+                .collect();
+            (
+                drawn,
+                WIDE_FENCE.get(s.source_start..s.source_end).unwrap_or(""),
+            )
+        })
+        .collect();
+    assert_eq!(
+        mapped,
+        vec![
+            ("Parse".to_string(), "Parse"),
+            ("Markdown".to_string(), "Markdown")
+        ],
+        "each span of the widened diagram sits on the source bytes it drew"
+    );
+}
+
+/// A drag that stays inside one label copies the characters it went over, and no more
+/// (design spec §2.2, owner ruling 2026-08-11).
+#[test]
+fn a_drag_over_part_of_a_label_copies_only_those_characters() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, col, _) = drawn(&canvas, "Read");
+    let half = drag(Pos::new(row, col), Pos::new(row, col + 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, half)
+            .expect("the drag covered a label")
+            .text,
+        "Re",
+        "two characters dragged over, two characters copied"
+    );
+}
+
+/// The other half: a label *is* source text, and a drag over one copies the Mermaid
+/// that produced it rather than the drawn box (design spec §3) — that label, and no
+/// more of the line it sits on.
+///
+/// This test used to pin `    A[Read] --> B[` as intended: `extend_over_markup` widened
+/// the hull over every byte nothing drew, which in prose is a pair of asterisks and on a
+/// Mermaid line is nearly the whole line. The highlight lit `Read` and the clipboard got
+/// a token cut in half. Design spec §2.2 now says a diagram is atomic, so what is copied
+/// here is exactly what lights up.
+#[test]
+fn a_drag_over_a_diagram_label_yields_the_mermaid_source() {
     let mut app = pager(FITTING_FENCE);
     let canvas = app.canvas().clone();
     let extract = drag_over(&canvas, FITTING_FENCE, "Read");
     assert!(
-        !extract.from_source,
-        "a drawn diagram has no source span; the pager must not claim it does"
+        extract.from_source,
+        "a flowchart label now has provenance, got {:?}",
+        extract.text
+    );
+    assert_eq!(
+        extract.text, "Read",
+        "one label, not the punctuation of the line it was written on"
+    );
+    // Half a label is half a label (design spec §2.2, amended after live testing; this
+    // assertion used to read "Read" and pinned the box as the unit of selection).
+    let (row, col, cols) = drawn(&canvas, "Read");
+    let half = drag(Pos::new(row, col), Pos::new(row, col + 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, half)
+            .expect("the drag covered a label")
+            .text,
+        "Re"
+    );
+    // And the highlight agrees, exactly: the two cells dragged over and nothing beside
+    // them. Asserted on the canvas, because the defect being fixed is the two
+    // disagreeing (design spec §7). Both directions — that the dragged characters wash
+    // *and* that the rest of the same label does not — because a wash that lit the whole
+    // label would still pass an assertion that only looked at the start of the range.
+    assert_eq!(
+        select::highlighted_columns(&canvas, FITTING_FENCE, half, row),
+        vec![col..col + 2],
+        "the wash is the two characters the clipboard got, not the label"
+    );
+    // The whole label, dragged end to end, is still the whole label.
+    let all = drag(Pos::new(row, col), Pos::new(row, col + cols - 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, all)
+            .expect("the drag covered a label")
+            .text,
+        "Read"
+    );
+    assert_eq!(
+        select::highlighted_columns(&canvas, FITTING_FENCE, all, row),
+        vec![col..col + cols]
+    );
+    // The narrowest drag the pager acts on at all is two cells — one is a click and
+    // `App::end_selection` drops it — and taken at the label's *far* end it pins the
+    // other endpoint: a hull that rounded up to the label would pass the test above.
+    let tail = drag(Pos::new(row, col + cols - 2), Pos::new(row, col + cols - 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, tail)
+            .expect("the drag covered a label")
+            .text,
+        "ad"
+    );
+    assert_eq!(
+        select::highlighted_columns(&canvas, FITTING_FENCE, tail, row),
+        vec![col + cols - 2..col + cols],
+        "and the first half of the label stays dark"
+    );
+}
+
+/// A drag that leaves one label behind takes the diagram whole (design spec §2.2).
+///
+/// The clipboard gets the fenced block, opener and closer included — a truncation like
+/// `    A[Read] --> B[` is not something a reader can paste anywhere.
+#[test]
+fn a_drag_across_two_labels_takes_the_whole_fenced_block() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (_, to, cols) = drawn(&canvas, "Draw");
+    let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+    let extract = select::extract(&canvas, FITTING_FENCE, across).expect("covered both boxes");
+    assert!(extract.from_source);
+    assert_eq!(
+        extract.text,
+        FITTING_FENCE.trim_end_matches('\n'),
+        "the whole block, fences and all"
+    );
+}
+
+/// A press on the drawing takes the diagram *in addition to* what the drag went on to
+/// cover, not instead of it (design spec §2.2, third case).
+///
+/// The case that separates the two readings of "immediately": the button goes down on the
+/// boxes' **bottom** edge and comes up in the prose below. Every label is above the press,
+/// so §2.1 resolves that endpoint *forward* — the hull it produces lies entirely after the
+/// diagram and does not overlap it. An implementation that only widened over the atoms the
+/// hull already met would hand back the prose alone, and the reader would watch the
+/// rectangle light up under the pointer while the clipboard held a sentence.
+#[test]
+fn a_press_on_box_art_that_drags_into_prose_takes_the_block_and_the_prose() {
+    let source = concat!(
+        "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n",
+        "\nAfter the **fence**.\n"
+    );
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (label, _, _) = drawn(&canvas, "Read");
+    let (below, at, cols) = drawn(&canvas, "After the fence.");
+    let bottom = (label + 1..below)
+        .find(|&row| canvas.row_text(row).contains('└'))
+        .expect("the boxes have a bottom edge below their labels");
+    let out = drag(Pos::new(bottom, 1), Pos::new(below, at + cols - 1));
+    let extract = select::extract(&canvas, source, out).expect("covered");
+    assert_eq!(
+        extract.text,
+        "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n\nAfter the **fence**.",
+        "the block the press claimed, then the prose the drag reached"
+    );
+    assert!(
+        !select::highlighted_columns(&canvas, source, out, label - 1).is_empty(),
+        "the diagram's top edge is washed, though the drag never went near it"
+    );
+}
+
+/// The **press** decides, not the drag's extent (design spec §2.2, third case).
+///
+/// The discriminating case: the button goes down on the arrow between the two boxes and
+/// comes up inside `Read`, to its left. The resolved hull of that drag lies wholly inside
+/// `Read`'s source range — §2.1 resolves the arrow to the end of the label before it — so
+/// every rule stated on the hull, and any rule keyed on the drag's *first* cell in
+/// document order, answers `"Read"`. Only asking where the button went down gives the
+/// diagram. If this test ever agrees with
+/// [`a_drag_over_a_diagram_label_yields_the_mermaid_source`], the anchor has stopped
+/// being consulted.
+#[test]
+fn a_press_on_box_art_takes_the_diagram_even_when_it_ends_in_a_label() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, col, _) = drawn(&canvas, "Read");
+    let text = canvas.row_text(row);
+    let arrow = text.find('▶').expect("the boxes are joined by an arrow");
+    let arrow =
+        u16::try_from(crate::text::display_width(&text[..arrow])).expect("a test canvas is narrow");
+    assert!(arrow > col, "the arrow sits to the right of the label");
+    // Anchor on the arrow, head back inside the label: a *reversed* drag, so the earlier
+    // of the two positions is the label and only the press is on the art.
+    let back = drag(Pos::new(row, arrow), Pos::new(row, col + 1));
+    let extract = select::extract(&canvas, FITTING_FENCE, back).expect("covered drawn cells");
+    assert_eq!(
+        extract.text,
+        FITTING_FENCE.trim_end_matches('\n'),
+        "the press was on the drawing, so the whole block comes, wherever it was released"
+    );
+    let ranges = select::highlighted_columns(&canvas, FITTING_FENCE, back, row);
+    assert!(
+        ranges.iter().any(|range| range.contains(&arrow)),
+        "the wash covers the arrow the press landed on, got {ranges:?}"
+    );
+}
+
+/// A diagram inside a container copies as clean Mermaid: **no** line keeps the container
+/// prefix (design spec §2.2).
+///
+/// The owner's ruling. What a reader copies a diagram *for* is to paste it somewhere
+/// else, and `> ```mermaid` pastes as a block quote containing a fence. The block's
+/// recorded extent begins at the backticks, so the prefix was already absent from line one
+/// and present on every line after it; the fix takes it off the rest rather than putting
+/// it back on the first.
+///
+/// Three containers in one test, because the reason to read the prefix out of the document
+/// rather than match `> ` is that there is no single prefix to match: a quote is `> `, a
+/// nested quote `> > `, and a fence in a list item is indented instead. All three fall out
+/// of the one rule, and the fence lines are stripped along with the content — the opener
+/// and the closer are source lines and carry the prefix too.
+#[test]
+fn a_diagram_in_a_container_copies_without_its_container_prefix() {
+    let clean = "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```";
+    for (container, source) in [
+        (
+            "a block quote",
+            "> ```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n",
+        ),
+        (
+            "a nested block quote",
+            "> > ```mermaid\n> > flowchart LR\n> >     A[Read] --> B[Draw]\n> > ```\n",
+        ),
+        (
+            "a list item",
+            "- item\n\n  ```mermaid\n  flowchart LR\n      A[Read] --> B[Draw]\n  ```\n",
+        ),
+    ] {
+        let mut app = pager(source);
+        let canvas = app.canvas().clone();
+        let (row, from, _) = drawn(&canvas, "Read");
+        let (_, to, cols) = drawn(&canvas, "Draw");
+        let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+        let extract = select::extract(&canvas, source, across).expect("covered both boxes");
+        // Whole-block equality, not a check on line one: the defect being fixed lived on
+        // every line *but* the first, and the one before it lived only on the first.
+        assert_eq!(
+            extract.text, clean,
+            "a diagram in {container} copies as if it had been written at the top level"
+        );
+        for line in extract.text.lines() {
+            assert!(
+                !line.starts_with('>'),
+                "no line copied out of {container} keeps a quote marker, got {:?}",
+                extract.text
+            );
+        }
+    }
+}
+
+/// The prefix comes off the diagram and off nothing else.
+///
+/// A drag that leaves a quoted diagram for the quoted prose below it: the block is
+/// stripped because it is an atom, and the prose is not, because the reader selected prose
+/// and decision 1 takes prose verbatim. An implementation that stripped the whole range
+/// once it saw an atom in it would quietly rewrite the paragraph too.
+#[test]
+fn the_prefix_comes_off_the_diagram_and_not_off_the_prose_beside_it() {
+    let source = "> ```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n>\n> After it.\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (below, at, cols) = drawn(&canvas, "After it.");
+    let out = drag(Pos::new(row, from), Pos::new(below, at + cols - 1));
+    let extract = select::extract(&canvas, source, out).expect("covered");
+    assert_eq!(
+        extract.text, "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n>\n> After it.",
+        "the block clean, the prose exactly as the file has it"
+    );
+}
+
+/// The prefix comes off the **opener** too, when the press lands on the drawing.
+///
+/// The drag-shape axis, which every other prefix test here misses: they all drag from one
+/// label to another, and that is the one shape whose hull starts *inside* a label, so the
+/// range's first byte lands exactly on the block's recorded start and the opener's `> `
+/// is never in the range to begin with. Press on the box art instead — design spec §2.2's
+/// third case, and the commonest gesture on a diagram — and the range starts at the
+/// opener's *line*, prefix included. Two reviewers found this independently on
+/// `3a3dedb`, where it copied `> ```mermaid` as line one: a quote containing a fence,
+/// which is exactly what the owner's ruling was made to prevent.
+#[test]
+fn a_press_on_box_art_in_a_quote_copies_the_opener_without_its_prefix() {
+    let source = "> ```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    // The row above the labels is the boxes' top edge: drawing, and nothing else.
+    let (label, _, _) = drawn(&canvas, "Read");
+    let (edge, left, _) = drawn(&canvas, "┌");
+    assert_eq!(
+        edge,
+        label - 1,
+        "the top edge sits directly above the labels"
+    );
+    let on_art = drag(Pos::new(edge, left), Pos::new(edge, left.saturating_add(2)));
+    let extract = select::extract(&canvas, source, on_art).expect("the drag covered drawn cells");
+    assert_eq!(
+        extract.text, "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```",
+        "a press on the drawing copies the block as cleanly as a drag across its labels"
+    );
+    for line in extract.text.lines() {
+        assert!(
+            !line.starts_with('>'),
+            "no line keeps a quote marker, opener included, got {:?}",
+            extract.text
+        );
+    }
+}
+
+/// The mirror of [`the_prefix_comes_off_the_diagram_and_not_off_the_prose_beside_it`]:
+/// quoted prose *above*, dragged down into the diagram.
+///
+/// The other drag shape that puts the opener's line — prefix and all — inside the range.
+/// The prose keeps its `> `, because the reader selected prose and decision 1 takes prose
+/// verbatim; the block does not, because it is an atom. On `3a3dedb` the boundary between
+/// the two fell one line late, and the clipboard held `> ```mermaid` followed by stripped
+/// content: unpasteable read either way.
+#[test]
+fn a_drag_from_the_quoted_prose_above_strips_the_diagrams_opener() {
+    let source =
+        "> Before it.\n>\n> ```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (above, at, _) = drawn(&canvas, "Before it.");
+    let (row, to, cols) = drawn(&canvas, "Draw");
+    let down = drag(Pos::new(above, at), Pos::new(row, to + cols - 1));
+    let extract = select::extract(&canvas, source, down).expect("covered");
+    assert_eq!(
+        extract.text, "> Before it.\n>\n```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```",
+        "the prose exactly as the file has it, the block as if it were at the top level"
+    );
+}
+
+/// A container prefix is recognised **per line**, not sampled once from the opener.
+///
+/// `CommonMark` does not require every line of a block quote to carry the same bytes: `>`
+/// with no space after it is the same marker as `> `, and a blank quoted line is a bare
+/// `>` — which is what `CommonMark` itself produces for one. An implementation that reads
+/// one prefix from line one and then requires every later line to *start with that exact
+/// string* renders all three of these correctly and copies them wrong, which is the
+/// see/get divergence this module exists to remove. Every fixture below is legal
+/// `CommonMark` and renders the same diagram as a plain quoted one.
+///
+/// The remedy the owner's ruling names is comrak's own prefix-stripping, checked back
+/// against the document: the block's content is matched line by line as a *suffix* of its
+/// source line, so a line whose prefix does not look like any other line's is still
+/// stripped exactly, and a line that cannot be located is left alone rather than mangled.
+#[test]
+fn a_quoted_diagrams_prefix_is_read_line_by_line() {
+    let clean = "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```";
+    for (shape, source, want) in [
+        (
+            "a quote marker with no space after it",
+            "> ```mermaid\n>flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n",
+            clean,
+        ),
+        (
+            "a bare quote marker on a blank line",
+            "> ```mermaid\n> flowchart LR\n>\n>     A[Read] --> B[Draw]\n> ```\n",
+            "```mermaid\nflowchart LR\n\n    A[Read] --> B[Draw]\n```",
+        ),
+        (
+            "an opener with no space and a body with one",
+            ">```mermaid\n> flowchart LR\n>     A[Read] --> B[Draw]\n> ```\n",
+            clean,
+        ),
+    ] {
+        let mut app = pager(source);
+        let canvas = app.canvas().clone();
+        let (row, from, _) = drawn(&canvas, "Read");
+        let (_, to, cols) = drawn(&canvas, "Draw");
+        let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+        let extract = select::extract(&canvas, source, across).expect("covered both boxes");
+        assert_eq!(
+            extract.text, want,
+            "a diagram written with {shape} copies as clean Mermaid"
+        );
+        for line in extract.text.lines() {
+            assert!(
+                !line.starts_with('>'),
+                "no line copied from {shape} keeps a quote marker, got {:?}",
+                extract.text
+            );
+        }
+        // The third fixture's failure mode is not a marker but what it *leaves behind*:
+        // a prefix sampled as `>` takes one byte off a `> ` line, so every content line
+        // comes back indented by one space. A `starts_with('>')` loop cannot see that,
+        // and neither can it see a closer left half-stripped, so the fence is pinned
+        // here as the fence it has to still be.
+        assert!(
+            extract.text.ends_with("\n```"),
+            "the closing fence is a fence, not an indented line, got {:?}",
+            extract.text
+        );
+    }
+}
+
+/// The other half of reading the prefix per line: a line the parser and the document
+/// **disagree** about comes back exactly as the document has it.
+///
+/// A tab-indented quoted diagram is the case that exists today. comrak expands the tab
+/// when it strips the container, so its content is no longer a suffix of the source line
+/// and no prefix can be established for that line. Two ways to go: emit comrak's text
+/// anyway, which puts on the clipboard bytes that appear nowhere in the file, or leave
+/// the line alone. This asserts the second, and asserts it byte for byte — a line the
+/// reader can still read beats a line quietly rewritten, which is the same call
+/// `doc::convert::code_lines` makes when it cannot locate a line at all.
+///
+/// The tab case is *not* fixed here and this test does not pretend it is: the fences come
+/// off, the content lines keep their `>` and their tab. What it pins is the direction of
+/// the degradation, so that "check comrak's answer against the document" cannot quietly
+/// become "trust it".
+#[test]
+fn a_line_the_parser_cannot_locate_is_copied_as_the_document_has_it() {
+    let source = "> ```mermaid\n>\tflowchart LR\n>\t    A[Read] --> B[Draw]\n> ```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    assert!(
+        canvas.spans().is_empty(),
+        "comrak's tab expansion costs this block every span it might have had, which is \
+         what puts every drag over it on the press-on-drawing path"
+    );
+    let (edge, left, _) = drawn(&canvas, "┌");
+    let on_art = drag(Pos::new(edge, left), Pos::new(edge, left.saturating_add(2)));
+    let extract = select::extract(&canvas, source, on_art).expect("the drag covered drawn cells");
+    assert_eq!(
+        extract.text, "```mermaid\n>\tflowchart LR\n>\t    A[Read] --> B[Draw]\n```",
+        "the two lines that could not be located are the document's own bytes, tab and \
+         marker included; nothing was invented for them"
+    );
+    for line in extract.text.lines() {
+        assert!(
+            source.contains(line),
+            "every copied line is a line the file actually has, got {line:?}"
+        );
+    }
+}
+
+/// The wash for a whole diagram covers its box art, and that is deliberate.
+///
+/// Chrome never highlights anywhere else in this pager (design spec §2), and a test that
+/// only looked at the label cells would pass just as happily against an implementation
+/// that had quietly kept that rule here — leaving the reader a highlight over two words
+/// and a clipboard holding forty bytes of Mermaid.
+#[test]
+fn the_whole_diagram_wash_covers_its_box_art() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (_, to, cols) = drawn(&canvas, "Draw");
+    let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+    // The top edge: a row of pure drawing, one row above the labels.
+    let edge = row - 1;
+    let corner = canvas
+        .row_text(edge)
+        .find('┌')
+        .expect("the boxes have a top-left corner");
+    let corner = u16::try_from(crate::text::display_width(&canvas.row_text(edge)[..corner]))
+        .expect("a test canvas is narrow");
+    let ranges = select::highlighted_columns(&canvas, FITTING_FENCE, across, edge);
+    assert!(
+        ranges.iter().any(|range| range.contains(&corner)),
+        "the box's corner at column {corner} is washed too, got {ranges:?}"
+    );
+    // And the arrow between the boxes, on the label row: the interior of the rectangle
+    // is filled, not just the two words in it.
+    let arrow = canvas
+        .row_text(row)
+        .find('▶')
+        .expect("the boxes are joined by an arrow");
+    let arrow = u16::try_from(crate::text::display_width(&canvas.row_text(row)[..arrow]))
+        .expect("a test canvas is narrow");
+    let ranges = select::highlighted_columns(&canvas, FITTING_FENCE, across, row);
+    assert!(
+        ranges.iter().any(|range| range.contains(&arrow)),
+        "the arrow at column {arrow} is washed too, got {ranges:?}"
+    );
+    // Solid, but only over the diagram: the blank margin the layout was handed is not
+    // part of the drawing and washing it would read as a highlight bug.
+    let drawn_to = u16::try_from(crate::text::display_width(canvas.row_text(row).trim_end()))
+        .expect("a test canvas is narrow");
+    assert!(
+        canvas.width() > drawn_to + 8,
+        "this canvas has margin to spare, or the assertion below proves nothing"
+    );
+    assert_eq!(
+        ranges.iter().map(|range| range.end).max(),
+        Some(drawn_to),
+        "the wash stops where the diagram does, got {ranges:?}"
+    );
+}
+
+/// A wrapped label draws on several rows, and a drag over one of them copies that row.
+///
+/// This test used to assert the opposite — `Parse Markdown`, the whole label, whichever
+/// row was dragged over — because a label was the unit of selection. Design spec §2.2 was
+/// amended after live testing and the rows now name their own bytes; what still has to
+/// hold, and is the reason the test exists, is that several rows of one label are not
+/// read as a drag across two boxes, which would copy the entire chart. That is now the
+/// spans' shared `unit`, not their shared range.
+#[test]
+fn a_drag_over_one_row_of_a_wrapped_label_copies_that_row() {
+    let mut app = pager(WIDE_FENCE);
+    let canvas = app.canvas().clone();
+    let label = WIDE_FENCE
+        .find("Parse Markdown")
+        .expect("the fixture's label");
+    let wrapped = canvas
+        .spans()
+        .iter()
+        .filter(|span| span.unit == Some((label, label + "Parse Markdown".len())))
+        .count();
+    assert_eq!(
+        wrapped, 2,
+        "this label has to be wrapped for the test to mean anything"
+    );
+    assert_eq!(
+        drag_over(&canvas, WIDE_FENCE, "Markdown").text,
+        "Markdown",
+        "the row that was dragged over, not the label it belongs to"
+    );
+    assert_eq!(
+        drag_over(&canvas, WIDE_FENCE, "Parse").text,
+        "Parse",
+        "and the same for the other row"
+    );
+    // Across both rows: the hull runs from one to the other and the space between them —
+    // a space that *is* in the source, since this label wraps rather than breaking — is
+    // between the ends of the hull and comes along (design spec §2, decision 1).
+    let (top, from, _) = drawn(&canvas, "Parse");
+    let (bottom, to, cols) = drawn(&canvas, "Markdown");
+    assert_eq!(top + 1, bottom, "the two rows are consecutive");
+    let both = drag(Pos::new(top, from), Pos::new(bottom, to + cols - 1));
+    let extract = select::extract(&canvas, WIDE_FENCE, both).expect("the drag covered a label");
+    assert_eq!(
+        extract.text, "Parse Markdown",
+        "still one label: two rows of it are not two boxes"
+    );
+    assert!(
+        !extract.text.contains("```"),
+        "and emphatically not the whole block, got {:?}",
+        extract.text
+    );
+}
+
+/// Partial selection inside a *wrapped* label — the case that would silently do the
+/// wrong thing, because until this task every row of one named the whole label and no
+/// column arithmetic inside a row could be right.
+#[test]
+fn a_drag_over_part_of_a_wrapped_labels_row_copies_only_those_characters() {
+    let mut app = pager(WIDE_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, col, cols) = drawn(&canvas, "Markdown");
+    let (top, parse, parse_cols) = drawn(&canvas, "Parse");
+    assert_eq!(top + 1, row, "the label wraps onto the row below `Parse`");
+    let half = drag(Pos::new(row, col), Pos::new(row, col + 4));
+    assert_eq!(
+        select::extract(&canvas, WIDE_FENCE, half)
+            .expect("the drag covered a label")
+            .text,
+        "Markd",
+        "five characters of the second row, and not the label they belong to"
+    );
+    // Both directions: what was dragged over washes, and what was not stays dark —
+    // including the row above, which shares the label and would light up under any rule
+    // that still answered with the whole of it.
+    assert_eq!(
+        select::highlighted_columns(&canvas, WIDE_FENCE, half, row),
+        vec![col..col + 5],
+        "the wash is the five characters, not the eight of the row"
+    );
+    assert_eq!(
+        select::highlighted_columns(&canvas, WIDE_FENCE, half, top),
+        Vec::new(),
+        "and nothing at all on the row above"
+    );
+    // The whole of one row, exactly: its own word, still not the label.
+    let all = drag(Pos::new(row, col), Pos::new(row, col + cols - 1));
+    assert_eq!(
+        select::extract(&canvas, WIDE_FENCE, all)
+            .expect("the drag covered a label")
+            .text,
+        "Markdown"
+    );
+    assert_eq!(
+        select::highlighted_columns(&canvas, WIDE_FENCE, all, top),
+        Vec::new(),
+        "the row above is still dark"
+    );
+    let above = drag(Pos::new(top, parse), Pos::new(top, parse + parse_cols - 1));
+    assert_eq!(
+        select::highlighted_columns(&canvas, WIDE_FENCE, above, row),
+        Vec::new(),
+        "and the same the other way round"
+    );
+}
+
+/// A label is as far as a confined drag can reach, and the Mermaid around it is not
+/// picked up on the way out.
+///
+/// `extend_over_markup` (design spec §2, decision 2) widens a hull over every byte no
+/// span drew, which on a Mermaid line is `A[`, the arrow and half the next box. The
+/// confined case must not run it, and the way to see that it does not is to drag right
+/// up to a label's edge — where the widening would start — and out onto the box art
+/// beside it, which §2.1 resolves back to the label's own end.
+#[test]
+fn a_drag_to_the_edge_of_a_label_stops_at_the_label() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, col, cols) = drawn(&canvas, "Read");
+    for reach in 0..3u16 {
+        let selection = drag(Pos::new(row, col), Pos::new(row, col + cols - 1 + reach));
+        assert_eq!(
+            select::extract(&canvas, FITTING_FENCE, selection)
+                .expect("the drag covered a label")
+                .text,
+            "Read",
+            "dragging {reach} columns past the label picked up the Mermaid around it"
+        );
+    }
+    // And from the other side: a drag that starts on the box art *left* of the label is
+    // a press outside every label, which is the third case and takes the diagram whole.
+    let outside = drag(Pos::new(row, col - 1), Pos::new(row, col + 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, outside)
+            .expect("the drag covered the diagram")
+            .text,
+        FITTING_FENCE.trim_end_matches('\n'),
+        "a press on the drawing takes the block, wherever it is released"
+    );
+}
+
+/// A `<br>` in a label is markup between two drawn rows, and a drag across both of them
+/// takes what lies between their ends — the `<br>` included.
+///
+/// Decision 1's hull, unqualified: nothing between the ends of a selection is dropped,
+/// which is the same rule that puts a code fence's own fence lines on the clipboard when
+/// a drag crosses one. The rows themselves name only what they drew, so dragging either
+/// one alone gives that one word.
+///
+/// The fixture pads the `<br>`, which is the shape where the padding is *inside* the
+/// label's own source text rather than trimmed off by the parser before it gets there:
+/// each drawn line is trimmed of it, and a mapping that forgot would slide every run of
+/// the second line one byte left.
+#[test]
+fn a_drag_across_an_explicit_line_break_in_a_label_keeps_it() {
+    let source = "```mermaid\nflowchart LR\n    A[One <br> Two] --> B[End]\n```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (top, one, _) = drawn(&canvas, "One");
+    let (bottom, two, two_cols) = drawn(&canvas, "Two");
+    assert_eq!(top + 1, bottom, "the label draws on two rows");
+    assert_eq!(drag_over(&canvas, source, "One").text, "One");
+    assert_eq!(drag_over(&canvas, source, "Two").text, "Two");
+    let both = drag(Pos::new(top, one), Pos::new(bottom, two + two_cols - 1));
+    assert_eq!(
+        select::extract(&canvas, source, both)
+            .expect("the drag covered a label")
+            .text,
+        "One <br> Two",
+        "the label as written, which is what the reader dragged across"
+    );
+}
+
+/// An entity in a label is one cell drawn by five bytes, and the selection has to answer
+/// with the bytes.
+///
+/// `&amp;` is the only span in a diagram whose source is not a copy of its cells, and it
+/// is cut out into a span of its own precisely so that the text either side of it stays a
+/// copy of its own — otherwise every column inside that label would resolve to a byte a
+/// few places out, and a reader dragging over `draw` would get `mp; d`.
+#[test]
+fn a_drag_over_an_entity_in_a_label_copies_the_reference() {
+    let source = "```mermaid\nflowchart LR\n    A[Parse &amp; draw] --> B[End]\n```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    assert_eq!(
+        drag_over(&canvas, source, "draw").text,
+        "draw",
+        "the text after the entity resolves to its own bytes"
+    );
+    assert_eq!(drag_over(&canvas, source, "Parse").text, "Parse");
+    let (row, col, _) = drawn(&canvas, "Parse & draw");
+    let entity = drag(Pos::new(row, col + 6), Pos::new(row, col + 6));
+    assert_eq!(
+        select::extract(&canvas, source, entity)
+            .expect("the drag covered a label")
+            .text,
+        "&amp;",
+        "the one cell the entity drew answers with the whole reference"
+    );
+    assert_eq!(
+        drag_over(&canvas, source, "Parse & draw").text,
+        "Parse &amp; draw",
+        "and the whole label is the label as written"
+    );
+    // A label *ending* in the entity, because that is the only shape in which the
+    // entity's own end is the end of the hull. Anywhere else the next run's start
+    // answers for it, and a span claiming one byte of `&amp;` instead of five gives the
+    // same clipboard as a correct one — which it does above, and which is why the run
+    // rule is pinned at the layout level as well.
+    let trailing = "```mermaid\nflowchart LR\n    A[Parse &amp;] --> B[End]\n```\n";
+    let mut app = pager(trailing);
+    let canvas = app.canvas().clone();
+    assert_eq!(
+        drag_over(&canvas, trailing, "Parse &").text,
+        "Parse &amp;",
+        "the entity is five bytes, and they are all in the hull"
+    );
+}
+
+/// A diagram inside a list item is indented, and its rectangle has to move with it.
+///
+/// The atom travels through `Canvas::indent` like a pin does; if it did not, the wash
+/// would sit a few columns left of the drawing it claims to cover.
+#[test]
+fn an_indented_diagrams_wash_moves_with_it() {
+    let source = "- item\n\n  ```mermaid\n  flowchart LR\n      A[Read] --> B[Draw]\n  ```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (_, to, cols) = drawn(&canvas, "Draw");
+    let across = drag(Pos::new(row, from), Pos::new(row, to + cols - 1));
+    let extract = select::extract(&canvas, source, across).expect("covered both boxes");
+    assert_eq!(
+        extract.text, "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```",
+        "the fenced block from its opener to its closer, with the list's indent off every \
+         line — see `a_diagram_in_a_container_copies_without_its_container_prefix`"
+    );
+    let ranges = select::highlighted_columns(&canvas, source, across, row);
+    let text = canvas.row_text(row);
+    let left = u16::try_from(crate::text::display_width(
+        &text[..text.len() - text.trim_start().len()],
+    ))
+    .expect("a test canvas is narrow");
+    assert!(left > 0, "the diagram is indented by the list");
+    assert_eq!(
+        ranges.first().map(|range| range.start),
+        Some(left),
+        "the wash starts at the indented drawing, got {ranges:?}"
+    );
+}
+
+/// A drag that starts in a diagram and ends outside it: the block, then what follows.
+///
+/// Document order, and no second concatenation step to get it wrong — the owner's rule
+/// is "```mermaid ... ``` whatever else is selected".
+#[test]
+fn a_drag_leaving_a_diagram_takes_the_block_and_then_what_follows() {
+    let source = concat!(
+        "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n",
+        "\nAfter the **fence**.\n"
+    );
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (row, from, _) = drawn(&canvas, "Read");
+    let (below, at, cols) = drawn(&canvas, "After the fence.");
+    let out = drag(Pos::new(row, from), Pos::new(below, at + cols - 1));
+    let extract = select::extract(&canvas, source, out).expect("covered");
+    assert!(extract.from_source);
+    assert_eq!(
+        extract.text,
+        "```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n\nAfter the **fence**.",
+        "the fenced block first, then the prose the drag reached"
+    );
+    // The diagram is washed whole even though the drag only entered one of its boxes.
+    let ranges = select::highlighted_columns(&canvas, source, out, row - 1);
+    assert!(
+        !ranges.is_empty(),
+        "the diagram's top edge is inside the wash"
+    );
+}
+
+/// The mirror: a drag that begins in prose and ends inside a diagram.
+///
+/// The block still arrives whole, and still in document order — the prose the drag
+/// started in comes first, because that is where it sits in the file.
+#[test]
+fn a_drag_entering_a_diagram_from_prose_takes_the_block_whole() {
+    let source = "Before it.\n\n```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (above, at, _) = drawn(&canvas, "Before it.");
+    let (row, to, cols) = drawn(&canvas, "Draw");
+    let extract = select::extract(
+        &canvas,
+        source,
+        drag(Pos::new(above, at), Pos::new(row, to + cols - 1)),
+    )
+    .expect("covered");
+    assert_eq!(
+        extract.text, "Before it.\n\n```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```",
+        "the prose, then the whole block the drag ended inside"
     );
 }
 
@@ -3185,20 +4412,20 @@ fn a_drag_across_a_code_fence_takes_the_fence_from_the_source() {
 
 /// Pins the limitation `select`'s module docs admit to, so it stays a decision.
 ///
-/// A code fence carries spans now (design spec §3), so it can no longer stand in for
-/// "content the renderer never mapped" — a drawn Mermaid diagram still can, since it is
-/// box art with no source span of its own.
+/// A code fence carries spans now (design spec §3), and so does a flowchart's label —
+/// a diagram's **box art** is what is left that the renderer never mapped, so the drag
+/// below ends on the boxes' top edge rather than on the row the labels are drawn on.
 #[test]
 fn a_drag_ending_inside_spanless_content_stops_at_the_last_mapped_byte() {
     let markdown = "- item one\n\n```mermaid\nflowchart LR\n    A[Read] --> B[Draw]\n```\n";
     let mut app = pager(markdown);
     let canvas = app.canvas().clone();
     let (top, col, _) = drawn(&canvas, "item one");
-    let (diagram, _, _) = drawn(&canvas, "Read");
+    let (label, _, _) = drawn(&canvas, "Read");
     let extract = select::extract(
         &canvas,
         markdown,
-        drag(Pos::new(top, col), Pos::new(diagram, 40)),
+        drag(Pos::new(top, col), Pos::new(label - 1, 40)),
     )
     .expect("covered");
     assert_eq!(
@@ -3687,6 +4914,24 @@ fn painted_button(app: &mut App, width: u16, height: u16, skip: usize) -> (u16, 
     panic!("no [copy] label {skip} on the screen: {rows:?}");
 }
 
+/// A full click on the control at viewport `(x, y)`: press and release, nothing between.
+///
+/// **Changed 2026-08-12 (Task 5).** A `[copy]` button used to fire on the press alone.
+/// Every kind of control now activates on the release that landed on the control the
+/// press started on, so a test that presses without releasing is testing half a gesture.
+fn click_hotspot(app: &mut App, x: u16, y: u16) -> Option<super::app::Activation> {
+    app.press_hotspot(x, y);
+    app.release_hotspot(x, y)
+}
+
+/// The `(text, html)` a clicked `[copy]` button carries.
+fn copy_payload(activation: super::app::Activation) -> (String, Option<String>) {
+    match activation.kind {
+        crate::canvas::HotspotKind::Copy { text, html } => (text, html),
+        other => panic!("not a copy button: {other:?}"),
+    }
+}
+
 #[test]
 fn the_button_appears_only_once_the_mouse_has_been_captured() {
     // The gate design spec §4 asks for, from the pager's end. `RenderOptions` is part
@@ -3716,7 +4961,7 @@ fn the_button_appears_only_once_the_mouse_has_been_captured() {
 }
 
 #[test]
-fn a_press_on_the_code_button_copies_the_block_and_starts_no_drag() {
+fn a_click_on_the_code_button_copies_the_block_and_starts_no_drag() {
     let mut app = pager_at(BUTTONS, 60, 20);
     app.set_copy_button(true);
     let (x, y) = painted_button(&mut app, 60, 20, 0);
@@ -3728,10 +4973,14 @@ fn a_press_on_the_code_button_copies_the_block_and_starts_no_drag() {
         app.selection().is_none(),
         "a press on a control is not the start of a drag"
     );
-    let copy = app.take_hotspot_copy().expect("a payload");
-    assert_eq!(copy.text, "let a = 1;\n");
-    assert!(copy.html.is_none(), "code has no second flavour");
-    assert_eq!(copy.what, super::clipboard::Copied::Code);
+    let activation = app.release_hotspot(x, y).expect("the click landed");
+    let (text, html) = copy_payload(activation);
+    assert_eq!(text, "let a = 1;\n");
+    assert!(html.is_none(), "code has no second flavour");
+    assert_eq!(
+        super::clipboard::Copied::for_button(html.as_deref()),
+        super::clipboard::Copied::Code
+    );
 }
 
 #[test]
@@ -3750,17 +4999,21 @@ fn a_press_beside_the_button_is_a_drag_like_any_other() {
 }
 
 #[test]
-fn a_press_on_the_table_button_copies_a_grid_and_says_it_was_a_table() {
+fn a_click_on_the_table_button_copies_a_grid_and_says_it_was_a_table() {
     // The status bar never lies: the same control on a table has to report `Table`, or
     // a reader is told they copied code and pastes a spreadsheet.
     let mut app = pager_at(BUTTONS, 60, 20);
     app.set_copy_button(true);
     let (x, y) = painted_button(&mut app, 60, 20, 1);
     assert!(app.press_hotspot(x, y), "the table's label is a control");
-    let copy = app.take_hotspot_copy().expect("a payload");
-    assert_eq!(copy.text, "Name\tSince\nAda\t1843\n");
-    assert!(copy.html.is_some(), "a table offers the richer flavour too");
-    assert_eq!(copy.what, super::clipboard::Copied::Table);
+    let activation = app.release_hotspot(x, y).expect("the click landed");
+    let (text, html) = copy_payload(activation);
+    assert_eq!(text, "Name\tSince\nAda\t1843\n");
+    assert!(html.is_some(), "a table offers the richer flavour too");
+    assert_eq!(
+        super::clipboard::Copied::for_button(html.as_deref()),
+        super::clipboard::Copied::Table
+    );
 }
 
 #[test]
@@ -3779,7 +5032,7 @@ fn the_button_is_still_under_the_pointer_once_the_document_has_scrolled() {
         "the control moved up the screen with the block it belongs to"
     );
     assert_eq!(
-        app.take_hotspot_copy().map(|copy| copy.text),
+        app.release_hotspot(x, y).map(|it| copy_payload(it).0),
         Some("let a = 1;\n".to_string())
     );
 }
@@ -3802,17 +5055,25 @@ fn the_button_of_an_over_wide_table_is_pressable_once_it_is_scrolled_into_view()
         "the control answers at the column it is drawn in, scrolled or not"
     );
     assert_eq!(
-        app.take_hotspot_copy().map(|copy| copy.what),
+        app.release_hotspot(x, y)
+            .map(|it| super::clipboard::Copied::for_button(copy_payload(it).1.as_deref())),
         Some(super::clipboard::Copied::Table)
     );
 }
 
 #[test]
 fn a_button_clipped_off_the_canvas_cannot_be_pressed_anywhere() {
-    // A block too wide even for `render::document`'s widening cap is clipped, and the
-    // hotspot survives at a column the clipped canvas no longer has while the label is
-    // drawn nowhere. That is an invisible control if any press can name that column, so
-    // this sweeps every cell of the block at every horizontal offset there is.
+    // A block too wide even for `render::document`'s widening cap is clipped, and its
+    // button's label is drawn nowhere. No press may reach it, so this sweeps every cell
+    // of the block at every horizontal offset there is.
+    //
+    // **Changed 2026-08-12 (Task 2b).** The second premise used to be that the hotspot
+    // *outlived* the clip, at a column the clipped canvas no longer had, and the sweep
+    // was the proof that no press could name that column. The clip now takes the claim
+    // with the cells (`Canvas::truncate_width`), so the control is gone rather than
+    // merely unreachable — a stronger fact, asserted here in place of the weaker one.
+    // The sweep stays: it is what would catch a claim surviving at a column that *does*
+    // exist, which is the failure this test was written for.
     let columns = 300;
     let head: String = (0..columns).map(|i| format!("| C{i:04} ")).collect();
     let rule: String = (0..columns).map(|_| "| --- ".to_string()).collect();
@@ -3825,10 +5086,10 @@ fn a_button_clipped_off_the_canvas_cannot_be_pressed_anywhere() {
             .contains(crate::render::button::LABEL),
         "the premise: the label was clipped away, so nothing is drawn to press"
     );
-    assert_eq!(
-        app.canvas().hotspots().len(),
-        1,
-        "and the premise's other half: the hotspot outlived it"
+    assert!(
+        app.canvas().hotspots().is_empty(),
+        "the clip took the claim with the cells it cut: {:?}",
+        app.canvas().hotspots()
     );
     loop {
         for y in 0..11 {
@@ -3869,9 +5130,8 @@ fn the_flash_is_painted_over_the_button_that_was_pressed() {
     let mut app = pager_at(BUTTONS, 60, 20);
     app.set_copy_button(true);
     let (x, y) = painted_button(&mut app, 60, 20, 0);
-    assert!(app.press_hotspot(x, y));
-    let copy = app.take_hotspot_copy().expect("a payload");
-    app.flash_copied(copy.row, copy.col);
+    let activation = click_hotspot(&mut app, x, y).expect("the click landed");
+    app.flash_copied(activation.row, activation.col);
     let rows = framed(&mut app, 60, 20);
     assert!(
         rows.iter()
@@ -3890,5 +5150,2188 @@ fn the_flash_is_painted_over_the_button_that_was_pressed() {
         rows[usize::from(y)].contains("[copied]─╮"),
         "the corner survives the overwrite: {:?}",
         rows[usize::from(y)]
+    );
+}
+
+/// The foregrounds the `[copy]` label's own columns are painted in, left to right.
+///
+/// Read off the painted frame rather than off the theme, because "the button changed
+/// colour" is a claim about cells on a screen. A state flag says the bookkeeping ran;
+/// only this says the reader can see anything.
+fn button_inks(
+    app: &mut App,
+    width: u16,
+    height: u16,
+    at: (u16, u16),
+) -> Vec<Option<ratatui::style::Color>> {
+    let buffer = framed_buffer(app, width, height);
+    let label = u16::try_from(crate::render::button::LABEL.chars().count()).expect("a width");
+    (at.0..at.0 + label)
+        .map(|x| buffer[(x, at.1)].style().fg)
+        .collect()
+}
+
+/// The row the button is drawn on, as text.
+fn button_row(app: &mut App, width: u16, height: u16, y: u16) -> String {
+    framed(app, width, height)[usize::from(y)].clone()
+}
+
+#[test]
+fn the_pointer_over_a_button_marks_it_hovered_and_repaints_it() {
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    let resting = button_inks(&mut app, 60, 20, (x, y));
+    let before = button_row(&mut app, 60, 20, y);
+
+    assert!(
+        app.set_pointer(x, y),
+        "arriving on a control is a change worth a repaint"
+    );
+    assert_eq!(app.hovered(), Some(0), "and it is that control");
+
+    let hovered = button_inks(&mut app, 60, 20, (x, y));
+    let theme = app.theme();
+    let expected = super::draw::term_style(theme.hovered(theme.code.frame)).fg;
+    assert_eq!(
+        hovered,
+        vec![expected; resting.len()],
+        "every drawn column of the label takes the hovered ink"
+    );
+    assert_ne!(hovered, resting, "which is not the ink it had at rest");
+    assert_eq!(
+        button_row(&mut app, 60, 20, y),
+        before,
+        "hover restyles cells, it never moves one"
+    );
+}
+
+#[test]
+fn moving_within_one_button_does_not_ask_for_a_redraw() {
+    // The failure mode this return value exists to prevent: a pager that re-lays-out
+    // and repaints the whole document on every motion event a terminal emits.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert!(app.set_pointer(x, y), "the first arrival is a change");
+    for step in 1..6 {
+        assert!(
+            !app.set_pointer(x + step, y),
+            "column {} is the same button as column {x}",
+            x + step
+        );
+        assert_eq!(app.hovered(), Some(0), "and it stays hovered");
+    }
+    assert!(app.set_pointer(x - 1, y), "leaving it is a change again");
+}
+
+#[test]
+fn the_pointer_off_any_button_clears_the_hover_and_the_paint() {
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    let resting = button_inks(&mut app, 60, 20, (x, y));
+    app.set_pointer(x, y);
+    assert!(app.hovered().is_some(), "the premise");
+    assert!(app.set_pointer(0, 0), "moving away is a change");
+    assert_eq!(app.hovered(), None, "and nothing is hovered");
+    assert_eq!(
+        button_inks(&mut app, 60, 20, (x, y)),
+        resting,
+        "the label goes back to the frame's own colour"
+    );
+    // And the same for the pointer leaving the document area altogether.
+    app.set_pointer(x, y);
+    assert!(app.clear_pointer(), "leaving the pane is a change");
+    assert_eq!(app.hovered(), None);
+    assert!(!app.clear_pointer(), "and clearing nothing is not");
+}
+
+#[test]
+fn the_resting_button_is_drawn_in_the_frames_own_colour() {
+    // The owner's ruling: at rest the button keeps exactly what it draws today. This
+    // pins that, so a future shade cannot be slipped in under the hover work.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    let frame = super::draw::term_style(app.theme().code.frame).fg;
+    assert_eq!(
+        button_inks(&mut app, 60, 20, (x, y)),
+        vec![frame; 6],
+        "an unhovered [copy] is frame, exactly as it always was"
+    );
+    // The table's button too, which is drawn in the other frame style.
+    let (tx, ty) = painted_button(&mut app, 60, 20, 1);
+    let border = super::draw::term_style(app.theme().table.border).fg;
+    assert_eq!(button_inks(&mut app, 60, 20, (tx, ty)), vec![border; 6]);
+}
+
+#[test]
+fn the_copied_flash_beats_the_hover_under_the_pointer() {
+    // The pointer is necessarily over the button when it is clicked, so a hover style
+    // painted after the flash would mask the one piece of feedback the press produces.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    let resting = button_inks(&mut app, 60, 20, (x, y));
+    app.set_pointer(x, y);
+    let activation = click_hotspot(&mut app, x, y).expect("the click landed");
+    app.flash_copied(activation.row, activation.col);
+    assert_eq!(app.hovered(), Some(0), "the pointer has not gone anywhere");
+
+    let rows = framed(&mut app, 60, 20);
+    assert!(
+        rows[usize::from(y)].contains(crate::render::button::FLASH),
+        "the flash is drawn: {:?}",
+        rows[usize::from(y)]
+    );
+    assert_eq!(
+        button_inks(&mut app, 60, 20, (x, y)),
+        resting,
+        "and it is drawn in the resting ink, not repainted by the hover under it"
+    );
+}
+
+#[test]
+fn a_pager_without_the_mouse_has_nothing_to_hover() {
+    // With `--mouse` off there are no hotspots at all, so there is no state to keep.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    let rows = framed(&mut app, 60, 20);
+    assert!(
+        !rows
+            .iter()
+            .any(|row| row.contains(crate::render::button::LABEL)),
+        "the premise: no button is drawn"
+    );
+    for y in 0..19 {
+        for x in 0..59 {
+            assert!(!app.set_pointer(x, y), "nothing to hover at {x},{y}");
+            assert_eq!(app.hovered(), None);
+        }
+    }
+}
+
+#[test]
+fn a_reflow_drops_the_hover_rather_than_moving_it() {
+    // The hover names a control by its index in the canvas's hotspot list, and a render
+    // replaces that list: the same index at a new width can be a different button, or
+    // none. The pointer has not moved, so nothing recomputes it — the stale index would
+    // simply be painted, lighting a control the reader is nowhere near. Dropped instead,
+    // exactly as the selection is, and for the same reason.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    app.set_pointer(x, y);
+    assert_eq!(app.hovered(), Some(0), "the premise");
+
+    let buffer = framed_buffer(&mut app, 40, 20);
+    assert_eq!(app.hovered(), None, "the reflow took the hover with it");
+    let theme = app.theme();
+    let lit: Vec<_> = [theme.code.frame, theme.table.border]
+        .iter()
+        .map(|style| super::draw::term_style(theme.hovered(*style)).fg)
+        .collect();
+    for y in 0..20 {
+        for x in 0..40 {
+            assert!(
+                !lit.contains(&buffer[(x, y)].style().fg),
+                "a hovered ink survived the reflow at {x},{y}"
+            );
+        }
+    }
+}
+
+// --- Hover lights a whole control, not one row of it (design spec §2.2) --------
+
+#[test]
+fn hovering_a_link_shades_every_row_of_it() {
+    // A wrapped link is several hotspots sharing one `target`; hovering any one row
+    // must light all of them, or the link visibly breaks in half under the pointer.
+    let mut app = pager_at(
+        "[a fairly long link label that wraps across several rows](https://example.com/x)\n",
+        24,
+        10,
+    );
+    let spots = app.rendered().hotspots().to_vec();
+    assert!(
+        spots.len() >= 2,
+        "the premise: the link wraps, got {spots:?}"
+    );
+    let target = spots[0].target;
+    assert!(
+        spots.iter().all(|spot| spot.target == target),
+        "one link, one target: {spots:?}"
+    );
+
+    // The label and its ` (url)` suffix take different resting styles
+    // (`theme.text.link` and `theme.text.link_url`), so "lit" is checked cell by cell,
+    // against what that exact cell had at rest — not against one derived colour.
+    let resting = framed_buffer(&mut app, 24, 10);
+
+    app.set_pointer(spots[0].col, u16::try_from(spots[0].row).expect("a row"));
+    assert_eq!(
+        app.hovered(),
+        Some(0),
+        "the first row is the one hit-tested"
+    );
+
+    let buffer = framed_buffer(&mut app, 24, 10);
+    let theme = app.theme();
+    let lit: Vec<usize> = spots
+        .iter()
+        .filter(|spot| {
+            let y = u16::try_from(spot.row).expect("a row");
+            (spot.col..spot.col.saturating_add(spot.cols)).all(|x| {
+                let before = resting[(x, y)].style();
+                let expected = super::draw::term_style(theme.hovered(from_term_style(before))).fg;
+                buffer[(x, y)].style().fg == expected
+            })
+        })
+        .map(|spot| spot.row)
+        .collect();
+    assert_eq!(
+        lit.len(),
+        spots.len(),
+        "only row(s) {lit:?} lit out of {spots:?}; the link wraps"
+    );
+}
+
+/// Recovers a `theme::Style` foreground from a drawn cell's `ratatui::Style`.
+///
+/// Only the foreground round-trips through the buffer, which is all a hovered cell's
+/// ink depends on — [`super::draw::hover_highlight`] derives the shade from the cell's
+/// own colour, not from any other attribute.
+fn from_term_style(style: ratatui::style::Style) -> crate::theme::Style {
+    let ratatui::style::Color::Rgb(r, g, b) = style.fg.expect("a foreground") else {
+        panic!("a drawn cell's foreground is always RGB");
+    };
+    crate::theme::Style {
+        fg: Some(crate::theme::Color { r, g, b }),
+        bg: None,
+        attrs: crate::theme::Attributes::NONE,
+    }
+}
+
+#[test]
+fn ordinary_prose_under_the_pointer_is_not_shaded() {
+    // The design spec §9.1 asymmetry, stated as a test: proving the non-hotspot
+    // direction too, not only that a hovered control lights.
+    let mut app = pager_at("just some words\n", 60, 10);
+    let before = framed_buffer(&mut app, 60, 10);
+    assert!(!app.set_pointer(2, 0), "plain prose has nothing to hover");
+    assert_eq!(app.hovered(), None);
+    let after = framed_buffer(&mut app, 60, 10);
+    for x in 0..60 {
+        assert_eq!(
+            after[(x, 0)].style(),
+            before[(x, 0)].style(),
+            "column {x} of plain prose changed style under the pointer"
+        );
+    }
+}
+
+#[test]
+fn hovering_a_link_does_not_light_an_unrelated_copy_button() {
+    // Painting "every hotspot sharing this target" must stop at the target: a control
+    // with a *different* target — here the fence's `[copy]` button — must stay exactly
+    // as it was, or two controls that merely happen to be on screen together would be
+    // confused for one.
+    let mut app = pager_at(
+        "```rust\nfn f() {}\n```\n\n[a link](https://example.com/x)\n",
+        60,
+        20,
+    );
+    app.set_copy_button(true);
+    let (bx, by) = painted_button(&mut app, 60, 20, 0);
+    let resting = button_inks(&mut app, 60, 20, (bx, by));
+
+    let spots = app.rendered().hotspots().to_vec();
+    let link = spots
+        .iter()
+        .find(|spot| matches!(spot.kind, crate::canvas::HotspotKind::Open { .. }))
+        .expect("the link recorded a hotspot");
+    app.set_pointer(link.col, u16::try_from(link.row).expect("a row"));
+    assert!(app.hovered().is_some(), "the link is hovered");
+
+    assert_eq!(
+        button_inks(&mut app, 60, 20, (bx, by)),
+        resting,
+        "the copy button stays at rest while a different control is hovered"
+    );
+}
+
+/// A bare pointer motion over the terminal, at screen column `column`, row `row`.
+fn motion(column: u16, row: u16) -> crossterm::event::MouseEvent {
+    crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Moved,
+        column,
+        row,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    }
+}
+
+#[test]
+fn a_motion_event_is_what_lights_the_button() {
+    // The state and the paint are tested above; this is the wire they hang off. A
+    // terminal in any-event tracking mode — which is what `EnableMouseCapture` asks for
+    // — delivers the pointer as `Moved`, and until this arm existed the loop dropped
+    // every one of them on the floor. Driven through the same dispatcher the event loop
+    // calls, so a hover that works only when a test pokes `App` directly fails here.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert_eq!(app.toc_width(), 0, "the probe has no pane in the way");
+
+    assert!(
+        super::term::on_mouse(&mut app, motion(x, y), 60, 20),
+        "arriving on the control asks for the frame that shows it"
+    );
+    assert_eq!(app.hovered(), Some(0));
+    assert!(
+        !super::term::on_mouse(&mut app, motion(x + 1, y), 60, 20),
+        "and sliding along it asks for nothing"
+    );
+    assert_eq!(app.hovered(), Some(0), "while staying on it");
+    // Off the document altogether: the scrollbar's own column.
+    assert!(
+        super::term::on_mouse(&mut app, motion(59, y), 60, 20),
+        "leaving the document is a change"
+    );
+    assert_eq!(
+        app.hovered(),
+        None,
+        "a pointer on the scrollbar leaves no button lit"
+    );
+}
+
+// --- The click state machine (design spec §3) ------------------------------------
+
+/// A left button event of `kind` at screen column `column`, row `row`.
+fn button_event(
+    kind: crossterm::event::MouseEventKind,
+    column: u16,
+    row: u16,
+) -> crossterm::event::MouseEvent {
+    crossterm::event::MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: crossterm::event::KeyModifiers::NONE,
+    }
+}
+
+/// A left press at screen `(column, row)`.
+fn press_at(column: u16, row: u16) -> crossterm::event::MouseEvent {
+    button_event(
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column,
+        row,
+    )
+}
+
+/// A left drag to screen `(column, row)`.
+fn drag_to(column: u16, row: u16) -> crossterm::event::MouseEvent {
+    button_event(
+        crossterm::event::MouseEventKind::Drag(crossterm::event::MouseButton::Left),
+        column,
+        row,
+    )
+}
+
+/// A left release at screen `(column, row)`.
+fn release_at(column: u16, row: u16) -> crossterm::event::MouseEvent {
+    button_event(
+        crossterm::event::MouseEventKind::Up(crossterm::event::MouseButton::Left),
+        column,
+        row,
+    )
+}
+
+/// The viewport cell the first hotspot of the `skip`th link starts in, and its target.
+///
+/// Read off the rendered canvas, which for an unscrolled pager with no pane is the
+/// viewport — the same identity every hover test above relies on.
+fn link_at(app: &mut App, skip: usize) -> (u16, u16, usize) {
+    let spot = app
+        .rendered()
+        .hotspots()
+        .iter()
+        .filter(|spot| matches!(spot.kind, crate::canvas::HotspotKind::Open { .. }))
+        .nth(skip)
+        .expect("a link hotspot");
+    (
+        spot.col,
+        u16::try_from(spot.row).expect("a viewport row"),
+        spot.target,
+    )
+}
+
+#[test]
+fn press_then_release_on_one_hotspot_fires() {
+    let mut app = pager_at("[x](https://example.com/a)\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    assert!(
+        !app.press_hotspot(x, y),
+        "a link does not claim the press: its cells are document text"
+    );
+    let fired = app.release_hotspot(x, y).expect("the click landed");
+    assert_eq!(
+        fired.kind,
+        crate::canvas::HotspotKind::Open {
+            url: "https://example.com/a".to_string()
+        },
+        "the click carries the full target, not the elided label"
+    );
+}
+
+#[test]
+fn a_press_alone_fires_nothing() {
+    // The whole of Task 5 in one assertion: activation moved to the release edge, so a
+    // button still held down has done nothing yet. This is the behaviour change — a
+    // `[copy]` button used to copy the instant it was pressed.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert!(app.press_hotspot(x, y), "the button claims the press");
+    assert!(
+        app.selection().is_none(),
+        "and starts no drag, exactly as before (design spec §5)"
+    );
+    // Nothing has been produced to copy: only the release below produces it.
+    assert!(
+        app.release_hotspot(x, y).is_some(),
+        "and the release is what fires"
+    );
+}
+
+#[test]
+fn press_drag_release_fires_nothing_and_yields_a_selection() {
+    // Selection wins every tie (design spec §3). Driven through the dispatcher, because
+    // the tie is decided by which arm claims the drag, not by `App` alone.
+    let mut app = pager_at("[x](https://example.com/a) and more text here\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    assert_eq!(app.toc_width(), 0, "the probe has no pane in the way");
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 10);
+    super::term::on_mouse(&mut app, drag_to(30, y), 60, 10);
+    // The release is asked for back *on the link*, not out at column 30 where the drag
+    // ended. Column 30 holds no control, so a build that cancelled nothing at all would
+    // answer `None` there too and the test would pass for the wrong reason; asking on the
+    // link means only a cancelled candidate can produce the `None`.
+    assert!(
+        app.release_hotspot(x, y).is_none(),
+        "a drag is not a click, even when the hand comes back"
+    );
+    assert!(app.selection().is_some(), "the gesture became a selection");
+}
+
+#[test]
+fn a_drag_that_starts_inside_a_link_still_selects_its_text() {
+    // The gesture the unification must not cost anyone: link cells are document text, so
+    // a press there begins a drag like any other and the release copies what it covered.
+    let mut app = pager_at(
+        "[label](https://example.com/a) and more text here\n",
+        60,
+        10,
+    );
+    let (x, y, _) = link_at(&mut app, 0);
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 10);
+    assert!(
+        app.selection().is_some(),
+        "a press on a link is the start of a drag"
+    );
+    super::term::on_mouse(&mut app, drag_to(x + 20, y), 60, 10);
+    app.end_selection();
+    let extract = app.take_pending_copy().expect("the drag selected text");
+    assert!(
+        extract.text.contains("label"),
+        "the selection covers the link's own label: {:?}",
+        extract.text
+    );
+}
+
+#[test]
+fn press_on_one_hotspot_and_release_on_another_fires_nothing() {
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        80,
+        10,
+    );
+    let (ax, ay, a) = link_at(&mut app, 0);
+    let (bx, by, b) = link_at(&mut app, 1);
+    assert_ne!(a, b, "the premise: two links are two controls");
+    app.press_hotspot(ax, ay);
+    assert!(
+        app.release_hotspot(bx, by).is_none(),
+        "a release on a different control is not a click on either"
+    );
+    // And the candidate did not survive the miss, waiting to fire on the next release.
+    assert!(app.release_hotspot(ax, ay).is_none());
+}
+
+#[test]
+fn moving_off_the_pressed_cell_and_back_does_not_resurrect_the_candidate() {
+    // "Moving off cancels" must mean cancelled, not suspended.
+    let mut app = pager_at("[x](https://example.com/a) tail\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 10);
+    super::term::on_mouse(&mut app, drag_to(40, y), 60, 10);
+    super::term::on_mouse(&mut app, drag_to(x, y), 60, 10);
+    assert!(app.release_hotspot(x, y).is_none());
+}
+
+#[test]
+fn a_click_across_two_rows_of_one_wrapped_link_fires_once() {
+    // A wrapped link is several hotspots sharing one `target`, and the reader pressed
+    // *the link* — not row 1 of it. Grouping by index rather than by target would call
+    // this two controls and fire nothing.
+    let mut app = pager_at(
+        "[a fairly long link label that wraps across several rows](https://example.com/x)\n",
+        24,
+        10,
+    );
+    let spots = app.rendered().hotspots().to_vec();
+    assert!(
+        spots.len() >= 2,
+        "the premise: the link wraps, got {spots:?}"
+    );
+    let target = spots[0].target;
+    assert!(
+        spots.iter().all(|spot| spot.target == target),
+        "one link, one target: {spots:?}"
+    );
+    let row = |spot: &crate::canvas::Hotspot| u16::try_from(spot.row).expect("a viewport row");
+    app.press_hotspot(spots[0].col, row(&spots[0]));
+    let fired = app
+        .release_hotspot(spots[1].col, row(&spots[1]))
+        .expect("one control, one click");
+    assert_eq!(
+        fired.kind,
+        crate::canvas::HotspotKind::Open {
+            url: "https://example.com/x".to_string()
+        }
+    );
+}
+
+#[test]
+fn a_release_that_never_saw_a_press_fires_nothing() {
+    // A button released over a control it was not pressed on — the tail of a gesture
+    // that began outside the window, say — is not a click on that control.
+    let mut app = pager_at("[x](https://example.com/a)\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    assert!(app.release_hotspot(x, y).is_none());
+}
+
+#[test]
+fn a_drag_off_the_copy_button_copies_nothing() {
+    // The behaviour this task changes, stated as a test. A press on `[copy]` starts no
+    // selection, so its drags reach no selection arm at all — the cancel has to be
+    // unguarded in the dispatcher, or the release would still copy after a drag away.
+    let mut app = pager_at(BUTTONS, 60, 20);
+    app.set_copy_button(true);
+    let (x, y) = painted_button(&mut app, 60, 20, 0);
+    assert_eq!(app.toc_width(), 0, "the probe has no pane in the way");
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 20);
+    assert!(app.selection().is_none(), "the button claimed the press");
+    super::term::on_mouse(&mut app, drag_to(x, y + 4), 60, 20);
+    assert!(
+        app.release_hotspot(x, y).is_none(),
+        "the hand travelled, so the gesture is not a click"
+    );
+}
+
+#[test]
+fn a_release_outside_the_document_cancels_the_click() {
+    // The pane, the scrollbar and the status bar are not places a control can be, so a
+    // button let go over one of them fires nothing — and leaves nothing behind either.
+    let mut app = pager_at("[x](https://example.com/a)\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 10);
+    super::term::on_mouse(&mut app, release_at(59, 9), 60, 10);
+    assert!(
+        app.release_hotspot(x, y).is_none(),
+        "the gesture is over, whatever a later release says"
+    );
+}
+
+#[test]
+fn a_press_off_the_document_disarms_a_click_left_in_flight() {
+    // `App::press_hotspot` disarms the previous candidate, but a press on the pane, on
+    // the scrollbar or on the chrome never reaches it. The path that matters: press a
+    // link, then *lose the release* — alt-tabbing away mid-press is not something
+    // `?1003` tracking always survives — then press somewhere off the document, then let
+    // go over that same link. The generic `Up` arm sees `in_doc`, finds the candidate
+    // still armed and fires a control with no press behind it. Harmless today; from Task
+    // 6 it is a browser opening unbidden, with none of the status-bar moment design spec
+    // §8 traded the confirmation prompt for.
+    let mut app = pager_at("# Heading\n\n[x](https://example.com/a)\n", 60, 12);
+    app.act(Action::ToggleToc);
+    assert!(app.toc_width() > 0, "the premise: the pane is open");
+    let (col, y, _) = link_at(&mut app, 0);
+    let x = col + app.toc_width();
+
+    // One probe per `Down` arm that is not the document's: the pane, the scrollbar, and
+    // the status bar — which with the pane focused reaches the arm that swallows a press
+    // outside the document entirely.
+    for (px, py, what) in [
+        (1, 1, "the pane"),
+        (59, 3, "the scrollbar"),
+        (x, 11, "the status bar"),
+    ] {
+        super::term::on_mouse(&mut app, press_at(x, y), 60, 12);
+        super::term::on_mouse(&mut app, press_at(px, py), 60, 12);
+        assert!(
+            app.release_hotspot(col, y).is_none(),
+            "a press on {what} left the link armed, and the release fired it"
+        );
+    }
+}
+
+#[test]
+fn a_bare_motion_cancels_a_click_in_flight() {
+    // "Cancellation, not suspension" has to hold in both arms that can carry a moving
+    // pointer. Under SGR encoding motion with a button held arrives as `Drag(Left)`, so
+    // this is unreachable on the terminals `mdmost` meets — but a terminal that reports
+    // held-button motion as motion would otherwise let press, away, back, release fire
+    // the link, which is what the drag spelling of this test already forbids.
+    let mut app = pager_at("[x](https://example.com/a) tail\n", 60, 10);
+    let (x, y, _) = link_at(&mut app, 0);
+    super::term::on_mouse(&mut app, press_at(x, y), 60, 10);
+    super::term::on_mouse(&mut app, motion(40, y), 60, 10);
+    super::term::on_mouse(&mut app, motion(x, y), 60, 10);
+    assert!(app.release_hotspot(x, y).is_none());
+}
+
+#[test]
+fn a_press_on_nothing_clears_any_candidate_before_it() {
+    // A press is the start of a gesture, so it owns the candidate outright: whatever the
+    // last one left behind is gone, control or no control under this one. Otherwise a
+    // press on plain prose would leave the previous link armed, and the release that
+    // ended *this* gesture would fire it.
+    let mut app = pager_at(
+        "[x](https://example.com/a) and plain words after it\n",
+        60,
+        10,
+    );
+    let (x, y, _) = link_at(&mut app, 0);
+    app.press_hotspot(x, y);
+    assert!(
+        !app.press_hotspot(40, y),
+        "the premise: column 40 is prose, not a control"
+    );
+    assert!(
+        app.release_hotspot(x, y).is_none(),
+        "the second press disarmed the first"
+    );
+}
+
+#[test]
+fn a_finished_selection_is_not_ended_a_second_time() {
+    // A finished selection stays up as a highlight, so every release that follows used
+    // to re-extract it onto the clipboard — over whatever that release had just done.
+    // Harmless while a release did nothing; not harmless now one activates controls.
+    let mut app = pager_at("some words worth selecting here\n", 60, 10);
+    app.begin_selection(0, 0);
+    app.drag_selection(20, 0);
+    app.end_selection();
+    assert!(
+        app.take_pending_copy().is_some(),
+        "the premise: the drag selected something"
+    );
+    assert!(
+        app.selection().is_some(),
+        "and the highlight is still up afterwards"
+    );
+    app.end_selection();
+    assert!(
+        app.take_pending_copy().is_none(),
+        "a gesture that is over cannot be ended again"
+    );
+}
+
+#[test]
+fn a_reflow_mid_click_drops_the_candidate_rather_than_moving_it() {
+    // A target id is issued per canvas, exactly as a hotspot index is: after a render
+    // the recorded id may name a different control, or none. Dropped for the same
+    // reason the hover and the selection are.
+    let mut app = pager_at(
+        "```rust\nfn f() {}\n```\n\n[a link](https://example.com/x)\n",
+        60,
+        20,
+    );
+    app.set_copy_button(true);
+    let (x, y, _) = link_at(&mut app, 0);
+    app.press_hotspot(x, y);
+    let _ = framed(&mut app, 40, 20);
+    let (nx, ny, _) = link_at(&mut app, 0);
+    assert!(
+        app.release_hotspot(nx, ny).is_none(),
+        "a click begun on one canvas may not fire on another"
+    );
+}
+
+// --- Resolving a cell to a source offset (design spec §2.1) ----------------------
+
+/// Renders `doc` at `width` directly, with no pager or terminal in the way.
+///
+/// `offset_at` is tested against the canvas alone, so the tests build one the same way
+/// `render/tests.rs` does rather than driving a full [`App`](super::app::App).
+fn render(doc: &str, width: u16) -> Canvas {
+    let parsed = Doc::parse(doc);
+    let theme = crate::theme::Theme::default_dark();
+    crate::render::render_document(
+        &parsed,
+        width,
+        None,
+        &theme,
+        &crate::render::RenderOptions::default(),
+    )
+}
+
+#[test]
+fn a_cell_on_text_resolves_to_that_byte() {
+    let doc = "| alpha | beta |\n| --- | --- |\n| one | two |\n";
+    let canvas = render(doc, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| &doc[s.source_start..s.source_end] == "alpha")
+        .expect("a span for alpha");
+    let at = select::offset_at(
+        &canvas,
+        doc,
+        Pos {
+            row: span.row,
+            col: span.col,
+        },
+        select::Bias::Start,
+    );
+    assert_eq!(at, Some(span.source_start));
+}
+
+#[test]
+fn a_cell_on_a_border_resolves_to_the_next_text_in_document_order() {
+    // Column 1 of a table row is the left vertical rule: chrome, with no span.
+    let doc = "| alpha | beta |\n| --- | --- |\n| one | two |\n";
+    let canvas = render(doc, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| &doc[s.source_start..s.source_end] == "alpha")
+        .expect("a span for alpha");
+    let on_rule = Pos {
+        row: span.row,
+        col: 1,
+    };
+    assert!(
+        canvas
+            .spans()
+            .iter()
+            .all(|s| s.row != span.row || s.col > 1),
+        "column 1 must really be chrome for this test to mean anything"
+    );
+    assert_eq!(
+        select::offset_at(&canvas, doc, on_rule, select::Bias::Start),
+        Some(span.source_start),
+        "a press on the rule takes the start of the cell's text"
+    );
+    // Column 1 sits before every span on the row, so it cannot tell "reading order" from
+    // "row order" apart: a comparison that dropped the column and kept only the row would
+    // land on the same answer. The rule *between* alpha and beta can: it sits after
+    // alpha's span and before beta's, on the very same row, so only a genuine `(row,
+    // col)` comparison picks beta over alpha for `Start` and alpha over beta for `End`.
+    let beta = canvas
+        .spans()
+        .iter()
+        .find(|s| &doc[s.source_start..s.source_end] == "beta")
+        .expect("a span for beta");
+    let between = Pos {
+        row: span.row,
+        col: span.col + span.cols,
+    };
+    assert!(
+        between.col < beta.col,
+        "the rule between the cells must actually sit before beta's span"
+    );
+    assert_eq!(
+        select::offset_at(&canvas, doc, between, select::Bias::Start),
+        Some(beta.source_start),
+        "reading order, not row order: the rule between cells takes the next cell's start"
+    );
+    assert_eq!(
+        select::offset_at(&canvas, doc, between, select::Bias::End),
+        Some(span.source_end),
+        "reading order, not row order: the rule between cells takes the previous cell's end"
+    );
+}
+
+#[test]
+fn a_cell_past_the_end_of_a_row_resolves_to_the_last_span_on_it() {
+    let doc = "| alpha | beta |\n| --- | --- |\n| one | two |\n";
+    let canvas = render(doc, 40);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| &doc[s.source_start..s.source_end] == "beta")
+        .expect("a span for beta");
+    let past = Pos {
+        row: span.row,
+        col: 200,
+    };
+    assert_eq!(
+        select::offset_at(&canvas, doc, past, select::Bias::End),
+        Some(span.source_end)
+    );
+}
+
+#[test]
+fn a_drag_entirely_on_chrome_selects_nothing() {
+    // The interior of a diagram: box art, no labels under either endpoint.
+    let doc = "```mermaid\nflowchart LR\n  A[Parse] --> B[Layout]\n```\n";
+    let canvas = render(doc, 60);
+    let lo = select::offset_at(&canvas, doc, Pos { row: 0, col: 0 }, select::Bias::Start);
+    let hi = select::offset_at(&canvas, doc, Pos { row: 0, col: 1 }, select::Bias::End);
+    assert!(
+        lo >= hi,
+        "an empty range, not the whole document: {lo:?}..{hi:?}"
+    );
+    // `lo >= hi` alone is satisfied by *either* fallback landing on the same value as
+    // the other, which is not what an inverted fallback actually does — it moves both
+    // ends toward each other, and `usize` can never go negative, so `>=` alone cannot
+    // tell a single inverted fallback from a correct one. Pin the values themselves.
+    //
+    // `Bias::Start` no longer clamps to the document end here, and that is the point of
+    // the change that moved it: a flowchart's labels carry spans now, so the *next* text
+    // after this corner of box art is the `Parse` label, and §2.1 says an endpoint on
+    // chrome takes it. `Bias::End` still clamps, because nothing precedes row 0.
+    // `a_drag_on_chrome_with_no_spans_at_all_clamps_both_ways` keeps the clamp itself
+    // covered on a document that really has no spans.
+    let parse = canvas
+        .spans()
+        .iter()
+        .find(|s| doc.get(s.source_start..s.source_end) == Some("Parse"))
+        .expect("the Parse label carries a span");
+    assert_eq!(
+        lo,
+        Some(parse.source_start),
+        "the next text in document order is the first label"
+    );
+    assert_eq!(
+        hi,
+        Some(0),
+        "no span at/before the cell clamps to the document start"
+    );
+}
+
+#[test]
+fn a_drag_on_chrome_with_no_spans_at_all_clamps_both_ways() {
+    // A document whose rendering carries no spans anywhere, so both fallbacks have to
+    // clamp rather than find a neighbour: `Bias::Start` to the document end and
+    // `Bias::End` to its start. Inverted on purpose (see `Bias`), so the hull is empty
+    // and never the whole document — the one answer design spec §2 rules out.
+    let doc = "---\n";
+    let canvas = render(doc, 60);
+    assert!(
+        canvas.spans().is_empty(),
+        "a thematic break maps no text: {:?}",
+        canvas.spans()
+    );
+    assert_eq!(
+        select::offset_at(&canvas, doc, Pos { row: 0, col: 0 }, select::Bias::Start),
+        Some(doc.len()),
+        "no span at/after the cell clamps to the document end"
+    );
+    assert_eq!(
+        select::offset_at(&canvas, doc, Pos { row: 0, col: 1 }, select::Bias::End),
+        Some(0),
+        "no span at/before the cell clamps to the document start"
+    );
+}
+
+// --- The hull is the range between two endpoints (design spec §2) ----------------
+
+#[test]
+fn a_drag_across_a_table_selects_whole_cells_in_document_order() {
+    // Dragging from the second cell of row 1 to the first cell of row 2 selects the
+    // text between them in the *source*, which is row-major — not the rectangle the
+    // two corners describe on screen. `drawn` and `drag` already exist for exactly
+    // this (used throughout the drag tests above); no new test helper is needed.
+    let doc = "| a | b |\n| --- | --- |\n| one | two |\n| three | four |\n";
+    let canvas = render(doc, 40);
+    let (two_row, two_col, _) = drawn(&canvas, "two");
+    let (three_row, three_col, three_cols) = drawn(&canvas, "three");
+    let sel = drag(
+        Pos::new(two_row, two_col),
+        Pos::new(three_row, three_col + three_cols - 1),
+    );
+    let (lo, hi) = select::source_hull(&canvas, doc, sel).expect("a hull");
+    let text = &doc[lo..hi];
+    assert!(text.starts_with("two"), "got {text:?}");
+    assert!(text.ends_with("three"), "got {text:?}");
+    assert!(
+        text.contains('\n'),
+        "the hull crosses the source's row boundary: {text:?}"
+    );
+}
+
+// --- The highlight is painted from the hull (design spec §2) ---------------------
+
+#[test]
+fn a_table_border_is_never_highlighted() {
+    let doc = "| a | b |\n| --- | --- |\n| one | two |\n";
+    let canvas = render(doc, 40);
+    let (one_row, one_col, _) = drawn(&canvas, "one");
+    let (two_row, two_col, two_cols) = drawn(&canvas, "two");
+    let sel = drag(
+        Pos::new(one_row, one_col),
+        Pos::new(two_row, two_col + two_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, one_row);
+    let row = canvas.row_text(one_row);
+    for range in &ranges {
+        for col in range.clone() {
+            let ch = row.chars().nth(usize::from(col)).unwrap_or(' ');
+            assert!(
+                !"│├┤┬┴┼╭╮╰╯─".contains(ch),
+                "chrome at column {col} is highlighted: {ch:?} in {row:?}"
+            );
+        }
+    }
+    assert!(!ranges.is_empty(), "the cells themselves are highlighted");
+}
+
+#[test]
+fn a_selection_confined_to_one_cell_does_not_wash_its_neighbour() {
+    // Both "one" and "two" carry spans on the same row, so a selection that covers
+    // the whole row cannot tell the clipping guard apart from its absence (every span
+    // on the row is inside the hull either way — a mutation that deletes the guard
+    // still passes `a_table_border_is_never_highlighted`). Confining the drag to just
+    // "one" is what actually exercises `span.source_end <= lo || span.source_start >=
+    // hi`: without it, "two" is a span on the same row too and would be washed along
+    // with it.
+    let doc = "| a | b |\n| --- | --- |\n| one | two |\n";
+    let canvas = render(doc, 40);
+    let (one_row, one_col, one_cols) = drawn(&canvas, "one");
+    let (two_row, two_col, _) = drawn(&canvas, "two");
+    assert_eq!(
+        one_row, two_row,
+        "fixture assumption: both cells on one row"
+    );
+    let sel = drag(
+        Pos::new(one_row, one_col),
+        Pos::new(one_row, one_col + one_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, one_row);
+    assert!(!ranges.is_empty(), "\"one\" itself must be highlighted");
+    for range in &ranges {
+        assert!(
+            range.end <= two_col,
+            "the wash reaches into \"two\" at column {two_col}: {ranges:?}"
+        );
+    }
+}
+
+#[test]
+fn the_highlight_stops_at_the_end_of_the_text() {
+    let doc = "short line\n";
+    let canvas = render(doc, 60);
+    let (row, col, cols) = drawn(&canvas, "short line");
+    let sel = drag(Pos::new(row, col), Pos::new(row, 59));
+    let ranges = select::highlighted_columns(&canvas, doc, sel, row);
+    let last = ranges.iter().map(|r| r.end).max().expect("a range");
+    assert_eq!(last, col + cols, "the wash must not run to the pane edge");
+}
+
+#[test]
+fn the_highlight_never_reaches_a_column_contiguous_next_span() {
+    // A carried-over minor from Task 2: the far-endpoint probe can overshoot into a
+    // column-contiguous next span, so dragging `bold` in `**bold**text` yields a hull
+    // of "bold**" (the closing delimiter comes along, harmlessly, for the clipboard).
+    // For the wash the same overshoot would be visible: it must not paint into
+    // "text", which sits immediately after "**" with no gap between them on screen.
+    let doc = "**bold**text\n";
+    let canvas = render(doc, 40);
+    let (row, bold_col, bold_cols) = drawn(&canvas, "bold");
+    let sel = drag(
+        Pos::new(row, bold_col),
+        Pos::new(row, bold_col + bold_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, row);
+    let (text_row, text_col, _) = drawn(&canvas, "text");
+    assert_eq!(text_row, row, "fixture assumption: both on one row");
+    for range in &ranges {
+        assert!(
+            range.end <= text_col,
+            "the wash reaches into \"text\" at column {}: {ranges:?}",
+            text_col
+        );
+    }
+}
+#[test]
+fn a_soft_line_break_washes_like_any_other_word_separator() {
+    // A newline inside a paragraph is drawn as a space between two words. That space
+    // is body text the reader dragged over, not chrome, so it has to wash like every
+    // other separator. Three source lines reflow onto one row at this width, which
+    // puts both newlines mid-row — the shape where the hole is visible. A soft break
+    // that lands at a row end is swallowed by wrapping and hides the defect, so the
+    // fixture must be one where it does not.
+    let doc = "Alpha beta gamma\ndelta epsilon zeta\neta theta.\n";
+    let canvas = render(doc, 60);
+    let (row, first_col, _) = drawn(&canvas, "Alpha");
+    let (last_row, last_col, last_cols) = drawn(&canvas, "theta.");
+    assert_eq!(row, last_row, "fixture assumption: one reflowed row");
+    let sel = drag(
+        Pos::new(row, first_col),
+        Pos::new(row, last_col + last_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, row);
+    let text = canvas.row_text(row);
+    for col in first_col..last_col + last_cols {
+        assert!(
+            ranges.iter().any(|range| range.contains(&col)),
+            "column {col} of the paragraph is not washed: {ranges:?} over {text:?}"
+        );
+    }
+}
+
+/// The document source as [`Doc`] stores it, which is what every byte offset in the
+/// application indexes — never the bytes as they sat in the file.
+///
+/// `App` passes `self.doc.source()` to `extract`, to `highlighted_columns` and to
+/// `Search`, so a test that passed its own string literal instead would be testing a
+/// pairing the pager never makes. That distinction is invisible while the two are equal
+/// and load-bearing the moment they are not, which is exactly the CRLF case.
+fn read(markdown: &str) -> String {
+    Doc::parse(markdown).source().to_string()
+}
+
+#[test]
+fn a_crlf_soft_line_break_washes_and_copies_a_clean_newline() {
+    // Line endings are normalised where the document is read, so by the time anything
+    // here runs there is no CRLF left: the separator is one `\n` drawn as one space,
+    // `Piece::anchored`'s length guard stops declining it without being touched, and
+    // the clipboard cannot carry a `\r` because the document no longer holds one.
+    //
+    // This replaces `a_crlf_soft_line_break_declines_its_origin_and_leaves_the_clipboard_whole`,
+    // whose two assertions this reverses on purpose (owner ruling: "copy paste should
+    // always get clean \n newline"). Its second assertion pinned a stray trailing `\r`
+    // on the clipboard — `extend_over_markup` walking to the line end over the undrawn
+    // `\r` — which was the more visible half of the defect and is gone with the byte.
+    let markdown = "Alpha beta gamma\r\ndelta epsilon zeta\r\n";
+    let doc = read(markdown);
+    let canvas = render(markdown, 60);
+    let (row, first_col, _) = drawn(&canvas, "Alpha");
+    let (last_row, last_col, last_cols) = drawn(&canvas, "zeta");
+    assert_eq!(row, last_row, "fixture assumption: one reflowed row");
+    let sel = drag(
+        Pos::new(row, first_col),
+        Pos::new(row, last_col + last_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, &doc, sel, row);
+    let separator = first_col + 16;
+    assert_eq!(
+        canvas.row_text(row).chars().nth(usize::from(separator)),
+        Some(' '),
+        "fixture assumption: the line ending is drawn as a space at column {separator}"
+    );
+    assert!(
+        ranges.iter().any(|range| range.contains(&separator)),
+        "the separator washes like any other: {ranges:?}"
+    );
+    let extract = select::extract(&canvas, &doc, sel).expect("the drag covered text");
+    assert!(
+        extract.from_source,
+        "the clipboard still answers from source"
+    );
+    assert_eq!(
+        extract.text, "Alpha beta gamma\ndelta epsilon zeta",
+        "the clipboard gets a clean newline and no carriage return"
+    );
+}
+
+#[test]
+fn a_crlf_document_drags_exactly_like_its_lf_twin() {
+    // The strongest statement of the rule available at this level, and the reason the
+    // fix belongs at the read rather than at three places downstream: a CRLF document
+    // is not *handled* by the pager, it has ceased to exist by the time the pager sees
+    // it. `Canvas` compares every cell, every style and every span, so this covers the
+    // paint; the drag covers the clipboard.
+    //
+    // The fixture is deliberately broad, because every construct that maps cells back to
+    // bytes does it by its own route and each of those routes used to have a line-ending
+    // clause: a paragraph reflowed across soft breaks (`inline::collect`), a fenced block
+    // (`convert::code_lines`' suffix match), an indented one (same rule, four spaces), a
+    // quoted fence (same rule again, over `> `), a quoted *diagram* (an `Atom`, whose
+    // `strip_to_content` pairing of comrak's literal against the source lines is
+    // positional and line for line — the construct with the most to lose from a line
+    // ending that is two bytes on one side and one on the other), a table, a list, and an
+    // escape and an entity, whose spans `convert::split_transcriptions` cuts by aligning
+    // the drawn text against the source byte for byte.
+    let body = |eol: &str| {
+        [
+            "# Title",
+            "",
+            "Alpha beta gamma",
+            "delta epsilon zeta",
+            "eta theta \\* and &amp; onwards.",
+            "",
+            "```rust",
+            "let a = 1;",
+            "",
+            "let b = 2;",
+            "```",
+            "",
+            "> quoted prose",
+            "> ",
+            "> ```text",
+            "> quoted code",
+            "> ```",
+            "",
+            "> ```mermaid",
+            "> flowchart LR",
+            ">   A[Parse] --> B[Layout]",
+            "> ```",
+            "",
+            "- one item",
+            "- another item",
+            "",
+            "| alpha | beta |",
+            "| --- | --- |",
+            "| one | two |",
+            "",
+            "    indented code",
+            "",
+        ]
+        .join(eol)
+            + eol
+    };
+    let crlf = body("\r\n");
+    let lf = body("\n");
+    // The claim underneath every other assertion here: the two documents are not merely
+    // handled alike, they *are* one document by the time anything indexes them.
+    assert_eq!(read(&crlf), lf, "a CRLF document reads as its LF twin");
+    let (crlf_canvas, lf_canvas) = (render(&crlf, 60), render(&lf, 60));
+    // Compared in three widening steps rather than by one `assert_eq!` on the canvases:
+    // a whole-`Canvas` mismatch prints every cell of both, which is 170KB of `Debug`
+    // nobody can read. The narrow assertions name what differs; the last one is still
+    // the full comparison, so nothing is given up for the legibility.
+    let rows = |c: &Canvas| (0..c.height()).map(|r| c.row_text(r)).collect::<Vec<_>>();
+    assert_eq!(rows(&crlf_canvas), rows(&lf_canvas), "same drawn text");
+    assert_eq!(
+        crlf_canvas.spans(),
+        lf_canvas.spans(),
+        "same spans, naming the same document bytes"
+    );
+    assert!(
+        crlf_canvas == lf_canvas,
+        "the canvases differ in something other than their text or their spans"
+    );
+    let sel = drag(
+        Pos::new(0, 0),
+        Pos::new(
+            crlf_canvas.height() - 1,
+            crlf_canvas.width().saturating_sub(1),
+        ),
+    );
+    let crlf_extract = select::extract(&crlf_canvas, &read(&crlf), sel).expect("text");
+    let lf_extract = select::extract(&lf_canvas, &read(&lf), sel).expect("text");
+    assert_eq!(
+        crlf_extract.text, lf_extract.text,
+        "both documents copy the same bytes"
+    );
+    assert!(
+        !crlf_extract.text.contains('\r'),
+        "no carriage return anywhere on the clipboard: {:?}",
+        crlf_extract.text
+    );
+    // Anchors proving the drag is not degenerate — it really did reach the document
+    // through the spans rather than falling back to the drawn cells, and it really did
+    // cover the constructs the fixture was widened for. Deliberately anchors, not a
+    // whole-string comparison: what a drag over a diagram copies is Task 5's ruling and
+    // is still moving, and this test is about line endings.
+    assert!(crlf_extract.from_source, "answered from the document");
+    assert!(crlf_extract.text.contains("let a = 1;\n\nlet b = 2;"));
+    assert!(crlf_extract.text.contains("> quoted code"));
+    assert!(crlf_extract.text.contains("```mermaid\nflowchart LR"));
+    assert!(crlf_extract.text.contains("| one | two |"));
+}
+
+#[test]
+fn a_crlf_fenced_code_block_copies_clean_newlines() {
+    // The one case where preserving `\r` could be argued — a code block is meant to be
+    // copied verbatim, and its bytes are the author's. The ruling is explicit that it
+    // is not argued: copy-paste always gets clean `\n`. Dragged on its own here rather
+    // than as part of the whole document, because a code block reaches the clipboard
+    // through `code_lines`' per-line provenance and not through the inline path.
+    let markdown = "```rust\r\nlet a = 1;\r\nlet b = 2;\r\n```\r\n";
+    let doc = read(markdown);
+    let canvas = render(markdown, 40);
+    let (first_row, first_col, _) = drawn(&canvas, "let a = 1;");
+    let (last_row, last_col, last_cols) = drawn(&canvas, "let b = 2;");
+    let sel = drag(
+        Pos::new(first_row, first_col),
+        Pos::new(last_row, last_col + last_cols - 1),
+    );
+    let extract = select::extract(&canvas, &doc, sel).expect("the drag covered code");
+    assert!(extract.from_source, "code answers from source");
+    assert_eq!(extract.text, "let a = 1;\nlet b = 2;");
+}
+
+/// Asserts that every column of the paragraph on `row` is washed by a drag across it.
+fn assert_paragraph_washes(doc: &str, first: &str, last: &str) -> select::Extract {
+    let canvas = render(doc, 60);
+    let (row, first_col, _) = drawn(&canvas, first);
+    let (last_row, last_col, last_cols) = drawn(&canvas, last);
+    assert_eq!(row, last_row, "fixture assumption: one reflowed row");
+    let sel = drag(
+        Pos::new(row, first_col),
+        Pos::new(row, last_col + last_cols - 1),
+    );
+    let ranges = select::highlighted_columns(&canvas, doc, sel, row);
+    let text = canvas.row_text(row);
+    for col in first_col..last_col + last_cols {
+        assert!(
+            ranges.iter().any(|range| range.contains(&col)),
+            "column {col} of the paragraph is not washed: {ranges:?} over {text:?}"
+        );
+    }
+    select::extract(&canvas, doc, sel).expect("the drag covered text")
+}
+
+#[test]
+fn an_escape_no_longer_darkens_its_whole_paragraph() {
+    // One `\*` used to cost every span in the paragraph: comrak reports the whole run
+    // as one text node whose source is a byte longer than its text, and a node whose
+    // lengths disagree carries no origin. Nothing highlighted and the clipboard fell
+    // through to the drawn cells. Split at the escape, the prose either side is an
+    // exact copy of its source again and the character the backslash protected is a
+    // copy of the byte after it, so the whole row washes.
+    let doc = "Alpha \\* beta gamma.\n";
+    let extract = assert_paragraph_washes(doc, "Alpha", "gamma.");
+    assert!(extract.from_source, "and the clipboard answers from source");
+    assert_eq!(
+        extract.text, "Alpha \\* beta gamma.",
+        "the source, backslash and all"
+    );
+}
+
+#[test]
+fn an_entity_no_longer_darkens_its_whole_paragraph() {
+    // The other half of the same defect. `&amp;` draws a character that copies no
+    // byte of its source, so the run around it is split and the entity's one cell is
+    // anchored to the whole of `&amp;` — those five bytes are exactly what drew it.
+    let doc = "Alpha &amp; beta gamma.\n";
+    let extract = assert_paragraph_washes(doc, "Alpha", "gamma.");
+    assert!(extract.from_source, "and the clipboard answers from source");
+    assert_eq!(
+        extract.text, "Alpha &amp; beta gamma.",
+        "the source, unexpanded"
+    );
+}
+
+#[test]
+fn a_numeric_entity_no_longer_darkens_its_whole_paragraph() {
+    for doc in ["Alpha &#65; beta gamma.\n", "Alpha &#x41; beta gamma.\n"] {
+        let extract = assert_paragraph_washes(doc, "Alpha", "gamma.");
+        assert!(extract.from_source, "{doc:?}: from source");
+        assert_eq!(extract.text, doc.trim_end(), "{doc:?}");
+    }
+}
+
+#[test]
+fn an_escape_at_the_very_start_of_a_paragraph_keeps_its_spans() {
+    // A boundary an alignment walk can drop: there is no prose run in front of the
+    // escape to flush, so the first thing the walk does is diverge.
+    let doc = "\\*Alpha beta gamma.\n";
+    let extract = assert_paragraph_washes(doc, "*Alpha", "gamma.");
+    assert!(extract.from_source, "the clipboard answers from source");
+    assert_eq!(extract.text, "\\*Alpha beta gamma.");
+}
+
+#[test]
+fn an_escape_at_the_very_end_of_a_paragraph_keeps_its_spans() {
+    // The other boundary: the walk diverges with nothing left to re-synchronise
+    // against, so it has to finish on the escape rather than look past it.
+    let doc = "Alpha beta gamma\\*\n";
+    let extract = assert_paragraph_washes(doc, "Alpha", "gamma*");
+    assert!(extract.from_source, "the clipboard answers from source");
+    assert_eq!(extract.text, "Alpha beta gamma\\*");
+}
+
+#[test]
+fn an_entity_at_either_end_of_a_paragraph_keeps_its_spans() {
+    for (doc, first, last, text) in [
+        (
+            "&amp;Alpha beta gamma.\n",
+            "&Alpha",
+            "gamma.",
+            "&amp;Alpha beta gamma.",
+        ),
+        (
+            "Alpha beta gamma&amp;\n",
+            "Alpha",
+            "gamma&",
+            "Alpha beta gamma&amp;",
+        ),
+    ] {
+        let extract = assert_paragraph_washes(doc, first, last);
+        assert!(extract.from_source, "{doc:?}: from source");
+        assert_eq!(extract.text, text, "{doc:?}");
+    }
+}
+
+#[test]
+fn dragging_the_character_an_escape_protected_copies_the_escape() {
+    // The escaped character's own cell is a copy of the byte after the backslash, so
+    // it resolves exactly; the backslash is undrawn markup, and `extend_over_markup`
+    // brings it along exactly as it brings a heading's `#`.
+    let doc = "Alpha \\* beta gamma.\n";
+    let canvas = render(doc, 60);
+    let extract = drag_over(&canvas, doc, "*");
+    assert!(extract.from_source, "one cell, resolved from source");
+    assert_eq!(extract.text, "\\*", "the escape, not the character alone");
+}
+
+#[test]
+fn dragging_the_character_an_entity_produced_copies_the_entity() {
+    // A transcribed cell has no interior: its span names the whole entity, so a drag
+    // over that one cell copies `&amp;` and never a fragment of it.
+    let doc = "Alpha &amp; beta gamma.\n";
+    let canvas = render(doc, 60);
+    let extract = drag_over(&canvas, doc, "&");
+    assert!(extract.from_source, "one cell, resolved from source");
+    assert_eq!(extract.text, "&amp;", "the whole entity");
+}
+
+#[test]
+fn a_search_hit_after_an_escape_lands_on_the_cells_it_drew() {
+    // Search runs over the source and projects through the same spans. With the
+    // paragraph unspanned there was nothing to project onto at all; with it split,
+    // the words after the escape are one run of cells again.
+    let doc = "Alpha \\* beta gamma.\n";
+    let canvas = render(doc, 60);
+    let mut search = crate::search::Search::new(doc, "beta gamma", SearchMode::Literal)
+        .expect("a valid pattern");
+    search.locate(doc, canvas.spans());
+    let hit = search.hits().first().expect("the pattern matches");
+    assert_eq!(
+        hit.segments.len(),
+        1,
+        "one unbroken run of cells: {:?}",
+        hit.segments
+    );
+    assert_eq!(
+        hit.segments[0].cols,
+        u16::try_from("beta gamma".len()).expect("short"),
+        "as wide as the rendered match"
+    );
+    let (row, col, _) = drawn(&canvas, "beta");
+    assert_eq!(
+        (hit.segments[0].row, hit.segments[0].col),
+        (row, col),
+        "and it starts where the words are drawn"
+    );
+}
+
+#[test]
+fn an_entity_wider_than_one_column_declines_its_origin() {
+    // The fail-closed edge of the transcription rule. A span's source is otherwise a
+    // byte-for-byte copy of the cells it names, which is what lets `select` and
+    // `search` convert between bytes and columns inside it. A transcribed span breaks
+    // that, and it is only harmless while the span has no interior — one column. An
+    // emoji entity draws two, so it is declined and that cell stays dark rather than
+    // handing the column arithmetic a body it cannot walk.
+    let doc = "Alpha &#x1F600; beta gamma.\n";
+    let canvas = render(doc, 60);
+    let (row, col, _) = drawn(&canvas, "\u{1F600}");
+    assert!(
+        !canvas
+            .spans()
+            .iter()
+            .any(|s| s.row == row && s.col <= col && col < s.col + s.cols),
+        "the emoji cell is deliberately unspanned: {:?}",
+        canvas.spans()
+    );
+    // And the prose either side of it keeps its provenance, which is the whole point:
+    // the degradation is one cell wide, not one paragraph wide.
+    let extract = drag_over(&canvas, doc, "gamma.");
+    assert!(extract.from_source, "the words after it still resolve");
+    assert_eq!(extract.text, "gamma.");
+}
+
+#[test]
+fn a_run_that_cannot_be_aligned_keeps_todays_honest_fallback() {
+    // `&fjlig;` expands to two characters and the alignment declines it, so this
+    // paragraph keeps the behaviour every escape used to get: no spans, and a
+    // clipboard that says so. Pinned because "fail closed" has to be a decision that
+    // stays visible, not a case nobody looked at.
+    let doc = "Alpha &fjlig; beta gamma.\n";
+    let canvas = render(doc, 60);
+    let (row, _, _) = drawn(&canvas, "Alpha");
+    assert!(
+        !canvas.spans().iter().any(|s| s.row == row),
+        "the paragraph carries no spans: {:?}",
+        canvas.spans()
+    );
+    let extract = drag_over(&canvas, doc, "gamma.");
+    assert!(
+        !extract.from_source,
+        "and the clipboard admits it is the rendered text"
+    );
+}
+
+#[test]
+fn a_search_hit_across_a_soft_line_break_highlights_in_one_piece() {
+    // Anchoring the soft break's space is not only about the selection wash: a search
+    // runs over the source and projects its hit onto cells through the same spans, so
+    // a match that crosses the newline used to be drawn as two lit runs with a dark
+    // cell between them. One span, one segment.
+    let doc = "Alpha beta gamma\ndelta epsilon zeta\n";
+    let canvas = render(doc, 60);
+    let mut search = crate::search::Search::new(doc, "gamma\\s+delta", SearchMode::Regex)
+        .expect("a valid pattern");
+    search.locate(doc, canvas.spans());
+    let hit = search.hits().first().expect("the pattern matches");
+    assert_eq!(
+        hit.segments.len(),
+        1,
+        "the match is one unbroken run of cells: {:?}",
+        hit.segments
+    );
+    assert_eq!(
+        hit.segments[0].cols,
+        u16::try_from("gamma delta".len()).expect("short"),
+        "and it is as wide as the rendered match"
+    );
+}
+
+// The keyboard cursor (Task 8). Copy buttons hide when mouse capture was refused,
+// on the rule that a control nobody can click is worse than none (design spec §4).
+// Links cannot take that route — they are content, not chrome — so `f`/`F` make
+// every control reachable without a mouse, and this is what earns links the right
+// never to be hidden.
+
+#[test]
+fn f_walks_the_whole_document_and_scrolls_the_cursor_into_view() {
+    // Task 11, defect 1. `f`/`F` walk every control in the *document*
+    // (`App::control_targets` has always read the whole canvas, not the viewport),
+    // and it is `App::cursor_step` that is responsible for scrolling to whatever it
+    // lands on. The old test fixture fit on one screen, so it could not tell a
+    // cursor that scrolled to follow apart from one that silently walked out of
+    // view: both make `cursor_target()` change. This fixture is 80-odd rows against
+    // a 10-row viewport, with one control right at the top and another many screens
+    // down, so the two behaviours diverge on the very first `f` past the first
+    // control — the observed bug was the fifth `f` finally lighting something the
+    // reader could not see land.
+    let doc = format!(
+        "[top](https://example.com/top)\n\n{}[bottom](https://example.com/bottom)\n",
+        "filler line\n\n".repeat(40),
+    );
+    let mut app = pager_at(&doc, 80, 10);
+
+    app.on_key(Key::char('f'));
+    let top_row = app
+        .cursor_hotspot()
+        .expect("f put the cursor on the first control")
+        .row;
+    assert!(
+        (app.scroll()..app.scroll() + app.viewport_height()).contains(&top_row),
+        "the cursor starts on screen: row {top_row}, scroll {}",
+        app.scroll()
+    );
+
+    app.on_key(Key::char('f'));
+    let bottom_row = app
+        .cursor_hotspot()
+        .expect("f must keep the cursor set")
+        .row;
+    assert_ne!(bottom_row, top_row, "f must advance to the next control");
+    assert!(
+        bottom_row > app.viewport_height(),
+        "the premise: the second control is off the first screenful, at row {bottom_row}"
+    );
+    assert!(
+        (app.scroll()..app.scroll() + app.viewport_height()).contains(&bottom_row),
+        "f must scroll the viewport to the control it lands on: row {bottom_row}, \
+         scroll {} (reverting the scroll-to-follow call is exactly what turns this \
+         assertion red)",
+        app.scroll()
+    );
+}
+
+#[test]
+fn the_cursor_wraps_at_the_end() {
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        80,
+        10,
+    );
+    app.on_key(Key::char('f'));
+    let first = app.cursor_target();
+    app.on_key(Key::char('f'));
+    app.on_key(Key::char('f'));
+    assert_eq!(
+        app.cursor_target(),
+        first,
+        "a third f on two controls must land back on the first"
+    );
+}
+
+#[test]
+fn shift_f_cycles_backward_and_wraps_at_the_start() {
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        80,
+        10,
+    );
+    app.on_key(Key::char('F'));
+    let last = app
+        .cursor_target()
+        .expect("F with no cursor yet lands on the last control");
+    app.on_key(Key::char('F'));
+    let prev = app.cursor_target().expect("F must keep the cursor set");
+    assert_ne!(prev, last, "F must step backward to a different control");
+    app.on_key(Key::char('F'));
+    assert_eq!(
+        app.cursor_target(),
+        Some(last),
+        "a third F on two controls wraps back to the last"
+    );
+}
+
+#[test]
+fn enter_activates_the_control_under_the_cursor() {
+    let mut app = pager_at("[a](https://example.com/a)\n", 60, 10);
+    app.on_key(Key::char('f'));
+    let outcome = app.on_key(Key::plain(KeyCode::Enter));
+    assert!(
+        outcome.fired_activation(),
+        "enter must fire the link under the cursor"
+    );
+    let activation = outcome.into_activation().expect("just asserted it fired");
+    assert_eq!(
+        activation.kind,
+        crate::canvas::HotspotKind::Open {
+            url: "https://example.com/a".to_string()
+        }
+    );
+}
+
+#[test]
+fn enter_without_a_cursor_fires_nothing() {
+    let mut app = pager_at("[a](https://example.com/a)\n", 60, 10);
+    assert!(!app.on_key(Key::plain(KeyCode::Enter)).fired_activation());
+}
+
+#[test]
+fn the_cursor_survives_no_mouse_capture() {
+    // The whole point: links are reachable without a mouse, which is what earns them
+    // the right never to be hidden (design spec §4). `pager_at` never grants the
+    // mouse (`App::new`'s `copy_button` starts `false`), so this is already the
+    // no-capture case.
+    let mut app = pager_at("[a](https://example.com/a)\n", 60, 10);
+    app.on_key(Key::char('f'));
+    assert!(app.cursor_target().is_some());
+}
+
+#[test]
+fn a_copy_button_is_still_hidden_without_mouse_capture() {
+    // The gating rule is RESOLVED for links by the cursor above, not repealed for
+    // buttons: a button nobody can click is still worse than none.
+    let mut app = pager_at("```rust\nfn a() {}\n```\n", 60, 10);
+    assert!(
+        !app.canvas()
+            .plain_text()
+            .contains(crate::render::button::LABEL),
+        "no copy button without mouse capture, cursor or not"
+    );
+}
+
+#[test]
+fn the_cursor_steps_per_control_not_per_wrapped_row() {
+    // A wrapped link is several hotspots sharing one target (design spec §2.2); `f`
+    // must land on the control once, not stall on its second row.
+    let mut app = pager_at(
+        "[a fairly long link label that wraps across several rows](https://example.com/x) [b](https://example.com/b)\n",
+        24,
+        10,
+    );
+    let spots = app.rendered().hotspots().to_vec();
+    assert!(
+        spots.len() >= 3,
+        "the premise: the first link wraps, got {spots:?}"
+    );
+    let wrapped_target = spots[0].target;
+    app.on_key(Key::char('f'));
+    assert_eq!(app.cursor_target(), Some(wrapped_target));
+    app.on_key(Key::char('f'));
+    assert_ne!(
+        app.cursor_target(),
+        Some(wrapped_target),
+        "a second f must leave the wrapped control, not step onto its own next row"
+    );
+}
+
+#[test]
+fn esc_drops_the_cursor_before_anything_else() {
+    let mut app = pager_at("[a](https://example.com/a)\n", 60, 10);
+    app.on_key(Key::char('f'));
+    assert!(app.cursor_target().is_some());
+    app.act(Action::Cancel);
+    assert!(app.cursor_target().is_none(), "esc drops the cursor");
+    assert!(!app.should_quit(), "esc never quits");
+}
+
+#[test]
+fn f_does_nothing_with_no_controls_on_screen() {
+    let mut app = pager_at("Plain prose, nothing to follow.\n", 60, 10);
+    app.on_key(Key::char('f'));
+    assert!(app.cursor_target().is_none());
+}
+
+#[test]
+fn f_is_scoped_to_the_document_and_does_nothing_while_the_toc_has_focus() {
+    let mut app = pager_at("# Heading\n\n[a](https://example.com/a)\n", 60, 20);
+    app.act(Action::ToggleToc);
+    assert_eq!(app.focus(), Focus::Toc);
+    app.on_key(Key::char('f'));
+    assert!(
+        app.cursor_target().is_none(),
+        "f reaches the document's controls, not the pane behind it"
+    );
+}
+
+#[test]
+fn a_reflow_drops_the_cursor() {
+    // Same reason a resize drops the hover and a click in flight: a target id is
+    // issued per canvas, so a stale one would name a different control, or none, on
+    // the canvas that replaces it.
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        80,
+        10,
+    );
+    app.on_key(Key::char('f'));
+    assert!(app.cursor_target().is_some());
+    app.resize(40, 10);
+    let _ = app.canvas();
+    assert!(app.cursor_target().is_none());
+}
+
+// ---------------------------------------------------------------------------
+// The footnote popup (Task 9b). Design spec §6.
+//
+// Every geometric assertion below is read off the **painted frame** — the box's own
+// corner glyphs — rather than recomputed from `popup::place`. A test that ran the
+// implementation's arithmetic a second time would agree with any mistake in it.
+// ---------------------------------------------------------------------------
+
+/// An activation of `kind` at the top-left cell, for the call sites that do not care
+/// where the control was.
+fn activation(kind: HotspotKind) -> super::app::Activation {
+    super::app::Activation {
+        row: 0,
+        col: 0,
+        kind,
+    }
+}
+
+/// The viewport cell `needle` starts in on the painted frame, or `None`.
+///
+/// [`painted_at`]'s non-panicking twin, for the helpers that paint repeatedly while
+/// looking for the position they want.
+fn found_on_frame(app: &mut App, width: u16, height: u16, needle: &str) -> Option<(u16, u16)> {
+    let rows = framed(app, width, height);
+    rows.iter().enumerate().find_map(|(y, line)| {
+        let at = line.find(needle)?;
+        Some((
+            u16::try_from(crate::text::display_width(&line[..at])).ok()?,
+            u16::try_from(y).ok()?,
+        ))
+    })
+}
+
+/// The popup's box as the reader sees it: `(left, top, width, height)`, in cells.
+///
+/// Read from the corner glyphs the border actually painted, which is why the documents
+/// these tests use are plain prose — a code fence or a table in one would draw the same
+/// rounded corners and this would find those instead.
+fn popup_box(app: &mut App, width: u16, height: u16) -> (u16, u16, u16, u16) {
+    let rows = framed(app, width, height);
+    let corner = |glyph: char| -> Option<(u16, u16)> {
+        rows.iter().enumerate().find_map(|(y, line)| {
+            let at = line.find(glyph)?;
+            Some((
+                u16::try_from(crate::text::display_width(&line[..at])).ok()?,
+                u16::try_from(y).ok()?,
+            ))
+        })
+    };
+    let (left, top) = corner('\u{256d}').unwrap_or_else(|| panic!("no popup drawn: {rows:?}"));
+    let (right, _) = corner('\u{256e}').expect("a top-right corner");
+    let (_, bottom) = corner('\u{2570}').expect("a bottom-left corner");
+    (left, top, right - left + 1, bottom - top + 1)
+}
+
+/// The text drawn inside the popup's border, one string per row.
+fn popup_text_of(app: &mut App, width: u16, height: u16) -> Vec<String> {
+    let (left, top, box_width, box_height) = popup_box(app, width, height);
+    let rows = framed(app, width, height);
+    (top + 1..top + box_height - 1)
+        .map(|y| {
+            rows[usize::from(y)]
+                .chars()
+                .skip(usize::from(left) + 1)
+                .take(usize::from(box_width) - 2)
+                .collect::<String>()
+        })
+        .collect()
+}
+
+/// Opens the footnote the way a reader with a mouse does: press and release on the
+/// drawn `[1]` marker, through the event loop's own dispatch.
+///
+/// Nothing here reaches past `term::on_mouse`, so the whole wire — hit test, click state
+/// machine, `term::activate`, `App::activate` — is under test in every one of these.
+fn open_footnote(source: &str, width: u16, height: u16) -> App {
+    let mut app = pager_at(source, width, height);
+    let (x, y) = painted_at(&mut app, width, height, "[1]");
+    super::term::on_mouse(&mut app, press_at(x, y), width, height);
+    super::term::on_mouse(&mut app, release_at(x, y), width, height);
+    assert!(
+        app.popup().is_some(),
+        "the marker drawn at ({x}, {y}) did not open a popup"
+    );
+    app
+}
+
+#[test]
+fn a_popup_sizes_itself_to_its_content_up_to_the_cap() {
+    // A one-line note gets a small box; a very long one stops at the cap rather than
+    // growing to the screen.
+    let mut small = open_footnote("a[^n]\n\n[^n]: short\n", 80, 24);
+    let (_, _, small_width, small_height) = popup_box(&mut small, 80, 24);
+    let long = format!("a[^n]\n\n[^n]: {}\n", "word ".repeat(400));
+    let mut large = open_footnote(&long, 80, 24);
+    let (left, top, large_width, large_height) = popup_box(&mut large, 80, 24);
+
+    assert!(
+        small_height < large_height,
+        "content decides the height: {small_height} vs {large_height}"
+    );
+    assert!(
+        small_width < large_width,
+        "and the width: {small_width} vs {large_width}"
+    );
+    assert!(
+        large_height <= super::popup::MAX_HEIGHT,
+        "the height cap holds: {large_height}"
+    );
+    assert!(
+        large_width <= super::popup::MAX_WIDTH,
+        "the width cap holds: {large_width}"
+    );
+    // Never off the screen, which is the property both caps are in service of.
+    assert!(left + large_width <= 80 && top + large_height <= 23);
+}
+
+#[test]
+fn a_popup_near_the_bottom_flips_above_the_marker() {
+    // The marker is put on the last row that can hold it, so below is impossible.
+    let source = format!(
+        "{}\nThe sentence with the note in it[^n].\n\n[^n]: a note worth reading\n",
+        "filler paragraph\n\n".repeat(60)
+    );
+    let mut app = pager_at(&source, 80, 24);
+    let (x, y) = lowest_marker(&mut app, 80, 24);
+    super::term::on_mouse(&mut app, press_at(x, y), 80, 24);
+    super::term::on_mouse(&mut app, release_at(x, y), 80, 24);
+    assert!(app.popup().is_some(), "the marker did not open a popup");
+
+    let (_, top, _, height) = popup_box(&mut app, 80, 24);
+    let body = 23u16;
+    assert!(
+        y + 1 + height > body,
+        "the marker at row {y} must leave no room below for a {height}-row box, \
+         or this test proves nothing"
+    );
+    // Entirely above the marker, not merely starting above it. A box *clamped* onto the
+    // screen instead of flipped would satisfy `top < y` while covering the very marker it
+    // was opened from — fault injection found exactly that hole, and this closes it.
+    assert!(
+        top + height <= y,
+        "it must open upwards, clear of the marker: top {top}, height {height}, marker {y}"
+    );
+    assert!(top + height <= body, "and stay on screen: {top} + {height}");
+}
+
+/// Scrolls the document until the `[1]` marker sits as far down the viewport as it goes,
+/// and answers where it ended up.
+///
+/// A search over painted frames rather than arithmetic over canvas rows: what the flip
+/// has to react to is where the marker *is on screen*, and that is the only thing here
+/// that knows.
+fn lowest_marker(app: &mut App, width: u16, height: u16) -> (u16, u16) {
+    let mut best: Option<(u16, u16, usize)> = None;
+    for scroll in 0..=app.max_scroll() {
+        app.scroll_to(scroll);
+        if let Some((x, y)) = found_on_frame(app, width, height, "[1]")
+            && best.is_none_or(|(_, seen, _)| y >= seen)
+        {
+            best = Some((x, y, scroll));
+        }
+    }
+    let (x, y, scroll) = best.expect("the marker is drawn somewhere");
+    app.scroll_to(scroll);
+    (x, y)
+}
+
+#[test]
+fn a_popup_near_the_right_edge_flips_left() {
+    // The paragraph is padded until the marker sits as far right as the wrap will put
+    // it — found by looking at painted frames, not by computing where the wrap lands.
+    let (source, x, y) = rightmost_marker(80, 24);
+    let mut app = pager_at(&source, 80, 24);
+    super::term::on_mouse(&mut app, press_at(x, y), 80, 24);
+    super::term::on_mouse(&mut app, release_at(x, y), 80, 24);
+    assert!(app.popup().is_some(), "the marker did not open a popup");
+
+    let (left, _, width, _) = popup_box(&mut app, 80, 24);
+    let screen = app.viewport_width();
+    assert!(
+        x + width > screen,
+        "the marker at column {x} must leave no room for a {width}-column box, \
+         or this test proves nothing"
+    );
+    assert!(left < x, "it must open leftwards: left {left}, marker {x}");
+    assert!(
+        left + width <= screen,
+        "and stay on screen: {left} + {width} in {screen}"
+    );
+}
+
+/// The padding that puts the marker furthest right, and where it lands.
+fn rightmost_marker(width: u16, height: u16) -> (String, u16, u16) {
+    let mut best: Option<(String, u16, u16)> = None;
+    for pad in 0..40 {
+        // The note is long enough for a box that cannot fit beside a marker near the
+        // right edge — a one-word note would sit there quite happily and the flip
+        // would never be asked for.
+        let source = format!(
+            "{}z[^n]\n\n[^n]: a note long enough to need room\n",
+            "zz ".repeat(pad)
+        );
+        let mut app = pager_at(&source, width, height);
+        if let Some((x, y)) = found_on_frame(&mut app, width, height, "[1]")
+            && best.as_ref().is_none_or(|(_, seen, _)| x >= *seen)
+        {
+            best = Some((source, x, y));
+        }
+    }
+    best.expect("the marker is drawn somewhere")
+}
+
+#[test]
+fn a_footnote_with_a_list_in_it_renders_through_the_ordinary_renderer() {
+    // The proof that this is "another width", not a second rendering path: nothing in
+    // `tui::popup` knows what a list is, and the note draws one anyway.
+    let mut app = open_footnote("a[^n]\n\n[^n]: intro\n\n    - one\n    - two\n", 80, 24);
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(text.contains("one") && text.contains("two"), "{text:?}");
+    assert!(
+        text.contains('*'),
+        "the list drew its markers — `render::glyphs` bullets depth 0 as `*`: {text:?}"
+    );
+    assert!(text.contains("intro"), "and the prose before it: {text:?}");
+}
+
+#[test]
+fn a_long_footnote_scrolls_inside_the_popup() {
+    let source = format!("a[^n]\n\n[^n]: {}\n", "line\n\n    ".repeat(60));
+    let mut app = open_footnote(&source, 80, 24);
+    let first = popup_text_of(&mut app, 80, 24);
+    app.scroll_popup(3);
+    let after = popup_text_of(&mut app, 80, 24);
+    assert_ne!(first, after, "the wheel moved the note, not the document");
+    assert_eq!(app.scroll(), 0, "and the document underneath did not move");
+}
+
+#[test]
+fn the_wheel_over_the_popup_scrolls_the_note_and_not_the_document() {
+    // The wire the test above hangs off. A notch that reached `App::on_scroll` would
+    // move the document — and, by the dismissal rule, close the very note the reader is
+    // scrolling.
+    let source = format!(
+        "a[^n]\n\n{}\n[^n]: {}\n",
+        "filler\n\n".repeat(40),
+        "line\n\n    ".repeat(60)
+    );
+    let mut app = open_footnote(&source, 80, 24);
+    let before = popup_text_of(&mut app, 80, 24);
+    let (left, top, _, _) = popup_box(&mut app, 80, 24);
+    super::term::on_mouse(
+        &mut app,
+        button_event(
+            crossterm::event::MouseEventKind::ScrollDown,
+            left + 1,
+            top + 1,
+        ),
+        80,
+        24,
+    );
+    assert!(app.popup().is_some(), "the note is still up");
+    assert_eq!(app.scroll(), 0, "the document did not move");
+    assert_ne!(popup_text_of(&mut app, 80, 24), before, "the note did move");
+}
+
+#[test]
+fn the_wheel_outside_the_popup_still_scrolls_the_document() {
+    // The counterweight: routing the wheel to the note must not swallow every notch.
+    let source = format!("a[^n]\n\n{}\n[^n]: a note\n", "filler\n\n".repeat(40));
+    let mut app = open_footnote(&source, 80, 24);
+    let (left, _, _, _) = popup_box(&mut app, 80, 24);
+    assert!(left > 0, "the box leaves a column to aim at");
+    super::term::on_mouse(
+        &mut app,
+        button_event(crossterm::event::MouseEventKind::ScrollDown, 0, 22),
+        80,
+        24,
+    );
+    assert!(app.scroll() > 0, "the document scrolled");
+    assert!(app.popup().is_none(), "and that dismissed the note");
+}
+
+#[test]
+fn links_inside_a_popup_are_inert() {
+    // Design spec §1.1. Both halves: the note's own link offers no control, and the
+    // document's links *underneath* the box are covered by it — a click aimed at a
+    // footnote must never open a browser.
+    // The marker sits at the start of the first line, so the box opens over the columns
+    // the links below it are drawn in. That overlap is the whole test on the second
+    // half: a document whose links happen to sit beside the box rather than under it
+    // proves nothing about the box covering them — fault injection found this test
+    // passing with the hit-test guard removed for exactly that reason.
+    let source = format!(
+        "a[^n]\n\n{}\n[^n]: see [x](https://example.com/a)\n",
+        "[under](https://example.com/under-one) and [again](https://example.com/two)\n\n"
+            .repeat(12)
+    );
+    let mut app = open_footnote(&source, 80, 24);
+    let (left, top, width, height) = popup_box(&mut app, 80, 24);
+    for y in top..top + height {
+        for x in left..left + width {
+            assert!(
+                app.press_hotspot(x, y),
+                "the popup claims the press at ({x}, {y})"
+            );
+            assert!(
+                app.release_hotspot(x, y).is_none(),
+                "no control fires inside the popup at ({x}, {y})"
+            );
+            app.set_pointer(x, y);
+            assert!(
+                app.hovered().is_none(),
+                "nothing lights under the popup at ({x}, {y})"
+            );
+            assert!(app.popup().is_some(), "and the popup stays up");
+        }
+    }
+}
+
+#[test]
+fn esc_dismisses_the_popup_and_does_not_quit() {
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
+    app.on_key(Key::plain(KeyCode::Esc));
+    assert!(app.popup().is_none());
+    assert!(!app.should_quit(), "Esc never quits");
+}
+
+#[test]
+fn scrolling_the_document_dismisses_the_popup() {
+    let source = format!("a[^n]\n\n{}\n[^n]: note\n", "filler\n\n".repeat(40));
+    let mut app = open_footnote(&source, 80, 24);
+    app.on_scroll(1, false);
+    assert!(app.popup().is_none(), "the anchor moved, so the popup goes");
+}
+
+#[test]
+fn a_height_only_resize_dismisses_the_popup_and_gives_the_movement_keys_back() {
+    // The resize that `ensure_rendered` cannot see. Staleness is keyed on the render
+    // width, so shrinking only the height re-renders nothing — and under `--width` no
+    // resize changes it at all. A popup that survived would keep a rectangle the
+    // viewport no longer has: clipped away by the painter, invisible, and still routing
+    // every movement key to a note with nothing to scroll. The reader would be left with
+    // a document that will not move and no way to see why.
+    let source = format!("a[^n]\n\n{}\n[^n]: a note\n", "filler\n\n".repeat(60));
+    let mut app = open_footnote(&source, 80, 40);
+    assert!(app.popup().is_some());
+
+    app.resize(80, 10);
+    let _ = app.canvas();
+    assert!(
+        app.popup().is_none(),
+        "the box outlived the viewport it was measured in"
+    );
+
+    // The half that hurts, stated separately: the keys work again.
+    app.act(Action::LineDown);
+    assert!(app.scroll() > 0, "the document scrolls again");
+}
+
+#[test]
+fn a_reflow_dismisses_the_popup() {
+    // Same reason: the box is anchored to the cell its marker was drawn in, and a
+    // reflow moves every cell.
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
+    app.resize(60, 24);
+    let _ = app.canvas();
+    assert!(app.popup().is_none());
+}
+
+#[test]
+fn a_click_outside_dismisses_the_popup() {
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
+    let (x, y) = a_cell_outside_the_popup(&mut app, 80, 24);
+    app.press_hotspot(x, y);
+    assert!(app.popup().is_none());
+}
+
+/// A document-area cell the popup does not cover.
+fn a_cell_outside_the_popup(app: &mut App, width: u16, height: u16) -> (u16, u16) {
+    let (left, top, box_width, box_height) = popup_box(app, width, height);
+    for y in 0..height - 1 {
+        for x in 0..width - 1 {
+            let inside = x >= left && x < left + box_width && y >= top && y < top + box_height;
+            if !inside {
+                return (x, y);
+            }
+        }
+    }
+    panic!("the popup covers the whole document area");
+}
+
+#[test]
+fn an_unknown_footnote_reports_and_opens_nothing() {
+    // The status bar never lies. 200 columns: the notice rides in `Drop::Context`, the
+    // cheapest-priority segment of the bar, which is dropped for width at 60 and at 100
+    // — so a narrower buffer would assert on a notice that was never drawn.
+    let mut app = pager_at("a[^n]\n\n[^n]: note\n", 200, 24);
+    app.activate(activation(HotspotKind::Footnote {
+        id: "missing".to_string(),
+    }));
+    assert!(app.popup().is_none());
+    let rows = framed(&mut app, 200, 24);
+    let status = rows.last().expect("a status row");
+    assert!(
+        status.contains("missing"),
+        "the notice must name the footnote it could not find: {status:?}"
+    );
+}
+
+#[test]
+fn a_marker_with_no_room_on_either_side_of_it_says_so() {
+    // The pager's half of `popup::place` answering `None`. The geometry test pins the
+    // refusal; this pins that the refusal reaches the reader. A marker reacting to a
+    // click and then doing nothing visible is the control design spec §1.1 refuses to
+    // offer, and the status bar never lies.
+    //
+    // Five rows of document area with the marker on the middle one leaves two rows above
+    // and two below, and a box needs three. 200 columns because the notice rides in
+    // `Drop::Context`, the cheapest-priority segment of the status bar, which is dropped
+    // for width at 60 and at 100 — a narrower buffer would assert on a notice that was
+    // never drawn.
+    let mut app = pager_at("filler\n\na[^n]\n\n[^n]: a note worth reading\n", 200, 6);
+    let (x, y) = painted_at(&mut app, 200, 6, "[1]");
+    assert_eq!(
+        y, 2,
+        "the marker must sit mid-viewport for either gap to be too small"
+    );
+    super::term::on_mouse(&mut app, press_at(x, y), 200, 6);
+    super::term::on_mouse(&mut app, release_at(x, y), 200, 6);
+    assert!(
+        app.popup().is_none(),
+        "no box fits above or below the marker, so none is opened"
+    );
+    let rows = framed(&mut app, 200, 6);
+    let status = rows.last().expect("a status row");
+    assert!(
+        status.contains("no room"),
+        "the reader has to be told why nothing happened: {status:?}"
+    );
+}
+
+#[test]
+fn the_keyboard_opens_the_same_popup_the_pointer_does() {
+    // Design spec §1: everything is reachable from the keyboard as well as the mouse.
+    // `f` steps the cursor onto the marker — the only control in this document — and
+    // `enter` fires it through `KeyOutcome`, exactly as a release fires it.
+    let mut app = pager_at("a[^n]\n\n[^n]: a note\n", 80, 24);
+    app.on_key(Key::char('f'));
+    assert!(app.cursor_target().is_some(), "the cursor found the marker");
+    let outcome = app.on_key(Key::plain(KeyCode::Enter));
+    let fired = outcome.into_activation().expect("enter fired the marker");
+    app.activate(fired);
+    assert!(app.popup().is_some(), "the keyboard route opens the popup");
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(text.contains("a note"), "and it holds the note: {text:?}");
+}
+
+#[test]
+fn the_popup_is_not_modal() {
+    // The reason it is not an `Overlay`: a prompt and the help overlay take every key
+    // before the bindings are consulted, and this must not. `q` still quits.
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
+    app.on_key(Key::char('q'));
+    assert!(app.should_quit(), "q still quits with a popup up");
+}
+
+#[test]
+fn the_cursor_keys_scroll_the_note_while_it_is_up() {
+    // Design spec §6: "the wheel over the popup, or the cursor keys while it is open".
+    // Without this the one key a reader reaches for would scroll the document and, by
+    // the dismissal rule, close the note.
+    let source = format!(
+        "a[^n]\n\n{}\n[^n]: {}\n",
+        "filler\n\n".repeat(40),
+        "line\n\n    ".repeat(60)
+    );
+    let mut app = open_footnote(&source, 80, 24);
+    let before = popup_text_of(&mut app, 80, 24);
+    app.act(Action::LineDown);
+    assert_eq!(app.scroll(), 0, "the document stayed where it was");
+    assert!(app.popup().is_some(), "and the note stayed up");
+    assert_ne!(popup_text_of(&mut app, 80, 24), before, "the note moved");
+}
+
+#[test]
+fn a_popup_holding_a_code_span_keeps_the_renderer_s_own_styling() {
+    // The other half of "it is another width": inline formatting arrives without this
+    // module having an opinion about it.
+    let mut app = open_footnote("a[^n]\n\n[^n]: a `token` in a note\n", 80, 24);
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(text.contains("token"), "{text:?}");
+}
+
+#[test]
+fn a_code_fence_inside_a_popup_offers_no_copy_button() {
+    // A control the reader cannot press is worse than no control (design spec §4), and
+    // controls inside a popup are inert (§1.1) — so the note is rendered with
+    // `copy_button` off whatever the pager itself is running with. `set_copy_button(true)`
+    // is what `term::run` does when the terminal grants mouse capture.
+    let mut app = pager_at("a[^n]\n\n[^n]: a note\n\n        code\n", 80, 24);
+    app.set_copy_button(true);
+    let _ = app.canvas();
+    let (x, y) = painted_at(&mut app, 80, 24, "[1]");
+    super::term::on_mouse(&mut app, press_at(x, y), 80, 24);
+    super::term::on_mouse(&mut app, release_at(x, y), 80, 24);
+    assert!(app.popup().is_some(), "the marker opened a popup");
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(text.contains("code"), "the fence is in the note: {text:?}");
+    assert!(
+        !text.contains("copy"),
+        "no button inside the popup: {text:?}"
+    );
+    assert!(
+        app.popup().expect("a popup").canvas().hotspots().is_empty(),
+        "and the note's canvas records no control at all"
     );
 }

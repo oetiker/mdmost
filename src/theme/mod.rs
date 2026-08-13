@@ -296,6 +296,20 @@ pub struct UiStyles {
     pub warning: Style,
 }
 
+/// How far [`Theme::hovered`] blends a control towards the theme's own ink.
+///
+/// Settled by the owner looking at it, and the measurements record what they chose
+/// rather than argue for it. At `0.6` the built-in frames move 149–205 in RGB Manhattan
+/// distance and 0.208–0.273 in relative luminance. Anything under about `0.25` was a
+/// shade nobody notices on a six-cell label.
+///
+/// This was `0.4` first, whose comment predicted that past about `0.6` the control would
+/// read as an accent competing with the heading above it. That prediction was made by
+/// measuring, not by looking; the owner looked at `0.4`, asked for more, and looked at
+/// `0.6` (2026-08-12). It is a shade on a six-cell label, and the eye is the instrument.
+/// Do not retune without asking.
+const HOVER_SHIFT: f32 = 0.6;
+
 /// A complete theme: palette plus every semantic style slot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Theme {
@@ -429,6 +443,38 @@ impl Theme {
     /// islands of theme floating in whatever colour the terminal happens to be.
     pub fn base(&self) -> Style {
         self.text.body
+    }
+
+    /// The style a control drawn in `style` takes while the pointer is over it.
+    ///
+    /// Derived, never a slot: the resting `[copy]` button is the frame it sits in —
+    /// `code.frame` at a fence, `table.border` at a table — and the owner's ruling on
+    /// that colour is that it is right as it is. What hovering has to add is only that
+    /// the control under the hand looks *touched*, "a bit darker, or lighter depending
+    /// on the colorscheme". A slot in every theme would be a second colour to keep in
+    /// step with the first for no gain, and a `[themes.<name>]` block in `config.toml`
+    /// would inherit nothing; a derivation is inherited by construction, which is the
+    /// same argument `builtin::from_palette` makes for `heading_number` and `chrome`.
+    ///
+    /// The blend goes towards [`Palette::fg`] — the theme's own ink — and that is what
+    /// makes the direction come out right without asking [`Theme::is_dark`]: a dark
+    /// theme's ink is lighter than its frame and a light theme's is darker, so the same
+    /// expression brightens one and deepens the other. It is also what makes the result
+    /// safe: the resting frame and the ink both clear their contrast floor against the
+    /// page, and every colour on the line between them lies between the two in
+    /// luminance, so the hovered button cannot land in the low-contrast band between the
+    /// page and its own frame. Blending towards white or black would have had to consult
+    /// the flag and would have washed the theme's hue out of the control on the way.
+    /// `tests/theme_contrast.rs` measures both halves in every theme.
+    ///
+    /// Only the foreground moves. A background would make the button a filled chip that
+    /// appears from nowhere on a frame that has none, and the reader asked for a shade,
+    /// not a widget.
+    pub fn hovered(&self, style: Style) -> Style {
+        Style {
+            fg: style.fg.map(|fg| fg.blend(self.palette.fg, HOVER_SHIFT)),
+            ..style
+        }
     }
 
     /// A pure background fill: [`Palette::bg`] with no foreground and no attributes.

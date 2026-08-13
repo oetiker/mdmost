@@ -5,10 +5,11 @@
 //! border sits. Shapes the parser could not classify already arrive as
 //! [`NodeShape::Rect`], so there is no fallback to handle here.
 
-use crate::canvas::{BorderSet, Canvas};
+use crate::canvas::{BorderSet, Canvas, SearchSpan, align_offset};
 use crate::mermaid::ast::{Label, NodeShape};
+use crate::mermaid::chrome;
 use crate::mermaid::layout::graph::PortPolicy;
-use crate::text::{Align, display_width, wrap_plain};
+use crate::text::{Align, display_width};
 use crate::theme::Theme;
 
 /// Columns of blank space between the label and the outline.
@@ -18,24 +19,35 @@ const PAD: usize = 1;
 pub(super) fn draw(label: &Label, shape: NodeShape, budget: u16, theme: &Theme) -> Canvas {
     let frame = outline_width(shape);
     let inner_budget = usize::from(budget).saturating_sub(frame + 2 * PAD).max(3);
-    let lines = wrap(label, inner_budget);
+    // `inner_budget` is at least 3, so the wrap is never asked for zero columns; the
+    // blank piece below is the only way this can come back empty.
+    let lines = chrome::label_pieces_or_blank(label, inner_budget);
     let text = lines
         .iter()
-        .map(|line| display_width(line))
+        .map(|line| display_width(&line.text))
         .max()
         .unwrap_or(0)
         .max(1);
     let styles = theme.diagram;
-    let mut body = Canvas::new((text + 2 * PAD) as u16, lines.len(), theme.base());
+    let field = text + 2 * PAD;
+    let mut body = Canvas::new(field as u16, lines.len(), theme.base());
     for (row, line) in lines.iter().enumerate() {
-        body.write_field(
-            row,
-            0,
-            text + 2 * PAD,
-            line,
-            Align::Center,
-            styles.node_text,
-        );
+        body.write_field(row, 0, field, &line.text, Align::Center, styles.node_text);
+        // Where this drawn line came from in the Mermaid source, run by run: the
+        // characters a reader drags over are the characters they get (design spec §2.2),
+        // so a wrapped label's rows name their own bytes rather than all naming the whole
+        // label. `chrome::label_spans` is that rule for every family at once, including
+        // the "no `source` means no span" part: a label built by `Label::line`, or one
+        // `lex::label_at` refused to place, must emit nothing rather than a span at byte
+        // zero of the document.
+        let drawn = display_width(&line.text);
+        if drawn == 0 {
+            continue;
+        }
+        // `write_field` centres through `text::pad_to_width`, whose left pad is
+        // `slack / 2`; `align_offset` is the same rule, asked rather than re-derived.
+        let col = align_offset(field, drawn, Align::Center);
+        chrome::label_spans(&mut body, label, line, row, col);
     }
     match shape {
         NodeShape::Rect => body.framed(BorderSet::PLAIN, styles.node_border, None, theme.base()),
@@ -48,6 +60,30 @@ pub(super) fn draw(label: &Label, shape: NodeShape, budget: u16, theme: &Theme) 
         NodeShape::Rhombus => rhombus(&body, theme),
         NodeShape::Subroutine => subroutine(&body, theme),
         NodeShape::Cylinder => cylinder(&body, theme),
+    }
+}
+
+/// Moves `src`'s spans on `row` onto row `index`, column `left`, of `out`.
+///
+/// [`Canvas::blit`] translates spans for the shapes built from `framed` and `indent`.
+/// [`rhombus`] and [`cylinder`] cannot use it — they interleave rules between the rows
+/// they copy — so they copy cell by cell, and a span left behind by that loop is a
+/// label that silently loses its provenance in two shapes out of seven. Called from
+/// inside each copy loop with the loop's own `index`, so the two can never disagree
+/// about where the row landed.
+fn carry_spans(out: &mut Canvas, src: &Canvas, row: usize, index: usize, left: u16) {
+    let moved: Vec<SearchSpan> = src
+        .spans()
+        .iter()
+        .filter(|span| span.row == row)
+        .map(|span| SearchSpan {
+            row: index,
+            col: span.col.saturating_add(left),
+            ..*span
+        })
+        .collect();
+    for span in moved {
+        out.add_span(span);
     }
 }
 
@@ -66,19 +102,6 @@ fn outline_width(shape: NodeShape) -> usize {
         NodeShape::Subroutine => 4,
         _ => 2,
     }
-}
-
-/// Wraps a label to `budget` columns, keeping its explicit `<br>` breaks.
-fn wrap(label: &Label, budget: usize) -> Vec<String> {
-    let mut out: Vec<String> = label
-        .lines
-        .iter()
-        .flat_map(|line| wrap_plain(line, budget.max(1)))
-        .collect();
-    if out.is_empty() {
-        out.push(String::new());
-    }
-    out
 }
 
 /// A framed box whose vertical edges are replaced by `left` and `right`.
@@ -121,6 +144,7 @@ fn rhombus(body: &Canvas, theme: &Theme) -> Canvas {
                 out.write_str(index, col + 1, cell.text(), cell.style());
             }
         }
+        carry_spans(&mut out, body, row, index, 1);
         out.write_str(index, width - 1, "│", styles.node_border);
     }
     out.push_text(&cap('╲', '╱'), Align::Left, styles.node_border);
@@ -169,10 +193,39 @@ fn cylinder(body: &Canvas, theme: &Theme) -> Canvas {
                 out.write_str(index, col, cell.text(), cell.style());
             }
         }
+        carry_spans(&mut out, &framed, row, index, 0);
         if row == 0 {
             let index = out.push_blank_row(theme.base());
             out.write_str(index, 0, &rule, styles.node_border);
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An empty label still draws a row, so the node is a box and not two rules.
+    ///
+    /// The blank piece `chrome::label_pieces_or_blank` supplies is the only thing
+    /// standing between `A[]` and a node with no inside. Only the state diagram guarded
+    /// that before; the flowchart shared the behaviour and none of the test.
+    #[test]
+    fn an_empty_label_still_draws_a_box() {
+        let theme = Theme::default_dark();
+        for shape in [
+            NodeShape::Rect,
+            NodeShape::Round,
+            NodeShape::Stadium,
+            NodeShape::Circle,
+            NodeShape::Rhombus,
+            NodeShape::Subroutine,
+            NodeShape::Cylinder,
+        ] {
+            let canvas = draw(&Label::default(), shape, 20, &theme);
+            assert!(canvas.height() >= 3, "{shape:?}: {}", canvas.height());
+            canvas.check_invariants().expect("canvas contract");
+        }
+    }
 }

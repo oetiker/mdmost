@@ -81,7 +81,10 @@ pub(crate) fn diagram(
     options: &RenderOptions,
 ) -> Option<(u16, Canvas)> {
     let NodeKind::CodeBlock {
-        language, literal, ..
+        language,
+        literal,
+        lines,
+        ..
     } = &node.kind
     else {
         return None;
@@ -96,7 +99,12 @@ pub(crate) fn diagram(
             return None;
         }
         match bridge::mermaid(literal, at, theme, Fit::ROOMY) {
-            Ok(canvas) => return Some((at, code::diagram_block(canvas, at, ctx))),
+            Ok(canvas) => {
+                return Some((
+                    at,
+                    code::diagram_block(canvas, at, literal, lines, node.source, ctx),
+                ));
+            }
             // `needed` is the exact width this diagram starts drawing at, so the usual
             // search is one further layout. It is treated as a hint rather than a
             // promise all the same: a renderer that reports a floor it does not honour,

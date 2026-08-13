@@ -31,7 +31,7 @@
 //! `tui::tests::the_gutter_rule_matches_the_renderer` pins the published column to the
 //! layout drawn here.
 
-use crate::canvas::{BorderSet, Canvas, SearchSpan};
+use crate::canvas::{Atom, BorderSet, Canvas, SearchSpan};
 use crate::doc::SourceSpan;
 use crate::error::MermaidError;
 use crate::mermaid::Fit;
@@ -67,26 +67,200 @@ pub(crate) fn render_code_block(
     literal: &str,
     fenced: bool,
     origins: &[SourceSpan],
+    block: SourceSpan,
     width: u16,
     ctx: Ctx<'_>,
 ) -> Canvas {
     if is_mermaid(language) {
         return match bridge::mermaid(literal, width, ctx.theme, Fit::COMPACT) {
-            Ok(canvas) => diagram_block(canvas, width, ctx),
+            Ok(canvas) => diagram_block(canvas, width, literal, origins, block, ctx),
             Err(error) => fallback(literal, &error, origins, width, ctx),
         };
     }
     framed_code(language, literal, fenced, origins, width, ctx)
 }
 
-/// A drawn diagram as a block of the document: the canvas, padded to the block width.
+/// A drawn diagram as a block of the document: the canvas, padded to the block width,
+/// with its labels' spans rebased onto the document and its drawn rectangle recorded as
+/// an [`Atom`].
 ///
 /// Shared with [`super::diagram::diagram`], which builds the same block at a width the
 /// viewport does not have, so that the two cannot disagree about what a diagram block
-/// *is*.
-pub(crate) fn diagram_block(mut canvas: Canvas, width: u16, ctx: Ctx<'_>) -> Canvas {
+/// *is* — the rebasing included, and the floating `[copy]` button, which is why both
+/// happen here and not at either call site.
+///
+/// `block` is the fence's own extent in the document, opener and closer included — the
+/// node's `source`, not anything re-derived by hunting for backticks. It is what a
+/// selection wider than one label copies (design spec §2.2), and it is recorded
+/// *before* the canvas is padded out to the block width so that the rectangle is the
+/// diagram's own, not the page's.
+pub(crate) fn diagram_block(
+    mut canvas: Canvas,
+    width: u16,
+    literal: &str,
+    origins: &[SourceSpan],
+    block: SourceSpan,
+    ctx: Ctx<'_>,
+) -> Canvas {
+    rebase_spans(&mut canvas, literal, origins);
+    if let Some((row, rows, col, cols)) = drawn_bounds(&canvas) {
+        canvas.add_atom(Atom {
+            row,
+            rows,
+            col,
+            cols,
+            source_start: block.start,
+            source_end: block.end,
+            // comrak's own prefix-stripping, carried over verbatim. What a container
+            // stripped from each line is not recoverable from the source range alone, and
+            // a selection left to guess it copies Mermaid a reader cannot paste — see
+            // [`Atom::content`].
+            content: literal.to_string(),
+        });
+    }
     canvas.resize_width(width, ctx.base);
+    // A diagram has no frame to hang the button on, so it floats at the top right of the
+    // block — which makes the drawing itself the only other occupant of that row. The
+    // occupied extent is therefore measured off the drawn row rather than assumed to be
+    // zero, so `place` can decline on a diagram that reaches the right edge instead of
+    // blanking a box. Placed after the resize because the button's column is reckoned
+    // from the block's width, not from the layout's.
+    //
+    // A block inside a table cell is not offered one at all, exactly as a code frame is
+    // not. Until 2026-08-12 (Task 2b) that was forced by `Canvas::blit` dropping
+    // hotspots — the label would have kept its cells and lost the claim behind it. A blit
+    // now carries a hotspot, so the guard stands as a product decision: one button per
+    // top-level block. `render::table::render_table_node` writes it down at length.
+    //
+    // The height check is the same rule read once more: `Canvas::write_str` no-ops on a
+    // row that does not exist while `place` would still record the hotspot, so an empty
+    // canvas would get a hotspot behind no label. A successful Mermaid layout always
+    // draws at least one row, so no test reaches it; it costs one comparison to keep the
+    // "both or neither" contract true by construction rather than by argument.
+    if ctx.options.copy_button && ctx.table_depth == 0 && canvas.height() > 0 {
+        let occupied =
+            u16::try_from(display_width(canvas.row_text(0).trim_end())).unwrap_or(u16::MAX);
+        button::place(
+            &mut canvas,
+            0,
+            occupied,
+            ctx.theme.code.frame,
+            // The mermaid source, opener and closer excluded: all three copy buttons
+            // carry the block's content and not its fences (owner ruling, 2026-08-12).
+            literal.to_string(),
+            None,
+        );
+    }
     canvas
+}
+
+/// The bounding box of the cells a diagram actually drew: `(row, rows, col, cols)`.
+///
+/// A layout hands back a canvas as wide as the space it was offered, so the drawing sits
+/// in the top-left of a mostly blank rectangle. Recording *that* as the atom would wash
+/// the empty margin beside the diagram, which reads as a highlight bug rather than as a
+/// diagram taken whole — so the box is measured from the glyphs.
+///
+/// Blank rows and columns *inside* the box are part of it: the gap between two nodes is
+/// the diagram's own, and the wash is meant to be solid (design spec §2.2). Only the
+/// margin around the drawing is trimmed. `None` when nothing was drawn at all.
+fn drawn_bounds(canvas: &Canvas) -> Option<(usize, usize, u16, u16)> {
+    let mut top: Option<usize> = None;
+    let mut bottom = 0usize;
+    let mut left = u16::MAX;
+    let mut right = 0u16;
+    for row in 0..canvas.height() {
+        let text = canvas.row_text(row);
+        let drawn = text.trim_end();
+        let lead = drawn.len() - drawn.trim_start().len();
+        if lead == drawn.len() {
+            continue;
+        }
+        let start = u16::try_from(display_width(&drawn[..lead])).unwrap_or(u16::MAX);
+        let end = u16::try_from(display_width(drawn)).unwrap_or(u16::MAX);
+        top.get_or_insert(row);
+        bottom = row;
+        left = left.min(start);
+        right = right.max(end);
+    }
+    let top = top?;
+    (right > left).then(|| (top, bottom - top + 1, left, right - left))
+}
+
+/// Rewrites a diagram's spans from offsets into `literal` to offsets into the document.
+///
+/// A layout family emits a span at the offset its label had in the Mermaid block it was
+/// parsed from (`mermaid::ast::Label::source`). The document's spans are absolute, and
+/// the two differ by more than one constant: comrak strips a container prefix — four
+/// spaces, `> `, a list indent — from every line of the literal independently, so there
+/// is no single delta to add. `origins` already carries the answer per line, built by
+/// `doc::convert::code_lines`, which locates each line as a *suffix* of a source line;
+/// that is the same mapping `code_area` uses for a code block's own spans, and it is
+/// where the container indent has already been solved. (Line endings are no longer part
+/// of that problem: they are normalised where the document is read.)
+///
+/// It is reused here rather than re-derived, but not by analogy: `code_area` maps a
+/// *row* to a line and needs no column arithmetic on the source side, whereas a label
+/// sits at an arbitrary byte offset inside its line. What transfers is `origins`
+/// itself; the offset-within-the-line walk below is this function's own.
+///
+/// Fails closed in every case it cannot answer — no mapping for the block, no origin
+/// for the line, an offset past the line's end — by dropping the span. A diagram with
+/// no provenance falls back to the drawn cells and says so (design spec §3.1); a
+/// diagram with *wrong* provenance copies bytes from somewhere else in the document.
+fn rebase_spans(canvas: &mut Canvas, literal: &str, origins: &[SourceSpan]) {
+    if canvas.spans().is_empty() {
+        return;
+    }
+    let lines = crate::doc::literal_lines(literal);
+    canvas.map_spans(|span| {
+        let start = document_offset(&lines, origins, span.source_start)?;
+        let end = document_offset(&lines, origins, span.source_end)?;
+        // A unit is a source range like any other and is rebased with the span that
+        // names it. Failing closed drops the whole span rather than just its unit: a
+        // label whose pieces disagreed about which label they belong to would read as a
+        // drag across several boxes, and a reader pointing at one word would get the
+        // whole chart.
+        let unit = match span.unit {
+            Some((from, to)) => Some((
+                document_offset(&lines, origins, from)?,
+                document_offset(&lines, origins, to)?,
+            )),
+            None => None,
+        };
+        (start <= end).then_some(SearchSpan {
+            source_start: start,
+            source_end: end,
+            unit,
+            ..*span
+        })
+    });
+}
+
+/// The document offset of byte `at` of the Mermaid literal, if it has one.
+///
+/// `lines` is the literal split by [`crate::doc::literal_lines`] — the crate's one
+/// definition of "a line of `literal`", and the same split `origins` was built against,
+/// so index `n` names the same line in both. The guard below is against the **origin's
+/// own end** rather than against the line's length, because the two are the same length
+/// only when the line was located: a line `code_lines` could not find contributes an
+/// empty origin, and an offset inside it must be dropped rather than measured against a
+/// range that has nothing to do with it. (It also used to absorb the `\r` a CRLF literal
+/// carried past the end of its origin; line endings are normalised at the read now, so
+/// that case no longer arises and the guard stands on the reason above alone.)
+fn document_offset(lines: &[&str], origins: &[SourceSpan], at: usize) -> Option<usize> {
+    let mut base = 0usize;
+    for (row, line) in lines.iter().enumerate() {
+        let end = base + line.len();
+        if at <= end {
+            let origin = origins.get(row).filter(|origin| !origin.is_empty())?;
+            let offset = origin.start + (at - base);
+            return (offset <= origin.end).then_some(offset);
+        }
+        // The `\n` that `literal_lines` split on, and that the last line may not have.
+        base = end + 1;
+    }
+    None
 }
 
 /// Draws the framed, highlighted code block.
@@ -137,8 +311,9 @@ fn framed_code(
     pin_gutter(&mut out, gutter, padding, title.as_ref());
     // The label and the junction have already taken what they need of the top edge; the
     // button is the third occupant and the only optional one, so it is the one that
-    // yields. A block inside a table cell is blitted into a row it shares and would lose
-    // its hotspot while keeping its cells, so it is not offered one at all.
+    // yields. A block inside a table cell is not offered one at all — a product decision
+    // since Task 2b taught `Canvas::blit` to carry a hotspot; see
+    // `render::table::render_table_node`.
     if ctx.options.copy_button && ctx.table_depth == 0 {
         let occupied = top_edge_occupied(&out, title.as_ref());
         button::place(
@@ -360,6 +535,7 @@ fn code_area(
                 out.add_span(SearchSpan {
                     source_start: origin.start,
                     source_end,
+                    unit: None,
                     row,
                     col: u16::try_from(gutter).unwrap_or(u16::MAX),
                     cols: u16::try_from(drawn).unwrap_or(u16::MAX),

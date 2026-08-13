@@ -6,9 +6,9 @@
 use mdmost::canvas::{BorderSet, Canvas};
 use mdmost::error::MermaidError;
 use mdmost::mermaid::Fit;
-use mdmost::mermaid::ast::Direction;
+use mdmost::mermaid::ast::{Direction, Label};
 use mdmost::mermaid::layout::graph::{
-    self, EdgeSpec, GraphSpec, GroupSpec, NodeIdx, Stroke, Terminator,
+    self, DrawnLabel, EdgeSpec, GraphSpec, GroupSpec, NodeIdx, Stroke, Terminator,
 };
 use mdmost::text::display_width;
 use mdmost::theme::Theme;
@@ -66,7 +66,7 @@ fn build(dir: usize, count: usize, pairs: &[(usize, usize, usize)], grouped: usi
     };
     if grouped > 0 {
         root.children.push(GroupSpec {
-            title: Some(vec!["SUB".to_string()]),
+            title: Some(DrawnLabel::whole(&Label::line("SUB"))),
             nodes: (0..grouped).map(NodeIdx).collect(),
             ..GroupSpec::default()
         });

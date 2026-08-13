@@ -9,8 +9,7 @@
 
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
-    Entity, EntityId, ErAttribute, ErCardinality, ErDiagram, ErKey, ErRelationship, Label,
-    LineStyle,
+    Entity, EntityId, ErAttribute, ErCardinality, ErDiagram, ErKey, ErRelationship, LineStyle,
 };
 
 use crate::mermaid::entity;
@@ -19,11 +18,17 @@ use super::intern;
 use super::lex::{self, Nesting, SrcLine};
 
 /// Parses a whole `erDiagram`.
-pub fn parse(lines: &[SrcLine<'_>]) -> Result<ErDiagram, MermaidError> {
+///
+/// `src` is the full mermaid source `lines` was lexed from; it is kept only so that
+/// label text — always a subslice of it — can report where it came from.
+pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<ErDiagram, MermaidError> {
     let Some((header, body)) = lines.split_first() else {
         return Err(lex::syntax(1, "empty diagram"));
     };
-    let mut builder = Builder::default();
+    let mut builder = Builder {
+        src,
+        ..Builder::default()
+    };
     let (_, rest) = lex::split_word(header.text);
     if !rest.is_empty() {
         builder.line(rest, header.number)?;
@@ -42,15 +47,18 @@ pub fn parse(lines: &[SrcLine<'_>]) -> Result<ErDiagram, MermaidError> {
 
 /// Accumulates entities and relationships.
 #[derive(Debug, Default)]
-struct Builder {
+struct Builder<'a> {
     entities: Vec<Entity>,
     relationships: Vec<ErRelationship>,
     /// The entity whose attribute block is open, and the line it opened on.
     current: Option<EntityId>,
     open: Option<usize>,
+    /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
+    /// offset — every label text this parser touches is a subslice of it.
+    src: &'a str,
 }
 
-impl Builder {
+impl Builder<'_> {
     /// Handles one source line.
     fn line(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         if self.open.is_some() {
@@ -133,7 +141,7 @@ impl Builder {
         let label = label
             .map(lex::unquote)
             .filter(|label| !label.is_empty())
-            .map(Label::parse);
+            .map(|label| lex::label_at(self.src, label));
         Ok(Some(ErRelationship {
             left,
             right,
@@ -151,19 +159,24 @@ impl Builder {
         if let Some(alias) = alias
             && let Some(target) = self.entities.get_mut(id.0)
         {
-            target.alias = Some(entity::decode(alias).into_owned());
+            target.alias = Some(lex::label_at(self.src, alias));
         }
         id
     }
 
     /// Interns an entity name.
     fn intern_entity(&mut self, name: &str) -> EntityId {
+        // The key is the label's visible first line rather than the raw source text, so
+        // that a name written once plainly and once with a character entity is one
+        // entity — the same text is the same entity, which is what an author means.
+        let label = lex::label_at(self.src, name);
+        let key = label.lines.first().cloned().unwrap_or_default();
         EntityId(intern(
             &mut self.entities,
-            name,
-            |entity| entity.name.as_str(),
+            &key,
+            |entity| entity.name.lines.first().map_or("", String::as_str),
             || Entity {
-                name: name.to_string(),
+                name: label.clone(),
                 alias: None,
                 attributes: Vec::new(),
             },
