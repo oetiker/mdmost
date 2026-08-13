@@ -409,3 +409,43 @@ fn render_once_options_still_record_link_hotspots() {
     let spots = render("[docs](https://example.com/a)\n", 60, &dump);
     assert_eq!(spots.len(), 1, "links are not gated on the copy button");
 }
+
+#[test]
+fn a_footnote_marker_records_a_hotspot_over_its_drawn_cells() {
+    let spots = hotspots("text[^note]\n\n[^note]: the note\n", 60);
+    assert_eq!(spots.len(), 1, "the marker is the only control");
+    let (_, _, cols, kind, _) = &spots[0];
+    assert_eq!(*cols, 3, "`[1]` is three columns");
+    assert_eq!(
+        *kind,
+        HotspotKind::Footnote {
+            id: "note".to_string()
+        }
+    );
+}
+
+#[test]
+fn a_footnote_hotspot_carries_the_name_not_the_drawn_number() {
+    // The marker draws `[1]`; the definition is keyed by `note`. A hotspot carrying
+    // "1" would resolve against nothing.
+    let spots = hotspots("a[^alpha] b[^beta]\n\n[^alpha]: A\n\n[^beta]: B\n", 60);
+    let ids: Vec<String> = spots
+        .iter()
+        .filter_map(|(_, _, _, kind, _)| match kind {
+            HotspotKind::Footnote { id } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec!["alpha".to_string(), "beta".to_string()]);
+}
+
+#[test]
+fn a_footnote_definition_body_records_no_marker_hotspot_of_its_own() {
+    // The backref inside a definition is not a reference the reader follows.
+    let spots = hotspots("text[^note]\n\n[^note]: the note\n", 60);
+    assert_eq!(
+        spots.len(),
+        1,
+        "one marker, not one per occurrence: {spots:?}"
+    );
+}

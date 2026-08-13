@@ -432,11 +432,19 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, ids: &mut usize, out: &mu
             ),
             NodeKind::Link { url, .. } => link(node, url, style, ctx, ids, out),
             NodeKind::Image { .. } => image_marker(node, style, ctx, ids, out),
-            NodeKind::FootnoteReference { number, .. } => {
-                out.push(Piece::synthetic(
-                    format!("[{number}]"),
-                    style.patch(theme.text.footnote_ref),
-                ));
+            NodeKind::FootnoteReference { name, number } => {
+                let id = *ids;
+                *ids += 1;
+                let mut piece =
+                    Piece::synthetic(format!("[{number}]"), style.patch(theme.text.footnote_ref));
+                // The hotspot carries the *name* a definition is keyed by, never the
+                // number: the number is only what is drawn (`NodeKind::FootnoteReference`
+                // carries both, `NodeKind::FootnoteDefinition` is keyed by name alone).
+                piece.control = Some(Control {
+                    id,
+                    kind: HotspotKind::Footnote { id: name.clone() },
+                });
+                out.push(piece);
             }
             // One marker per inline run is enough to say "HTML was dropped here";
             // `<b>x</b>` would otherwise bracket its own text with two of them. The
