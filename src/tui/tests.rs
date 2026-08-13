@@ -1686,9 +1686,9 @@ fn an_anchor_scrolls_its_heading_to_the_top_row() {
         "filler\n\n".repeat(40)
     );
     let mut app = pager_at(&doc, 60, 10);
-    app.activate(HotspotKind::Anchor {
+    app.activate(activation(HotspotKind::Anchor {
         slug: "target".to_string(),
-    });
+    }));
     let rows = framed(&mut app, 60, 10);
     assert!(
         rows[0].contains("Target"),
@@ -1704,9 +1704,9 @@ fn a_duplicate_heading_resolves_to_the_right_one() {
         "filler\n\n".repeat(40)
     );
     let mut app = pager_at(&doc, 60, 10);
-    app.activate(HotspotKind::Anchor {
+    app.activate(activation(HotspotKind::Anchor {
         slug: "setup-1".to_string(),
-    });
+    }));
     let rows = framed(&mut app, 60, 10);
     assert!(
         rows.iter().any(|row| row.contains("second")),
@@ -1721,9 +1721,9 @@ fn an_unknown_anchor_reports_and_does_not_move() {
     // about the anchor, not about the bar's unrelated elision policy.
     let mut app = pager_at("# A\n\nbody\n", 80, 10);
     let before = app.scroll();
-    app.activate(HotspotKind::Anchor {
+    app.activate(activation(HotspotKind::Anchor {
         slug: "nope".to_string(),
-    });
+    }));
     assert_eq!(app.scroll(), before, "it must scroll nowhere");
     let rows = framed(&mut app, 80, 10);
     let status = rows.last().expect("a status row");
@@ -6722,4 +6722,430 @@ fn a_reflow_drops_the_cursor() {
     app.resize(40, 10);
     let _ = app.canvas();
     assert!(app.cursor_target().is_none());
+}
+
+// ---------------------------------------------------------------------------
+// The footnote popup (Task 9b). Design spec §6.
+//
+// Every geometric assertion below is read off the **painted frame** — the box's own
+// corner glyphs — rather than recomputed from `popup::place`. A test that ran the
+// implementation's arithmetic a second time would agree with any mistake in it.
+// ---------------------------------------------------------------------------
+
+/// An activation of `kind` at the top-left cell, for the call sites that do not care
+/// where the control was.
+fn activation(kind: HotspotKind) -> super::app::Activation {
+    super::app::Activation {
+        row: 0,
+        col: 0,
+        kind,
+    }
+}
+
+/// The viewport cell `needle` starts in on the painted frame, or `None`.
+///
+/// [`painted_at`]'s non-panicking twin, for the helpers that paint repeatedly while
+/// looking for the position they want.
+fn found_on_frame(app: &mut App, width: u16, height: u16, needle: &str) -> Option<(u16, u16)> {
+    let rows = framed(app, width, height);
+    rows.iter().enumerate().find_map(|(y, line)| {
+        let at = line.find(needle)?;
+        Some((
+            u16::try_from(crate::text::display_width(&line[..at])).ok()?,
+            u16::try_from(y).ok()?,
+        ))
+    })
+}
+
+/// The popup's box as the reader sees it: `(left, top, width, height)`, in cells.
+///
+/// Read from the corner glyphs the border actually painted, which is why the documents
+/// these tests use are plain prose — a code fence or a table in one would draw the same
+/// rounded corners and this would find those instead.
+fn popup_box(app: &mut App, width: u16, height: u16) -> (u16, u16, u16, u16) {
+    let rows = framed(app, width, height);
+    let corner = |glyph: char| -> Option<(u16, u16)> {
+        rows.iter().enumerate().find_map(|(y, line)| {
+            let at = line.find(glyph)?;
+            Some((
+                u16::try_from(crate::text::display_width(&line[..at])).ok()?,
+                u16::try_from(y).ok()?,
+            ))
+        })
+    };
+    let (left, top) = corner('\u{256d}').unwrap_or_else(|| panic!("no popup drawn: {rows:?}"));
+    let (right, _) = corner('\u{256e}').expect("a top-right corner");
+    let (_, bottom) = corner('\u{2570}').expect("a bottom-left corner");
+    (left, top, right - left + 1, bottom - top + 1)
+}
+
+/// The text drawn inside the popup's border, one string per row.
+fn popup_text_of(app: &mut App, width: u16, height: u16) -> Vec<String> {
+    let (left, top, box_width, box_height) = popup_box(app, width, height);
+    let rows = framed(app, width, height);
+    (top + 1..top + box_height - 1)
+        .map(|y| {
+            rows[usize::from(y)]
+                .chars()
+                .skip(usize::from(left) + 1)
+                .take(usize::from(box_width) - 2)
+                .collect::<String>()
+        })
+        .collect()
+}
+
+/// Opens the footnote the way a reader with a mouse does: press and release on the
+/// drawn `[1]` marker, through the event loop's own dispatch.
+///
+/// Nothing here reaches past `term::on_mouse`, so the whole wire — hit test, click state
+/// machine, `term::activate`, `App::activate` — is under test in every one of these.
+fn open_footnote(source: &str, width: u16, height: u16) -> App {
+    let mut app = pager_at(source, width, height);
+    let (x, y) = painted_at(&mut app, width, height, "[1]");
+    super::term::on_mouse(&mut app, press_at(x, y), width, height);
+    super::term::on_mouse(&mut app, release_at(x, y), width, height);
+    assert!(
+        app.popup().is_some(),
+        "the marker drawn at ({x}, {y}) did not open a popup"
+    );
+    app
+}
+
+#[test]
+fn a_popup_sizes_itself_to_its_content_up_to_the_cap() {
+    // A one-line note gets a small box; a very long one stops at the cap rather than
+    // growing to the screen.
+    let mut small = open_footnote("a[^n]\n\n[^n]: short\n", 80, 24);
+    let (_, _, small_width, small_height) = popup_box(&mut small, 80, 24);
+    let long = format!("a[^n]\n\n[^n]: {}\n", "word ".repeat(400));
+    let mut large = open_footnote(&long, 80, 24);
+    let (left, top, large_width, large_height) = popup_box(&mut large, 80, 24);
+
+    assert!(
+        small_height < large_height,
+        "content decides the height: {small_height} vs {large_height}"
+    );
+    assert!(
+        small_width < large_width,
+        "and the width: {small_width} vs {large_width}"
+    );
+    assert!(
+        large_height <= super::popup::MAX_HEIGHT,
+        "the height cap holds: {large_height}"
+    );
+    assert!(
+        large_width <= super::popup::MAX_WIDTH,
+        "the width cap holds: {large_width}"
+    );
+    // Never off the screen, which is the property both caps are in service of.
+    assert!(left + large_width <= 80 && top + large_height <= 23);
+}
+
+#[test]
+fn a_popup_near_the_bottom_flips_above_the_marker() {
+    // The marker is put on the last row that can hold it, so below is impossible.
+    let source = format!(
+        "{}\nThe sentence with the note in it[^n].\n\n[^n]: a note worth reading\n",
+        "filler paragraph\n\n".repeat(60)
+    );
+    let mut app = pager_at(&source, 80, 24);
+    let (x, y) = lowest_marker(&mut app, 80, 24);
+    super::term::on_mouse(&mut app, press_at(x, y), 80, 24);
+    super::term::on_mouse(&mut app, release_at(x, y), 80, 24);
+    assert!(app.popup().is_some(), "the marker did not open a popup");
+
+    let (_, top, _, height) = popup_box(&mut app, 80, 24);
+    let body = 23u16;
+    assert!(
+        y + 1 + height > body,
+        "the marker at row {y} must leave no room below for a {height}-row box, \
+         or this test proves nothing"
+    );
+    assert!(top < y, "it must open upwards: top {top}, marker {y}");
+    assert!(top + height <= body, "and stay on screen: {top} + {height}");
+}
+
+/// Scrolls the document until the `[1]` marker sits as far down the viewport as it goes,
+/// and answers where it ended up.
+///
+/// A search over painted frames rather than arithmetic over canvas rows: what the flip
+/// has to react to is where the marker *is on screen*, and that is the only thing here
+/// that knows.
+fn lowest_marker(app: &mut App, width: u16, height: u16) -> (u16, u16) {
+    let mut best: Option<(u16, u16, usize)> = None;
+    for scroll in 0..=app.max_scroll() {
+        app.scroll_to(scroll);
+        if let Some((x, y)) = found_on_frame(app, width, height, "[1]")
+            && best.is_none_or(|(_, seen, _)| y >= seen)
+        {
+            best = Some((x, y, scroll));
+        }
+    }
+    let (x, y, scroll) = best.expect("the marker is drawn somewhere");
+    app.scroll_to(scroll);
+    (x, y)
+}
+
+#[test]
+fn a_popup_near_the_right_edge_flips_left() {
+    // The paragraph is padded until the marker sits as far right as the wrap will put
+    // it — found by looking at painted frames, not by computing where the wrap lands.
+    let (source, x, y) = rightmost_marker(80, 24);
+    let mut app = pager_at(&source, 80, 24);
+    super::term::on_mouse(&mut app, press_at(x, y), 80, 24);
+    super::term::on_mouse(&mut app, release_at(x, y), 80, 24);
+    assert!(app.popup().is_some(), "the marker did not open a popup");
+
+    let (left, _, width, _) = popup_box(&mut app, 80, 24);
+    let screen = app.viewport_width();
+    assert!(
+        x + width > screen,
+        "the marker at column {x} must leave no room for a {width}-column box, \
+         or this test proves nothing"
+    );
+    assert!(left < x, "it must open leftwards: left {left}, marker {x}");
+    assert!(
+        left + width <= screen,
+        "and stay on screen: {left} + {width} in {screen}"
+    );
+}
+
+/// The padding that puts the marker furthest right, and where it lands.
+fn rightmost_marker(width: u16, height: u16) -> (String, u16, u16) {
+    let mut best: Option<(String, u16, u16)> = None;
+    for pad in 0..40 {
+        // The note is long enough for a box that cannot fit beside a marker near the
+        // right edge — a one-word note would sit there quite happily and the flip
+        // would never be asked for.
+        let source = format!(
+            "{}z[^n]\n\n[^n]: a note long enough to need room\n",
+            "zz ".repeat(pad)
+        );
+        let mut app = pager_at(&source, width, height);
+        if let Some((x, y)) = found_on_frame(&mut app, width, height, "[1]")
+            && best.as_ref().is_none_or(|(_, seen, _)| x >= *seen)
+        {
+            best = Some((source, x, y));
+        }
+    }
+    best.expect("the marker is drawn somewhere")
+}
+
+#[test]
+fn a_footnote_with_a_list_in_it_renders_through_the_ordinary_renderer() {
+    // The proof that this is "another width", not a second rendering path: nothing in
+    // `tui::popup` knows what a list is, and the note draws one anyway.
+    let mut app = open_footnote("a[^n]\n\n[^n]: intro\n\n    - one\n    - two\n", 80, 24);
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(text.contains("one") && text.contains("two"), "{text:?}");
+    assert!(
+        text.contains('*'),
+        "the list drew its markers — `render::glyphs` bullets depth 0 as `*`: {text:?}"
+    );
+    assert!(text.contains("intro"), "and the prose before it: {text:?}");
+}
+
+#[test]
+fn a_long_footnote_scrolls_inside_the_popup() {
+    let source = format!("a[^n]\n\n[^n]: {}\n", "line\n\n    ".repeat(60));
+    let mut app = open_footnote(&source, 80, 24);
+    let first = popup_text_of(&mut app, 80, 24);
+    app.scroll_popup(3);
+    let after = popup_text_of(&mut app, 80, 24);
+    assert_ne!(first, after, "the wheel moved the note, not the document");
+    assert_eq!(app.scroll(), 0, "and the document underneath did not move");
+}
+
+#[test]
+fn the_wheel_over_the_popup_scrolls_the_note_and_not_the_document() {
+    // The wire the test above hangs off. A notch that reached `App::on_scroll` would
+    // move the document — and, by the dismissal rule, close the very note the reader is
+    // scrolling.
+    let source = format!(
+        "a[^n]\n\n{}\n[^n]: {}\n",
+        "filler\n\n".repeat(40),
+        "line\n\n    ".repeat(60)
+    );
+    let mut app = open_footnote(&source, 80, 24);
+    let before = popup_text_of(&mut app, 80, 24);
+    let (left, top, _, _) = popup_box(&mut app, 80, 24);
+    super::term::on_mouse(
+        &mut app,
+        button_event(
+            crossterm::event::MouseEventKind::ScrollDown,
+            left + 1,
+            top + 1,
+        ),
+        80,
+        24,
+    );
+    assert!(app.popup().is_some(), "the note is still up");
+    assert_eq!(app.scroll(), 0, "the document did not move");
+    assert_ne!(popup_text_of(&mut app, 80, 24), before, "the note did move");
+}
+
+#[test]
+fn the_wheel_outside_the_popup_still_scrolls_the_document() {
+    // The counterweight: routing the wheel to the note must not swallow every notch.
+    let source = format!("a[^n]\n\n{}\n[^n]: a note\n", "filler\n\n".repeat(40));
+    let mut app = open_footnote(&source, 80, 24);
+    let (left, _, _, _) = popup_box(&mut app, 80, 24);
+    assert!(left > 0, "the box leaves a column to aim at");
+    super::term::on_mouse(
+        &mut app,
+        button_event(crossterm::event::MouseEventKind::ScrollDown, 0, 22),
+        80,
+        24,
+    );
+    assert!(app.scroll() > 0, "the document scrolled");
+    assert!(app.popup().is_none(), "and that dismissed the note");
+}
+
+#[test]
+fn links_inside_a_popup_are_inert() {
+    // Design spec §1.1. Both halves: the note's own link offers no control, and the
+    // document's links *underneath* the box are covered by it — a click aimed at a
+    // footnote must never open a browser.
+    let source = format!(
+        "[body](https://example.com/b) a[^n]\n\n{}\n[^n]: see [x](https://example.com/a)\n",
+        "[under](https://example.com/u)\n\n".repeat(12)
+    );
+    let mut app = open_footnote(&source, 80, 24);
+    let (left, top, width, height) = popup_box(&mut app, 80, 24);
+    for y in top..top + height {
+        for x in left..left + width {
+            assert!(
+                app.press_hotspot(x, y),
+                "the popup claims the press at ({x}, {y})"
+            );
+            assert!(
+                app.release_hotspot(x, y).is_none(),
+                "no control fires inside the popup at ({x}, {y})"
+            );
+            app.set_pointer(x, y);
+            assert!(
+                app.hovered().is_none(),
+                "nothing lights under the popup at ({x}, {y})"
+            );
+            assert!(app.popup().is_some(), "and the popup stays up");
+        }
+    }
+}
+
+#[test]
+fn esc_dismisses_the_popup_and_does_not_quit() {
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
+    app.on_key(Key::plain(KeyCode::Esc));
+    assert!(app.popup().is_none());
+    assert!(!app.should_quit(), "Esc never quits");
+}
+
+#[test]
+fn scrolling_the_document_dismisses_the_popup() {
+    let source = format!("a[^n]\n\n{}\n[^n]: note\n", "filler\n\n".repeat(40));
+    let mut app = open_footnote(&source, 80, 24);
+    app.on_scroll(1, false);
+    assert!(app.popup().is_none(), "the anchor moved, so the popup goes");
+}
+
+#[test]
+fn a_reflow_dismisses_the_popup() {
+    // Same reason: the box is anchored to the cell its marker was drawn in, and a
+    // reflow moves every cell.
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
+    app.resize(60, 24);
+    let _ = app.canvas();
+    assert!(app.popup().is_none());
+}
+
+#[test]
+fn a_click_outside_dismisses_the_popup() {
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
+    let (x, y) = a_cell_outside_the_popup(&mut app, 80, 24);
+    app.press_hotspot(x, y);
+    assert!(app.popup().is_none());
+}
+
+/// A document-area cell the popup does not cover.
+fn a_cell_outside_the_popup(app: &mut App, width: u16, height: u16) -> (u16, u16) {
+    let (left, top, box_width, box_height) = popup_box(app, width, height);
+    for y in 0..height - 1 {
+        for x in 0..width - 1 {
+            let inside = x >= left && x < left + box_width && y >= top && y < top + box_height;
+            if !inside {
+                return (x, y);
+            }
+        }
+    }
+    panic!("the popup covers the whole document area");
+}
+
+#[test]
+fn an_unknown_footnote_reports_and_opens_nothing() {
+    // The status bar never lies. 200 columns: the notice rides in `Drop::Context`, the
+    // cheapest-priority segment of the bar, which is dropped for width at 60 and at 100
+    // — so a narrower buffer would assert on a notice that was never drawn.
+    let mut app = pager_at("a[^n]\n\n[^n]: note\n", 200, 24);
+    app.activate(activation(HotspotKind::Footnote {
+        id: "missing".to_string(),
+    }));
+    assert!(app.popup().is_none());
+    let rows = framed(&mut app, 200, 24);
+    let status = rows.last().expect("a status row");
+    assert!(
+        status.contains("missing"),
+        "the notice must name the footnote it could not find: {status:?}"
+    );
+}
+
+#[test]
+fn the_keyboard_opens_the_same_popup_the_pointer_does() {
+    // Design spec §1: everything is reachable from the keyboard as well as the mouse.
+    // `f` steps the cursor onto the marker — the only control in this document — and
+    // `enter` fires it through `KeyOutcome`, exactly as a release fires it.
+    let mut app = pager_at("a[^n]\n\n[^n]: a note\n", 80, 24);
+    app.on_key(Key::char('f'));
+    assert!(app.cursor_target().is_some(), "the cursor found the marker");
+    let outcome = app.on_key(Key::plain(KeyCode::Enter));
+    let fired = outcome.into_activation().expect("enter fired the marker");
+    app.activate(fired);
+    assert!(app.popup().is_some(), "the keyboard route opens the popup");
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(text.contains("a note"), "and it holds the note: {text:?}");
+}
+
+#[test]
+fn the_popup_is_not_modal() {
+    // The reason it is not an `Overlay`: a prompt and the help overlay take every key
+    // before the bindings are consulted, and this must not. `q` still quits.
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
+    app.on_key(Key::char('q'));
+    assert!(app.should_quit(), "q still quits with a popup up");
+}
+
+#[test]
+fn the_cursor_keys_scroll_the_note_while_it_is_up() {
+    // Design spec §6: "the wheel over the popup, or the cursor keys while it is open".
+    // Without this the one key a reader reaches for would scroll the document and, by
+    // the dismissal rule, close the note.
+    let source = format!(
+        "a[^n]\n\n{}\n[^n]: {}\n",
+        "filler\n\n".repeat(40),
+        "line\n\n    ".repeat(60)
+    );
+    let mut app = open_footnote(&source, 80, 24);
+    let before = popup_text_of(&mut app, 80, 24);
+    app.act(Action::LineDown);
+    assert_eq!(app.scroll(), 0, "the document stayed where it was");
+    assert!(app.popup().is_some(), "and the note stayed up");
+    assert_ne!(popup_text_of(&mut app, 80, 24), before, "the note moved");
+}
+
+#[test]
+fn a_popup_holding_a_code_span_keeps_the_renderer_s_own_styling() {
+    // The other half of "it is another width": inline formatting arrives without this
+    // module having an opinion about it.
+    let mut app = open_footnote("a[^n]\n\n[^n]: a `token` in a note\n", 80, 24);
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(text.contains("token"), "{text:?}");
 }

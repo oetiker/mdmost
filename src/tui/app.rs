@@ -15,6 +15,7 @@ use crate::toc::{FilterHit, Toc};
 
 use super::cache::RenderCache;
 use super::draw::Offsets;
+use super::popup::{self, Popup};
 use super::select::{Extract, Pos, Selection};
 
 /// The narrowest terminal the table-of-contents pane is offered in.
@@ -42,6 +43,24 @@ pub const FLASH_FOR: u64 = 600;
 /// Whether `key` is a bare digit, and so part of a repeat count.
 fn is_count_digit(key: Key) -> bool {
     matches!(key.code, KeyCode::Char(ch) if ch.is_ascii_digit()) && key.mods.is_empty()
+}
+
+/// How far `action` scrolls a footnote popup, or `None` if it is not a movement key.
+///
+/// The movement keys only. `Top` and `Bottom` are deliberately *not* here: a reader who
+/// presses `G` with a popup up means the end of the document, and taking them would make
+/// the popup modal in the one way it is not (see [`Overlay`]).
+fn popup_scroll(action: Action, height: usize, times: usize) -> Option<isize> {
+    let rows = |per: usize| isize::try_from(per.saturating_mul(times)).unwrap_or(isize::MAX);
+    match action {
+        Action::LineDown => Some(rows(1)),
+        Action::LineUp => Some(-rows(1)),
+        Action::HalfPageDown => Some(rows((height / 2).max(1))),
+        Action::HalfPageUp => Some(-rows((height / 2).max(1))),
+        Action::PageDown => Some(rows(height.saturating_sub(1).max(1))),
+        Action::PageUp => Some(-rows(height.saturating_sub(1).max(1))),
+        _ => None,
+    }
 }
 
 /// Which pane the keyboard is talking to.
@@ -128,6 +147,24 @@ impl PromptKind {
 }
 
 /// The overlay currently covering the document, if any.
+///
+/// # Why the footnote popup is not one of these
+///
+/// It lives beside this enum, in [`App::popup`], and the difference is not cosmetic.
+///
+/// * **These are modal; the popup is not.** [`App::on_key`] routes *every* key to the
+///   prompt or the help overlay before the bindings are consulted. The popup must not
+///   do that: `q` still quits, `/` still searches, and scrolling the document is how the
+///   reader *dismisses* the popup — a key path that could not exist if the popup owned
+///   the keyboard the way these two do.
+/// * **These fill the screen; the popup is anchored to a cell.** It carries a rectangle,
+///   a rendered canvas and a scroll offset, and it must stay on the document area it is
+///   anchored inside. None of that has a meaning for `Help` or `Prompt`.
+/// * **An enum is one-at-a-time.** A popup and a prompt can be up together — the reader
+///   opens a footnote and then presses `/` — and the help overlay deliberately covers
+///   the popup. Making them variants of one type would forbid combinations nobody asked
+///   to forbid, and would put a [`Canvas`] inside a `Clone + PartialEq` enum that
+///   [`App::on_key`] clones on every keystroke at a prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Overlay {
     /// Nothing is covering the document.
@@ -217,6 +254,12 @@ pub struct App {
     toc_filter: String,
     toc_hits: Vec<FilterHit>,
     overlay: Overlay,
+    /// The footnote popup that is up, if any. See [`Overlay`] for why it is not one.
+    ///
+    /// Dropped by anything that moves the marker it is anchored to — a document scroll,
+    /// a horizontal scroll, a reflow — because a box pointing at a sentence that is no
+    /// longer under it is worse than no box (design spec §6).
+    popup: Option<Popup>,
     /// The first help row on screen, for a help overlay taller than the terminal.
     help_scroll: usize,
     /// The digits typed in front of a movement key, `less`-style.
@@ -325,6 +368,7 @@ impl App {
             toc_filter: String::new(),
             toc_hits: Vec::new(),
             overlay: Overlay::None,
+            popup: None,
             help_scroll: 0,
             pending_count: String::new(),
             notice,
@@ -686,6 +730,10 @@ impl App {
     /// was touched. A press anywhere else on the track jumps there first and then
     /// grabs, so the reader can carry straight on dragging.
     pub fn scrollbar_press(&mut self, height: u16, row: u16) {
+        // The scrollbar is outside the popup, and a click outside dismisses it. Said
+        // here rather than left to the scroll that usually follows, because grabbing the
+        // thumb without moving it scrolls nothing and would otherwise leave the box up.
+        self.close_popup();
         self.ensure_rendered();
         let (start, length) = self.scrollbar_thumb(height);
         let top = usize::from(row) * 2;
@@ -847,8 +895,25 @@ impl App {
             // caused (a resize, a toggled option) and the click is theirs to repeat; a
             // click that fired the wrong link would not be.
             self.pressed = None;
+            // And the footnote popup, one step further still: it is anchored to the cell
+            // its marker was drawn in, and a reflow moves that cell. The box would keep
+            // its place on screen while the sentence it belongs to moved out from under
+            // it.
+            self.popup = None;
             self.clamp();
         }
+    }
+
+    /// Puts away anything anchored to a document cell, because the document just moved.
+    ///
+    /// Called by every path that changes where the document sits under the viewport —
+    /// the vertical scroll, the horizontal scroll, and (in [`App::ensure_rendered`]) a
+    /// reflow. Design spec §6 lists "scrolling the document" as one of the three ways a
+    /// footnote popup is dismissed, and the reason is the anchor: the box points at the
+    /// marker it was opened from, and a box left pointing at whatever has scrolled into
+    /// that cell would be a claim about the document that is no longer true.
+    fn moved_document(&mut self) {
+        self.popup = None;
     }
 
     /// Clamps the scroll offsets into range.
@@ -883,6 +948,7 @@ impl App {
 
     /// Scrolls by `delta` rows, clamped at both ends.
     pub fn scroll_by(&mut self, delta: isize) {
+        self.moved_document();
         self.ensure_rendered();
         let max = self.max_scroll();
         let target = if delta >= 0 {
@@ -896,6 +962,7 @@ impl App {
 
     /// Puts `row` at the top of the viewport, clamped.
     pub fn scroll_to(&mut self, row: usize) {
+        self.moved_document();
         self.ensure_rendered();
         self.scroll = row.min(self.max_scroll());
         self.track_toc();
@@ -903,6 +970,7 @@ impl App {
 
     /// Brings `row` into view, leaving a little context above it when scrolling up.
     pub fn reveal(&mut self, row: usize) {
+        self.moved_document();
         self.ensure_rendered();
         let height = self.viewport_height();
         let margin = (height / 5).min(3);
@@ -922,6 +990,7 @@ impl App {
     /// readable in its surroundings. A row already comfortably on screen is left
     /// where it is, so stepping through nearby matches does not lurch.
     pub fn reveal_centered(&mut self, row: usize) {
+        self.moved_document();
         self.ensure_rendered();
         let height = self.viewport_height();
         let margin = (height / 4).max(1);
@@ -1076,6 +1145,18 @@ impl App {
     pub fn act_with_count(&mut self, action: Action, count: Option<usize>) {
         let height = self.viewport_height();
         let times = count.unwrap_or(1).max(1);
+        // "Long footnotes scroll: the wheel over the popup, **or the cursor keys while
+        // it is open**" (design spec §6). Only the movement keys are taken, and only
+        // while a popup is up: everything else — `q`, `/`, `f`, `Esc` — still reaches
+        // the document, which is the whole difference between this and an `Overlay`.
+        // Without this the one key a reader would try to scroll a long note with would
+        // scroll the document instead and, by doing so, dismiss the note.
+        if self.popup.is_some()
+            && let Some(delta) = popup_scroll(action, height, times)
+        {
+            self.scroll_popup(delta);
+            return;
+        }
         let lines =
             |per: usize| -> isize { isize::try_from(per.saturating_mul(times)).unwrap_or(0) };
         match action {
@@ -1112,11 +1193,15 @@ impl App {
             // document behind it.
             Action::CursorNext | Action::CursorPrev => {}
             Action::ScrollLeft => {
+                // Sideways is still the document moving under the anchor, so the popup
+                // goes for the same reason it does on a vertical scroll.
+                self.moved_document();
                 self.hscroll = self
                     .hscroll
                     .saturating_sub(HSCROLL_STEP.saturating_mul(u16::try_from(times).unwrap_or(1)));
             }
             Action::ScrollRight => {
+                self.moved_document();
                 self.ensure_rendered();
                 self.hscroll = self
                     .hscroll
@@ -1233,7 +1318,14 @@ impl App {
     /// on purpose. `Esc` therefore peels state off one layer at a time and, when
     /// there is nothing left to peel, says so.
     fn cancel(&mut self) {
-        // Outermost layer, and the newest: a reader steps the keyboard cursor onto a
+        // The outermost layer of all: a box drawn over the document, which is the one
+        // piece of state here the reader can see the edges of. `Esc` never quits (design
+        // spec §10), which is exactly what leaves it free to close this.
+        if self.popup.take().is_some() {
+            self.notify("footnote closed", false);
+            return;
+        }
+        // Then the newest: a reader steps the keyboard cursor onto a
         // control to look at it, and `Esc` is how they say "never mind" without
         // following it — the same standing this gives a fresh selection just below.
         if self.cursor.take().is_some() {
@@ -1424,10 +1516,123 @@ impl App {
     /// test can drive them without a terminal. Task 9 gives `Footnote` its behaviour;
     /// until then it is recognised and does nothing, the same stance `term::activate`
     /// took for `Anchor` before this task.
-    pub fn activate(&mut self, kind: HotspotKind) {
-        if let HotspotKind::Anchor { slug } = kind {
-            self.activate_anchor(&slug);
+    ///
+    /// # Why the whole [`Activation`] and not just its kind
+    ///
+    /// **Changed 2026-08-13 (Task 9b).** A footnote popup is anchored to the marker that
+    /// opened it, so *where* the control was drawn is part of what activating it means —
+    /// and the row and column were already in hand at both call sites, the mouse's and
+    /// the keyboard's. Passing the kind alone would have meant a second hit test here to
+    /// find the control the caller had just resolved.
+    pub fn activate(&mut self, activation: Activation) {
+        match activation.kind {
+            HotspotKind::Anchor { slug } => self.activate_anchor(&slug),
+            HotspotKind::Footnote { id } => {
+                self.open_footnote(&id, activation.row, activation.col);
+            }
+            // `Copy` and `Open` touch the clipboard and the display server, which the
+            // state machine may not (design spec §13); `super::term::activate` owns them.
+            HotspotKind::Copy { .. } | HotspotKind::Open { .. } => {}
         }
+    }
+
+    /// Opens the popup holding the footnote named `id`, anchored to the marker drawn at
+    /// canvas `(row, col)`.
+    ///
+    /// # The note comes from the ordinary renderer
+    ///
+    /// [`crate::render::render_blocks`] lays out the definition's children at the box's
+    /// inner width — the same `render_sequence` walk
+    /// [`crate::render::render_document`] enters for every top-level block of the page,
+    /// entered one level down. That is the whole of the popup's rendering: a popup is
+    /// *another width*, not a second rendering path, so a list, a code span or a table
+    /// inside a footnote is laid out by the code that lays them out everywhere else.
+    ///
+    /// `render_document` itself is the wrong entry point here despite what the brief
+    /// said, and for a mundane reason: it takes a whole [`Doc`], and a footnote
+    /// definition is a node inside one. It would also apply the document's own side
+    /// margins, its lone-`#` title banner and its section numbering to the inside of a
+    /// popup — three whole-document decisions that a footnote is not a document for.
+    ///
+    /// # The status bar never lies
+    ///
+    /// A name matching no definition names itself in the notice and opens nothing, the
+    /// same stance [`App::activate_anchor`] takes for a slug that matches no heading.
+    fn open_footnote(&mut self, id: &str, row: usize, col: u16) {
+        self.ensure_rendered();
+        if popup::definition(self.doc.root(), id).is_none() {
+            self.notify(format!("no footnote named {id}"), true);
+            return;
+        }
+        let screen = (self.viewport_width(), self.popup_screen_height());
+        if !popup::fits(screen) {
+            self.notify("the terminal is too small for a footnote popup", false);
+            return;
+        }
+        // A control the reader stepped to with `f`/`F` may be off screen, and a box
+        // anchored to a cell that is not on the viewport would be a box pointing
+        // nowhere. Bringing the marker into view first is what makes the keyboard route
+        // land the same box the pointer route does.
+        if self.viewport_cell(row, col).is_none() {
+            self.reveal(row);
+            self.ensure_rendered();
+        }
+        let anchor = self.viewport_cell(row, col).unwrap_or((0, 0));
+        let width = popup::inner_width(screen.0);
+        // `copy_button: false`, whatever the pager is running with: a `[copy]` on a code
+        // fence inside the popup would be a control, and controls inside a popup are
+        // inert (design spec §1.1). A button that cannot be pressed is worse than no
+        // button (§4), so the renderer is told not to draw one.
+        let options = RenderOptions {
+            copy_button: false,
+            ..self.render_options()
+        };
+        let (canvas, label) = {
+            let Some(node) = popup::definition(self.doc.root(), id) else {
+                return;
+            };
+            let label = match &node.kind {
+                crate::doc::NodeKind::FootnoteDefinition { name, number } => {
+                    crate::render::block::footnote_label(name, *number)
+                }
+                _ => id.to_string(),
+            };
+            (
+                crate::render::render_blocks(&node.children, width, &self.theme, &options),
+                label,
+            )
+        };
+        self.popup = Some(Popup::new(canvas, label, anchor, screen, self.theme.base()));
+    }
+
+    /// The rows of the document area a popup may occupy.
+    ///
+    /// The viewport, not the terminal: the status bar is not a place a box may cover,
+    /// and neither is the row the marker itself is on when the box opens downwards.
+    fn popup_screen_height(&self) -> u16 {
+        u16::try_from(self.viewport_height()).unwrap_or(u16::MAX)
+    }
+
+    /// Where canvas cell `(row, col)` is drawn in the document area, when it is drawn.
+    ///
+    /// The painter's own arithmetic, run forwards: [`Offsets::x_of`] is what
+    /// [`super::draw`] positions every highlight with, so a popup can never disagree
+    /// with the pixels about which cell its marker was in. `None` for a cell that is
+    /// off the top or bottom of the viewport, behind a pinned prefix, or past the
+    /// right-hand rail.
+    fn viewport_cell(&self, row: usize, col: u16) -> Option<(u16, u16)> {
+        let y = u16::try_from(row.checked_sub(self.scroll)?).ok()?;
+        if usize::from(y) >= self.viewport_height() {
+            return None;
+        }
+        let offsets = Offsets::scrolled_to(
+            self.reach(),
+            self.pinned(),
+            self.hscroll,
+            self.viewport_width(),
+        );
+        let x = offsets.x_of(row, col)?;
+        (x < offsets.content()).then_some((x, y))
     }
 
     /// Scrolls the heading `slug` names to the top row, or says it found none.
@@ -1821,6 +2026,16 @@ impl App {
     /// button is — the thing [`App::hotspot_at`]'s note about `canvas_pos` is careful
     /// about, one level further out.
     fn hotspot_index_at(&self, x: u16, y: u16) -> Option<usize> {
+        // The popup covers the document, so the controls under it are covered too:
+        // nothing beneath the box lights, presses or fires. One guard rather than three,
+        // because a press, a release and a hover that disagreed about what the box hides
+        // would be a link that highlights through a popup and then opens a browser from
+        // a click the reader aimed at a footnote. Links drawn *inside* the popup are
+        // inert for the same reason from the other side (design spec §1.1): the note's
+        // own canvas is never consulted here at all.
+        if self.popup_contains(x, y) {
+            return None;
+        }
         let pos = self.canvas_pos(x, y);
         self.cache.canvas().hotspots().iter().position(|spot| {
             spot.row == pos.row
@@ -1851,8 +2066,24 @@ impl App {
     /// The candidate is replaced, never merged. Two presses without a release cannot
     /// happen from one mouse, but a caller that managed it would get the later one, which
     /// is the one the hand is on.
+    ///
+    /// # A press while a footnote popup is up
+    ///
+    /// Inside the box, the popup swallows it: no control fires, no selection starts, and
+    /// the popup stays. Outside it, the popup is dismissed (design spec §6) and the press
+    /// then does what it always did — the click is not eaten by the dismissal, because a
+    /// reader who clicks a link beside an open note means to follow it.
     pub fn press_hotspot(&mut self, x: u16, y: u16) -> bool {
         self.ensure_rendered();
+        if self.popup.is_some() {
+            if self.popup_contains(x, y) {
+                // Claimed outright, exactly as a `[copy]` button claims one: there is no
+                // document text under the box to select.
+                self.pressed = None;
+                return true;
+            }
+            self.close_popup();
+        }
         let Some(spot) = self.hotspot_at(x, y) else {
             self.pressed = None;
             return false;
@@ -2030,6 +2261,41 @@ impl App {
             col: spot.col,
             kind: spot.kind.clone(),
         })
+    }
+
+    /// The footnote popup that is up, if any.
+    ///
+    /// Read by [`super::draw`], which paints it, and by [`super::term`], which routes
+    /// the wheel to whichever of the note and the document the pointer is over.
+    pub fn popup(&self) -> Option<&Popup> {
+        self.popup.as_ref()
+    }
+
+    /// Whether document-area cell `(x, y)` is covered by the popup.
+    pub fn popup_contains(&self, x: u16, y: u16) -> bool {
+        self.popup
+            .as_ref()
+            .is_some_and(|popup| popup.contains(x, y))
+    }
+
+    /// Scrolls the note inside the popup by `delta` rows, clamped at both ends.
+    ///
+    /// **The note moves; the document does not.** A wheel notch over the popup that
+    /// scrolled the page would scroll the marker out from under the box and, by the
+    /// dismissal rule, close the very note the reader was trying to read.
+    pub fn scroll_popup(&mut self, delta: isize) {
+        if let Some(popup) = self.popup.as_mut() {
+            popup.scroll_by(delta);
+        }
+    }
+
+    /// Puts the popup away, for a click that landed outside it.
+    ///
+    /// No notice: a click elsewhere is the reader getting on with something, and a
+    /// status bar that announced it would be saying what they can already see. `Esc`
+    /// does say so, because there the box is all that press did.
+    fn close_popup(&mut self) {
+        self.popup = None;
     }
 
     /// Records that the control at canvas `(row, col)` was just used.

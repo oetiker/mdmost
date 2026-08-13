@@ -383,8 +383,27 @@ pub(super) fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16
                 app.clear_pointer()
             };
         }
-        MouseEventKind::ScrollDown => app.on_scroll(1, in_toc),
-        MouseEventKind::ScrollUp => app.on_scroll(-1, in_toc),
+        // The wheel over an open footnote popup scrolls **the note, not the document**
+        // (design spec §6). It has to: a document scroll dismisses the popup, so a
+        // notch that reached `App::on_scroll` would close the note the reader was
+        // trying to read further into. Outside the box the wheel means what it always
+        // did.
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+            let delta = if event.kind == MouseEventKind::ScrollDown {
+                1
+            } else {
+                -1
+            };
+            let (x, y) = local();
+            if in_doc && app.popup_contains(x, y) {
+                // The reader's own `scroll_step`, so one notch moves the note by as much
+                // as it moves the page.
+                let step = isize::try_from(app.config().scroll_step).unwrap_or(1);
+                app.scroll_popup(delta * step);
+            } else {
+                app.on_scroll(delta, in_toc);
+            }
+        }
         // The scrollbar. Its track is the body area — everything but the status bar —
         // exactly as `draw`'s `bar_area` is. Note what the drag and the release do
         // *not* look at: the column. A one-column bar is impossible to stay on while
@@ -485,6 +504,9 @@ fn copy_selection(app: &mut App) {
 /// and on what, and the I/O — which touches the terminal and the display server — happens
 /// out here.
 fn activate(app: &mut App, activation: Activation) {
+    // Kept before the kind is moved out, so the two arms that hand the activation on can
+    // put it back together.
+    let (row, col) = (activation.row, activation.col);
     match activation.kind {
         HotspotKind::Copy { text, html } => {
             let what = super::clipboard::Copied::for_button(html.as_deref());
@@ -506,9 +528,10 @@ fn activate(app: &mut App, activation: Activation) {
         }
         // Anchor and Footnote are pure state — no terminal, no display server — so
         // `App::activate` owns them; only `Copy` and `Open` need this function's I/O.
-        // Task 9 still owes `Footnote` its behaviour.
+        // The whole activation goes over, not just the kind: a footnote popup is
+        // anchored to the cell the marker was drawn in, and that cell is here.
         kind @ (HotspotKind::Anchor { .. } | HotspotKind::Footnote { .. }) => {
-            app.activate(kind);
+            app.activate(Activation { row, col, kind });
         }
     }
 }

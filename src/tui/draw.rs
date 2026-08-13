@@ -8,6 +8,8 @@ use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color as TermColor, Modifier, Style as TermStyle};
+use ratatui::text::Span as TermSpan;
+use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
 use crate::canvas::{BorderSet, Canvas, Cell, Rule, Side};
 use crate::theme::{Attributes, Color, Style};
@@ -155,6 +157,11 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
     if app.rendered().is_empty() {
         empty_notice(buffer, doc_area, dim_style);
     }
+    // The footnote popup goes over the document and under everything else. Over,
+    // because it is a box the reader asked for and the page is its background; under
+    // the chrome, because the status bar is not a place a box may cover and the help
+    // overlay is modal — it dims the whole document area, popup included.
+    footnote_popup(buffer, doc_area, app);
 
     if toc_width > 0 {
         chrome::draw_toc(buffer, toc_area, app);
@@ -756,6 +763,103 @@ fn leading_rule(cells: &[Cell], style: Style) -> Option<Rule> {
         }
         BorderSet::rule_glyph(cell.text().chars().next()?)?.1
     })
+}
+
+/// Paints the footnote popup over the document.
+///
+/// Paint-time, like [`hover_highlight`] and [`copied_flash`] before it: the note was
+/// laid out once by the ordinary renderer when the popup opened, and this copies cells.
+/// Nothing here measures, wraps or styles a single character of the footnote — that is
+/// what "a popup is another width, not a second rendering path" means in practice, and a
+/// special case for a list or a code span appearing in this function would be the sign
+/// that the shared path had been left.
+///
+/// The body is painted in the *document's* own background rather than in the help
+/// overlay's panel wash. Two reasons: the note's cells were rendered against that
+/// background, so they need no patching and a code fence inside the note keeps its own
+/// frame colour; and a framed inset over the page is the visual language the document
+/// already speaks — a code frame, a table and an image placeholder are all exactly this.
+/// Only the border and its title borrow the help overlay's slots, so the pager's boxes
+/// agree with each other without a new theme slot that every theme would have to grow.
+fn footnote_popup(buffer: &mut Buffer, area: Rect, app: &App) {
+    let Some(popup) = app.popup() else { return };
+    let theme = app.theme();
+    let at = popup.area();
+    let rect = Rect::new(
+        area.x.saturating_add(at.left),
+        area.y.saturating_add(at.top),
+        at.width.min(area.width.saturating_sub(at.left)),
+        at.height.min(area.height.saturating_sub(at.top)),
+    );
+    if rect.width < 3 || rect.height < 3 {
+        return;
+    }
+    let base = theme.base();
+    let on_page = |style: Style| Style {
+        bg: base.bg,
+        ..style
+    };
+    Clear.render(rect, buffer);
+    buffer.set_style(rect, term_style(base));
+    let mut block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(term_style(on_page(theme.ui.help_border)))
+        .title(TermSpan::styled(
+            format!(" [{}] ", popup.label()),
+            term_style(on_page(theme.ui.help_title)),
+        ));
+    // A note taller than its box says how much more there is and how to reach it, the
+    // way the help overlay does. A box that silently held back half a footnote would be
+    // the pager lying by omission about the document.
+    let hidden = popup.hidden_rows();
+    if popup.max_scroll() > 0 {
+        let note = if hidden > 0 {
+            format!(" \u{2193} {hidden} more ")
+        } else {
+            " \u{2191} back ".to_string()
+        };
+        block = block.title_bottom(TermSpan::styled(
+            note,
+            term_style(on_page(theme.ui.help_title)),
+        ));
+    }
+    block.render(rect, buffer);
+
+    // The note itself: canvas cells straight into buffer cells, from the row the reader
+    // has scrolled to. The inner region is the border plus one column of padding on each
+    // side — nothing in this program is welded to its own border.
+    let inner = Rect::new(
+        rect.x.saturating_add(crate::tui::popup::CHROME_COLS / 2),
+        rect.y.saturating_add(1),
+        rect.width.saturating_sub(crate::tui::popup::CHROME_COLS),
+        rect.height.saturating_sub(crate::tui::popup::CHROME_ROWS),
+    );
+    let canvas = popup.canvas();
+    for y in 0..inner.height {
+        let Some(cells) = canvas.row(popup.scroll() + usize::from(y)) else {
+            break;
+        };
+        for x in 0..inner.width {
+            let Some(cell) = cells.get(usize::from(x)) else {
+                break;
+            };
+            let Some(target) = buffer.cell_mut((inner.x + x, inner.y + y)) else {
+                continue;
+            };
+            target.set_style(term_style(base.patch(cell.style())));
+            if cell.is_continuation() {
+                // The lead is always on screen here — the note starts at its own column
+                // zero — so ratatui wants the owned cell left empty.
+                target.set_symbol("");
+            } else if cell.width() == 2 && x + 1 >= inner.width {
+                // A wide glyph whose other half falls outside the box, drawn as a space
+                // rather than as half a character. Same rule as `blit`'s.
+                target.set_symbol(" ");
+            } else {
+                target.set_symbol(cell.text());
+            }
+        }
+    }
 }
 
 /// Says so, rather than showing a screenful of nothing (usability P14).
