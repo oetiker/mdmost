@@ -1,328 +1,277 @@
-# Controller Handoff — mdmost, branch `semantic-selection`
+# Controller Handoff — mdmost trunk, pre-public
 
 > Starter pack for the next controller session. This handoff lives in ONE worktree — run
 > `git worktree list` first and confirm this is the workstream you're resuming. Read this
 > first, then `git log <handoff-commit>..HEAD`. Detail is NOT here — it is in git and in
-> the ledger named in §6. Before you rewrite this file at your own handoff: read the
+> the documents named in §6. Before you rewrite this file at your own handoff: read the
 > previous version (`git show HEAD:docs/controller-handoff.md`) and carry forward any
 > lesson in §4/§5 still true. Fresh synthesis, not blank page. On merge into another
 > branch, rewrite that branch's handoff to the merged reality — do not preserve this text,
-> and tombstone this one.
+> and tombstone the branch you merged.
 
 Handoff commit: the last commit touching this file — `git log -1 -- docs/controller-handoff.md`
-Date: 2026-08-13   Reason: context rollover mid-plan; nine tasks done, the popup and the demo remain
-Worktree / branch: `/scratch/oetiker/claude-worktrees/mdmost-semantic-selection` @ `semantic-selection`
-Trunk: `main` @ `344f4e1`. **This branch is NOT merged and there is still no remote.**
+Date: 2026-08-13   Reason: milestone — every written plan is now executed and merged to trunk
+Worktree / branch: main checkout `/home/oetiker/checkouts/mdmost` @ `main`
+Trunk at time of writing: this **is** trunk. `main` @ `dbe236d`.
 
-**This branch now carries TWO complete workstreams, neither merged**: the semantic-selection
-plan (finished 2026-08-12, ~20 commits) and the clickable-links plan (in progress). That is
-a lot of unmerged work on a branch with no remote. Weigh merging the finished half.
+Sibling worktrees, as of this commit — verify with `git worktree list`, this line cannot
+see anything created later:
 
-Sibling worktrees:
-- `/home/oetiker/checkouts/mdmost` @ `main` — owns nothing; **its handoff is three plans
-  stale and actively wrong.** Do not believe it.
-- `/scratch/oetiker/claude-worktrees/mdmost-tryout` — detached, the owner's test binary and
-  pages (`links.md`, `buttons.md`). Never commit here.
-- `/scratch/oetiker/claude-worktrees/mdmost-verify` — **the controller's own worktree**, see
-  §4.1. Detached at whatever commit was last verified. Never let an implementer near it.
+- `/scratch/oetiker/claude-worktrees/mdmost-semantic-selection` — **merged and
+  tombstoned.** Its handoff is a gravestone. Do not start work there. **Its
+  `.superpowers/sdd/` ledger is gitignored and still the only copy** (§6).
+- `/scratch/oetiker/claude-worktrees/mdmost-tryout` — detached; the owner's test binary
+  and pages (`links.md`, `buttons.md`). Never commit here.
+- `/scratch/oetiker/claude-worktrees/mdmost-verify` — **the controller's own worktree.**
+  Every gate run and every mutation happens here, never in an implementer's tree (§4.1).
+  Detached at whatever was last verified. Never let an implementer near it.
 
 ## 1. Mission
 
-`mdmost` is a full-screen terminal pager for one Markdown document — "as pleasant to look at
-as btop, as pleasant to use as less". Rust + ratatui.
-
-The current plan makes a link **react and be followed**: hover, click, `http`/`https` in the
-browser, `#anchor` in this document, a footnote popup, and a keyboard cursor so none of it
-needs a mouse.
+`mdmost` is a full-screen terminal pager for one Markdown document — "as pleasant to look
+at as btop, as pleasant to use as less". Rust + ratatui. GFM including tables with
+Markdown inside cells, syntax-highlighted code, and seven Mermaid families as Unicode box
+art.
 
 Load-bearing mental models:
 
-1. **Rendering is a pure function of `(AST, width, theme, options)`.** Anything depending on
-   the pointer — hover, the selection wash, `[copied]` — is **paint-time** in `src/tui/`,
-   never render-time. `render` must not depend on `tui`.
-2. **A `SearchSpan`'s source is a byte-for-byte copy of the cells it names.** A `Hotspot` is
-   deliberately exempt: it claims *drawn cells*, not source bytes, which is why a link's
-   synthetic ` (url)` suffix belongs to the control and to no source range.
+1. **Rendering is a pure function of `(AST, width, theme, options)`.** Parse once; no
+   layout decision at parse time; a resize discards the canvas and renders again. Anything
+   depending on the pointer — hover, the selection wash, `[copied]` — is **paint-time** in
+   `src/tui/`, never render-time. `render` must not depend on `tui`.
+2. **A `SearchSpan`'s source is a byte-for-byte copy of the cells it names.** A `Hotspot`
+   is deliberately exempt: it claims *drawn cells*, not source bytes, which is why a
+   link's synthetic ` (url)` suffix belongs to the control and to no source range.
 3. **Syntax comes off the source; text is decoded at the leaves.**
 
 **How the owner works, and it is not optional.** They review by *looking at rendered
-output*. **Answer a design question with a rendered sample, never with prose** — build a
-release binary in the tryout worktree and write them a page. When they reframe a question,
-the reframe *is* the design.
+output*, and their findings are consistently precise. **Answer a design question with a
+rendered sample, never with prose** — build a release binary in the tryout worktree and
+write them a page. They cut through analysis that has become over-engineered; treat that
+as direction. They report bugs from real use, so expect renderer bug reports mid-plan.
+When they reframe a question — "think how selection works in a web browser" — the reframe
+*is* the design; stop defending the old framing and follow it.
 
 ## 2. Where we are, as of the handoff commit
 
-Re-derive rather than inherit (§8). Plan: `docs/superpowers/plans/2026-08-12-clickable-links.md`.
+Re-derive rather than inherit (§8). **Every plan ever written for this project is now
+executed and on trunk.** Four of them:
 
-| Task | Commit | Tests |
-| --- | --- | --- |
-| 1 — `Hotspot` grows a kind | `78fd8aa` | 1178 |
-| 2 — links record hotspots | `32c357b` | 1191 |
-| 3 — scheme allowlist + status-bar URL | `c4d1bdd` | 1203 |
-| 2b — a link in a table cell reacts (off-plan) | `d6a262a` | 1218 |
-| 4 — hover lights a whole control | `38c667d` | 1222 |
-| 5 — the click state machine (+ fix `68031b4`) | `3fc1513` | 1237 |
-| 6 — the opener (+ fix `bf62a00`, doc `9265fc6`) | `c726142` | 1245 |
-| 7 — anchors | `a743ca8` | 1245 |
-| 8 — the keyboard cursor | `285b064` | 1257 |
-| 9a — a footnote marker is a control (off-plan) | `07aa96e` | 1260 |
-| 9b — the footnote popup (+ 3 fix commits) | `b2ccc74` | 1290 |
+| Plan | What landed |
+| --- | --- |
+| `2026-08-09-publishing` | CI, release workflow for five targets, packaging, man page, Homebrew formula, the demo |
+| `2026-08-10-code-provenance` | code blocks map back to source; search and copy reach inside a fence; `src/export/`; copy buttons |
+| `2026-08-11-semantic-selection` | a selection is a range over the document, not a rectangle of cells |
+| `2026-08-12-clickable-links` | hover, click, browser, anchors, footnote popup, keyboard cursor |
 
-At `b2ccc74`: **1290 tests across 33 suites**; `cargo fmt --check`, `cargo clippy --jobs 4
---all-targets -- -D warnings`, `cargo test --jobs 4` and `cargo check --jobs 4 --target
-x86_64-pc-windows-msvc` all exit 0. **Every commit had its gates re-derived by the
-controller in the verify worktree, its test count reconciled two ways, and at least one
-load-bearing mutation re-run by the controller rather than taken on the implementer's
-word.** That caught five things a report would not have: a vacuous security test, an
-uncovered rebase path, a "red" that was a compile error, a stale click candidate the next
-task would have turned into a browser opening unbidden, and a sanitisation hole whose
-justification a later task had silently invalidated.
+At `dbe236d`: **1292 tests across 33 suites**; `cargo fmt --check`, `cargo clippy --jobs 4
+--all-targets -- -D warnings`, `cargo test --jobs 4 --no-fail-fast` and `cargo check
+--jobs 4 --target x86_64-pc-windows-msvc` all exit 0. Re-derived by the controller in the
+verify worktree at `172d39b`, and `git diff 172d39b dbe236d` is empty, so the merge commit
+carries no content of its own.
 
-**Remaining: Task 10 (the demo) only. Every other task is implemented and verified.**
-
-**Task 9 was split on 2026-08-13 and the plan rewritten (`522ad76`).** Writing its tests
-against the real code — deliberately deferred, and this is why — found the task's premise
-false: **nothing constructed `HotspotKind::Footnote`**, and a footnote reference rendered
-as a bare synthetic `[1]` with no control tag, so there was nothing to click and the popup
-could never have been opened by a pointer. 9a supplied that half (`07aa96e`). **9b is the
-popup and its ten test bodies are now written out in the plan**, against the code as it
-stands.
+**There is still no remote and nothing has ever been pushed** as of this commit — but that
+rots the moment the owner creates the repository, so check `git remote -v` rather than
+believing this sentence.
 
 ## 3. Do this next
 
-1. **Wait on the owner.** A binary with the whole feature in it is built at
-   `/scratch/oetiker/cargo-target-mdmost-tryout/release/mdmost` (from `b2ccc74`) and
-   `mdmost-tryout/links.md` exercises every state. The five open questions in §7 were put
-   to them as one batch on 2026-08-13. **Do not re-ask them piecemeal.**
-2. **Then Task 10, the demo — an owner gate**, and the last task. Its brief is the plan's
-   Task 9b/10 sections; `scripts/task-brief` keys on plain numbers and does not know about
-   `9a`/`9b`, so extract with `sed -n '/^### Task 10/,$p'`.
-3. **Five owner answers are outstanding and none of them blocks** (§7). Batch them: the
-   owner reviews by looking, so give them one binary that does everything and one page,
-   rather than five prose questions spread over an afternoon.
-4. **Then the branch's fate.** It carries two complete workstreams, unmerged, no remote.
+1. **The owner's manual GitHub steps are the only thing blocking a release**, and they
+   have been outstanding across three handoffs: create `github.com/oetiker/mdmost`, add
+   `CRATES_IO_TOKEN`, grant Actions write permission. Public-vs-private was never
+   answered. The owner authorised `gh` use, but **the token lacks the `workflow` scope**,
+   so pushing `.github/workflows/` needs `gh auth refresh -s workflow` first.
+2. **Then push.** The owner ruled on 2026-08-13: "everything should be merged with main
+   before we push", and that merge is done.
+3. **The release workflow has never executed** (§7.2). Its first real run is its first
+   test, and that is worth watching rather than firing and walking away.
+4. **No plan is waiting.** The next workstream is whatever the owner asks for next; if
+   they ask for a feature, that is a `superpowers:brainstorming` conversation before a
+   plan, not a task to start.
 
 ## 4. Lessons & traps ← the irreplaceable part
 
 Carried forward and still true: **give every agent its own `CARGO_TARGET_DIR`**; **never
 read a gate's result through a pipe** (a redirect is *not* a pipe and preserves exit
-status); the clippy gate is `--all-targets -- -D warnings`; **verify a subagent's
-arithmetic, not its adjectives**; **do not choose glyphs by measuring them**; **a rename is
-not a `sed`**; **when two code paths render "the same" thing, prove it**; **backticks in
-`git commit -m` are command-substituted — use a quoted heredoc**; **`git merge` does not
-accept `-F -`**; **never merge into a dirty worktree**; **`git status --porcelain
---ignored` before removing a worktree** — the ledger is gitignored and dies with it;
-**diagnose a silent agent by the worktree, never by the silence**; **state process
-constraints as actions, not prohibitions**; **dispatch at most ONE file-writing agent per
-worktree**.
+status); the clippy gate is `--all-targets -- -D warnings` because plain `cargo clippy`
+exits 0 on warnings; **fault injection must run `--no-fail-fast`**, or cargo stops at the
+first failing binary and hides which other suites catch the mutation; **read the log, not
+the exit code** — exit 101 is identical for a panicking test and a failed compile, so grep
+`^error\[` before believing any red; **verify a subagent's arithmetic, not its
+adjectives**; **do not choose glyphs by measuring them**; **a rename is not a `sed`**;
+**when two code paths render "the same" thing, prove it**; **measure box art in columns,
+not bytes**; **backticks in `git commit -m` are command-substituted — use a quoted
+heredoc**; **`git merge` does not accept `-F -`** (a file works, and `git commit -F -`
+does too); **never merge into a dirty worktree**; **`git status --porcelain --ignored`
+before removing a worktree** — the ledger is gitignored and dies with it; **diagnose a
+silent agent by the worktree, never by the silence**; **state process constraints as
+actions, not prohibitions**; **dispatch at most ONE file-writing agent per worktree**, and
+the test file is shared even when the source files are disjoint.
 
-New this session, in rough order of what they are worth:
-
-0. **I broke the build by running two writers in one worktree**, and "the files are
-   disjoint" was not the exemption I thought. Task 6 renamed `chrome::sanitized_url` →
-   `sanitized` and updated its test; Task 7 then committed `tests.rs` carrying that
-   renamed test while `chrome.rs` stayed uncommitted, so **`a743ca8` does not compile**
-   (`bf62a00` repairs it and says so). The source files *were* disjoint — but **the test
-   file is shared, and almost always will be.** Two phantom defects came out of that same
-   window and both would have cost the next reader time: an "`app.rs` fails `cargo fmt`"
-   that was a snapshot of another agent's in-flight file, and an unexplained intermittent
-   in a security test (§7.9). **ONE writer per worktree. No exemptions.**
-
-0b. **A missing test is only a gap if you can name a mutation that survives without it,
-   and a Minor is only Minor for as long as its blast radius holds.** Two escalations this
-   session, both correct, both from the same shape of reasoning: a stale click candidate
-   rated Minor on "today it is a spurious re-copy" became Important because *the next
-   task* made it a browser opening unbidden; and an unsanitised status-bar notice was rated
-   Minor as "not new exposure" when in fact Task 6 had just invalidated the reasoning that
-   excluded it from Task 3's sanitisation sweep. **A defect whose severity is set by what
-   changed around it is not a deferred minor.**
-
-1. **THE CONTROLLER IS A WRITER.** I corrupted an implementer's working tree **twice** by
-   running my own `cp`-backup → mutate → suite → restore cycle in the worktree it was live
-   in. Checking "is it clean first" does not work: a gate run takes minutes and the agent
-   resumes inside that window, so the check and the write are not atomic. **Fix, now in
-   force: the controller owns `/scratch/oetiker/claude-worktrees/mdmost-verify` and does
-   every gate run and every mutation there** (`git -C ../mdmost-verify checkout <sha>`,
-   target dir `cargo-target-mdmost-verify`). I had written "two agents cannot share one git
-   index" into my own ledger that morning and read it as being about two *implementers*.
-2. **Fault injection must run `--no-fail-fast`.** Cargo's default stops at the first failing
-   test *binary* and hides which other suites catch the mutation. On the allowlist mutation
-   the default run showed one red and never ran the integration binary; `--no-fail-fast`
-   showed **two reds in two suites**. Same mutation, twice the evidence.
-3. **Read the log, not the exit code.** Exit 101 is identical for a panicking test and a
-   failed compile. I recorded a "verified red" that was a type-inference error and only
-   caught it by reading the log. Grep `^error\[` before believing any red.
-4. **A missing test is only a gap if you can name a mutation that survives without it.**
-   A brief demanded a second painting test for links in centred cells; the implementer
-   wrote one test. Rather than log a gap I mutated for the bug such a test would catch —
-   and the existing test caught it, because a prose-wrapped link already starts at a
-   different column on each row. The second test would have been ceremony. This is the
-   discipline's inverse and it stops it generating busywork.
-5. **Brief reviewers to read the WORKING TREE, not only the diff they were handed.** That
-   is how Task 2b's reviewer found both an uncommitted test that closed a real gap *and* a
-   live fault injection with a build still running. Twice the useful finding came from what
-   an agent was *doing*, not what it had *committed*.
-6. **Before discarding a dirty tree, read the diff.** After my first interference I assumed
-   the dirt was my own residue and was one command from `git checkout --`. It was the
-   implementer's *better* uncommitted work — the route that removed the need for two
-   `cfg(test)` seams. "The working tree is the only copy" applies to work you did not write
-   and did not expect.
-7. **The backgrounding bug hit five of six implementers.** Bash's 2-minute default
-   backgrounds the command and the shell dies with the turn. All three of `timeout:
-   600000`, foreground, and *wait for it in the same turn* must be in every brief — and it
-   still recurs, so the reliable defence is the diagnosis: **dirty tree + live build =
-   resume that agent, never re-dispatch**.
-8. **Six of my own file references were wrong**, and five implementers correctly overruled
-   me. The status bar is `chrome::draw_status`, not `draw.rs`. `blit` **drops** hotspots, so
-   the collision fix belonged in `merge_hotspots`. `mdmost::render::document` does not
-   exist. **Name the CONSTRAINT — which layer must not learn this — not the file.**
-9. **A `#[cfg(test)]` constructor is not production surface.** An implementer resisted
-   adding one on good instinct, misapplied; it does not exist in a release build. Say so, so
-   the resistance does not cost a round. (In the end Route 1 removed the need entirely.)
-10. **Two vacuous-test species, both caught only by mutation.** (a) A test that calls the
-    helper directly proves the tool works, not that the tool is *used* — removing the call
-    site from `draw_status` turned nothing red. (b) An assertion that holds for two
-    different reasons cannot distinguish them: "no raw ESC in the output" is true whether or
-    not the sanitiser runs, because ratatui drops `Cc` itself. The load-bearing assertion
-    was the **presence of the U+FFFD marker**.
+1. **THE CONTROLLER IS A WRITER.** Corrupted an implementer's tree twice by running a
+   backup → mutate → suite → restore cycle in the worktree it was live in. Checking "is it
+   clean first" does not work: a gate run takes minutes and the agent resumes inside that
+   window, so the check and the write are not atomic. **The controller owns
+   `mdmost-verify` and does every gate run and every mutation there.**
+2. **A missing test is only a gap if you can name a mutation that survives without it,
+   and a Minor is only Minor for as long as its blast radius holds.** A stale click
+   candidate rated Minor on "today it is a spurious re-copy" became Important because the
+   *next task* made it a browser opening unbidden. A defect whose severity is set by what
+   changed around it is not a deferred minor. The inverse matters too: when a brief
+   demanded a second painting test, mutating for the bug it would catch showed the
+   existing test already caught it — the second test would have been ceremony.
+3. **Two vacuous-test species, both caught only by mutation.** A test that calls the
+   helper directly proves the tool works, not that it is *used* — removing the call site
+   turned nothing red. And an assertion that holds for two different reasons cannot
+   distinguish them: "no raw ESC in the output" is true whether or not the sanitiser runs,
+   because ratatui drops `Cc` itself. Also: **prove a mutation makes a test FAIL, not
+   skip** — a skip is a vacuous test in disguise.
+4. **When a recorded beat looks wrong, check the app in a live pane before changing the
+   script.** New this session and it cost a take: the demo's footnote counter read as
+   `7 → 6 → 5 → 5`, an apparently swallowed keystroke, and the "fix" was three separate
+   scenes. It was an off-by-one — **the run log counts frames, it does not number them**,
+   so `scene 49 → 833 frames total` means `frame0832.png`, and the frame I read as the
+   first keypress was the one before it. A `tmux -L probe` pane walking the same keys
+   showed `8 → 7 → 6 → 5` and settled it in a minute. The wrong beat looked entirely
+   plausible, which is the whole danger.
+5. **Do not ship a frame that contradicts its own status bar.** The demo's theme beat
+   produced a dark screen captioned `theme: light`, held 2.8 s on the hero image — and it
+   had shipped that way in the previous recording without being noticed. mdmost was
+   provably correct (a live pane repaints to `#fdfcf9`; ansidrama alone records the switch
+   correctly; ansidrama driving tmux does too). Only the full tour fails, after act 5 kills
+   a pane and resizes the survivor. **Rule the recording out before suspecting the app,
+   and cut a beat you cannot record honestly** rather than shipping a lie at 2.8 seconds.
+   Diagnosis and the recipe for restoring it are in `docs/maintainer-notes.md`.
+6. **Six of my own file references were wrong**, and five implementers correctly overruled
+   me. **Name the CONSTRAINT — which layer must not learn this — not the file.**
+7. **Before discarding a dirty tree, read the diff.** After interfering once I assumed the
+   dirt was my own residue and was one command from `git checkout --`. It was the
+   implementer's *better* uncommitted work.
+8. **Brief reviewers to read the WORKING TREE, not only the diff they were handed.** Twice
+   the useful finding came from what an agent was *doing*, not what it had *committed*.
+9. **The backgrounding bug hit five of six implementers.** All three of `timeout: 600000`,
+   foreground, and *wait for it in the same turn* must be in every brief — and it still
+   recurs, so the reliable defence is the diagnosis: **dirty tree + live build = resume
+   that agent, never re-dispatch**.
+10. **An abandoned branch can hold the only copy of a real fix.** Check by content, not by
+    commit subject, and check every commit on a branch before deleting it.
 
 ## 5. Don'ts & constraints
 
 Carried forward and binding: **no HTML rendering**; **Mermaid is Unicode box art only**;
-**bullets and task boxes are ASCII**; **`Esc` never quits**; **do not widen the `NodeArt`
+**bullets and task boxes are ASCII and do not vary by font detection**; **Nerd Font glyphs
+are detected, not defaulted on**; **`Esc` never quits**; **do not widen the `NodeArt`
 seam**; **`render` must not depend on `tui`**; **`#![forbid(unsafe_code)]`**; **the status
 bar never lies**; **no 1000-node golden snapshot**; **4-core cap on every cargo
-invocation**; **there is no centring anywhere**; **`src/export/` may depend only on `doc`**;
-**TSV is what every reader receives**; **the table gap-row threshold is 30 display
-columns**; **the copy button follows what mouse capture actually did**; **do not push —
-creating the remote is the owner's step**; **tmux: kill only your own session, and check a
-process's parent with `ps -o ppid=` before killing an `mdmost`** — the owner runs this pager
-himself on this machine.
+invocation**; **tmux: kill only your own session, on your own socket**; **leave no stray
+`mdmost` processes — but check a process's parent with `ps -o ppid=` first**, because the
+owner runs this pager himself on this machine.
 
-Owner rulings this session, all binding:
+Settled; do not relitigate:
 
-1. **`HOVER_SHIFT = 0.6`** (was 0.4). The owner looked and asked for more pronounced. The
-   old comment predicting "past 0.6 it reads as an accent" was a *measurement*, not a look,
-   and is retired. Do not retune without asking.
-2. **The clickable-links spec ships in full** — anchors and the footnote popup included:
-   "we want it all."
-3. **The demo gains a footnote-popup click** (Task 10).
-4. **Carried, unconfirmed:** "the first and final panel needs to stay 3× longer so they can
-   be read" — read as demo timing, to be confirmed before recording. It arrived attached to
-   a comment the owner then withdrew, so the attachment is uncertain, not the request.
-
-Settled by the work; do not relitigate:
-
-- **`blit` carries hotspots; it drops `Pin` and `Atom`.** A `Pin` claims the leading columns
-  *from column zero* — a whole-row claim, meaningless once blitted into a shared row. A
-  `Hotspot` carries its own `col`, so translated it names specific destination cells where
-  the control's characters really are drawn — the same claim a search span makes, and
-  `blit` has always translated those. Unlike a search span (verbatim, consumers clamp), a
-  hotspot is **clamped and dropped when nothing survives**: a region that reacts while
-  showing nothing of the control is worse than no region.
-- **A hotspot over the column an overflow chevron kept is revoked too** — "a cell that opens
-  a link without looking like one is the same fault as a claim on a cell that is not there."
-- **Only `http` and `https` become controls**, matched case-insensitively; a `#fragment`
-  becomes an anchor folded through the *shared* `doc::slug::base_slug`, so a heading and a
-  link can never drift apart. Everything else — `mailto:`, `file:`, `javascript:`, local
-  `.md` — is **wholly inert**, failing closed. A control that lights up and then declines is
-  worse than one never offered.
-- **A hotspot carries the FULL url**, never the `elide_middle`d form drawn on screen.
-- **Hover lights every hotspot sharing a `target`**, which is what makes a wrapped link one
-  control.
-- **Activation is on the RELEASE edge for every control** — see §7.2, stated for veto.
-- **`Copied::for_button` / the copy payload is the block's content without its fences**;
-  a *selection* still yields the fenced block. Deliberately different.
+- **There is no centring anywhere.** Every block anchors at the same left margin.
+- **`src/export/` may depend only on `doc`** — not `canvas`, not `theme`, not `tui`.
+- **TSV is what every reader receives**; HTML is an upgrade where a flavoured clipboard
+  exists. Nobody ever gets less than TSV.
+- **The title banner is opt-in**; **`--render-once` may emit lines wider than `--width`**.
+- **The table gap-row threshold is 30 display columns.**
+- **The copy button follows what mouse capture actually did**, not what the config asked
+  for. This is why `--render-once` shows none — correct, not a bug to work around. But
+  **`--render-once` DOES record hotspots**: that flag also means "mouse capture refused"
+  and "stdout is not a terminal", and gating links on it would blank every link for every
+  mouseless reader. Spec §4's contrary line was struck by owner ruling (`172d39b`).
+- **`HOVER_SHIFT = 0.6`** by owner ruling. Do not retune without asking.
+- **Only `http` and `https` become controls**, case-insensitively; `#fragment` folds
+  through the *shared* `doc::slug::base_slug`. Everything else — `mailto:`, `file:`,
+  `javascript:`, local `.md` — is **wholly inert**, failing closed.
+- **A hotspot carries the FULL url**, never the `elide_middle`d form on screen.
+- **Activation is on the RELEASE edge for every control**, `[copy]` included.
+- **`blit` carries hotspots; it drops `Pin` and `Atom`.** A hotspot is clamped, and
+  dropped when nothing survives: a region that reacts while showing nothing of the control
+  is worse than no region. A hotspot over the column an overflow chevron kept is revoked.
+- **No apt/yum repository, no GitHub Pages site, no container image, no macOS
+  notarisation.** All four considered and rejected; reasons in the publishing spec §1.
 
 ## 6. Where the detail lives
 
-- **Plan:** `docs/superpowers/plans/2026-08-12-clickable-links.md`. Tasks 2b is not in it.
-  Task 9 has stub test bodies by design.
-- **Design authority:** `docs/superpowers/specs/2026-08-11-clickable-links-design.md`
-- **Ledger — read this second, after this file:**
-  `.superpowers/sdd/2026-08-12-clickable-links/progress.md`. **Gitignored, dies with the
-  worktree.** Every ruling, deferred minor, brief, report and review is in that directory.
-- Previous workstream's plan and spec: `2026-08-11-semantic-selection*`.
-- **Owner's test pages:** `mdmost-tryout/links.md` (this plan) and `buttons.md` (previous),
-  binary at `/scratch/oetiker/cargo-target-mdmost-tryout/release/mdmost`. **Run with
-  `--mouse` or there are no controls at all.**
-- **Durable facts discovered, in the ledger, worth knowing:** DEL, U+009B, NEL, LINE and
-  PARAGRAPH SEPARATOR and both C1 endpoints all survive CommonMark's bare-destination
-  grammar into a link's URL unchanged — only true ASCII C0 controls are excluded. And
-  **ratatui's `Buffer::set_line` silently drops every `Cc` character**, which is why the
-  escape-injection threat does not reproduce and why the real defect is a *silent
-  zero-width drop* against width arithmetic that charged one column.
+- **Design authorities:** `docs/superpowers/specs/2026-08-08-mdmost-design.md` (renderer),
+  `2026-08-11-semantic-selection-design.md`, `2026-08-11-clickable-links-design.md`.
+- **Finished plans**, for why the code looks as it does: `docs/superpowers/plans/`.
+- **The clickable-links SDD ledger — gitignored, and the only copy** — is
+  `.superpowers/sdd/2026-08-12-clickable-links/progress.md` **in the merged
+  `mdmost-semantic-selection` worktree**, alongside every brief, report, review and review
+  diff. Removing that worktree destroys it; that has happened once before on this project
+  and the record of which review found what was lost. **Ask the owner before removing it**,
+  and run `git status --porcelain --ignored` first.
+- **Demo:** `demo/tour.md`, `demo/mdmost.toml` (the ansidrama script), `demo/tmux.conf`,
+  `demo/config.toml`; regeneration recipe, drift warnings, the frame-numbering trap and
+  the cut theme beat all in `docs/maintainer-notes.md`. Reference repo:
+  `~/checkouts/ansidrama`.
+- **Owner's test pages:** `mdmost-tryout/links.md` and `buttons.md`. **Run with `--mouse`
+  or there are no controls at all.**
+- **Durable facts worth knowing:** DEL, U+009B, NEL, LINE and PARAGRAPH SEPARATOR and both
+  C1 endpoints all survive CommonMark's bare-destination grammar into a link's URL
+  unchanged — only true ASCII C0 controls are excluded. And **ratatui's
+  `Buffer::set_line` silently drops every `Cc` character**, which is why the
+  escape-injection threat does not reproduce and why the real defect is a silent
+  zero-width drop against width arithmetic that charged one column.
 - Key files: `src/canvas/ops.rs` (`blit`, `merge_hotspots`, `clamped_claim`,
   `revoke_hotspots_over`), `src/canvas/mod.rs` (`Hotspot`, `HotspotKind`),
-  `src/render/inline.rs` (`link`, `flatten`, `reconcile` — where hotspots are recorded),
-  `src/render/link.rs` (`classify`), `src/tui/draw.rs` (`hover_highlight`),
-  `src/tui/chrome.rs` (`draw_status`, `sanitized_url`), `src/tui/app.rs`
-  (`press_hotspot`, `release_hotspot`, `cancel_hotspot_press`).
+  `src/render/inline.rs` (`link`, `flatten`, `reconcile`), `src/render/link.rs`
+  (`classify`), `src/tui/draw.rs` (`hover_highlight`), `src/tui/chrome.rs`
+  (`draw_status`, `sanitized`), `src/tui/app.rs` (`press_hotspot`, `release_hotspot`,
+  `cursor_step`, `control_targets`), `src/tui/popup.rs`, `src/tui/select.rs`.
 
 ## 7. Open questions / pending decisions
 
-**Batch these for the owner — do not ask them one at a time.** They review by looking, so
-hand over one binary that does everything plus `mdmost-tryout/links.md`, and ask all of it
-at once. Five are open as of this handoff; the first four are behaviour choices, the fifth
-is the colour gate.
-
-0. **Should a link click say `opening…`, or stay silent?** Today only *failures* reach the
-   status bar. That is defensible — the spawn is detached and unwaited, so the pager
-   genuinely cannot claim the browser opened, and the status bar never lies — but a click
-   then looks like nothing happened until the browser surfaces, which on a cold start is
-   seconds. `opening…` is a claim about what the *pager* did, not the browser, so it is
-   honest and still informative. Controller leans toward it; the owner decides.
-
-0b. **`[copy]` now fires on button-up, not button-down** (`3fc1513`, stated in its commit
-   message for veto). Unifying was the controller's call; spec §2 asks the button to
-   "become one case of a general mechanism", and one mechanism cannot have two firing
-   edges.
-
-0c. **The keyboard cursor cycles `[copy]` buttons as well as links.** Nothing in the spec
-   restricts it, and it lets a mouseless reader copy a code block. Flagged, not ruled.
-
-1. **`--render-once` and hotspots — spec §4 contradicts itself, owner ruling needed.** Line
-   93 says render-once records no hotspots; the paragraph above says links are never hidden
-   because a keyboard cursor makes them reachable. `--render-once` sets `copy_button:
-   false`, **the same flag the pager sets when mouse capture is refused** *and* when stdout
-   is not a terminal. Gating link hotspots on it would blank every link in every mouseless
-   terminal — the exact population Task 8 exists to serve. Current behaviour (hotspots are
-   recorded) is pinned by a test. Controller's recommendation: strike line 93; it was
-   written about *buttons*, which are drawn chrome.
-2. **Activation moved to the release edge**, so `[copy]` now fires on button-up. Stated in
-   `3fc1513`'s message for veto. The owner has not responded.
-3. **Task 4's colour gate is open.** Binary and `links.md` handed over 2026-08-12; no
-   response yet. Not blocking — a shade is a one-constant change.
-4. **Two unguarded `Span` sites**, pre-existing, for the final review: `chrome::highlighted`
-   (`chrome.rs:182`, TOC heading text) and the status-bar breadcrumb (`chrome.rs:383`). Same
-   width-drift exposure the URL had.
-5. **Deferred minors worth triaging at the final review**, in the ledger. The strongest:
-   the invariant "a hotspot never claims a cell the canvas does not have" is held by
-   argument at three call sites, not by construction — adding it to
-   `Canvas::check_invariants` would make a future op that forgets to clamp fail loudly in
-   ~40 existing tests.
-6. **Owner's manual GitHub steps, still outstanding:** create `github.com/oetiker/mdmost`,
-   add `CRATES_IO_TOKEN`, grant Actions write. The owner authorised `gh` use; **the token
-   lacks the `workflow` scope**, so pushing `.github/workflows/` needs `gh auth refresh -s
-   workflow`. Public-vs-private was never answered.
-7. Carried and still open: the release workflow has never executed; Windows compiles but
-   has never been run (mouse, clipboard, alternate screen, and now motion and release
-   handling, all unexercised); the RPM payload is unverified; `&nbsp;` is a wrapping
-   opportunity, flagged and unruled; the banner's internal band centring was never ruled on.
-8. An environmental quirk with no root cause: `diff <(git show HEAD:path) file` produced a
-   spurious full-file diff twice on byte-identical files (confirmed by `sha256sum`). Use
-   real intermediate files for verification diffs.
+1. **The owner's manual GitHub steps** (§3.1) — the only real blocker.
+2. **The release workflow has never executed.** The changelog rewrite, the formula marker
+   rewrite and the deb/rpm builds were rehearsed locally; the matrix builds, crates.io
+   publish, GitHub release and Homebrew commit are unexercised.
+3. **Windows compiles but has never been run.** Mouse, clipboard, alternate screen, motion
+   and release handling all unexercised there.
+4. **The demo's theme beat is cut and wants an ansidrama fix** (§4.5). Two related
+   ansidrama limitations are also written up in `demo/mdmost.toml`: `Recorder::move_to`
+   sends no bytes, so a recorded pointer never lights anything and hover has to be spelled
+   as a raw SGR motion report through the `keys` escape hatch — which means the frame
+   showing a lit link has no arrow resting on it. Fixing `move_to` would make every
+   pointer glide in the tour truthful, and would want its own before/after.
+5. **`demo/tour.md` claims "the status bar says which, every time"**, but at act 4's
+   49-column pane the copy notice is dropped by the status bar's width budget, so the demo
+   promises something the demo does not show. Pre-existing and by design; fixing it means
+   changing the drop priorities or re-staging act 4 at full width.
+6. **Two unguarded `Span` sites**, pre-existing: `chrome::highlighted` (TOC heading text)
+   and the status-bar breadcrumb. Same width-drift exposure the URL had.
+7. **A deferred minor worth doing:** the invariant "a hotspot never claims a cell the
+   canvas does not have" is held by argument at three call sites, not by construction.
+   Adding it to `Canvas::check_invariants` would make a future op that forgets to clamp
+   fail loudly in ~40 existing tests.
+8. **`selection-review.html`** sits untracked in the semantic-selection worktree — a Task
+   3 review artifact from the previous plan. It dies with the worktree; nothing depends on
+   it.
+9. Carried and still open: the RPM payload is unverified (`rpm(1)` is not installed here);
+   `fc-list` as the macOS icon probe is untested there; nested diagrams are never widened
+   while nested tables are; Nerd Fonts v2 patches fail icon detection (deliberate); the
+   banner fixture is self-referential because `figlet`'s `Small` font is not installed
+   here; `&nbsp;` as a wrapping opportunity is flagged and unruled; the banner's internal
+   band centring was never ruled on; the light theme's heading ramp is flat and
+   non-monotone (measured 4.80 → 4.89 → 4.92 → 4.95 → 4.90 → 4.86:1) — re-measure before
+   designing against it.
+10. An environmental quirk with no root cause: `diff <(git show HEAD:path) file` produced a
+    spurious full-file diff twice on byte-identical files (confirmed by `sha256sum`). Use
+    real intermediate files for verification diffs.
 
 ## 8. Staleness watch
 
 - **Integration state must be re-derived, never inherited**: `git merge-base --is-ancestor
   HEAD main`, `git log --oneline HEAD..main`, `git branch -a --contains HEAD`.
 - **Sibling worktrees created after this commit are invisible here.** Run `git worktree
-  list`.
-- The 1290-test count and the four green gates are as of `b2ccc74`. Re-run them; a count
+  list`. The one thing this file can promise is that `mdmost-semantic-selection` was
+  merged and tombstoned at `dbe236d`.
+- **"There is no remote" rots the moment the owner creates the repository**, which is step
+  one of their list. Check `git remote -v`.
+- The 1292-test count and the four green gates are as of `dbe236d`. Re-run them; a count
   that moved without an explanation is the signal.
-- **"There is no remote" rots the moment the owner creates the repository.** Check `git
-  remote -v` rather than believing §7.6.
-- The plan's line references were written against `392096f` and this session changed
-  `canvas/ops.rs`, `canvas/mod.rs`, `render/inline.rs`, `tui/draw.rs`, `tui/chrome.rs` and
-  `tui/app.rs` substantially. **Treat every file and line it names as a draft.**
+- **~14 GB of orphaned cargo target dirs** live under `/scratch/oetiker/` from removed
+  worktrees. There was no disk pressure at the time of writing. Ask before deleting, and
+  never use `cargo sweep --stamp`/`--file` with a shared target dir.
