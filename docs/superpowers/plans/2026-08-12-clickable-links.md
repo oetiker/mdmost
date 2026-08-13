@@ -48,7 +48,7 @@ Paste this section into every implementer brief.
 | `src/tui/app.rs` | press/release state machine, cursor, anchor jump, popup state | 5, 7, 8, 9 |
 | `src/tui/term.rs` | mouse and key dispatch into the above | 5, 8 |
 | `src/tui/open.rs` **(new)** | the platform opener behind a test seam | 6 |
-| `src/tui/popup.rs` **(new)** | footnote popup layout — sizing, flipping, scrolling | 9 |
+| `src/tui/popup.rs` **(new)** | footnote popup layout — sizing, flipping, scrolling | 9b |
 | `demo/mdmost.toml`, `demo/tour.md` | the recording | 10 |
 
 ---
@@ -1043,69 +1043,212 @@ fn a_copy_button_is_still_hidden_without_mouse_capture() {
 
 ---
 
-### Task 9: The footnote popup
+### Task 9a: A footnote marker is a control
 
-The largest task. A bordered box adjacent to the marker, sized to content up to a cap, flipping above/below and left/right to stay on screen.
+**Rewritten 2026-08-13, against the code as it actually is.** The original Task 9
+assumed a footnote marker already recorded a hotspot. **It does not.** Nothing in the
+crate constructs `HotspotKind::Footnote` — the only mention is a no-op match arm at
+`src/tui/term.rs:510`. A footnote reference renders as a bare synthetic piece
+(`src/render/inline.rs:435`):
 
-**The footnote renders through the ordinary renderer at the popup's width.** Rendering is already a pure function of width, so a popup is another width, not a second rendering path — formatting, code spans and lists inside a footnote work for free. **Do not write a second renderer.**
+```rust
+NodeKind::FootnoteReference { number, .. } => {
+    out.push(Piece::synthetic(
+        format!("[{number}]"),
+        style.patch(theme.text.footnote_ref),
+    ));
+}
+```
+
+So there is nothing to click, and the popup has no way to be opened by a pointer. This
+task supplies the missing half. It is deliberately separate from the popup: it is
+render-side, small, and mirrors work already done for links, whereas the popup is
+tui-side and large.
 
 **Files:**
-- Create: `src/tui/popup.rs`
-- Modify: `src/tui/app.rs` (popup state), `src/tui/draw.rs` (paint), `src/render/inline.rs` (footnote markers record `HotspotKind::Footnote`)
-- Test: `tests/footnote_popup.rs` (new)
+- Modify: `src/render/inline.rs` (the `FootnoteReference` arm, ~line 435)
+- Test: `tests/link_hotspots.rs`
 
-- [ ] **Step 1: Write the failing tests — layout is testable on a canvas, no terminal**
+**Interfaces:**
+- Consumes: `Control { id, kind }` and the `&mut usize` counter already threaded down `collect`/`image_marker`/`link`.
+- Produces: `HotspotKind::Footnote { id }` on the marker's drawn cells, where `id` is the footnote's **name** as the document spells it (`NodeKind::FootnoteReference { name, number }` carries both). The name is what a definition is keyed by; the number is only what is drawn.
+
+- [ ] **Step 1: Write the failing tests**
 
 ```rust
 #[test]
-fn a_popup_sizes_itself_to_its_content_up_to_the_cap() { /* … */ }
+fn a_footnote_marker_records_a_hotspot_over_its_drawn_cells() {
+    let spots = hotspots("text[^note]\n\n[^note]: the note\n", 60);
+    assert_eq!(spots.len(), 1, "the marker is the only control");
+    let (_, _, cols, kind, _) = &spots[0];
+    assert_eq!(*cols, 3, "`[1]` is three columns");
+    assert_eq!(*kind, HotspotKind::Footnote { id: "note".to_string() });
+}
 
 #[test]
-fn a_popup_near_the_bottom_flips_above_the_marker() { /* … */ }
+fn a_footnote_hotspot_carries_the_name_not_the_drawn_number() {
+    // The marker draws `[1]`; the definition is keyed by `note`. A hotspot carrying
+    // "1" would resolve against nothing.
+    let spots = hotspots("a[^alpha] b[^beta]\n\n[^alpha]: A\n\n[^beta]: B\n", 60);
+    let ids: Vec<String> = spots
+        .iter()
+        .filter_map(|(_, _, _, kind, _)| match kind {
+            HotspotKind::Footnote { id } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec!["alpha".to_string(), "beta".to_string()]);
+}
 
 #[test]
-fn a_popup_near_the_right_edge_flips_left() { /* … */ }
+fn a_footnote_definition_body_records_no_marker_hotspot_of_its_own() {
+    // The backref inside a definition is not a reference the reader follows.
+    let spots = hotspots("text[^note]\n\n[^note]: the note\n", 60);
+    assert_eq!(spots.len(), 1, "one marker, not one per occurrence: {spots:?}");
+}
+```
+
+- [ ] **Step 2: Run them and watch every one fail.** `cargo test --jobs 4 --no-fail-fast --test link_hotspots`. Expected: no `Footnote` hotspot is recorded at all.
+
+- [ ] **Step 3: Tag the marker.** Give the `FootnoteReference` arm a `Control` exactly as `link()` does — issue an id from the same counter, set `piece.control` on the synthetic piece. `reconcile` already turns a tagged piece into a per-row `Hotspot`; you are adding a producer, not a mechanism.
+
+- [ ] **Step 4: Run them green, then the full suite.** No drawn cell may move — the marker's text and style are unchanged.
+
+- [ ] **Step 5: Fault injection**, full suite, `--no-fail-fast`. Carry the *number* instead of the *name* → `a_footnote_hotspot_carries_the_name_not_the_drawn_number` red. Drop the tag → the first test red.
+
+- [ ] **Step 6: Commit.**
+
+---
+
+### Task 9b: The footnote popup
+
+The largest task in the plan. A bordered box adjacent to the marker, sized to its content
+up to a cap, flipping above/below and left/right to stay on screen.
+
+**The footnote renders through the ordinary renderer at the popup's width.** Rendering is
+already a pure function of width, so a popup is *another width*, not a second rendering
+path — formatting, code spans and lists inside a footnote work for free. **Do not write a
+second renderer.**
+
+**Files:**
+- Create: `src/tui/popup.rs` — pure geometry: sizing, flipping, scroll offset
+- Modify: `src/tui/app.rs` (popup state), `src/tui/draw.rs` (paint), `src/tui/term.rs` (dismissal, wheel)
+- Test: `src/tui/tests.rs`, and `tests/footnote_popup.rs` for layout
+
+**Facts verified against the code 2026-08-13, use these over the plan's older text:**
+- `Overlay` (`src/tui/app.rs:132`) has exactly `None`, `Help`, `Prompt` — **there is no popup variant**. Decide whether the popup joins `Overlay` or lives beside it, and say why. It differs from the others: it is anchored to a cell rather than filling the screen, and `Help`/`Prompt` are modal.
+- The footnote's content is `NodeKind::FootnoteDefinition { name, number }` (`src/doc/mod.rs:210`), found by name.
+- `Esc` never quits — a standing project rule — so it is free for dismissal, but check its existing precedence chain (Task 8 put the keyboard cursor at the front of it).
+- **`Drop::Context`, the status bar's notice segment, is the cheapest-priority segment and is dropped for width at 60 and 100 columns.** Two agents wrote vacuous tests against it. If any of your tests assert on a notice, use a 200-column buffer and say why in the comment.
+
+- [ ] **Step 1: Write the failing tests.** Layout is pure geometry and needs no terminal.
+
+```rust
+#[test]
+fn a_popup_sizes_itself_to_its_content_up_to_the_cap() {
+    // A one-line note gets a small box; a very long one stops at the cap rather than
+    // growing to the screen.
+    let small = popup_for("a[^n]\n\n[^n]: short\n", 80, 24);
+    let large = popup_for(&format!("a[^n]\n\n[^n]: {}\n", "word ".repeat(400)), 80, 24);
+    assert!(small.height < large.height, "content decides the height");
+    assert!(large.height <= POPUP_MAX_HEIGHT, "the cap holds: {large:?}");
+    assert!(large.width <= 80, "never wider than the screen");
+}
+
+#[test]
+fn a_popup_near_the_bottom_flips_above_the_marker() {
+    // The marker is on the last row that can hold it, so below is impossible.
+    let popup = popup_for_marker_at_row(23, 80, 24);
+    assert!(popup.top < 23, "it must open upwards: {popup:?}");
+    assert!(popup.top + popup.height <= 24, "and stay on screen");
+}
+
+#[test]
+fn a_popup_near_the_right_edge_flips_left() {
+    let popup = popup_for_marker_at_col(78, 80, 24);
+    assert!(popup.left + popup.width <= 80, "it must stay on screen: {popup:?}");
+}
 
 #[test]
 fn a_footnote_with_a_list_in_it_renders_through_the_ordinary_renderer() {
     // The proof that this is "another width", not a second rendering path.
-    let app = open_footnote("[^1]\n\n[^1]: intro\n\n    - one\n    - two\n");
-    let text = popup_text(&app);
-    assert!(text.contains("one") && text.contains("two"));
-    assert!(text.contains('•') || text.contains('-'), "the list drew its markers");
+    let text = popup_text("a[^n]\n\n[^n]: intro\n\n    - one\n    - two\n", 80, 24);
+    assert!(text.contains("one") && text.contains("two"), "{text:?}");
+    assert!(
+        text.contains('\u{2022}') || text.contains('-'),
+        "the list drew its markers: {text:?}"
+    );
 }
 
 #[test]
-fn a_long_footnote_scrolls_inside_the_popup() { /* … */ }
+fn a_long_footnote_scrolls_inside_the_popup() {
+    let mut app = open_footnote(&format!("a[^n]\n\n[^n]: {}\n", "line\n\n    ".repeat(60)), 80, 24);
+    let first = popup_text_of(&app);
+    app.scroll_popup(3);
+    let after = popup_text_of(&app);
+    assert_ne!(first, after, "the wheel moved the note, not the document");
+    assert_eq!(app.scroll(), 0, "and the document underneath did not move");
+}
 
 #[test]
 fn links_inside_a_popup_are_inert() {
     // Design spec §1.1.
-    let app = open_footnote("[^1]\n\n[^1]: see [x](https://example.com/a)\n");
-    assert!(app.popup_hotspots().is_empty());
+    let app = open_footnote("a[^n]\n\n[^n]: see [x](https://example.com/a)\n", 80, 24);
+    assert!(popup_hotspots(&app).is_empty());
 }
 
 #[test]
 fn esc_dismisses_the_popup_and_does_not_quit() {
-    let mut app = open_footnote("[^1]\n\n[^1]: note\n");
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
     app.on_key(key_esc());
     assert!(app.popup().is_none());
     assert!(!app.should_quit(), "Esc never quits");
 }
 
 #[test]
-fn scrolling_the_document_dismisses_the_popup() { /* … */ }
+fn scrolling_the_document_dismisses_the_popup() {
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
+    app.on_scroll(1, false);
+    assert!(app.popup().is_none(), "the anchor moved, so the popup goes");
+}
 
 #[test]
-fn a_click_outside_dismisses_the_popup() { /* … */ }
+fn a_click_outside_dismisses_the_popup() {
+    let mut app = open_footnote("a[^n]\n\n[^n]: note\n", 80, 24);
+    let (x, y) = a_cell_outside_the_popup(&app);
+    app.press_hotspot(x, y);
+    assert!(app.popup().is_none());
+}
+
+#[test]
+fn an_unknown_footnote_reports_and_opens_nothing() {
+    // The status bar never lies. 200 columns: the notice segment is the cheapest
+    // priority in the bar and is dropped for width at 60 and 100.
+    let mut app = pager_at("a[^n]\n\n[^n]: note\n", 200, 24);
+    app.activate(HotspotKind::Footnote { id: "missing".to_string() });
+    assert!(app.popup().is_none());
+    assert!(status_line_of(&app).contains("missing"));
+}
 ```
 
-Fill every `/* … */` with a real body before starting — a placeholder here is a plan failure. Each follows the shape of the first: build an app, open the footnote, assert on the drawn canvas.
+The helpers (`popup_for`, `popup_for_marker_at_row`, `popup_for_marker_at_col`,
+`popup_text`, `open_footnote`, `popup_hotspots`, `a_cell_outside_the_popup`) are yours to
+write; keep them reading the drawn canvas rather than recomputing the implementation's own
+arithmetic, the way `cells_at` does in `tests/link_hotspots.rs`.
 
-- [ ] **Steps 2–7:** run red; implement layout in `popup.rs` (pure geometry, unit-testable); render the footnote's nodes through `render::document` at the popup's inner width; paint in `draw.rs`; wire dismissal to `Esc`, an outside click and any document scroll; run green; inject (remove the bottom flip, remove the right flip, let popup links record hotspots — each must turn its own test red); commit.
+- [ ] **Step 2: Run them and watch every one fail.**
 
----
+- [ ] **Step 3: Geometry first**, in `src/tui/popup.rs`, pure and unit-testable: given the marker's `(row, col)`, the content's natural size, the screen size and the cap, produce `(top, left, width, height)` plus a scroll offset. No `App`, no `Buffer`.
 
+- [ ] **Step 4: Render the note** through `render_document` at the popup's inner width. **Reuse it; do not write a second path.**
+
+- [ ] **Step 5: Paint** in `src/tui/draw.rs`, over the document, under nothing. Hover and the cursor already paint here; follow that seam.
+
+- [ ] **Step 6: Dismissal** — `Esc`, a click outside, and any document scroll. Wire the wheel over the popup to scroll the note rather than the document.
+
+- [ ] **Step 7: Fault injection**, full suite, `--no-fail-fast`: remove the bottom flip → that test red; remove the right flip → that test red; let popup content record hotspots → `links_inside_a_popup_are_inert` red; scroll the document instead of the note → the scroll test red.
+
+- [ ] **Step 8: Gates and commit.**
 ### Task 10: The demo
 
 **Files:** `demo/mdmost.toml`, `demo/tour.md`, `docs/demo/mdmost.webp`, `docs/maintainer-notes.md`
