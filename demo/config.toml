@@ -7,10 +7,16 @@
 
 theme = "dark"
 
-# Nerd Font glyphs are otherwise *detected*, and the answer depends on which fonts
-# the recording host has installed. Pin it off: the recording is rasterised with
-# ansidrama's bundled JetBrains Mono, which has no Nerd Font glyphs.
-icons = false
+# Nerd Font glyphs are otherwise *detected*, and the answer would then depend on which
+# fonts the recording host has installed. Pinned ON rather than left to detection: the
+# recording is rasterised by ansidrama, which bundles Symbols Nerd Font for exactly these
+# codepoints and consults it after its text font, so the glyphs are there on every host.
+#
+# This was pinned OFF until 2026-08-13 on the grounds that ansidrama rasterised with
+# "JetBrains Mono, which has no Nerd Font glyphs" — a claim about someone else's bundled
+# font that stopped being true when they added two more, and which nothing here would
+# ever have re-checked. Needs an ansidrama new enough to carry the symbols font.
+icons = true
 
 # The title banner is opt-in and off by default, so the demo has to ask for it.
 title_banner = true

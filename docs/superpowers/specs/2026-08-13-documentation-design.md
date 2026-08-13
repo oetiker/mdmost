@@ -29,14 +29,38 @@ Three artifacts, one of them generated:
 | --- | --- | --- |
 | `README.md` | someone deciding, in 30 seconds | authored |
 | `docs/manual.md` | someone using it, on the web | **authored — the single source** |
-| `man/mdmost.1` | someone using it, in a terminal | **generated from `docs/manual.md`** |
+| `man/mdmost.1` | someone using it, in a terminal | **built artifact, not in git** |
 
-`man/mdmost.1` stays a **committed file**. Four things consume it and none of them can
-run pandoc: the deb assets (`Cargo.toml:113`), the rpm assets (`Cargo.toml:126`), the
-Homebrew formula (`Formula/mdmost.rb:39`) and the release tarball
-(`.github/workflows/release.yml:143`). `man/` is also not in `Cargo.toml`'s `exclude`,
-so the page ships inside the crate. Generation is therefore *committed output plus a
-staleness gate*, never generate-at-install.
+**`man/mdmost.1` is never committed.** It is generated in CI, and the stages that need
+it consume it from there. `man/` is gitignored.
+
+This was designed the other way first — committed output plus a CI staleness gate — and
+that was worse. A generated file under version control can disagree with its source, so
+it needs a gate, and the gate is a thing to maintain and a way to fail the build for a
+reason no reader cares about. **A file that does not exist cannot be stale.** The
+consumers turn out not to need it committed:
+
+| Consumer | Where it reads the page | Needs it in git? |
+| --- | --- | --- |
+| Homebrew (`Formula/mdmost.rb:39`) | **our release tarball**, staged by `release.yml:143` | no |
+| deb assets (`Cargo.toml:113`) | working tree during `build-binaries` | no |
+| rpm assets (`Cargo.toml:126`) | working tree during `build-binaries` | no |
+| release tarball (`release.yml:143`) | working tree during `build-binaries` | no |
+
+All three working-tree consumers run inside the same `build-binaries` job, so **one
+generate step at the top of that job serves all of them**.
+
+The one snag is `cargo publish` (`release.yml:232`): a generated, untracked `man/` makes
+the tree dirty and publishing would need `--allow-dirty`. The fix is to add `man/**` to
+`Cargo.toml`'s `exclude` instead. Nothing is lost — **`cargo install` does not install
+man pages**, so the page inside the `.crate` was inert bytes that no user could ever
+reach.
+
+**What this costs, stated plainly:** a git checkout has no man page until someone runs
+`make man`, which needs pandoc. That affects contributors, and any distro packager who
+builds from a git tag rather than from the release tarball or the crate. Given that
+every packaging path this project actually ships — deb, rpm, Homebrew, tarball — is
+built by our own CI, the trade is worth it.
 
 ## 3. Generation
 
@@ -48,9 +72,13 @@ pandoc 3.1.3 is the version this is designed against. Its man writer turns defin
 lists into `.TP`, which is the shape the current hand-written page already uses for its
 45 keys, so the output stays idiomatic roff.
 
-**The date must come from metadata, not from the build.** pandoc stamps the header with
-today's date unless told otherwise, which would make the staleness gate below fail every
-day for no reason. `docs/manual.md` opens with:
+**The date comes from metadata, not from the build.** pandoc stamps the header with
+today's date unless told otherwise, which would mean two builds of the same source
+producing different pages — and would put a meaningless "date" on the page equal to
+whenever the release happened to be cut. (With the page uncommitted this no longer
+breaks any diff, as it would have under the rejected design; it is now purely about the
+page telling the truth about when the manual was last revised.) `docs/manual.md` opens
+with:
 
 ```yaml
 ---
@@ -67,17 +95,24 @@ version number**, deliberately: a version there would make every release bump th
 which would couple the release workflow to doc regeneration for no reader benefit.
 
 **Entry point.** The repository has no Makefile and no `scripts/`. Add a minimal
-`Makefile` with exactly two targets, and nothing else — broader targets are out of scope
-here:
+`Makefile` with one target, and nothing else — broader targets are out of scope here:
 
-- `make man` — regenerate `man/mdmost.1` from `docs/manual.md`.
-- `make check-man` — regenerate into a temporary file and diff against the committed
-  page; non-zero exit if they differ.
+- `make man` — build `man/mdmost.1` from `docs/manual.md`.
 
-**CI gate.** A job in `.github/workflows/ci.yml` installs pandoc and runs
-`make check-man`. A stale `.1` fails the build. This is the whole reason the split is
-safe: the failure mode of single-sourcing is a generated file that no longer matches its
-source, and it is caught mechanically rather than by review.
+Contributors run it when they want to read the page locally; CI runs the same target, so
+there is exactly one command and no second code path that could drift from it.
+
+**Where CI builds it.**
+
+- `.github/workflows/release.yml`, job `build-binaries`: `make man` as the first step,
+  before `cargo deb`, `cargo generate-rpm` and the tarball staging at line 143. One
+  step, three consumers.
+- `.github/workflows/ci.yml`: a `docs` job that installs pandoc and runs `make man`.
+  Nothing consumes the output there — its job is to fail the build when `docs/manual.md`
+  stops converting, so a broken manual is caught on the pull request that broke it and
+  not at release time.
+
+There is **no staleness check**, because there is nothing that can be stale.
 
 ## 4. What the README becomes
 
@@ -157,7 +192,18 @@ Structure:
 - **Icons are detected, not assumed** — `icons` in the config, and why the default is
   detection.
 
-## 7. Keeping the font advice true
+## 7. Keeping the font advice true — and what this does NOT test
+
+**It tests against no font whatsoever, and cannot.** It compares two things that are
+both inside this repository: the codepoints the renderer emits, and the list of blocks
+the manual claims to draw. It says nothing about whether any font on any machine has
+glyphs for them. Checking that would mean rasterising a font and asserting something
+about the reader's system — an assumption this project does not make in code, and one
+that would be wrong on the next machine.
+
+So the claim is narrow: **§6's block list cannot silently stop matching the renderer.**
+Judge it on that. If that is not worth a test file, the alternative is to derive the
+list once by hand during implementation and accept that it may rot.
 
 A test, `tests/glyph_inventory.rs`, renders `tests/corpus/` **and a fixture per Mermaid
 family** — the corpus has `diagrams.md` and `pipeline.mmd` but does not exercise all
@@ -184,11 +230,14 @@ constrain the renderer — only the honesty of the documentation.
 
 ## 9. Acceptance
 
-- `make man` reproduces `man/mdmost.1` byte-for-byte from a clean checkout.
-- `make check-man` exits non-zero when `docs/manual.md` is edited without regenerating.
-- CI runs `check-man` and fails a stale page.
+- `make man` produces `man/mdmost.1` from a clean checkout with nothing but pandoc
+  installed, and `man/` is gitignored and absent from a fresh clone.
 - `man ./man/mdmost.1` renders without roff warnings, and the four groups of keys appear
   as `.TP` entries.
+- `cargo package --list` contains no `man/` entry, and `cargo publish` needs no
+  `--allow-dirty`.
+- A release run produces a tarball containing `man/mdmost.1`, and deb and rpm packages
+  that install it to `/usr/share/man/man1/`.
 - README contains no box-drawing characters at all.
 - Every README link into `docs/` is absolute.
 - `tests/glyph_inventory.rs` passes, and fails when a new non-ASCII glyph is introduced.
@@ -200,9 +249,11 @@ constrain the renderer — only the honesty of the documentation.
    means"; the demo card was changed on 2026-08-13 to "less but moreso and it knows
    Markdown"; `Cargo.toml`'s description is a third, flatter wording. One of the three
    should win in all three places.
-2. **The demo could show icons.** `demo/config.toml:11` pins `icons = false` and
-   justifies it with "ansidrama's bundled JetBrains Mono, which has no Nerd Font
-   glyphs". That is **false as of ansidrama's current release** — it bundles Symbols
-   Nerd Font precisely for these codepoints, and the recording script can enable them.
-   Turning icons on would make the demo show a feature it currently hides. Out of scope
-   here; flagged because the comment is actively wrong.
+2. ~~**The demo could show icons.**~~ **Answered 2026-08-13: `icons = true`.** The old
+   justification — "ansidrama's bundled JetBrains Mono, which has no Nerd Font glyphs" —
+   was a claim about someone else's bundled font that stopped being true when they added
+   two more. `demo/config.toml` now pins icons ON, and says why it is pinned rather than
+   detected. **The demo must be re-recorded against an ansidrama new enough to carry
+   Symbols Nerd Font**, which the owner is releasing; until then the recording on disk
+   does not match its own config. This is demo work, tracked here only because this spec
+   is where the error surfaced.
