@@ -7061,6 +7061,30 @@ fn scrolling_the_document_dismisses_the_popup() {
 }
 
 #[test]
+fn a_height_only_resize_dismisses_the_popup_and_gives_the_movement_keys_back() {
+    // The resize that `ensure_rendered` cannot see. Staleness is keyed on the render
+    // width, so shrinking only the height re-renders nothing — and under `--width` no
+    // resize changes it at all. A popup that survived would keep a rectangle the
+    // viewport no longer has: clipped away by the painter, invisible, and still routing
+    // every movement key to a note with nothing to scroll. The reader would be left with
+    // a document that will not move and no way to see why.
+    let source = format!("a[^n]\n\n{}\n[^n]: a note\n", "filler\n\n".repeat(60));
+    let mut app = open_footnote(&source, 80, 40);
+    assert!(app.popup().is_some());
+
+    app.resize(80, 10);
+    let _ = app.canvas();
+    assert!(
+        app.popup().is_none(),
+        "the box outlived the viewport it was measured in"
+    );
+
+    // The half that hurts, stated separately: the keys work again.
+    app.act(Action::LineDown);
+    assert!(app.scroll() > 0, "the document scrolls again");
+}
+
+#[test]
 fn a_reflow_dismisses_the_popup() {
     // Same reason: the box is anchored to the cell its marker was drawn in, and a
     // reflow moves every cell.

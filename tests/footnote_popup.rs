@@ -13,8 +13,20 @@ fn cells(width: u16, height: u16) -> impl Iterator<Item = (u16, u16)> {
     (0..height).flat_map(move |y| (0..width).map(move |x| (x, y)))
 }
 
-/// The note sizes the sweeps use: a one-liner, a paragraph, and one past both caps.
+/// The note sizes the sweeps use: a one-liner, a paragraph, one past the width cap, and
+/// one past the height cap.
+///
+/// **The tall one is load-bearing.** A four-row note makes a six-row box, which fits
+/// above or below a marker almost anywhere on a 23-row document area — so a sweep of
+/// that size alone cannot reach the case where the box fits neither way, and a review
+/// found this file asserting the no-overlap rule while never exercising it.
 const NOTES: [(u16, u16); 4] = [(5, 1), (30, 4), (200, 3), (40, 90)];
+
+/// [`popup::place`], for the sweeps where a box is always possible.
+fn place(anchor: (u16, u16), content: (u16, u16), screen: (u16, u16)) -> Area {
+    popup::place(anchor, content, screen)
+        .unwrap_or_else(|| panic!("no box for {anchor:?} with {content:?} on {screen:?}"))
+}
 
 #[test]
 fn a_popup_never_leaves_the_screen_wherever_its_marker_is() {
@@ -29,7 +41,7 @@ fn a_popup_never_leaves_the_screen_wherever_its_marker_is() {
                 left,
                 width,
                 height,
-            } = popup::place(anchor, content, screen);
+            } = place(anchor, content, screen);
             assert!(
                 left + width <= screen.0,
                 "{anchor:?} with {content:?} ran off the right edge: {left}+{width}"
@@ -50,23 +62,61 @@ fn a_popup_opens_below_its_marker_whenever_there_is_room() {
     // upwards would pass the "stays on screen" sweep above and still be wrong on every
     // row of the document.
     let screen = (80u16, 23u16);
-    let content = (30u16, 4u16);
-    let height = popup::place((0, 0), content, screen).height;
-    for (x, y) in cells(screen.0, screen.1) {
-        let area = popup::place((x, y), content, screen);
-        if y + 1 + height <= screen.1 {
-            assert_eq!(
-                area.top,
-                y + 1,
-                "there was room below the marker at ({x}, {y})"
-            );
-        } else {
+    for content in NOTES {
+        let height = place((0, 0), content, screen).height;
+        for (x, y) in cells(screen.0, screen.1) {
+            let area = place((x, y), content, screen);
+            if y + 1 + height <= screen.1 {
+                assert_eq!(
+                    area.top,
+                    y + 1,
+                    "there was room below the marker at ({x}, {y}) for {content:?}"
+                );
+                assert_eq!(area.height, height, "and no reason to shrink it");
+            } else if height <= y {
+                assert_eq!(
+                    area.top + area.height,
+                    y,
+                    "no room below, so it must sit directly above the marker at ({x}, {y})"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_popup_never_covers_its_own_marker() {
+    // The rule the flip exists for, and the one containment cannot express: a box merely
+    // clamped onto the screen satisfies "inside the viewport" while sitting on top of the
+    // sentence the reader asked the question from.
+    //
+    // A 23-row document area cannot hold a 12-row box in *either* gap once the marker is
+    // near the middle — `2 * MAX_HEIGHT + 1` is 25 rows and the default terminal has 24 —
+    // so this is the default case, not an exotic one. There the box is shrunk into the
+    // larger gap, and where even that cannot hold a border and one row there is no box.
+    let screen = (80u16, 23u16);
+    for content in NOTES {
+        for (x, y) in cells(screen.0, screen.1) {
+            let Some(area) = popup::place((x, y), content, screen) else {
+                continue;
+            };
             assert!(
-                area.top + area.height <= y,
-                "no room below, so it must sit entirely above the marker at ({x}, {y}): {area:?}"
+                y < area.top || y >= area.top + area.height,
+                "the box at {area:?} covers its own marker at ({x}, {y})"
             );
         }
     }
+}
+
+#[test]
+fn a_marker_with_no_room_on_either_side_gets_no_box_at_all() {
+    // Not a sliver, and not a box over the marker: nothing, so the pager can say so.
+    // A five-row document area with the marker in the middle leaves two rows above and
+    // two below, and a box needs three.
+    assert!(popup::place((0, 2), (30, 4), (80, 5)).is_none());
+    // One row further up and the gap below is three rows, which is exactly a box.
+    let area = popup::place((0, 1), (30, 4), (80, 5)).expect("a box in the gap below");
+    assert_eq!((area.top, area.height), (2, 3));
 }
 
 #[test]
@@ -76,9 +126,9 @@ fn a_popup_starts_at_its_marker_whenever_there_is_room() {
     // nothing.
     let screen = (80u16, 23u16);
     let content = (30u16, 4u16);
-    let width = popup::place((0, 0), content, screen).width;
+    let width = place((0, 0), content, screen).width;
     for (x, y) in cells(screen.0, screen.1) {
-        let area = popup::place((x, y), content, screen);
+        let area = place((x, y), content, screen);
         if x + width <= screen.0 {
             assert_eq!(area.left, x, "there was room to the right at ({x}, {y})");
         } else {
@@ -98,9 +148,9 @@ fn a_popup_starts_at_its_marker_whenever_there_is_room() {
 #[test]
 fn a_popup_is_as_big_as_its_note_up_to_the_caps() {
     let screen = (200u16, 60u16);
-    let small = popup::place((0, 0), (5, 1), screen);
-    let medium = popup::place((0, 0), (30, 4), screen);
-    let huge = popup::place((0, 0), (400, 400), screen);
+    let small = place((0, 0), (5, 1), screen);
+    let medium = place((0, 0), (30, 4), screen);
+    let huge = place((0, 0), (400, 400), screen);
 
     assert!(small.width < medium.width, "content decides the width");
     assert!(small.height < medium.height, "and the height");
@@ -137,7 +187,7 @@ fn a_narrow_screen_renders_the_note_narrower_rather_than_hanging_off_the_edge() 
     assert_eq!(popup::inner_width(30), 26, "the screen on a narrow one");
     for screen_width in 12..200u16 {
         let inner = popup::inner_width(screen_width);
-        let area = popup::place((0, 0), (inner, 3), (screen_width, 23));
+        let area = place((0, 0), (inner, 3), (screen_width, 23));
         assert!(
             area.left + area.width <= screen_width,
             "a note rendered at {inner} needs a box that fits in {screen_width}: {area:?}"

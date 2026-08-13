@@ -835,6 +835,15 @@ impl App {
         // A drag cannot survive this: its anchor is a row of a track that is about to
         // change height, and the reflow moves every line under it.
         self.bar_grab = None;
+        // Nor can the footnote popup, and for the same reason one step over: its anchor
+        // is a *viewport* row, and its rectangle was measured against a document area
+        // that is about to change shape. Said here rather than left to
+        // `ensure_rendered`'s stale block, which is what covers reflow: staleness is
+        // keyed on the render width, so a height-only resize never fires it — and under
+        // `--width` no resize fires it at all. The box would then survive with geometry
+        // the viewport no longer has: clipped away by the painter, invisible, and still
+        // eating every movement key from a state the reader has no way to see.
+        self.popup = None;
         let anchor = self.source_offset_at(self.scroll);
         self.size = (width, height);
         self.ensure_rendered();
@@ -1602,7 +1611,14 @@ impl App {
                 label,
             )
         };
-        self.popup = Some(Popup::new(canvas, label, anchor, screen, self.theme.base()));
+        // `None` when neither the room above the marker nor the room below it can hold a
+        // box that does not cover the marker itself (see `popup::place`). Reported, not
+        // swallowed: a marker that reacts to a click and then does nothing visible is
+        // exactly the control design spec §1.1 refuses to offer.
+        match Popup::new(canvas, label, anchor, screen, self.theme.base()) {
+            Some(popup) => self.popup = Some(popup),
+            None => self.notify("no room beside the marker for the footnote", false),
+        }
     }
 
     /// The rows of the document area a popup may occupy.

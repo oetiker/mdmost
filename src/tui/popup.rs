@@ -119,43 +119,63 @@ pub fn inner_width(screen_width: u16) -> u16 {
 /// `anchor` is the marker's own cell, in document-area coordinates; `content` is
 /// `(columns, rows)` of the note as the renderer actually laid it out.
 ///
-/// Three rules, in this order:
+/// Four rules, in this order:
 ///
 /// * **Sized to its content, up to the cap.** A one-line note gets a small box. A long
 ///   one stops at [`MAX_WIDTH`] / [`MAX_HEIGHT`] and scrolls inside it.
 /// * **Below the marker, or above it when below will not fit.** Below is the default
 ///   because that is where the eye already is; the flip is what keeps a marker on the
 ///   last row of the viewport from opening a box nobody can see.
-/// * **Left-aligned with the marker, or flush right when that will not fit.** Same
-///   argument, sideways.
+/// * **Shrunk into the larger gap when it fits neither.** See below — this is the case
+///   the default 24-row terminal reaches, not an exotic one.
+/// * **Left-aligned with the marker, or flush right when that will not fit.** The same
+///   argument as the second rule, sideways. There is no third case here: a box beside
+///   the marker's column is still on a different *row* from it, so overlapping columns
+///   hide nothing.
 ///
-/// The box never leaves the document area on any edge, which is the property every one
-/// of the three rules is in service of.
-pub fn place(anchor: (u16, u16), content: (u16, u16), screen: (u16, u16)) -> Area {
+/// # The box never covers its own marker
+///
+/// `None` rather than an overlap, and this is the whole reason the answer is optional.
+/// The two vertical gaps are `anchor.1` rows above the marker and
+/// `screen.1 - anchor.1 - 1` below it, so a box of `MAX_HEIGHT` fits *neither* whenever
+/// the viewport is shorter than `2 * MAX_HEIGHT + 1` rows — which the default 24-row
+/// terminal, with its 23-row document area, is. Clamping the box onto the screen there
+/// draws it over the marker, and the reader loses the sentence they asked the question
+/// from: exactly what the above/below flip exists to protect. So the box is shrunk into
+/// whichever gap is larger and scrolls a little sooner, and when even that gap cannot
+/// hold a border and one row of note there is no honest box to draw at all —
+/// [`super::app::App`] says so in the status bar instead.
+///
+/// The box also never leaves the document area on any edge, which is the property the
+/// flips are in service of.
+pub fn place(anchor: (u16, u16), content: (u16, u16), screen: (u16, u16)) -> Option<Area> {
     let width = content
         .0
         .saturating_add(CHROME_COLS)
         .min(MAX_WIDTH)
         .min(screen.0)
         .max(CHROME_COLS.min(screen.0));
-    let height = content
+    // `clamp`, not `min` then `max`: the two constants bound the same value from either
+    // side, and clippy is right that saying so once is clearer.
+    let wanted = content
         .1
         .saturating_add(CHROME_ROWS)
-        .min(MAX_HEIGHT)
-        .min(screen.1)
-        .max(MIN_HEIGHT.min(screen.1));
+        .clamp(MIN_HEIGHT, MAX_HEIGHT);
 
-    // Below the marker if the box fits there, otherwise above it — and if it fits
-    // neither way (a box taller than the whole document area, which the cap makes
-    // possible only on a very short terminal) it is pushed onto the screen from the
-    // bottom, because a box whose *top* is off screen shows nothing but its own edge.
-    let below = anchor.1.saturating_add(1);
-    let top = if below.saturating_add(height) <= screen.1 {
-        below
+    let above = anchor.1;
+    let below = screen.1.saturating_sub(anchor.1.saturating_add(1));
+    let (top, height) = if wanted <= below {
+        (anchor.1.saturating_add(1), wanted)
+    } else if wanted <= above {
+        (anchor.1 - wanted, wanted)
+    } else if below >= above {
+        (anchor.1.saturating_add(1), below)
     } else {
-        anchor.1.saturating_sub(height)
+        (0, above)
     };
-    let top = top.min(screen.1.saturating_sub(height));
+    if height < MIN_HEIGHT {
+        return None;
+    }
 
     // Left-aligned with the marker, or pushed back onto the screen from the right edge.
     let left = if anchor.0.saturating_add(width) <= screen.0 {
@@ -164,12 +184,12 @@ pub fn place(anchor: (u16, u16), content: (u16, u16), screen: (u16, u16)) -> Are
         screen.0.saturating_sub(width)
     };
 
-    Area {
+    Some(Area {
         top,
         left,
         width,
         height,
-    }
+    })
 }
 
 /// The widest row of `canvas` that has anything drawn in it, in columns.
@@ -236,23 +256,26 @@ pub struct Popup {
 
 impl Popup {
     /// Builds a popup holding `canvas`, anchored to the marker at `anchor`.
+    ///
+    /// `None` when there is no room for a box that does not cover its own marker; see
+    /// [`place`].
     pub fn new(
         canvas: Canvas,
         label: String,
         anchor: (u16, u16),
         screen: (u16, u16),
         fill: Style,
-    ) -> Self {
+    ) -> Option<Self> {
         let content = (
             used_width(&canvas, fill),
             u16::try_from(canvas.height()).unwrap_or(u16::MAX),
         );
-        Self {
-            area: place(anchor, content, screen),
+        Some(Self {
+            area: place(anchor, content, screen)?,
             canvas,
             label,
             scroll: 0,
-        }
+        })
     }
 
     /// Where the box sits.
