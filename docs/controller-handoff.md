@@ -66,8 +66,9 @@ Re-derive rather than inherit (§8). Plan: `docs/superpowers/plans/2026-08-12-cl
 | 7 — anchors | `a743ca8` | 1245 |
 | 8 — the keyboard cursor | `285b064` | 1257 |
 | 9a — a footnote marker is a control (off-plan) | `07aa96e` | 1260 |
+| 9b — the footnote popup (+ 3 fix commits) | `b2ccc74` | 1290 |
 
-At `07aa96e`: **1260 tests across 32 suites**; `cargo fmt --check`, `cargo clippy --jobs 4
+At `b2ccc74`: **1290 tests across 33 suites**; `cargo fmt --check`, `cargo clippy --jobs 4
 --all-targets -- -D warnings`, `cargo test --jobs 4` and `cargo check --jobs 4 --target
 x86_64-pc-windows-msvc` all exit 0. **Every commit had its gates re-derived by the
 controller in the verify worktree, its test count reconciled two ways, and at least one
@@ -77,7 +78,7 @@ uncovered rebase path, a "red" that was a compile error, a stale click candidate
 task would have turned into a browser opening unbidden, and a sanitisation hole whose
 justification a later task had silently invalidated.
 
-**Remaining: Task 9b (the footnote popup) and Task 10 (the demo).**
+**Remaining: Task 10 (the demo) only. Every other task is implemented and verified.**
 
 **Task 9 was split on 2026-08-13 and the plan rewritten (`522ad76`).** Writing its tests
 against the real code — deliberately deferred, and this is why — found the task's premise
@@ -89,11 +90,13 @@ stands.
 
 ## 3. Do this next
 
-1. **Task 9a's review is in flight** when this was written. Clear it, then **Task 9b** —
-   the largest task in the plan. Its brief is the plan's own Task 9b section; extract it
-   with `sed -n '/^### Task 9b/,/^### Task 10/p'`, as `scripts/task-brief` keys on plain
-   numbers and does not know about `9a`/`9b`.
-2. **Then Task 10, the demo — an owner gate**, and the last task.
+1. **Wait on the owner.** A binary with the whole feature in it is built at
+   `/scratch/oetiker/cargo-target-mdmost-tryout/release/mdmost` (from `b2ccc74`) and
+   `mdmost-tryout/links.md` exercises every state. The five open questions in §7 were put
+   to them as one batch on 2026-08-13. **Do not re-ask them piecemeal.**
+2. **Then Task 10, the demo — an owner gate**, and the last task. Its brief is the plan's
+   Task 9b/10 sections; `scripts/task-brief` keys on plain numbers and does not know about
+   `9a`/`9b`, so extract with `sed -n '/^### Task 10/,$p'`.
 3. **Five owner answers are outstanding and none of them blocks** (§7). Batch them: the
    owner reviews by looking, so give them one binary that does everything and one page,
    rather than five prose questions spread over an afternoon.
@@ -316,7 +319,7 @@ is the colour gate.
   HEAD main`, `git log --oneline HEAD..main`, `git branch -a --contains HEAD`.
 - **Sibling worktrees created after this commit are invisible here.** Run `git worktree
   list`.
-- The 1260-test count and the four green gates are as of `07aa96e`. Re-run them; a count
+- The 1290-test count and the four green gates are as of `b2ccc74`. Re-run them; a count
   that moved without an explanation is the signal.
 - **"There is no remote" rots the moment the owner creates the repository.** Check `git
   remote -v` rather than believing §7.6.
