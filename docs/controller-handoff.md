@@ -244,6 +244,15 @@ Settled; do not relitigate:
    changing the drop priorities or re-staging act 4 at full width.
 6. **Two unguarded `Span` sites**, pre-existing: `chrome::highlighted` (TOC heading text)
    and the status-bar breadcrumb. Same width-drift exposure the URL had.
+6b. **Feature idea, owner's, 2026-08-13 — a language icon on the code frame's label.**
+   `src/tui/icons.rs` has ten fixed UI icons behind `Icons::new(nerd_font)`; nothing is
+   per-language. A Nerd Font dev-icon map (Rust, Python, TOML, …) with a fallback for the
+   long tail would put a glyph beside the `rust` label, degrading to today's plain label
+   when icons are off. **Needs its own brainstorm and spec — it is a feature, not
+   documentation.** The known risk is the one this project keeps paying: PUA glyphs have
+   an advance width that need not match what `unicode-width` reports, and the frame label
+   does column arithmetic against the frame edge — the same shape as the `Cc` zero-width
+   drop in the status bar.
 7. **A deferred minor worth doing:** the invariant "a hotspot never claims a cell the
    canvas does not have" is held by argument at three call sites, not by construction.
    Adding it to `Canvas::check_invariants` would make a future op that forgets to clamp
