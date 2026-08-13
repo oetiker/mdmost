@@ -22,6 +22,22 @@ fn cells(width: u16, height: u16) -> impl Iterator<Item = (u16, u16)> {
 /// found this file asserting the no-overlap rule while never exercising it.
 const NOTES: [(u16, u16); 4] = [(5, 1), (30, 4), (200, 3), (40, 90)];
 
+/// The document areas the sweeps run over.
+///
+/// **More than one height is load-bearing, and the arithmetic says why.** The box is
+/// shrunk into the *larger* gap when it fits neither, and the branch that shrinks into
+/// the gap **above** the marker needs `above > below` and `wanted > above` at once. On a
+/// 23-row area the first needs a marker below row 11 and the second needs `above` under
+/// `MAX_HEIGHT`, which is 12 — so the two cannot both hold and that branch is
+/// unreachable. A review mutated exactly it and the whole suite stayed green while
+/// sweeping every cell of a 23-row screen. Shorter areas are where the case lives: at 20
+/// rows a marker on row 11 has 11 rows above it and 8 below, and a twelve-row box fits
+/// neither.
+///
+/// The short ones are also the terminals where a box refuses to open at all, which is the
+/// other half of the same rule.
+const SCREENS: [(u16, u16); 5] = [(80, 23), (80, 20), (80, 12), (80, 7), (80, 5)];
+
 /// [`popup::place`], for the sweeps where a box is always possible.
 fn place(anchor: (u16, u16), content: (u16, u16), screen: (u16, u16)) -> Area {
     popup::place(anchor, content, screen)
@@ -33,24 +49,29 @@ fn a_popup_never_leaves_the_screen_wherever_its_marker_is() {
     // The property every flip is in service of. A box that hangs off an edge is not a
     // smaller mistake than one drawn in the wrong place: the part that is off screen is
     // simply not there, and the reader has no way to know a footnote was cut.
-    let screen = (80u16, 23u16);
-    for content in NOTES {
-        for anchor in cells(screen.0, screen.1) {
-            let Area {
-                top,
-                left,
-                width,
-                height,
-            } = place(anchor, content, screen);
-            assert!(
-                left + width <= screen.0,
-                "{anchor:?} with {content:?} ran off the right edge: {left}+{width}"
-            );
-            assert!(
-                top + height <= screen.1,
-                "{anchor:?} with {content:?} ran off the bottom: {top}+{height}"
-            );
-            assert!(width >= 3 && height >= 3, "a box has a border to draw");
+    for screen in SCREENS {
+        for content in NOTES {
+            for anchor in cells(screen.0, screen.1) {
+                let Some(Area {
+                    top,
+                    left,
+                    width,
+                    height,
+                }) = popup::place(anchor, content, screen)
+                else {
+                    continue;
+                };
+                assert!(
+                    left + width <= screen.0,
+                    "{anchor:?} with {content:?} on {screen:?} ran off the right edge: \
+                     {left}+{width}"
+                );
+                assert!(
+                    top + height <= screen.1,
+                    "{anchor:?} with {content:?} on {screen:?} ran off the bottom: {top}+{height}"
+                );
+                assert!(width >= 3 && height >= 3, "a box has a border to draw");
+            }
         }
     }
 }
@@ -88,24 +109,47 @@ fn a_popup_opens_below_its_marker_whenever_there_is_room() {
 fn a_popup_never_covers_its_own_marker() {
     // The rule the flip exists for, and the one containment cannot express: a box merely
     // clamped onto the screen satisfies "inside the viewport" while sitting on top of the
-    // sentence the reader asked the question from.
+    // sentence the reader asked the question from. `a_popup_never_leaves_the_screen…`
+    // passes on a build that gets this wrong, which is why the invariant is asserted here
+    // rather than left as a corollary of that one.
     //
-    // A 23-row document area cannot hold a 12-row box in *either* gap once the marker is
-    // near the middle — `2 * MAX_HEIGHT + 1` is 25 rows and the default terminal has 24 —
-    // so this is the default case, not an exotic one. There the box is shrunk into the
-    // larger gap, and where even that cannot hold a border and one row there is no box.
-    let screen = (80u16, 23u16);
-    for content in NOTES {
-        for (x, y) in cells(screen.0, screen.1) {
-            let Some(area) = popup::place((x, y), content, screen) else {
-                continue;
-            };
-            assert!(
-                y < area.top || y >= area.top + area.height,
-                "the box at {area:?} covers its own marker at ({x}, {y})"
-            );
+    // Every screen in `SCREENS`, not one: the branch that shrinks the box into the gap
+    // *above* the marker cannot be reached on a 23-row area at all (see `SCREENS`), and a
+    // sweep that ran only that height stated this rule while never exercising it.
+    for screen in SCREENS {
+        for content in NOTES {
+            for (x, y) in cells(screen.0, screen.1) {
+                let Some(area) = popup::place((x, y), content, screen) else {
+                    continue;
+                };
+                assert!(
+                    y < area.top || y >= area.top + area.height,
+                    "the box at {area:?} covers its own marker at ({x}, {y}) on {screen:?}"
+                );
+            }
         }
     }
+}
+
+#[test]
+fn the_gap_above_the_marker_is_a_case_the_sweeps_actually_reach() {
+    // A tripwire on the sweeps above, not a rule of its own. The two of them are only
+    // worth their runtime if the shrink-into-the-gap-above branch is among the answers
+    // they see, and that branch is reachable in a narrow band: `above > below` puts the
+    // marker in the lower half, `wanted > above` puts `above` under MAX_HEIGHT, and both
+    // together need an area shorter than 2 * MAX_HEIGHT. If a future cap makes the band
+    // empty again, this fails and says so — rather than the sweeps quietly going hollow.
+    let area = popup::place((0, 11), (40, 90), (80, 20)).expect("a shrunken box");
+    assert_eq!(
+        (area.top, area.height),
+        (0, 11),
+        "eleven rows above the marker, eight below, and a twelve-row box wanted: it must \
+         take the larger gap and stop short of the marker"
+    );
+    assert!(
+        SCREENS.contains(&(80, 20)) && NOTES.contains(&(40, 90)),
+        "and the sweeps must actually run that combination"
+    );
 }
 
 #[test]
@@ -114,6 +158,9 @@ fn a_marker_with_no_room_on_either_side_gets_no_box_at_all() {
     // A five-row document area with the marker in the middle leaves two rows above and
     // two below, and a box needs three.
     assert!(popup::place((0, 2), (30, 4), (80, 5)).is_none());
+    // The same refusal reached through the *other* gap: two rows above the marker, one
+    // below, so the larger gap is the one above and it is still a row short of a box.
+    assert!(popup::place((0, 2), (30, 4), (80, 4)).is_none());
     // One row further up and the gap below is three rows, which is exactly a box.
     let area = popup::place((0, 1), (30, 4), (80, 5)).expect("a box in the gap below");
     assert_eq!((area.top, area.height), (2, 3));

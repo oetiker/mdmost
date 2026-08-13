@@ -7135,6 +7135,38 @@ fn an_unknown_footnote_reports_and_opens_nothing() {
 }
 
 #[test]
+fn a_marker_with_no_room_on_either_side_of_it_says_so() {
+    // The pager's half of `popup::place` answering `None`. The geometry test pins the
+    // refusal; this pins that the refusal reaches the reader. A marker reacting to a
+    // click and then doing nothing visible is the control design spec §1.1 refuses to
+    // offer, and the status bar never lies.
+    //
+    // Five rows of document area with the marker on the middle one leaves two rows above
+    // and two below, and a box needs three. 200 columns because the notice rides in
+    // `Drop::Context`, the cheapest-priority segment of the status bar, which is dropped
+    // for width at 60 and at 100 — a narrower buffer would assert on a notice that was
+    // never drawn.
+    let mut app = pager_at("filler\n\na[^n]\n\n[^n]: a note worth reading\n", 200, 6);
+    let (x, y) = painted_at(&mut app, 200, 6, "[1]");
+    assert_eq!(
+        y, 2,
+        "the marker must sit mid-viewport for either gap to be too small"
+    );
+    super::term::on_mouse(&mut app, press_at(x, y), 200, 6);
+    super::term::on_mouse(&mut app, release_at(x, y), 200, 6);
+    assert!(
+        app.popup().is_none(),
+        "no box fits above or below the marker, so none is opened"
+    );
+    let rows = framed(&mut app, 200, 6);
+    let status = rows.last().expect("a status row");
+    assert!(
+        status.contains("no room"),
+        "the reader has to be told why nothing happened: {status:?}"
+    );
+}
+
+#[test]
 fn the_keyboard_opens_the_same_popup_the_pointer_does() {
     // Design spec §1: everything is reachable from the keyboard as well as the mouse.
     // `f` steps the cursor onto the marker — the only control in this document — and
