@@ -169,27 +169,55 @@ in the right, on `demo/tour.md`. Everything it depends on is under `demo/` —
 `tmux.conf` (the split, the mouse, and `set-clipboard on`), and `mdmost.toml` (the
 script itself). It needs `tmux` >= 3.4, `less` and `nano` on the host, and nothing else.
 
-Three things in there are load-bearing and easy to break:
+Five things in there are load-bearing and easy to break:
 
 - **`demo/tour.md`'s widths.** The point of the drag is that the pane passes through
-  the widths where the content changes shape. The three-column table has two-line cells
-  up to 59 columns and single-line rows from 60; the small flowchart's labels wrap
-  below 59 and are single-line above; the five-column table needs 60 and the
-  `pipeline.mmd` diagram 188, so neither fits the 47-column pane. Change a cell's text
-  and you can silently move one of those thresholds past the drag, leaving the demo
-  showing nothing. Check with `mdmost --render-once --width N demo/tour.md` at 48, 50,
-  59, 60, 64 and 100 before re-recording.
+  the widths where the content changes shape. Measured against the current renderer:
+  the three-column table has two-line cells up to 59 columns and single-line rows from
+  60; the small flowchart's labels wrap up to 50 and are single-line from 51; the
+  five-column table is 60 wide and the `pipeline.mmd` diagram declines to draw below
+  65, so neither fits the 48-column pane. Change a cell's text and you can silently
+  move one of those thresholds past the drag, leaving the demo showing nothing. Check
+  with `mdmost --render-once --width N demo/tour.md` at 48, 50, 51, 59, 60, 64 and 100
+  before re-recording. **These numbers drift on their own.** The flowchart's threshold
+  was 59 when the demo was first recorded and is 51 now, and the width the pipeline
+  reports it wants went from 188 to 127 — a sentence in `demo/tour.md` quotes that
+  number aloud, so re-read it too. Nothing in the test suite pins any of this.
+- **Coordinates are read off the screen, not derived.** Every `click` in the script is
+  a column and a row of a hundred-column frame, and a click that lands on nothing is
+  *silent*: the copy does not happen, and the `prefix ]` that follows pastes the
+  previous buffer a second time, which looks almost right. The fenced block's `[copy]`
+  moved from row 16 to row 1 between recordings for no reason but a renderer change.
+  Before re-recording, put a 49-column pane on `demo/tour.md`, walk the same keys, and
+  read every button's row and column off `tmux capture-pane -p`.
 - **`DISPLAY` and `WAYLAND_DISPLAY` are emptied** in `demo/mdmost.toml`. mdmost writes
   OSC 52 unconditionally, and tmux's `set-clipboard on` takes it into its own paste
   buffer — that is the whole of act 4 and it needs no display server. With one
   reachable, `arboard` also takes the copy and the status bar says something else.
 - **`set -g set-clipboard on`.** Without it `prefix ]` pastes nothing and act 4 is a
   mime.
+- **`hold_cs` is a duration written into the WebP, not a sleep.** ansidrama sends the
+  next scene's key as soon as the PTY has been quiet for `settle_ms`, so scenes that
+  read as seconds apart on screen are milliseconds apart in the terminal. Two
+  consequences, both of which have bitten this script:
+  - an `Escape` scene lays a bare ESC in front of the next keystroke and the pair
+    arrives as `M-<key>`, losing both. There is no `Escape` in the script; act 6
+    dismisses the footnote box with a click and act 7 relies on the same rule.
+  - a key sent right after the left pane's `exit` can reach the dying shell instead of
+    mdmost, because `bash` is quiet for longer than `settle_ms` before tmux notices the
+    EOF. Act 5 spends three throwaway `g`s there to buy quiet windows.
 
-Recording takes about four minutes and the result is lossless WebP, currently 803
-frames and about 1.6 MB. Successive runs produce the same frame count and the same loop
-duration but **not** byte-identical files — a few hundred bytes drift between runs — so
+Recording takes about five minutes and the result is lossless WebP, currently 906
+frames and about 1.7 MB. Successive runs produce the same frame count and the same loop
+duration but **not** byte-identical files — a few dozen bytes drift between runs — so
 re-record only when the demo actually changes, not as routine hygiene.
+
+**Watch the result before committing it.** `ansidrama record demo/mdmost.toml
+--dump-png <dir>` writes every frame as a PNG beside the WebP, and the run log names the
+frame each scene ends on, so a beat can be checked by opening one file. Three of the
+four takes behind the current recording had a silently broken act in them — a copy that
+pasted the last thing twice, a note that never closed, a contents pane that opened one
+beat too late — and none of it was visible from the byte size or the frame count.
 
 The copy buttons only exist when mouse capture succeeded, so `--render-once` shows none.
 That is correct, not a broken render.
