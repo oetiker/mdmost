@@ -10,7 +10,7 @@
 > and tombstone this one.
 
 Handoff commit: the last commit touching this file — `git log -1 -- docs/controller-handoff.md`
-Date: 2026-08-13   Reason: context rollover mid-plan, five tasks of ten done
+Date: 2026-08-13   Reason: context rollover mid-plan; nine tasks done, the popup and the demo remain
 Worktree / branch: `/scratch/oetiker/claude-worktrees/mdmost-semantic-selection` @ `semantic-selection`
 Trunk: `main` @ `344f4e1`. **This branch is NOT merged and there is still no remote.**
 
@@ -61,26 +61,43 @@ Re-derive rather than inherit (§8). Plan: `docs/superpowers/plans/2026-08-12-cl
 | 3 — scheme allowlist + status-bar URL | `c4d1bdd` | 1203 |
 | 2b — a link in a table cell reacts (off-plan) | `d6a262a` | 1218 |
 | 4 — hover lights a whole control | `38c667d` | 1222 |
-| 5 — the click state machine | `3fc1513` | 1235 |
+| 5 — the click state machine (+ fix `68031b4`) | `3fc1513` | 1237 |
+| 6 — the opener (+ fix `bf62a00`, doc `9265fc6`) | `c726142` | 1245 |
+| 7 — anchors | `a743ca8` | 1245 |
+| 8 — the keyboard cursor | `285b064` | 1257 |
+| 9a — a footnote marker is a control (off-plan) | `07aa96e` | 1260 |
 
-At `3fc1513`: **1235 tests across 32 suites**; `cargo fmt --check`, `cargo clippy --jobs 4
+At `07aa96e`: **1260 tests across 32 suites**; `cargo fmt --check`, `cargo clippy --jobs 4
 --all-targets -- -D warnings`, `cargo test --jobs 4` and `cargo check --jobs 4 --target
 x86_64-pc-windows-msvc` all exit 0. **Every commit had its gates re-derived by the
 controller in the verify worktree, its test count reconciled two ways, and at least one
 load-bearing mutation re-run by the controller rather than taken on the implementer's
-word.** That caught three things a report would not have: a vacuous security test, an
-uncovered rebase path, and a "red" that was a compile error.
+word.** That caught five things a report would not have: a vacuous security test, an
+uncovered rebase path, a "red" that was a compile error, a stale click candidate the next
+task would have turned into a browser opening unbidden, and a sanitisation hole whose
+justification a later task had silently invalidated.
 
-**Remaining: Tasks 6 (the opener), 7 (anchors), 8 (keyboard cursor), 9 (footnote popup),
-10 (the demo).** Task 9's plan text still has five stub test bodies — write them when Task
-9 is next up, not before (§4.6).
+**Remaining: Task 9b (the footnote popup) and Task 10 (the demo).**
+
+**Task 9 was split on 2026-08-13 and the plan rewritten (`522ad76`).** Writing its tests
+against the real code — deliberately deferred, and this is why — found the task's premise
+false: **nothing constructed `HotspotKind::Footnote`**, and a footnote reference rendered
+as a bare synthetic `[1]` with no control tag, so there was nothing to click and the popup
+could never have been opened by a pointer. 9a supplied that half (`07aa96e`). **9b is the
+popup and its ten test bodies are now written out in the plan**, against the code as it
+stands.
 
 ## 3. Do this next
 
-1. **Task 5's review is in flight** when this was written. Clear it, then Task 6.
-2. **Tasks 6–8 are ordinary.** Task 9 (the popup) is the largest and its plan is
-   incomplete by design. Task 10 is the demo and is an owner gate.
-3. **Two owner answers are outstanding and neither blocks** (§7.1, §7.2).
+1. **Task 9a's review is in flight** when this was written. Clear it, then **Task 9b** —
+   the largest task in the plan. Its brief is the plan's own Task 9b section; extract it
+   with `sed -n '/^### Task 9b/,/^### Task 10/p'`, as `scripts/task-brief` keys on plain
+   numbers and does not know about `9a`/`9b`.
+2. **Then Task 10, the demo — an owner gate**, and the last task.
+3. **Five owner answers are outstanding and none of them blocks** (§7). Batch them: the
+   owner reviews by looking, so give them one binary that does everything and one page,
+   rather than five prose questions spread over an afternoon.
+4. **Then the branch's fate.** It carries two complete workstreams, unmerged, no remote.
 
 ## 4. Lessons & traps ← the irreplaceable part
 
@@ -97,6 +114,25 @@ constraints as actions, not prohibitions**; **dispatch at most ONE file-writing 
 worktree**.
 
 New this session, in rough order of what they are worth:
+
+0. **I broke the build by running two writers in one worktree**, and "the files are
+   disjoint" was not the exemption I thought. Task 6 renamed `chrome::sanitized_url` →
+   `sanitized` and updated its test; Task 7 then committed `tests.rs` carrying that
+   renamed test while `chrome.rs` stayed uncommitted, so **`a743ca8` does not compile**
+   (`bf62a00` repairs it and says so). The source files *were* disjoint — but **the test
+   file is shared, and almost always will be.** Two phantom defects came out of that same
+   window and both would have cost the next reader time: an "`app.rs` fails `cargo fmt`"
+   that was a snapshot of another agent's in-flight file, and an unexplained intermittent
+   in a security test (§7.9). **ONE writer per worktree. No exemptions.**
+
+0b. **A missing test is only a gap if you can name a mutation that survives without it,
+   and a Minor is only Minor for as long as its blast radius holds.** Two escalations this
+   session, both correct, both from the same shape of reasoning: a stale click candidate
+   rated Minor on "today it is a spurious re-copy" became Important because *the next
+   task* made it a browser opening unbidden; and an unsanitised status-bar notice was rated
+   Minor as "not new exposure" when in fact Task 6 had just invalidated the reasoning that
+   excluded it from Task 3's sanitisation sweep. **A defect whose severity is set by what
+   changed around it is not a deferred minor.**
 
 1. **THE CONTROLLER IS A WRITER.** I corrupted an implementer's working tree **twice** by
    running my own `cp`-backup → mutate → suite → restore cycle in the worktree it was live
@@ -222,6 +258,26 @@ Settled by the work; do not relitigate:
 
 ## 7. Open questions / pending decisions
 
+**Batch these for the owner — do not ask them one at a time.** They review by looking, so
+hand over one binary that does everything plus `mdmost-tryout/links.md`, and ask all of it
+at once. Five are open as of this handoff; the first four are behaviour choices, the fifth
+is the colour gate.
+
+0. **Should a link click say `opening…`, or stay silent?** Today only *failures* reach the
+   status bar. That is defensible — the spawn is detached and unwaited, so the pager
+   genuinely cannot claim the browser opened, and the status bar never lies — but a click
+   then looks like nothing happened until the browser surfaces, which on a cold start is
+   seconds. `opening…` is a claim about what the *pager* did, not the browser, so it is
+   honest and still informative. Controller leans toward it; the owner decides.
+
+0b. **`[copy]` now fires on button-up, not button-down** (`3fc1513`, stated in its commit
+   message for veto). Unifying was the controller's call; spec §2 asks the button to
+   "become one case of a general mechanism", and one mechanism cannot have two firing
+   edges.
+
+0c. **The keyboard cursor cycles `[copy]` buttons as well as links.** Nothing in the spec
+   restricts it, and it lets a mouseless reader copy a code block. Flagged, not ruled.
+
 1. **`--render-once` and hotspots — spec §4 contradicts itself, owner ruling needed.** Line
    93 says render-once records no hotspots; the paragraph above says links are never hidden
    because a keyboard cursor makes them reachable. `--render-once` sets `copy_button:
@@ -260,7 +316,7 @@ Settled by the work; do not relitigate:
   HEAD main`, `git log --oneline HEAD..main`, `git branch -a --contains HEAD`.
 - **Sibling worktrees created after this commit are invisible here.** Run `git worktree
   list`.
-- The 1235-test count and the four green gates are as of `3fc1513`. Re-run them; a count
+- The 1260-test count and the four green gates are as of `07aa96e`. Re-run them; a count
   that moved without an explanation is the signal.
 - **"There is no remote" rots the moment the owner creates the repository.** Check `git
   remote -v` rather than believing §7.6.
