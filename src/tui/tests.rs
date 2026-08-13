@@ -8,6 +8,7 @@ use ratatui::layout::Rect;
 
 use super::app::{App, AppOptions, Focus, Overlay, PromptKind};
 use super::help;
+use crate::canvas::HotspotKind;
 use crate::config::{Action, Config, Key, KeyBindings, KeyCode};
 use crate::doc::Doc;
 use crate::search::SearchMode;
@@ -1540,13 +1541,13 @@ fn painted_at(app: &mut App, width: u16, height: u16, needle: &str) -> (u16, u16
 }
 
 #[test]
-fn sanitized_url_substitutes_a_control_character_without_moving_its_width() {
+fn sanitized_substitutes_a_control_character_without_moving_its_width() {
     // The direct-call pin: one column in, one column out
     // (`crate::text::cell_clusters`), so nothing measured for the status bar's own
-    // layout arithmetic moves because of the substitution. This does not prove the
-    // call site in `draw_status` still exists -- see the test below for that.
+    // layout arithmetic moves because of the substitution. This does not prove either
+    // call site in `draw_status` still exists -- see the tests below for that.
     let hostile = "https://example.com/\u{9b}pwned";
-    let safe = super::chrome::sanitized_url(hostile);
+    let safe = super::chrome::sanitized(hostile);
     assert!(
         !safe.contains('\u{9b}'),
         "the control character does not survive: {safe:?}"
@@ -1572,7 +1573,7 @@ fn a_control_character_in_a_hovered_url_cannot_reach_the_terminal() {
     // Hovered the same way `hovering_a_link_shows_its_full_url_in_the_status_bar`
     // does -- real `set_pointer` against the real rendered canvas -- and drawn
     // through `chrome::draw_status` itself, so this fails if the call site to
-    // `sanitized_url` is ever dropped, not only if the helper it calls breaks.
+    // `sanitized` is ever dropped, not only if the helper it calls breaks.
     let mut app = pager_at("[here](https://example.com/\u{9b}[31mpwned)\n", 60, 10);
     let (x, y) = painted_at(&mut app, 60, 10, "here");
     app.set_pointer(x, y);
@@ -1588,7 +1589,7 @@ fn a_control_character_in_a_hovered_url_cannot_reach_the_terminal() {
     // survives to `status` *either way* -- that is what the assertion above pins, and
     // it is true for two different reasons depending on whether the call site exists:
     //
-    // * with `sanitized_url` wired in, the raw byte is replaced with `text::UNPLACEABLE`
+    // * with `sanitized` wired in, the raw byte is replaced with `text::UNPLACEABLE`
     //   (U+FFFD) *before* the string ever reaches a `Span`, so ratatui draws an
     //   ordinary printable character in its place;
     // * with the call site removed, the raw byte reaches `Span`/`Buffer::set_line`
@@ -1613,6 +1614,48 @@ fn a_control_character_in_a_hovered_url_cannot_reach_the_terminal() {
 }
 
 #[test]
+fn a_control_character_in_a_failed_open_notice_cannot_reach_the_terminal() {
+    // `open::open` embeds the URL it could not launch into `Outcome::Failed`'s message
+    // (`src/tui/open.rs`), and `term::activate` hands that straight to `App::notify`.
+    // The URL there is document content the reader did not write, exactly as much as
+    // the hovered URL above is -- Task 6 is what made this call site carry untrusted
+    // text, so it gets the identical proof. `notify` itself is exercised directly
+    // rather than through a real failed spawn, because `App` never touches a process
+    // (design spec §13): the state machine only needs to be handed the message a real
+    // failure would have produced.
+    // `Drop::Context` -- what carries the notice -- is the very first segment the bar
+    // sheds for space (see `chrome::Drop`), so the buffer has to be wide enough that
+    // nothing competes it away before sanitization is even reached. The message is a
+    // realistic length for what `open::open` actually produces; this test is about
+    // sanitization, not the drop order.
+    let mut app = pager_at("[here](https://example.com/x)\n", 200, 10);
+    app.notify(
+        "could not open https://example.com/\u{9b}pwned: no such file or directory",
+        true,
+    );
+    let rows = painted(200, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        !status.contains('\u{9b}'),
+        "the raw C1 control byte does not reach the drawn status bar: {status:?}"
+    );
+    // As with the hovered-URL test above, the absence of the raw byte alone cannot
+    // distinguish a wired-in sanitizer from a dropped call site -- ratatui silently
+    // drops raw controls either way. The marker's presence is the proof that
+    // `chrome::sanitized` actually ran on `notice.text`.
+    assert!(
+        status.contains('\u{fffd}'),
+        "the control character is substituted, not silently dropped: {status:?}"
+    );
+    assert!(
+        status.contains("could not open https://example.com/"),
+        "the rest of the notice still draws: {status:?}"
+    );
+}
+
+#[test]
 fn hovering_a_link_shows_its_full_url_in_the_status_bar() {
     // Design spec §8: there is deliberately no confirmation prompt before a link
     // opens, and the status bar showing exactly where it goes is the safeguard that
@@ -1627,6 +1670,66 @@ fn hovering_a_link_shows_its_full_url_in_the_status_bar() {
     assert!(
         status.contains("https://example.com/a/path"),
         "the status bar must show where the link goes; it said {status:?}"
+    );
+}
+
+#[test]
+fn an_anchor_scrolls_its_heading_to_the_top_row() {
+    // Filler both before *and after* the target: `scroll_to` (like the TOC's own
+    // jump) clamps to `max_scroll`, so a heading with too little content below it
+    // cannot reach the very top row without leaving blank space beneath the last
+    // line -- the brief's original document (filler only above) hit exactly that
+    // clamp and never got the heading to row 0.
+    let doc = format!(
+        "[go](#target)\n\n{}\n## Target\n\n{}",
+        "filler\n\n".repeat(40),
+        "filler\n\n".repeat(40)
+    );
+    let mut app = pager_at(&doc, 60, 10);
+    app.activate(HotspotKind::Anchor {
+        slug: "target".to_string(),
+    });
+    let rows = framed(&mut app, 60, 10);
+    assert!(
+        rows[0].contains("Target"),
+        "the target heading lands on the top row: {rows:?}"
+    );
+}
+
+#[test]
+fn a_duplicate_heading_resolves_to_the_right_one() {
+    // Slugger suffixes duplicates -1, -2. `#setup-1` is the SECOND "Setup".
+    let doc = format!(
+        "## Setup\n\n{}\n## Setup\n\nsecond\n",
+        "filler\n\n".repeat(40)
+    );
+    let mut app = pager_at(&doc, 60, 10);
+    app.activate(HotspotKind::Anchor {
+        slug: "setup-1".to_string(),
+    });
+    let rows = framed(&mut app, 60, 10);
+    assert!(
+        rows.iter().any(|row| row.contains("second")),
+        "the second Setup's body is on screen: {rows:?}"
+    );
+}
+
+#[test]
+fn an_unknown_anchor_reports_and_does_not_move() {
+    // Wide enough that the notice is not the first segment the bar's own width-based
+    // elision (`Drop::Context` is the cheapest priority) gives up; the assertion is
+    // about the anchor, not about the bar's unrelated elision policy.
+    let mut app = pager_at("# A\n\nbody\n", 80, 10);
+    let before = app.scroll();
+    app.activate(HotspotKind::Anchor {
+        slug: "nope".to_string(),
+    });
+    assert_eq!(app.scroll(), before, "it must scroll nowhere");
+    let rows = framed(&mut app, 80, 10);
+    let status = rows.last().expect("a status row");
+    assert!(
+        status.contains("nope"),
+        "the status bar never lies -- it must say the anchor matched nothing: {status:?}"
     );
 }
 

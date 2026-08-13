@@ -1350,6 +1350,40 @@ impl App {
         }
     }
 
+    /// Does what activating a hotspot does to the app's own state.
+    ///
+    /// Kinds that touch the terminal or the display server — [`HotspotKind::Open`],
+    /// [`HotspotKind::Copy`] — are handled entirely by [`super::term::activate`], which
+    /// owns that I/O (design spec §13); this covers the kinds that are pure state, so a
+    /// test can drive them without a terminal. Task 9 gives `Footnote` its behaviour;
+    /// until then it is recognised and does nothing, the same stance `term::activate`
+    /// took for `Anchor` before this task.
+    pub fn activate(&mut self, kind: HotspotKind) {
+        if let HotspotKind::Anchor { slug } = kind {
+            self.activate_anchor(&slug);
+        }
+    }
+
+    /// Scrolls the heading `slug` names to the top row, or says it found none.
+    ///
+    /// Slugs are resolved through the same [`Toc`] the table of contents and `[`/`]`
+    /// use — [`Toc::index_of`] against [`doc::Heading::id`](crate::doc::Heading), then
+    /// [`Toc::row_of`] for where that heading actually rendered — so an anchor and the
+    /// TOC can never disagree about which heading a duplicated title means. The status
+    /// bar never lies: a slug matching nothing names itself in the notice and leaves
+    /// the scroll position untouched, rather than guessing.
+    fn activate_anchor(&mut self, slug: &str) {
+        self.ensure_rendered();
+        match self
+            .toc
+            .index_of(slug)
+            .and_then(|index| self.toc.row_of(index))
+        {
+            Some(row) => self.scroll_to(row),
+            None => self.notify(format!("no heading matches #{slug}"), true),
+        }
+    }
+
     /// Jumps to the previous or next heading in the document.
     fn step_heading(&mut self, forward: bool) {
         self.ensure_rendered();

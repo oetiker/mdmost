@@ -499,10 +499,12 @@ fn activate(app: &mut App, activation: Activation) {
                 app.notify(why, true);
             }
         }
-        // Tasks 7 and 9 give these their actions — anchors, footnotes. Doing nothing
-        // here keeps the state machine ahead of them without inventing behaviour: the
-        // click is recognised, and what it should do does not exist yet.
-        HotspotKind::Anchor { .. } | HotspotKind::Footnote { .. } => {}
+        // Anchor and Footnote are pure state — no terminal, no display server — so
+        // `App::activate` owns them; only `Copy` and `Open` need this function's I/O.
+        // Task 9 still owes `Footnote` its behaviour.
+        kind @ (HotspotKind::Anchor { .. } | HotspotKind::Footnote { .. }) => {
+            app.activate(kind);
+        }
     }
 }
 
