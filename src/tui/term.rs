@@ -489,10 +489,20 @@ fn activate(app: &mut App, activation: Activation) {
             app.report_copy(text.len(), what, &delivery);
             app.flash_copied(activation.row, activation.col);
         }
-        // Tasks 6 to 9 give these their actions — the opener, anchors, footnotes. Doing
-        // nothing here keeps the state machine ahead of them without inventing behaviour:
-        // the click is recognised, and what it should do does not exist yet.
-        HotspotKind::Open { .. } | HotspotKind::Anchor { .. } | HotspotKind::Footnote { .. } => {}
+        HotspotKind::Open { url } => {
+            // No flash on success: [`copied_flash`](super::draw) paints the literal word
+            // `[copied]` into the nine columns a `[copy]` button reserves for it
+            // (`render::button::REGION`), and a link reserves no such region. The
+            // browser appearing is the confirmation; only a failure needs the status
+            // bar, and the status bar never lies about what happened.
+            if let super::open::Outcome::Failed(why) = super::open::open(&url) {
+                app.notify(why, true);
+            }
+        }
+        // Tasks 7 and 9 give these their actions — anchors, footnotes. Doing nothing
+        // here keeps the state machine ahead of them without inventing behaviour: the
+        // click is recognised, and what it should do does not exist yet.
+        HotspotKind::Anchor { .. } | HotspotKind::Footnote { .. } => {}
     }
 }
 
