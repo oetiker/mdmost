@@ -169,6 +169,12 @@ in the right, on `demo/tour.md`. Everything it depends on is under `demo/` —
 `tmux.conf` (the split, the mouse, and `set-clipboard on`), and `mdmost.toml` (the
 script itself). It needs `tmux` >= 3.4, `less` and `nano` on the host, and nothing else.
 
+The frame is dressed as a macOS window by ansidrama's own `[chrome]` table, so the
+output is larger than the cell grid: 728×501 rather than 700×450, from `padding = 14` on
+each side plus the title bar. The bar colours are keyed to the dark theme in
+`src/theme/builtin.rs` rather than left at ansidrama's greys, and they are deliberately
+fixed — a title bar that changed with the theme would read as a second window opening.
+
 Five things in there are load-bearing and easy to break:
 
 - **`demo/tour.md`'s widths.** The point of the drag is that the pane passes through
@@ -212,6 +218,15 @@ frames and about 1.7 MB. Successive runs produce the same frame count and the sa
 duration but **not** byte-identical files — a few dozen bytes drift between runs — so
 re-record only when the demo actually changes, not as routine hygiene.
 
+**The run log counts frames, it does not number them.** `scene 49 → 833 frames total`
+means that scene's last frame is `frame0832.png`, because the dump is zero-indexed. Read
+it as a frame number and every beat you check is the one *after* the one you meant, which
+is usually a plausible-looking screen — it cost a take here: a footnote counter read as
+`7 → 6 → 5 → 5` (a keystroke apparently swallowed) was really `8 → 7 → 6 → 5` with the
+open frame mistaken for the first press. **When a beat looks wrong, check the app in a
+live pane before changing the script**: `tmux -L probe -f demo/tmux.conf new-session -x
+100 -y 30 …`, walk the same keys with a pause between them, and read `capture-pane -p`.
+
 **Watch the result before committing it.** `ansidrama record demo/mdmost.toml
 --dump-png <dir>` writes every frame as a PNG beside the WebP, and the run log names the
 frame each scene ends on, so a beat can be checked by opening one file. Three of the
@@ -221,3 +236,29 @@ beat too late — and none of it was visible from the byte size or the frame cou
 
 The copy buttons only exist when mouse capture succeeded, so `--render-once` shows none.
 That is correct, not a broken render.
+
+### The theme beat is cut, and why — restore it when ansidrama is fixed
+
+The tour used to end by pressing `t` to the light theme and `t` back to dark. **That beat
+is gone**, because at that point in the recording — and only there — the frame after the
+first `t` is still the *dark* screen carrying `theme: light` in its status bar. It held
+for 2.8 s on the hero image, and it shipped that way in the recording before this one. A
+status bar that names a theme the screen is not wearing is the one thing this project
+says a status bar may never do.
+
+It is not mdmost, and three checks say so:
+
+- a live pane repaints correctly — after `t` the background is `#fdfcf9` every time;
+- a three-scene ansidrama script (launch, `t`, hold) records the switch correctly;
+- the same script driving `tmux -f demo/tmux.conf` records it correctly too.
+
+Only the full tour fails, at the end, after act 5 has killed a pane and resized the
+survivor — so the suspicion is emulator state in ansidrama rather than anything here.
+Neither an empty re-capture nor a `j`/`k` that forces a complete repaint recovers the
+frame, so it is not a capture settling early: those bytes never landed. Reproducing it
+needs the whole tour, which is what makes it expensive to chase.
+
+**To restore the beat**, put two `t` scenes back at the end of `demo/mdmost.toml`, record,
+and open the frame after the first one. If it is light, the bug is fixed and the tour can
+show themes again. Until then the tour never leaves dark, and ends on the frame `enter`
+left behind.
