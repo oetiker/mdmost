@@ -252,11 +252,26 @@ It is not mdmost, and three checks say so:
 - a three-scene ansidrama script (launch, `t`, hold) records the switch correctly;
 - the same script driving `tmux -f demo/tmux.conf` records it correctly too.
 
-Only the full tour fails, at the end, after act 5 has killed a pane and resized the
-survivor — so the suspicion is emulator state in ansidrama rather than anything here.
-Neither an empty re-capture nor a `j`/`k` that forces a complete repaint recovers the
-frame, so it is not a capture settling early: those bytes never landed. Reproducing it
-needs the whole tour, which is what makes it expensive to chase.
+Only the full tour fails, and **so far only the full tour**. Neither an empty re-capture
+nor a `j`/`k` that forces a complete repaint recovers the frame, so it is not a capture
+settling early: those bytes never landed.
+
+**Two hypotheses have been tested and killed**, so nobody repeats them:
+
+- *"It is the pane kill and the resize act 5 does."* No. A script that launches the same
+  two panes, kills the left one and switches theme in the resized survivor renders light
+  correctly.
+- *"It is the alternate screen, from nano in act 4."* No. The same script with a nano
+  session opened and closed before the pane kill also renders light correctly.
+
+What remains untested, in the order worth trying: the **mouse drag** of act 2 and 3
+(many resize events, not one), an **active search highlight**, the **contents pane**,
+the raw SGR motion reports act 6 injects through the `keys` escape hatch, and simple
+**accumulation** — the failing frame is number 906 of 907, and every probe so far has
+been under 50 frames. The cheapest next step is to bisect the real script: truncate it
+after each act, append a `t` and an empty scene, and record. That is about four minutes
+a probe and roughly three probes by binary search — far cheaper than it looks, and much
+cheaper than another synthetic guess.
 
 **To restore the beat**, put two `t` scenes back at the end of `demo/mdmost.toml`, record,
 and open the frame after the first one. If it is light, the bug is fixed and the tour can

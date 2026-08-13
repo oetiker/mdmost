@@ -70,7 +70,7 @@ text = "#8d95a8"
 # a viewer arriving mid-play can orient on, and at the old 260 the card was gone before
 # the second line had been read.
 [[scene]]
-card = { lines = ["mdmost", "less, but it knows what Markdown means"], fg = "#fef9c3" }
+card = { lines = ["mdmost", "like less but for Markdown"], fg = "#fef9c3" }
 hold_cs = 780
 
 [[scene]]
@@ -430,10 +430,12 @@ hold_cs = 280
 #   * a live pane repaints correctly — `t` moves the background to `#fdfcf9` every time;
 #   * ansidrama alone records the switch correctly (a three-scene script does it);
 #   * ansidrama driving tmux records it correctly too.
-# Only the full tour fails, at the end, after act 5 has killed a pane and resized the
-# survivor — which points at emulator state in ansidrama rather than at anything here.
-# An empty re-capture does not fix it, and neither does a `j`/`k` that forces a complete
-# repaint, so the frame is not merely settling early: those bytes never landed.
+# Only the full tour fails, and so far only the full tour. An empty re-capture does not
+# fix it, and neither does a `j`/`k` that forces a complete repaint, so the frame is not
+# merely settling early: those bytes never landed. Two guesses at the cause have since
+# been tested and killed — it is not act 5's pane kill and resize, and it is not the
+# alternate screen nano leaves behind in act 4; a short script doing either still
+# switches theme correctly. `docs/maintainer-notes.md` lists what is left to try.
 #
 # So the tour now ends on the theme it started in by never leaving it. The document is
 # where `enter` left it — `Reading room` at the top of the viewport, which is the last
