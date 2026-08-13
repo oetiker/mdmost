@@ -90,7 +90,14 @@ mouse capture is not granted, because a control nobody can click is worse than n
 keyboard cursor makes links reachable over SSH and in terminals without mouse support, so
 links are never hidden — the principle is satisfied by a different route.
 
-`--render-once` records no hotspots, as it draws no copy buttons.
+~~`--render-once` records no hotspots, as it draws no copy buttons.~~ **Struck by owner
+ruling, 2026-08-13.** It contradicted the paragraph above it, and the paragraph above it
+is the one that is right. The line was written about *buttons*, which are drawn chrome; a
+hotspot draws nothing. `--render-once` sets `copy_button: false`, and that is the **same**
+flag the pager sets when mouse capture is refused and when stdout is not a terminal — so
+gating link hotspots on it would blank every link in every mouseless terminal, which is
+the exact population this section exists to serve. Hotspots are recorded, and a test pins
+that behaviour.
 
 ## 5. Anchors
 
