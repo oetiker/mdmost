@@ -343,9 +343,24 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     // here before committing. Only an `Open` hotspot names a URL; a hovered copy
     // button carries no target and shows nothing, or the bar would print a stale
     // one the moment the pointer left the last link.
+    //
+    // The keyboard cursor gets the identical treatment, and for the reader it matters
+    // for most: a mouse hover already puts the URL here, but the cursor is what a
+    // reader with no mouse has *instead* of a hover, and without this the safeguard
+    // the design spec calls out simply does not exist for them — nothing else on the
+    // status bar says where `enter` is about to send them.
+    //
+    // The hover wins when both are live at once, because it is the more recent
+    // signal: the pointer only has a hovered control while it is sitting on one right
+    // now, whereas the cursor can sit on a control long after the reader's attention
+    // (and, if the terminal supports it, their hand on the mouse) moved elsewhere.
+    // Nothing needs to reconcile disagreement here — [`super::app::App::cursor_hotspot`]
+    // resolves the cursor's *target* to a hotspot the same way `enter` does, so this
+    // can never point somewhere `enter` would not.
     if let Some(crate::canvas::HotspotKind::Open { url }) = app
         .hovered()
         .and_then(|index| app.rendered().hotspots().get(index))
+        .or_else(|| app.cursor_hotspot())
         .map(|spot| &spot.kind)
     {
         let mut spans = Vec::new();

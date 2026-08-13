@@ -1674,6 +1674,70 @@ fn hovering_a_link_shows_its_full_url_in_the_status_bar() {
 }
 
 #[test]
+fn the_keyboard_cursor_shows_its_url_in_the_status_bar_too() {
+    // Task 11, defect 2. Design spec §8 calls the status bar URL the stand-in for a
+    // confirmation prompt before a link opens, but `chrome::draw_status` read
+    // `app.hovered()` only — so the one reader who needs that safeguard most, the
+    // one with no mouse who reached the link with `f`, never saw it.
+    //
+    // 200 columns, not the 60 the hover test above uses: `Drop::Url` is a
+    // high-priority segment that survives even a 60-column bar, so a narrow buffer
+    // here would happen to pass either way, which is exactly the shape of vacuous
+    // test this plan has shipped before against `Drop::Context`. 200 columns removes
+    // any doubt that the segment was actually drawn rather than merely surviving
+    // by luck of the width picked.
+    let mut app = pager_at("[here](https://example.com/a/path)\n", 200, 10);
+    app.on_key(Key::char('f'));
+    let rows = painted(200, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        status.contains("https://example.com/a/path"),
+        "the keyboard cursor must show where the link goes, same as a hover does; \
+         it said {status:?}"
+    );
+}
+
+#[test]
+fn a_hover_wins_over_the_keyboard_cursor_in_the_status_bar() {
+    // Both a hover and a cursor can be live at once with `--mouse`: the reader
+    // walked the document with `f`, then reached for the mouse and rested it on a
+    // *different* link without pressing anything. The hover is the more recent
+    // signal of where the reader is actually looking, so it wins — see the
+    // reasoning in `chrome::draw_status` beside the `.or_else` this exercises.
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        200,
+        10,
+    );
+    // `f` lands on `a` first (`control_targets` walks the canvas in draw order).
+    app.on_key(Key::char('f'));
+    assert!(
+        app.cursor_hotspot().is_some_and(|spot| spot.kind
+            == HotspotKind::Open {
+                url: "https://example.com/a".into()
+            }),
+        "the premise: the cursor is on `a`"
+    );
+    let (x, y) = painted_at(&mut app, 200, 10, "b");
+    app.set_pointer(x, y);
+
+    let rows = painted(200, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    let status = &rows[0];
+    assert!(
+        status.contains("https://example.com/b"),
+        "the hover must win over the cursor; it said {status:?}"
+    );
+    assert!(
+        !status.contains("https://example.com/a"),
+        "and the cursor's url must not also show; it said {status:?}"
+    );
+}
+
+#[test]
 fn an_anchor_scrolls_its_heading_to_the_top_row() {
     // Filler both before *and after* the target: `scroll_to` (like the TOC's own
     // jump) clamps to `max_scroll`, so a heading with too little content below it
@@ -6547,21 +6611,50 @@ fn a_search_hit_across_a_soft_line_break_highlights_in_one_piece() {
 // never to be hidden.
 
 #[test]
-fn f_cycles_the_cursor_through_the_hotspots_on_screen() {
-    let mut app = pager_at(
-        "[a](https://example.com/a) [b](https://example.com/b)\n",
-        80,
-        10,
+fn f_walks_the_whole_document_and_scrolls_the_cursor_into_view() {
+    // Task 11, defect 1. `f`/`F` walk every control in the *document*
+    // (`App::control_targets` has always read the whole canvas, not the viewport),
+    // and it is `App::cursor_step` that is responsible for scrolling to whatever it
+    // lands on. The old test fixture fit on one screen, so it could not tell a
+    // cursor that scrolled to follow apart from one that silently walked out of
+    // view: both make `cursor_target()` change. This fixture is 80-odd rows against
+    // a 10-row viewport, with one control right at the top and another many screens
+    // down, so the two behaviours diverge on the very first `f` past the first
+    // control — the observed bug was the fifth `f` finally lighting something the
+    // reader could not see land.
+    let doc = format!(
+        "[top](https://example.com/top)\n\n{}[bottom](https://example.com/bottom)\n",
+        "filler line\n\n".repeat(40),
     );
+    let mut app = pager_at(&doc, 80, 10);
+
     app.on_key(Key::char('f'));
-    let first = app
-        .cursor_target()
-        .expect("f put the cursor on the first control");
+    let top_row = app
+        .cursor_hotspot()
+        .expect("f put the cursor on the first control")
+        .row;
+    assert!(
+        (app.scroll()..app.scroll() + app.viewport_height()).contains(&top_row),
+        "the cursor starts on screen: row {top_row}, scroll {}",
+        app.scroll()
+    );
+
     app.on_key(Key::char('f'));
-    assert_ne!(
-        app.cursor_target(),
-        Some(first),
-        "f must advance to the next control"
+    let bottom_row = app
+        .cursor_hotspot()
+        .expect("f must keep the cursor set")
+        .row;
+    assert_ne!(bottom_row, top_row, "f must advance to the next control");
+    assert!(
+        bottom_row > app.viewport_height(),
+        "the premise: the second control is off the first screenful, at row {bottom_row}"
+    );
+    assert!(
+        (app.scroll()..app.scroll() + app.viewport_height()).contains(&bottom_row),
+        "f must scroll the viewport to the control it lands on: row {bottom_row}, \
+         scroll {} (reverting the scroll-to-follow call is exactly what turns this \
+         assertion red)",
+        app.scroll()
     );
 }
 

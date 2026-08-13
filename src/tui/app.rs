@@ -1578,10 +1578,12 @@ impl App {
             self.notify("the terminal is too small for a footnote popup", false);
             return;
         }
-        // A control the reader stepped to with `f`/`F` may be off screen, and a box
-        // anchored to a cell that is not on the viewport would be a box pointing
-        // nowhere. Bringing the marker into view first is what makes the keyboard route
-        // land the same box the pointer route does.
+        // [`App::cursor_step`] now scrolls the cursor into view the instant `f`/`F`
+        // move it, so the keyboard route no longer hands this a marker off screen in
+        // practice. This guard is kept anyway: a box anchored to a cell that is not on
+        // the viewport would be a box pointing nowhere, and there is no other reason
+        // to trust `row`/`col` blindly here than the invariant above, which lives in a
+        // different method and could drift out of sync with this one.
         if self.viewport_cell(row, col).is_none() {
             self.reveal(row);
             self.ensure_rendered();
@@ -2200,11 +2202,42 @@ impl App {
         self.cursor
     }
 
-    /// Every control on screen, once each, in the order the renderer drew them.
+    /// The hotspot the keyboard cursor is on, if any.
+    ///
+    /// Resolved the same way [`App::activate_cursor`] resolves it — the first hotspot
+    /// carrying the cursor's target — so [`super::chrome`]'s status-bar URL can never
+    /// disagree with `enter` about which control the cursor means. `pub` for exactly
+    /// that reader: [`App::hovered`] hands `super::chrome` an *index* into
+    /// `rendered().hotspots()` because a hovered position is one cell that is either on
+    /// a hotspot or is not, but the cursor is a `target`, several hotspots for a
+    /// wrapped control, so the lookup has to happen somewhere and doing it twice (once
+    /// here, once in [`App::activate_cursor`]) is the drift this avoids.
+    pub fn cursor_hotspot(&self) -> Option<&crate::canvas::Hotspot> {
+        let target = self.cursor?;
+        self.rendered()
+            .hotspots()
+            .iter()
+            .find(|spot| spot.target == target)
+    }
+
+    /// Every control in the whole document, once each, in the order the renderer drew
+    /// them.
     ///
     /// A control is a `target`, not a hotspot: a wrapped link or one wrapped inside a
     /// centred table cell is several hotspots sharing one, and `f`/`F` must land on
     /// each control once, not once per row it happens to span (design spec §2.2, §4).
+    ///
+    /// **The whole document, not the viewport.** `f`/`F` walk every control there is
+    /// and bring the one they land on into view — like `n`/`N` walk every search hit,
+    /// not just the ones already on screen — rather than being limited to whatever
+    /// happens to be visible when the reader presses the key. The alternative (only
+    /// cycling controls already on screen) reads as simpler, but it means a control
+    /// past the fold is unreachable by keyboard until the reader scrolls to it by some
+    /// other means first, which defeats the reason `f`/`F` exist: a link is content,
+    /// never hidden, and content that scrolling past does not remove from `f`'s reach.
+    /// [`App::cursor_step`] is what keeps the promise "on screen" true instead: it
+    /// scrolls to whatever `f`/`F` lands on, so the cursor is always visible the
+    /// instant it moves, never merely reachable in principle.
     fn control_targets(&self) -> Vec<usize> {
         let mut targets = Vec::new();
         for spot in self.cache.canvas().hotspots() {
@@ -2215,8 +2248,8 @@ impl App {
         targets
     }
 
-    /// Moves the keyboard cursor to the next (`forward`) or previous control on
-    /// screen, wrapping at either end.
+    /// Moves the keyboard cursor to the next (`forward`) or previous control in the
+    /// document, wrapping at either end, and scrolls it into view.
     ///
     /// This is what makes every link reachable without a mouse (design spec §4): a
     /// `[copy]` button hides when mouse capture was refused because a control nobody
@@ -2224,6 +2257,19 @@ impl App {
     /// would hide the document. The cursor is what resolves that for links instead of
     /// repealing the rule for buttons — a button the cursor lands on still only exists
     /// in the canvas when `copy_button` let the renderer draw it.
+    ///
+    /// # Scrolling to follow the cursor
+    ///
+    /// [`App::control_targets`] walks the whole document, so the control `f`/`F` lands
+    /// on may be off screen — the *next* one is by definition, past the last screenful.
+    /// Left alone, that is exactly the defect this method exists to close: the cursor
+    /// would move somewhere the reader cannot see, `enter` would activate whatever that
+    /// was sight unseen, and for an `Open` control that means a browser opening on a
+    /// link nobody looked at. [`App::reveal_centered`] and [`App::reveal_columns`] are
+    /// the same pair [`App::step_match`] uses to keep a search hit on screen, used here
+    /// for the same reason: a control landing on the last visible row shows nothing of
+    /// its surroundings, and one past the right edge of a wide table or long code line
+    /// is off screen sideways even once the row is on screen vertically.
     fn cursor_step(&mut self, forward: bool) {
         self.ensure_rendered();
         let targets = self.control_targets();
@@ -2254,6 +2300,11 @@ impl App {
             (None, false) => last,
         };
         self.cursor = Some(targets[next]);
+        if let Some(spot) = self.cursor_hotspot() {
+            let (row, col, cols) = (spot.row, spot.col, spot.cols);
+            self.reveal_centered(row);
+            self.reveal_columns(row, col, cols);
+        }
     }
 
     /// Builds the [`Activation`] an `enter` on the keyboard cursor fires, if the
@@ -2265,13 +2316,7 @@ impl App {
     /// depend on which row of it fired.
     fn activate_cursor(&mut self) -> Option<Activation> {
         self.ensure_rendered();
-        let target = self.cursor?;
-        let spot = self
-            .cache
-            .canvas()
-            .hotspots()
-            .iter()
-            .find(|spot| spot.target == target)?;
+        let spot = self.cursor_hotspot()?;
         Some(Activation {
             row: spot.row,
             col: spot.col,

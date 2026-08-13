@@ -308,10 +308,13 @@ Notes on a few of these:
 Clicking a link opens it in your browser; clicking a `#heading` reference scrolls that
 heading to the top of the viewport. Both work with no `--mouse` flag: press `f` (or
 `F` to go backward) to move a keyboard cursor from one link or button to the next
-across the visible screen, and `enter` to follow whatever it is on. Unlike the `[copy]`
-buttons below, links are never hidden when the mouse was not captured — a link is
-content, not chrome, and hiding it would mean hiding part of the document. `Esc` puts
-the cursor away. Only `http`/`https` links open; anything else is shown as plain text.
+anywhere in the document, scrolling to bring it on screen — the same way `n` steps to
+the next search hit — and `enter` to follow whatever it is on. The status bar shows the
+full URL under the cursor exactly as it does for a mouse hover, so `enter` never sends
+you somewhere unseen. Unlike the `[copy]` buttons below, links are never hidden when
+the mouse was not captured — a link is content, not chrome, and hiding it would mean
+hiding part of the document. `Esc` puts the cursor away. Only `http`/`https` links
+open; anything else is shown as plain text.
 
 ## Selecting and copying
 
