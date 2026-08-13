@@ -56,7 +56,6 @@ The scope is deliberately narrow, and these are decisions rather than gaps:
 
 - **Not an editor.** The document is read-only.
 - **Not a file browser.** One document per invocation; there is no tree, no next-file.
-- **No link following.** Links are shown and styled; nothing opens a browser.
 - **No HTML.** Raw HTML in the source is skipped rather than rendered or shown.
 - **No raster images.** An image becomes a captioned placeholder with its alt text and
   target — no sixel, no kitty protocol.
@@ -259,7 +258,9 @@ same live binding table as the list below, so the two cannot drift apart.
 | `]` | Go to the next heading |
 | `=`, `ctrl-g` | Report where you are |
 | `tab` | Show or hide the table of contents |
-| `enter` | Jump to the selected heading |
+| `f` | Move the keyboard cursor to the next link or button |
+| `F` | Move the keyboard cursor to the previous link or button |
+| `enter` | Jump to the selected heading, or follow the link or button under the keyboard cursor |
 
 #### Search
 
@@ -301,6 +302,16 @@ Notes on a few of these:
   newer mdmost understands are all still there afterwards, the previous version is kept
   as `config.toml.bak`, and a save whose result would not read back identically is
   refused rather than guessed at.
+
+## Links
+
+Clicking a link opens it in your browser; clicking a `#heading` reference scrolls that
+heading to the top of the viewport. Both work with no `--mouse` flag: press `f` (or
+`F` to go backward) to move a keyboard cursor from one link or button to the next
+across the visible screen, and `enter` to follow whatever it is on. Unlike the `[copy]`
+buttons below, links are never hidden when the mouse was not captured — a link is
+content, not chrome, and hiding it would mean hiding part of the document. `Esc` puts
+the cursor away. Only `http`/`https` links open; anything else is shown as plain text.
 
 ## Selecting and copying
 

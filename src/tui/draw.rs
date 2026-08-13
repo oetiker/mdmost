@@ -111,6 +111,30 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
         app.theme(),
         &hovered_spots,
     );
+    // The keyboard cursor, resolved to every hotspot of its control exactly as the
+    // pointer's hover is above — a wrapped link is several hotspots sharing one
+    // target, and `f`/`F` land on the control, not on one row of it (design spec §4).
+    let cursor_spots: Vec<(usize, u16, u16)> = app
+        .cursor_target()
+        .map(|target| {
+            app.rendered()
+                .hotspots()
+                .iter()
+                .filter(|spot| spot.target == target)
+                .map(|spot| (spot.row, spot.col, spot.cols))
+                .collect()
+        })
+        .unwrap_or_default();
+    cursor_highlight(
+        buffer,
+        doc_area,
+        app.rendered(),
+        scroll,
+        &hscroll,
+        base,
+        app.theme(),
+        &cursor_spots,
+    );
     // Under the search wash and the selection, which say where the reader's attention
     // is; the flash only says what their last click did.
     copied_flash(
@@ -462,6 +486,45 @@ fn hover_highlight(
                 .map_or(base, |cell| base.patch(cell.style()));
             if let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) {
                 target.set_style(term_style(theme.hovered(under)));
+            }
+        }
+    }
+}
+
+/// Paints the keyboard cursor onto every hotspot of the control it is on.
+///
+/// The same shape as [`hover_highlight`] — a control the cursor sits on gets the same
+/// tint a hovered one does, plus reverse video: a reader without a mouse needs a mark
+/// they can find at a glance, and one indistinguishable from a pointer that is not
+/// there would not be a cursor at all. `at` is every region of the control, already
+/// resolved by the caller from its `target`, exactly as hover's grouping is.
+#[allow(clippy::too_many_arguments)]
+fn cursor_highlight(
+    buffer: &mut Buffer,
+    area: Rect,
+    canvas: &Canvas,
+    top: usize,
+    left: &Offsets<'_>,
+    base: Style,
+    theme: &crate::theme::Theme,
+    at: &[(usize, u16, u16)],
+) {
+    for &(row, col, cols) in at {
+        let Some(y) = row.checked_sub(top).and_then(|y| u16::try_from(y).ok()) else {
+            continue;
+        };
+        let Some(cells) = canvas.row(row).filter(|_| y < area.height) else {
+            continue;
+        };
+        for column in col..col.saturating_add(cols) {
+            let Some(x) = left.x_of(row, column).filter(|x| *x < left.content()) else {
+                continue;
+            };
+            let under = cells
+                .get(usize::from(column))
+                .map_or(base, |cell| base.patch(cell.style()));
+            if let Some(target) = buffer.cell_mut((area.x + x, area.y + y)) {
+                target.set_style(term_style(theme.hovered(under).with(Attributes::REVERSE)));
             }
         }
     }

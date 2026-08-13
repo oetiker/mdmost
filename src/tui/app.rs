@@ -85,6 +85,31 @@ pub struct Activation {
     pub kind: HotspotKind,
 }
 
+/// What handling one key produced, for [`super::term`] to act on.
+///
+/// [`App::on_key`] cannot fire a control itself — the state machine touches no
+/// terminal or display server (design spec §13) — so it hands back what an `enter` on
+/// the keyboard cursor produced, the same way [`App::release_hotspot`] hands back a
+/// mouse click. Most keys produce an empty outcome; [`Default`] is that outcome.
+#[derive(Debug, Default)]
+pub struct KeyOutcome {
+    activation: Option<Activation>,
+}
+
+impl KeyOutcome {
+    /// Whether the key fired a control under the keyboard cursor.
+    pub fn fired_activation(&self) -> bool {
+        self.activation.is_some()
+    }
+
+    /// Takes the activation, for the caller that carries out `Open`/`Copy` I/O and
+    /// dispatches the rest through [`App::activate`] — the one place that logic lives,
+    /// whether the click came from a mouse or a keyboard.
+    pub fn into_activation(self) -> Option<Activation> {
+        self.activation
+    }
+}
+
 impl PromptKind {
     /// The sigil shown in front of the input.
     ///
@@ -234,6 +259,23 @@ pub struct App {
     /// selection and for the same reason: the indices belong to the canvas they were
     /// resolved against.
     hover: Option<usize>,
+    /// The control the keyboard cursor sits on, as a
+    /// [`Hotspot::target`](crate::canvas::Hotspot), for a reader with no mouse.
+    ///
+    /// A target rather than a hotspot index — unlike [`App::hover`] — because `f`/`F`
+    /// must step *per control*, and a control that wraps across rows or inside a
+    /// centred table cell is several hotspots sharing one target (design spec §2.2,
+    /// §4). Stepping by index would stall on the second row of a wrapped link instead
+    /// of advancing past it. Dropped on reflow for the same reason `hover` and
+    /// `pressed` are: a target id is issued per canvas.
+    cursor: Option<usize>,
+    /// The [`Activation`] a keyboard `Confirm` just produced, for [`App::on_key`]'s
+    /// caller to carry out.
+    ///
+    /// Mirrors [`App::pending_copy`]: the state machine touches no terminal or
+    /// display server (design spec §13), so firing a control from the keyboard is
+    /// handed over the same way a finished drag is, rather than acted on here.
+    pending_activation: Option<Activation>,
     quit: bool,
 }
 
@@ -295,6 +337,8 @@ impl App {
             pressed: None,
             copied_flash: None,
             hover: None,
+            cursor: None,
+            pending_activation: None,
             quit: false,
         };
         app.refilter_toc();
@@ -794,6 +838,9 @@ impl App {
             // hotspot list. The pointer has not moved, but what is under it may have,
             // and a stale index would paint the highlight onto a different button.
             self.hover = None;
+            // And the keyboard cursor, for the same reason: it too names a control by a
+            // target id issued per canvas, and a reflow issues a new one.
+            self.cursor = None;
             // And a click in flight, for the same reason one step further on: a target id
             // is issued per canvas, so the id a press recorded may name a different
             // control on the new one — or none. A reflow mid-click is a reflow the reader
@@ -985,16 +1032,16 @@ impl App {
 /// Key and mouse handling.
 impl App {
     /// Handles one key press.
-    pub fn on_key(&mut self, key: Key) {
+    pub fn on_key(&mut self, key: Key) -> KeyOutcome {
         self.clear_notice();
         if let Overlay::Prompt { kind, input } = &self.overlay {
             let (kind, input) = (*kind, input.clone());
             self.prompt_key(kind, input, key);
-            return;
+            return KeyOutcome::default();
         }
         if self.overlay == Overlay::Help {
             self.help_key(key);
-            return;
+            return KeyOutcome::default();
         }
         match self.config.keys.action(&key) {
             Some(action) => {
@@ -1014,6 +1061,9 @@ impl App {
                     false,
                 );
             }
+        }
+        KeyOutcome {
+            activation: self.pending_activation.take(),
         }
     }
 
@@ -1049,7 +1099,18 @@ impl App {
             Action::PrevMatch => self.repeat(times, |app| app.step_match(app.search_backward)),
             Action::ToggleSearchMode => self.toggle_search_mode(),
             Action::Confirm if self.focus == Focus::Toc => self.jump_to_selected_heading(),
-            Action::Confirm => {}
+            // Fires through the same channel a finished drag uses: `act_with_count` is
+            // not allowed to touch a terminal (design spec §13), so the activation is
+            // handed to `pending_activation` for `on_key` to hand further to
+            // `super::term`, which does the I/O and, for `Anchor`/`Footnote`, calls
+            // back into `App::activate`.
+            Action::Confirm => self.pending_activation = self.activate_cursor(),
+            Action::CursorNext if self.focus == Focus::Document => self.cursor_step(true),
+            Action::CursorPrev if self.focus == Focus::Document => self.cursor_step(false),
+            // The table of contents has no controls of its own to cycle through: `f`/`F`
+            // do nothing while it has focus, rather than reaching into the narrowed
+            // document behind it.
+            Action::CursorNext | Action::CursorPrev => {}
             Action::ScrollLeft => {
                 self.hscroll = self
                     .hscroll
@@ -1172,8 +1233,13 @@ impl App {
     /// on purpose. `Esc` therefore peels state off one layer at a time and, when
     /// there is nothing left to peel, says so.
     fn cancel(&mut self) {
-        // Outermost layer, and the newest: a highlight the reader just made is the most
-        // recent thing they did, so it is the first thing `Esc` should undo.
+        // Outermost layer, and the newest: a reader steps the keyboard cursor onto a
+        // control to look at it, and `Esc` is how they say "never mind" without
+        // following it — the same standing this gives a fresh selection just below.
+        if self.cursor.take().is_some() {
+            self.notify("cursor dropped", false);
+            return;
+        }
         if self.selection.take().is_some() {
             self.notify("selection cleared", false);
             return;
@@ -1875,6 +1941,95 @@ impl App {
     /// argument that keeps the `[copied]` flash out of the renderer.
     pub fn hovered(&self) -> Option<usize> {
         self.hover
+    }
+
+    /// The control the keyboard cursor is on, as a
+    /// [`Hotspot::target`](crate::canvas::Hotspot).
+    ///
+    /// Read by [`super::draw`] the same way [`App::hovered`] is: the cursor is a
+    /// painted difference, not a rendered one (design spec §4 — the keyboard cursor is
+    /// paint-time, exactly like hover).
+    pub fn cursor_target(&self) -> Option<usize> {
+        self.cursor
+    }
+
+    /// Every control on screen, once each, in the order the renderer drew them.
+    ///
+    /// A control is a `target`, not a hotspot: a wrapped link or one wrapped inside a
+    /// centred table cell is several hotspots sharing one, and `f`/`F` must land on
+    /// each control once, not once per row it happens to span (design spec §2.2, §4).
+    fn control_targets(&self) -> Vec<usize> {
+        let mut targets = Vec::new();
+        for spot in self.cache.canvas().hotspots() {
+            if !targets.contains(&spot.target) {
+                targets.push(spot.target);
+            }
+        }
+        targets
+    }
+
+    /// Moves the keyboard cursor to the next (`forward`) or previous control on
+    /// screen, wrapping at either end.
+    ///
+    /// This is what makes every link reachable without a mouse (design spec §4): a
+    /// `[copy]` button hides when mouse capture was refused because a control nobody
+    /// can click is worse than none, but a link is content, not chrome, and hiding it
+    /// would hide the document. The cursor is what resolves that for links instead of
+    /// repealing the rule for buttons — a button the cursor lands on still only exists
+    /// in the canvas when `copy_button` let the renderer draw it.
+    fn cursor_step(&mut self, forward: bool) {
+        self.ensure_rendered();
+        let targets = self.control_targets();
+        if targets.is_empty() {
+            self.cursor = None;
+            return;
+        }
+        let at = self
+            .cursor
+            .and_then(|target| targets.iter().position(|&t| t == target));
+        let last = targets.len() - 1;
+        let next = match (at, forward) {
+            (Some(index), true) => {
+                if index == last {
+                    0
+                } else {
+                    index + 1
+                }
+            }
+            (Some(index), false) => {
+                if index == 0 {
+                    last
+                } else {
+                    index - 1
+                }
+            }
+            (None, true) => 0,
+            (None, false) => last,
+        };
+        self.cursor = Some(targets[next]);
+    }
+
+    /// Builds the [`Activation`] an `enter` on the keyboard cursor fires, if the
+    /// cursor is on a control.
+    ///
+    /// One hit test with [`App::release_hotspot`]'s counterpart: both resolve a
+    /// target to the first hotspot that carries it, because every hotspot sharing a
+    /// target carries the same `kind` — what activating the control does does not
+    /// depend on which row of it fired.
+    fn activate_cursor(&mut self) -> Option<Activation> {
+        self.ensure_rendered();
+        let target = self.cursor?;
+        let spot = self
+            .cache
+            .canvas()
+            .hotspots()
+            .iter()
+            .find(|spot| spot.target == target)?;
+        Some(Activation {
+            row: spot.row,
+            col: spot.col,
+            kind: spot.kind.clone(),
+        })
     }
 
     /// Records that the control at canvas `(row, col)` was just used.

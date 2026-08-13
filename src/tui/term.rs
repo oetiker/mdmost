@@ -313,7 +313,12 @@ fn on_key(app: &mut App, event: KeyEvent) {
         return;
     }
     if let Some(key) = convert_key(event) {
-        app.on_key(key);
+        // The state machine cannot fire a control itself (design spec §13); an `enter`
+        // on the keyboard cursor hands the activation back exactly as a mouse release
+        // does, and it is carried out through the one dispatch both share.
+        if let Some(activation) = app.on_key(key).into_activation() {
+            activate(app, activation);
+        }
     }
 }
 

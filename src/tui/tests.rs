@@ -6539,3 +6539,187 @@ fn a_search_hit_across_a_soft_line_break_highlights_in_one_piece() {
         "and it is as wide as the rendered match"
     );
 }
+
+// The keyboard cursor (Task 8). Copy buttons hide when mouse capture was refused,
+// on the rule that a control nobody can click is worse than none (design spec §4).
+// Links cannot take that route — they are content, not chrome — so `f`/`F` make
+// every control reachable without a mouse, and this is what earns links the right
+// never to be hidden.
+
+#[test]
+fn f_cycles_the_cursor_through_the_hotspots_on_screen() {
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        80,
+        10,
+    );
+    app.on_key(Key::char('f'));
+    let first = app
+        .cursor_target()
+        .expect("f put the cursor on the first control");
+    app.on_key(Key::char('f'));
+    assert_ne!(
+        app.cursor_target(),
+        Some(first),
+        "f must advance to the next control"
+    );
+}
+
+#[test]
+fn the_cursor_wraps_at_the_end() {
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        80,
+        10,
+    );
+    app.on_key(Key::char('f'));
+    let first = app.cursor_target();
+    app.on_key(Key::char('f'));
+    app.on_key(Key::char('f'));
+    assert_eq!(
+        app.cursor_target(),
+        first,
+        "a third f on two controls must land back on the first"
+    );
+}
+
+#[test]
+fn shift_f_cycles_backward_and_wraps_at_the_start() {
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        80,
+        10,
+    );
+    app.on_key(Key::char('F'));
+    let last = app
+        .cursor_target()
+        .expect("F with no cursor yet lands on the last control");
+    app.on_key(Key::char('F'));
+    let prev = app.cursor_target().expect("F must keep the cursor set");
+    assert_ne!(prev, last, "F must step backward to a different control");
+    app.on_key(Key::char('F'));
+    assert_eq!(
+        app.cursor_target(),
+        Some(last),
+        "a third F on two controls wraps back to the last"
+    );
+}
+
+#[test]
+fn enter_activates_the_control_under_the_cursor() {
+    let mut app = pager_at("[a](https://example.com/a)\n", 60, 10);
+    app.on_key(Key::char('f'));
+    let outcome = app.on_key(Key::plain(KeyCode::Enter));
+    assert!(
+        outcome.fired_activation(),
+        "enter must fire the link under the cursor"
+    );
+    let activation = outcome.into_activation().expect("just asserted it fired");
+    assert_eq!(
+        activation.kind,
+        crate::canvas::HotspotKind::Open {
+            url: "https://example.com/a".to_string()
+        }
+    );
+}
+
+#[test]
+fn enter_without_a_cursor_fires_nothing() {
+    let mut app = pager_at("[a](https://example.com/a)\n", 60, 10);
+    assert!(!app.on_key(Key::plain(KeyCode::Enter)).fired_activation());
+}
+
+#[test]
+fn the_cursor_survives_no_mouse_capture() {
+    // The whole point: links are reachable without a mouse, which is what earns them
+    // the right never to be hidden (design spec §4). `pager_at` never grants the
+    // mouse (`App::new`'s `copy_button` starts `false`), so this is already the
+    // no-capture case.
+    let mut app = pager_at("[a](https://example.com/a)\n", 60, 10);
+    app.on_key(Key::char('f'));
+    assert!(app.cursor_target().is_some());
+}
+
+#[test]
+fn a_copy_button_is_still_hidden_without_mouse_capture() {
+    // The gating rule is RESOLVED for links by the cursor above, not repealed for
+    // buttons: a button nobody can click is still worse than none.
+    let mut app = pager_at("```rust\nfn a() {}\n```\n", 60, 10);
+    assert!(
+        !app.canvas()
+            .plain_text()
+            .contains(crate::render::button::LABEL),
+        "no copy button without mouse capture, cursor or not"
+    );
+}
+
+#[test]
+fn the_cursor_steps_per_control_not_per_wrapped_row() {
+    // A wrapped link is several hotspots sharing one target (design spec §2.2); `f`
+    // must land on the control once, not stall on its second row.
+    let mut app = pager_at(
+        "[a fairly long link label that wraps across several rows](https://example.com/x) [b](https://example.com/b)\n",
+        24,
+        10,
+    );
+    let spots = app.rendered().hotspots().to_vec();
+    assert!(
+        spots.len() >= 3,
+        "the premise: the first link wraps, got {spots:?}"
+    );
+    let wrapped_target = spots[0].target;
+    app.on_key(Key::char('f'));
+    assert_eq!(app.cursor_target(), Some(wrapped_target));
+    app.on_key(Key::char('f'));
+    assert_ne!(
+        app.cursor_target(),
+        Some(wrapped_target),
+        "a second f must leave the wrapped control, not step onto its own next row"
+    );
+}
+
+#[test]
+fn esc_drops_the_cursor_before_anything_else() {
+    let mut app = pager_at("[a](https://example.com/a)\n", 60, 10);
+    app.on_key(Key::char('f'));
+    assert!(app.cursor_target().is_some());
+    app.act(Action::Cancel);
+    assert!(app.cursor_target().is_none(), "esc drops the cursor");
+    assert!(!app.should_quit(), "esc never quits");
+}
+
+#[test]
+fn f_does_nothing_with_no_controls_on_screen() {
+    let mut app = pager_at("Plain prose, nothing to follow.\n", 60, 10);
+    app.on_key(Key::char('f'));
+    assert!(app.cursor_target().is_none());
+}
+
+#[test]
+fn f_is_scoped_to_the_document_and_does_nothing_while_the_toc_has_focus() {
+    let mut app = pager_at("# Heading\n\n[a](https://example.com/a)\n", 60, 20);
+    app.act(Action::ToggleToc);
+    assert_eq!(app.focus(), Focus::Toc);
+    app.on_key(Key::char('f'));
+    assert!(
+        app.cursor_target().is_none(),
+        "f reaches the document's controls, not the pane behind it"
+    );
+}
+
+#[test]
+fn a_reflow_drops_the_cursor() {
+    // Same reason a resize drops the hover and a click in flight: a target id is
+    // issued per canvas, so a stale one would name a different control, or none, on
+    // the canvas that replaces it.
+    let mut app = pager_at(
+        "[a](https://example.com/a) [b](https://example.com/b)\n",
+        80,
+        10,
+    );
+    app.on_key(Key::char('f'));
+    assert!(app.cursor_target().is_some());
+    app.resize(40, 10);
+    let _ = app.canvas();
+    assert!(app.cursor_target().is_none());
+}
