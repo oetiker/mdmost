@@ -6861,7 +6861,13 @@ fn a_popup_near_the_bottom_flips_above_the_marker() {
         "the marker at row {y} must leave no room below for a {height}-row box, \
          or this test proves nothing"
     );
-    assert!(top < y, "it must open upwards: top {top}, marker {y}");
+    // Entirely above the marker, not merely starting above it. A box *clamped* onto the
+    // screen instead of flipped would satisfy `top < y` while covering the very marker it
+    // was opened from — fault injection found exactly that hole, and this closes it.
+    assert!(
+        top + height <= y,
+        "it must open upwards, clear of the marker: top {top}, height {height}, marker {y}"
+    );
     assert!(top + height <= body, "and stay on screen: {top} + {height}");
 }
 
@@ -7006,9 +7012,15 @@ fn links_inside_a_popup_are_inert() {
     // Design spec §1.1. Both halves: the note's own link offers no control, and the
     // document's links *underneath* the box are covered by it — a click aimed at a
     // footnote must never open a browser.
+    // The marker sits at the start of the first line, so the box opens over the columns
+    // the links below it are drawn in. That overlap is the whole test on the second
+    // half: a document whose links happen to sit beside the box rather than under it
+    // proves nothing about the box covering them — fault injection found this test
+    // passing with the hit-test guard removed for exactly that reason.
     let source = format!(
-        "[body](https://example.com/b) a[^n]\n\n{}\n[^n]: see [x](https://example.com/a)\n",
-        "[under](https://example.com/u)\n\n".repeat(12)
+        "a[^n]\n\n{}\n[^n]: see [x](https://example.com/a)\n",
+        "[under](https://example.com/under-one) and [again](https://example.com/two)\n\n"
+            .repeat(12)
     );
     let mut app = open_footnote(&source, 80, 24);
     let (left, top, width, height) = popup_box(&mut app, 80, 24);
@@ -7148,4 +7160,29 @@ fn a_popup_holding_a_code_span_keeps_the_renderer_s_own_styling() {
     let mut app = open_footnote("a[^n]\n\n[^n]: a `token` in a note\n", 80, 24);
     let text = popup_text_of(&mut app, 80, 24).join("\n");
     assert!(text.contains("token"), "{text:?}");
+}
+
+#[test]
+fn a_code_fence_inside_a_popup_offers_no_copy_button() {
+    // A control the reader cannot press is worse than no control (design spec §4), and
+    // controls inside a popup are inert (§1.1) — so the note is rendered with
+    // `copy_button` off whatever the pager itself is running with. `set_copy_button(true)`
+    // is what `term::run` does when the terminal grants mouse capture.
+    let mut app = pager_at("a[^n]\n\n[^n]: a note\n\n        code\n", 80, 24);
+    app.set_copy_button(true);
+    let _ = app.canvas();
+    let (x, y) = painted_at(&mut app, 80, 24, "[1]");
+    super::term::on_mouse(&mut app, press_at(x, y), 80, 24);
+    super::term::on_mouse(&mut app, release_at(x, y), 80, 24);
+    assert!(app.popup().is_some(), "the marker opened a popup");
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(text.contains("code"), "the fence is in the note: {text:?}");
+    assert!(
+        !text.contains("copy"),
+        "no button inside the popup: {text:?}"
+    );
+    assert!(
+        app.popup().expect("a popup").canvas().hotspots().is_empty(),
+        "and the note's canvas records no control at all"
+    );
 }
