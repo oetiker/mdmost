@@ -37,22 +37,24 @@ fn fit(text: &str, width: usize) -> String {
     }
 }
 
-/// Strips terminal control sequences out of a hovered link's URL before it reaches a
-/// `Span`.
+/// Strips terminal control sequences out of untrusted text before it reaches a `Span`.
 ///
-/// `url` is untrusted document content, and the hovered-URL segment is the one place
-/// in the whole program that puts such content into a `ratatui::text::Span` outside
-/// the [`crate::canvas::Canvas`] path — everywhere else,
-/// [`Canvas::check_invariants`](crate::canvas::Canvas::check_invariants) refuses to
-/// let a raw control character survive that far, because "an ESC opens an escape
-/// sequence and a document can repaint the screen from inside a paragraph." Whether
-/// today's parser can actually produce one in a link destination is not something to
-/// rest a safety property on (design spec §8 makes the visible URL exactly that); this
-/// closes the gap regardless. [`crate::text::cell_clusters`] is the identical
-/// one-column-in, one-column-out substitution the canvas already relies on, so this
-/// draws nothing the rest of the program would not already trust.
-pub(super) fn sanitized_url(url: &str) -> String {
-    crate::text::cell_clusters(url).collect()
+/// Everywhere but here, [`Canvas::check_invariants`](crate::canvas::Canvas::check_invariants)
+/// refuses to let a raw control character survive into a drawn cell, because "an ESC
+/// opens an escape sequence and a document can repaint the screen from inside a
+/// paragraph." This function exists for the handful of spots in the status bar that
+/// build a `ratatui::text::Span` straight from document-derived text, bypassing that
+/// path entirely: the hovered link's URL, and — since a `HotspotKind::Open` failure
+/// message embeds the URL it failed to open (`src/tui/open.rs`) — the notice line too.
+/// Neither of those was written by the reader.
+///
+/// Named for what it does, not for which call site first needed it: a second caller
+/// that forgets to route through this would reopen exactly the gap this closes.
+/// [`crate::text::cell_clusters`] is the identical one-column-in, one-column-out
+/// substitution the canvas already relies on, so this draws nothing the rest of the
+/// program would not already trust.
+pub(super) fn sanitized(text: &str) -> String {
+    crate::text::cell_clusters(text).collect()
 }
 
 /// Draws the table-of-contents pane.
@@ -349,7 +351,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         let mut spans = Vec::new();
         sep(&mut spans);
         spans.push(TermSpan::styled(
-            sanitized_url(url),
+            sanitized(url),
             term_style(theme.ui.status_accent),
         ));
         left.push(Segment::new(Drop::Url, spans));
@@ -369,7 +371,12 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
                 term_style(style),
             ));
         }
-        spans.push(TermSpan::styled(notice.text.clone(), term_style(style)));
+        // A notice is usually app-generated ("copied 12 bytes...") and sanitizing
+        // those is a no-op, but an `Open` failure embeds the URL it could not launch
+        // (`src/tui/open.rs`) — document content, not app content — so every notice
+        // goes through the same substitution as the hovered URL above rather than
+        // trusting each `notify` caller to remember which kind it produced.
+        spans.push(TermSpan::styled(sanitized(&notice.text), term_style(style)));
         left.push(Segment::new(Drop::Context, spans));
     } else if let Some(index) = app.current_heading()
         && let Some(entry) = app.toc().entries().get(index)
