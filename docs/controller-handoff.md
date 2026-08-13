@@ -17,9 +17,9 @@ Trunk at time of writing: this **is** trunk. `main` @ `dbe236d`.
 Sibling worktrees, as of this commit — verify with `git worktree list`, this line cannot
 see anything created later:
 
-- `/scratch/oetiker/claude-worktrees/mdmost-semantic-selection` — **merged and
-  tombstoned.** Its handoff is a gravestone. Do not start work there. **Its
-  `.superpowers/sdd/` ledger is gitignored and still the only copy** (§6).
+- `mdmost-semantic-selection` — **merged, tombstoned, and the worktree is gone** (removed
+  2026-08-13 with the owner's approval). The branch survives, carrying nothing but its
+  gravestone. Its gitignored ledger was archived out first — see §6.
 - `/scratch/oetiker/claude-worktrees/mdmost-tryout` — detached; the owner's test binary
   and pages (`links.md`, `buttons.md`). Never commit here.
 - `/scratch/oetiker/claude-worktrees/mdmost-verify` — **the controller's own worktree.**
@@ -197,12 +197,14 @@ Settled; do not relitigate:
 - **Design authorities:** `docs/superpowers/specs/2026-08-08-mdmost-design.md` (renderer),
   `2026-08-11-semantic-selection-design.md`, `2026-08-11-clickable-links-design.md`.
 - **Finished plans**, for why the code looks as it does: `docs/superpowers/plans/`.
-- **The clickable-links SDD ledger — gitignored, and the only copy** — is
-  `.superpowers/sdd/2026-08-12-clickable-links/progress.md` **in the merged
-  `mdmost-semantic-selection` worktree**, alongside every brief, report, review and review
-  diff. Removing that worktree destroys it; that has happened once before on this project
-  and the record of which review found what was lost. **Ask the owner before removing it**,
-  and run `git status --porcelain --ignored` first.
+- **The SDD ledgers for both plans live at `/scratch/oetiker/mdmost-ledgers/`** — 112
+  files: `2026-08-11-semantic-selection/` and `2026-08-12-clickable-links/`, each holding
+  `progress.md` plus every brief, report, review and review diff, and every ruling on a
+  deferred minor. They are **outside git by design** (the SDD directory is gitignored) and
+  were copied out of the `mdmost-semantic-selection` worktree just before it was removed on
+  2026-08-13, because the equivalent ledgers for an earlier plan were destroyed exactly
+  that way and commit messages became the only record. `selection-review.html`, a Task 3
+  review artifact, is archived beside them. **Nothing backs this directory up.**
 - **Demo:** `demo/tour.md`, `demo/mdmost.toml` (the ansidrama script), `demo/tmux.conf`,
   `demo/config.toml`; regeneration recipe, drift warnings, the frame-numbering trap and
   the cut theme beat all in `docs/maintainer-notes.md`. Reference repo:
@@ -246,9 +248,9 @@ Settled; do not relitigate:
    canvas does not have" is held by argument at three call sites, not by construction.
    Adding it to `Canvas::check_invariants` would make a future op that forgets to clamp
    fail loudly in ~40 existing tests.
-8. **`selection-review.html`** sits untracked in the semantic-selection worktree — a Task
-   3 review artifact from the previous plan. It dies with the worktree; nothing depends on
-   it.
+8. **The ledger archive at `/scratch/oetiker/mdmost-ledgers/` is unbacked** (§6). If this
+   project ever gets a remote, that is the moment to decide whether the ledgers belong in
+   it, in a sibling repository, or nowhere.
 9. Carried and still open: the RPM payload is unverified (`rpm(1)` is not installed here);
    `fc-list` as the macOS icon probe is untested there; nested diagrams are never widened
    while nested tables are; Nerd Fonts v2 patches fail icon detection (deliberate); the
