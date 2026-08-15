@@ -328,9 +328,22 @@ hold_cs = 240
 
 # The pointer moves off the link to the footnote marker. Without this the URL would
 # stand in the status bar for the rest of the recording, over a footnote it has
-# nothing to do with.
+# nothing to do with — and this is genuinely load-bearing, not tidiness: only
+# `MouseEventKind::Moved` calls `set_pointer`/`clear_pointer` (`src/tui/term.rs`), so a
+# click alone would never clear a stuck hover.
+#
+# The `await` proves the URL actually left. It cannot look for the URL's absence —
+# `await` waits for text to appear — so instead it waits for what the URL's presence
+# is proven to *displace*: the status bar's heading breadcrumb ("Source, kept", the
+# `##` heading above this point in `demo/tour.md`) is the cheapest segment on the bar
+# (`Drop::Context` in `src/tui/chrome.rs`) and is dropped first whenever the bar runs
+# out of width. Verified live at this pane's 100 columns: with the link hovered, the
+# breadcrumb is absent (the URL takes its place); the instant the pointer leaves, the
+# breadcrumb reappears. So its presence, row-scoped to the status bar, is proof the
+# URL is gone.
 [[scene]]
 move = { x = 28, y = 24 }
+await = { find = "Source, kept", row = -1 }
 hold_cs = 60
 
 # The note opens in a box *above* its marker — twelve rows will not fit in the five
@@ -406,8 +419,19 @@ hold_cs = 300
 keys = ["f"]
 hold_cs = 240
 
+# This is the tour's closing note, so its outcome is gated rather than trusted: with
+# `DISPLAY` emptied for act 4, a swallowed `f` above would leave `enter` on whatever
+# the walk last landed on, and following an `Open` hotspot instead of an anchor would
+# put a launch failure in the status bar as the last thing a looping viewer reads.
+# `Reading room` is safe unscoped-looking but is not unscoped: the same words already
+# sit in the paragraph above ("Reading room (#reading-room), scrolls there instead of
+# leaving"), so this is row-scoped to the status bar's heading breadcrumb, which reads
+# a different heading ("Source, kept") right up until this `enter` actually lands —
+# verified live: the breadcrumb only becomes `Reading room` once the heading is
+# genuinely scrolled to the top of the viewport.
 [[scene]]
 keys = ["Enter"]
+await = { find = "Reading room", row = -1 }
 hold_cs = 280
 
 # ─── Act 7: the closing panel ────────────────────────────────────────────────────
