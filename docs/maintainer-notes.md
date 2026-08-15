@@ -331,9 +331,10 @@ so a repaint that lands late is no longer sampled early. The beat is back in
 colour, and the broken frame's *text* was correct — its status bar said `theme: light`
 truthfully while the pixels underneath were still dark. Verifying the switch means a
 human opening the frame and reading the background colour: light is `#fdfcf9`, dark is
-`#11141b`. Verified this session at frame0920 (light, correct) and frame0922 (dark,
-correct); check the equivalent frames again after any re-recording, since frame numbers
-shift whenever anything earlier in the script changes.
+`#11141b`. Verified for the recording shipped in commit `299bc81` at frame0919 (light,
+correct) and frame0920 (dark, correct); check the equivalent frames again after any
+re-recording, since frame numbers shift whenever anything earlier in the script changes,
+and note which commit they were read against.
 
 The bisect table below is the evidence that makes the fix explicable rather than a hope
 that a version bump happened to help. Keep it.
@@ -359,6 +360,10 @@ record; that is one four-minute probe per question. Results:
 | same, padded with ten empty scenes | 911 | **light — correct** |
 | same, plus `G` instead of the walk | 902 | **light — correct** |
 | **the full tour — the walk `F F F f Enter`** | 906 | **DARK, captioned `theme: light`** |
+| **the full tour, re-recorded 2026-08-15 against ansidrama 0.4.0 (commit `299bc81`)** | 919 | **light — correct** |
+
+The last row is the same trigger configuration as the row above it — the full tour, walk and all — carrying
+the fix forward past 0.3.0. It is not a new bisect; it is confirmation that the earlier fix still holds.
 
 So five hypotheses are dead, and nobody should re-run them: it is **not** act 5's pane
 kill and resize, **not** the alternate screen nano leaves behind, **not** accumulated
