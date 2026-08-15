@@ -468,31 +468,45 @@ await = { find = "Reading room", row = -1 }
 hold_cs = 280
 
 # ─── Act 7: the closing panel ────────────────────────────────────────────────────
-# **There was a theme beat here — `t` to light, `t` back to dark — and it is gone,
-# because it could not be recorded truthfully.** In the recording, and only at this point
-# in it, the first `t` produced a frame that was still the *dark* screen with `theme:
-# light` in its status bar, and held it for 2.8 seconds. A status bar that names a theme
-# the screen is not wearing is the one thing this project says a status bar may never do,
-# and it is worse on the hero image than on any other screen. The previous recording
-# shipped with that frame in it.
+# The theme beat: `t` to light, `t` back to dark. It was cut on 2026-08-13 because the
+# first `t`, at this exact point in the tour — right after act 6's keyboard walk, `F F F
+# f Enter` — recorded a frame that was still the *dark* screen captioned `theme: light`,
+# held for 2.8 seconds. A status bar that names a theme the screen is not wearing is the
+# one thing this project says a status bar may never do, and it is worse on the hero
+# image than on any other screen.
 #
-# It is not mdmost. Three things were ruled out before the beat was cut, and the notes in
-# `docs/maintainer-notes.md` carry the detail so the beat can come back:
-#   * a live pane repaints correctly — `t` moves the background to `#fdfcf9` every time;
-#   * ansidrama alone records the switch correctly (a three-scene script does it);
-#   * ansidrama driving tmux records it correctly too.
-# Bisected on 2026-08-13 against ansidrama 0.2.0: **the trigger is act 6's keyboard walk**,
-# the `F F F f Enter` above. Truncate this script before it and the theme switch records
-# correctly; replace the walk with a plain `G` and it records correctly; pad the frame
-# count past the failing one and it still records correctly. It is not the capture race
-# 0.2.0 fixed either — `react_ms` at four times its default changes nothing. And a live
-# pane repaints correctly after the identical sequence, so mdmost is not the thing at
-# fault. The table of probes is in `docs/maintainer-notes.md`.
+# It was never mdmost: a live pane repaints correctly every time, and so does ansidrama
+# recording the same switch in isolation or under tmux. The bisect (table in
+# `docs/maintainer-notes.md`) pinned the trigger to act 6's keyboard walk immediately
+# before the `t` — truncate the script before it, or pad past it, or replace the walk
+# with a plain `G`, and the switch records correctly every time.
 #
-# So the tour now ends on the theme it started in by never leaving it. The document is
-# where `enter` left it — `Reading room` at the top of the viewport, which is the last
-# thing act 6 proved a keyboard can reach — and that frame is held three times over for
-# the same reason as the opening card: it is where a looping viewer lands.
+# ansidrama 0.3.0 fixed the likely cause: output still draining from a previous input
+# could end the current input's wait early, so the capture landed before the repaint.
+# The grace is now measured on real grid changes rather than PTY bytes, which is exactly
+# the class of race the bisect pointed at.
+#
+# The `await` below is necessary and NOT sufficient. The broken frame carried a
+# *correct* caption over a *wrong* colour, and `await` matches text, never colour — it
+# would have matched the broken frame just as happily as a fixed one. So the light frame
+# is not trusted on the `await`'s word: every recording of this beat is opened as a PNG
+# and its background is read by eye against the theme's real colours (`#fdfcf9` for
+# light, `#11141b` for dark, `src/theme/builtin.rs`) before this beat is believed fixed.
+# That check against 0.4.0 is recorded as a second entry in the bisect table.
+[[scene]]
+keys = ["t"]
+await = { find = "theme: light", row = -1 }
+hold_cs = 280
+
+[[scene]]
+keys = ["t"]
+await = { find = "theme: dark", row = -1 }
+hold_cs = 280
+
+# The tour closes on the theme it opened in. The document is where `enter` left it —
+# `Reading room` at the top of the viewport, which is the last thing act 6 proved a
+# keyboard can reach — and that frame is held three times over for the same reason as
+# the opening card: it is where a looping viewer lands.
 [[scene]]
 keys = []
 hold_cs = 900
