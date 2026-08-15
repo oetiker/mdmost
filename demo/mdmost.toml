@@ -184,8 +184,20 @@ hold_cs = 220
 click = { x = 20, y = 25 }
 hold_cs = 30
 
+# The status bar's copy notice is not available as a gate here — at 49 columns it drops
+# to fit (Task 3) — so this waits for the paste to land in `nano` instead, and it is
+# row-scoped rather than trusting a plain substring. mdmost's own table header is on
+# screen throughout, one row below this one at row 2, framed as "│ Instrument │ Reading
+# │ Remark │"; row 1 in mdmost's pane is only the frame's top border (`╭──┬──┬──[copy]─
+# ╮`), no cell text at all. So this exact row, on nano's side, holds tab-expanded
+# spacing ("Instrument      Reading Remark") that only the TSV paste can produce — and
+# even without that accident of layout, a run of plain spaces could never come from
+# mdmost's own rendering, which always separates cells with U+2502 ("│"), not
+# whitespace (`export::table_tsv`, `render::table` — the same discriminator as act 2's
+# drag, read in the opposite direction).
 [[scene]]
 keys = ["C-b", "]"]
+await = { find = 'Instrument +Reading +Remark', row = 1 }
 hold_cs = 260
 
 # The fenced block's `[copy]` button — the Rust source that was written, not the
@@ -216,8 +228,17 @@ hold_cs = 220
 click = { x = 20, y = 25 }
 hold_cs = 30
 
+# The pasted Rust source lands on nano's row 5, its first line — verified live, the same
+# way the frame's row 1 above was. mdmost's own framed rendering of the identical text
+# sits on row 5 too, but two panes over: nano's copy starts flush at column 0, while
+# mdmost's is boxed at `[copy]` (94, 1) with the frame's left border and a padding
+# column ahead of it. Row-scoping to 5 does not by itself separate the panes — both
+# occupy that row — but at this row the two occurrences never collide: mdmost's part of
+# row 5 is blank (a rule sits above it at row 4, the code frame's top edge), so nano's
+# text is the only text row 5 has to offer.
 [[scene]]
 keys = ["C-b", "]"]
+await = { find = 'fn reading\(s: &Sample\) -> Option<Reading> \{', row = 5 }
 hold_cs = 260
 
 # A dragged paragraph — the Markdown behind the cells, not the cells.
@@ -237,18 +258,20 @@ hold_cs = 240
 click = { x = 20, y = 25 }
 hold_cs = 30
 
+# This is the largest of the three pastes and the one a deleted 0.2.0 workaround (a
+# trailing `keys = []` re-capture scene) used to protect — nano used to redraw it in
+# more than one write, and a single capture could freeze the pane one paste short of
+# the truth. Continuous sampling (the `moved`/`held` wait in `sampler.rs`) now stands in
+# for that: this `await` cannot be satisfied until the screen has gone quiet, so a paste
+# still arriving in a second write keeps the wait open rather than letting a stale frame
+# slip through. Row 12 is the paragraph's first line, landing right after the fenced
+# block's closing `}` on row 11; mdmost's own row 12 at this scroll position is prose
+# from later in the document ("and nothing else."), so there is nothing there for this
+# text to collide with.
 [[scene]]
 keys = ["C-b", "]"]
+await = { find = 'A pager renders\. It does not merely print a', row = 12 }
 hold_cs = 300
-
-# One more capture of the same screen, sending nothing. This paste is the largest of the
-# three and `nano` redraws it in more than one write; a single capture can settle between
-# the writes and freeze the pane one paste short of the truth, and the next act closes
-# `nano` before a later frame could ever correct it. An empty `keys` re-captures, which
-# is all this needs.
-[[scene]]
-keys = []
-hold_cs = 200
 
 # ─── Act 5: full width ───────────────────────────────────────────────────────────
 # The left pane closes and mdmost takes all hundred columns: the contents pane opens
