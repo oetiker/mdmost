@@ -295,27 +295,17 @@ hold_cs = 120
 text = "exit"
 hold_cs = 40
 
+# `bash` exits here, and for a moment a keystroke could reach a pane tmux has not yet
+# closed. Row 4's rule under the banner only runs this long once mdmost holds all
+# hundred columns, so the `await` cannot fire until the pane has actually closed.
+# Recorded three times behind this gate and every time the `Tab`, the four `Down`s
+# and the `Enter` landed on mdmost — the wait survives the pane transition. Should a
+# future recording still race it, the `await` is what turns that into a loud abort
+# instead of a silently wrong demo.
 [[scene]]
 keys = ["Enter"]
+await = { find = '^\s*━{55,}', row = 4 }
 hold_cs = 300
-
-# Three sacrificial `g`s, and they are here to buy time rather than to do anything.
-#
-# ansidrama sends the next key once the terminal has been quiet for `settle_ms`, and
-# `bash` exiting is quiet for longer than that *before* tmux notices the EOF and closes
-# the pane. So the key after this `Enter` is a coin toss: it reaches either mdmost or a
-# shell that is already gone. Recorded once with a single scene here and the `Tab` fell
-# into the dying pane — the contents never opened, the four `Down`s scrolled the
-# document instead of the list, and every beat of act 5 after it was a different demo.
-#
-# Each keystroke costs one whole quiet window, so three of them are about a second of
-# real time; `g` is the one key that can be thrown away safely, because act 4 left the
-# document at the top and `g` is where it already is. Whichever of the three lands
-# first, the screen does not change, and by the last one the pane is certainly gone.
-[[scene]]
-keys = ["g", "g", "g"]
-type_cs = 30
-hold_cs = 60
 
 [[scene]]
 keys = ["Tab"]
