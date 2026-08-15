@@ -89,7 +89,7 @@ fn reading(s: &Sample) -> Option<Reading> {
 ```
 
 Copy a table and it arrives as tab-separated values. Copy a paragraph and it
-arrives as Markdown. The status bar says which, every time.
+arrives as Markdown. The status bar names which, when there is room for it.
 
 ## Where a link goes
 
