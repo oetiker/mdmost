@@ -249,6 +249,20 @@ Six things in there are load-bearing and easy to break:
   a leftover session. After any aborted run: `tmux -L mdmost-demo kill-server` before
   recording again.
 
+**Act 5's fallback, if it is ever needed again.** The script used to spend three
+throwaway `g` presses right after closing the left pane, to buy time before the next
+real keystroke. They are gone now, deleted once three independent recordings passed
+with nothing but the `await` on the full-width screen. Three clean runs on one machine
+is not proof the hazard is gone, though — only that it did not show up this time. What
+they guarded against is a keystroke reaching a pane before tmux has finished closing it,
+which is timing-dependent by nature: a slower or more loaded host is exactly where it
+would reappear. **If act 5 ever aborts on its `await`, the first thing to try is adding
+a sacrificial `g` back before the `Tab`.** `g` costs nothing to throw away here — act 4
+already leaves the document at the top, and `g` goes to the top, so it changes nothing
+visible even where it does nothing useful. And when this happens, treat it as the gate
+doing its job: the abort means a miss that used to pass silently is now caught, not that
+something regressed.
+
 Recording takes about five minutes and the result is lossless WebP, about 1.7 MB. Frame
 count is reproducible under the current recorder: two consecutive full recordings
 produced 908 frames each, with a byte-identical `manifest.tsv`. The WebP bytes
