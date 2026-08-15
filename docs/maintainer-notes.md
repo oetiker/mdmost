@@ -175,7 +175,7 @@ each side plus the title bar. The bar colours are keyed to the dark theme in
 `src/theme/builtin.rs` rather than left at ansidrama's greys, and they are deliberately
 fixed — a title bar that changed with the theme would read as a second window opening.
 
-Five things in there are load-bearing and easy to break:
+Six things in there are load-bearing and easy to break:
 
 - **`demo/tour.md`'s widths.** The point of the drag is that the pane passes through
   the widths where the content changes shape. Measured against the current renderer:
@@ -202,34 +202,71 @@ Five things in there are load-bearing and easy to break:
   reachable, `arboard` also takes the copy and the status bar says something else.
 - **`set -g set-clipboard on`.** Without it `prefix ]` pastes nothing and act 4 is a
   mime.
-- **`hold_cs` is a duration written into the WebP, not a sleep.** ansidrama sends the
-  next scene's key as soon as the PTY has been quiet for `settle_ms`, so scenes that
-  read as seconds apart on screen are milliseconds apart in the terminal. Two
-  consequences, both of which have bitten this script:
-  - an `Escape` scene lays a bare ESC in front of the next keystroke and the pair
-    arrives as `M-<key>`, losing both. There is no `Escape` in the script; act 6
-    dismisses the footnote box with a click and act 7 relies on the same rule.
-  - a key sent right after the left pane's `exit` can reach the dying shell instead of
-    mdmost, because `bash` is quiet for longer than `settle_ms` before tmux notices the
-    EOF. Act 5 spends three throwaway `g`s there to buy quiet windows.
+- **`await` patterns are regexes, and they replace the whole `settle_ms` timing model.**
+  ansidrama no longer paces on quiet windows; it samples the terminal grid continuously
+  and assembles frames from that log. A scene declares the screen it is waiting for with
+  `await`, and if the pattern never matches the run **aborts**, naming the pattern that
+  failed — there is no silent timeout. `hold_cs` is untouched by any of this: it is still
+  a duration written into the WebP, not a sleep, and pacing the *shown* video is still
+  its only job. The `Escape` consequence also survives unchanged: a bare ESC lays in
+  front of the next keystroke and the pair arrives as `M-<key>`, losing both, which is
+  why there is no `Escape` scene in the script — act 6 dismisses the footnote box with a
+  click and act 7 relies on the same rule.
 
-Recording takes about five minutes and the result is lossless WebP, currently 906
-frames and about 1.7 MB. Successive runs produce the same frame count and the same loop
-duration but **not** byte-identical files — a few dozen bytes drift between runs — so
-re-record only when the demo actually changes, not as routine hygiene.
+  Four things about `await` patterns have each cost an attempt to learn here:
+  - **The pattern is `Regex::new(find)` (`ansidrama/src/pattern.rs`), not literal text.**
+    Escape `. [ ] ( ) + * ? | ^ $ { } \` or the match tests something other than what it
+    looks like. `[copy]` unescaped is a *character class* matching one `c`, `o`, `p` or
+    `y` — it is not the button label, and a script carrying it "passes" while verifying
+    nothing. It must be `\[copy\]`. (Two patterns in `demo/tour.md` — the sentence
+    naming the pipeline width, and `github.com` — carry an unescaped `.`; that is a
+    deliberate, harmless wildcard, not an oversight.) `regex_lite` has no implicit
+    multiline mode, so `^` anchors the whole string, not each line.
+  - **`row` is 0-indexed; `tmux capture-pane` is 1-indexed.** `resolve_row`
+    (`pattern.rs:64-68`) uses a non-negative row as the array index directly, so row 0
+    is the terminal's first row. A negative row counts from the bottom, so `row = -1` is
+    the status bar. Carrying a row read off `capture-pane -p` (which numbers from 1)
+    straight into `row` without subtracting one is an off-by-one that has cost a failed
+    attempt here.
+  - **Row scoping separates rows, never panes.** `row` is the only scoping primitive
+    `await` has. In the vertical split, one row spans both panes, so a row-scoped
+    pattern is matched against that row's full 100-column string with both panes'
+    content side by side.
+  - **`^` still separates the panes, for as long as the split exists.** A row-scoped
+    match runs against that row with only trailing whitespace trimmed, so `^` means
+    column 1 of the frame. nano and less live in columns 1–49; mdmost is the right-hand
+    pane and never draws before about column 51 — so an `^`-anchored, row-scoped
+    pattern can never match mdmost's content while the split is up. Act 4's three gates
+    lean on this structurally, not by luck. mdmost also draws its own one-column left
+    margin, so even a pattern aimed at mdmost's content needs `\s*` in front of it, not
+    a bare `^`; that stops mattering only once the split closes and mdmost owns column 1
+    too.
+- **An aborted run leaves the tmux server alive.** Every failed `await` — so every fault
+  injection run on purpose while testing a script — exits through ansidrama's error path
+  before it tears tmux down. The next `ansidrama record` then runs `new-session -s demo`
+  against a socket that is still occupied, and its launch command exits immediately. The
+  only symptom is "the launched command exited after scene 00" — nothing that looks like
+  a leftover session. After any aborted run: `tmux -L mdmost-demo kill-server` before
+  recording again.
 
-**The run log counts frames, it does not number them.** `scene 49 → 833 frames total`
-means that scene's last frame is `frame0832.png`, because the dump is zero-indexed. Read
-it as a frame number and every beat you check is the one *after* the one you meant, which
-is usually a plausible-looking screen — it cost a take here: a footnote counter read as
-`7 → 6 → 5 → 5` (a keystroke apparently swallowed) was really `8 → 7 → 6 → 5` with the
-open frame mistaken for the first press. **When a beat looks wrong, check the app in a
-live pane before changing the script**: `tmux -L probe -f demo/tmux.conf new-session -x
-100 -y 30 …`, walk the same keys with a pause between them, and read `capture-pane -p`.
+Recording takes about five minutes and the result is lossless WebP, about 1.7 MB. Frame
+count is reproducible under the current recorder: two consecutive full recordings
+produced 908 frames each, with a byte-identical `manifest.tsv`. The WebP bytes
+themselves were not re-checked this round; the earlier finding — same frame count and
+loop duration, but a few dozen bytes drift between runs — still stands as the last
+measurement of that. Re-record only when the demo actually changes, not as routine
+hygiene.
+
+**`--dump-png <dir>` writes `manifest.tsv` beside the frames**, mapping `frame`,
+`scene`, `input`, `kind` and `hold_cs` for every frame — the old run log's frame tally
+is gone along with the recorder that printed it. The lesson that outlives the mechanism:
+**when a beat looks wrong, check the app in a live pane before changing the script**:
+`tmux -L probe -f demo/tmux.conf new-session -x 100 -y 30 …`, walk the same keys with a
+pause between them, and read `capture-pane -p`.
 
 **Watch the result before committing it.** `ansidrama record demo/mdmost.toml
---dump-png <dir>` writes every frame as a PNG beside the WebP, and the run log names the
-frame each scene ends on, so a beat can be checked by opening one file. Three of the
+--dump-png <dir>` writes every frame as a PNG beside the WebP, and `manifest.tsv` names
+the frame each scene ends on, so a beat can be checked by opening one file. Three of the
 four takes behind the current recording had a silently broken act in them — a copy that
 pasted the last thing twice, a note that never closed, a contents pane that opened one
 beat too late — and none of it was visible from the byte size or the frame count.
@@ -237,14 +274,55 @@ beat too late — and none of it was visible from the byte size or the frame cou
 The copy buttons only exist when mouse capture succeeded, so `--render-once` shows none.
 That is correct, not a broken render.
 
-### The theme beat is cut, and why — restore it when ansidrama is fixed
+**Regenerating, step by step.** Skipping this order is how a broken take gets skipped
+too:
 
-The tour used to end by pressing `t` to the light theme and `t` back to dark. **That beat
-is gone**, because at that point in the recording — and only there — the frame after the
-first `t` is still the *dark* screen carrying `theme: light` in its status bar. It held
-for 2.8 s on the hero image, and it shipped that way in the recording before this one. A
-status bar that names a theme the screen is not wearing is the one thing this project
-says a status bar may never do.
+1. Rebuild both binaries — `mdmost` and `ansidrama` — so neither step runs against a
+   stale one.
+2. Check the width thresholds with `mdmost --render-once --width N demo/tour.md` at 48,
+   50, 51, 59, 60, 64 and 100.
+3. Re-read every `click` coordinate off a live 49-column pane, as above — do not trust
+   coordinates from a previous recording.
+4. Record with `ansidrama record demo/mdmost.toml --dump-png <dir>`.
+5. Open the theme frame named in `manifest.tsv` and confirm its background is light
+   (`#fdfcf9`).
+6. Confirm the tour's closing frame is dark (`#11141b`).
+7. Only then replace `docs/demo/mdmost.webp`.
+
+**Testing one act without paying for the whole tour:** copy `demo/mdmost.toml`, delete
+the scenes after the act under test, and record the copy. Two things about the copy
+matter — run it from the repository root, because the `launch` line uses paths relative
+to there, and always pass `-o` to a scratch path, because the config's `out` key
+resolves relative to *the config file's own directory* and an unmoved copy overwrites
+`docs/demo/mdmost.webp` from underneath you. **Exception: the theme beat cannot be
+verified this way.** The bisect below found the trigger is act 6's keyboard walk running
+immediately before it; truncating removes exactly that walk, so a truncated script is
+the one configuration that always passes regardless of whether the beat is actually
+fixed.
+
+### The theme beat, and how to verify it
+
+The tour ends by pressing `t` to the light theme and `t` back to dark. It was cut on
+2026-08-13 because at that point in the recording — and only there — the frame after the
+first `t` was still the *dark* screen while its status bar named `theme: light`. A status
+bar that names a theme the screen is not wearing is the one thing this project says a
+status bar may never do.
+
+ansidrama 0.3.0 fixed the cause: the settle grace it waits out before sampling a frame
+is now measured against real changes to the terminal grid rather than against PTY bytes,
+so a repaint that lands late is no longer sampled early. The beat is back in
+`demo/mdmost.toml`.
+
+**`await` cannot verify this beat, and never will.** A pattern matches text, never
+colour, and the broken frame's *text* was correct — its status bar said `theme: light`
+truthfully while the pixels underneath were still dark. Verifying the switch means a
+human opening the frame and reading the background colour: light is `#fdfcf9`, dark is
+`#11141b`. Verified this session at frame0920 (light, correct) and frame0922 (dark,
+correct); check the equivalent frames again after any re-recording, since frame numbers
+shift whenever anything earlier in the script changes.
+
+The bisect table below is the evidence that makes the fix explicable rather than a hope
+that a version bump happened to help. Keep it.
 
 It is not mdmost, and three checks say so:
 
@@ -278,13 +356,13 @@ four times the default, changes nothing.
 time: `G`, then `F F F f Enter`, then `t`, gives a background of `#fdfcf9`. Only the
 recording disagrees.
 
-What is left is the difference between a keyboard walk and any other input, inside
-ansidrama. The walk is five keystrokes that move a *painted* cursor and then follow an
-anchor; each redraws, and the last one scrolls. Worth trying next: the walk with the
-`Enter` removed, to separate the cursor from the anchor jump, and the walk replaced by
-five presses of an unbound key, to separate "five rapid keystrokes" from "the cursor".
+What was left, at the time, was the difference between a keyboard walk and any other
+input inside ansidrama — five keystrokes that move a *painted* cursor and then follow an
+anchor, each redrawing, with the last one scrolling. That is the shape of what 0.3.0's
+grid-based settle grace fixed: a capture race between a late repaint and an early sample,
+exactly where a walk like this one produces one.
 
-**To restore the beat**, put two `t` scenes back at the end of `demo/mdmost.toml`, record,
-and open the frame after the first one. If it is light, the bug is fixed and the tour can
-show themes again. Until then the tour never leaves dark, and ends on the frame `enter`
-left behind.
+**If a future recording shows the same failure**, the fix has regressed — re-open this
+section, not the recipe above it. Day-to-day, verifying the beat is just steps 5 and 6
+of the regeneration recipe: open the theme frame and confirm it is light, then confirm
+the tour's closing frame is dark.
