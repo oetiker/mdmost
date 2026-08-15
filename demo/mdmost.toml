@@ -99,9 +99,19 @@ hold_cs = 30
 keys = ["Space"]
 hold_cs = 160
 
+# `await` is a regex (ansidrama `Pattern::new` -> `Regex::new`), not a literal
+# substring. mdmost's rendered table borders cells with U+2502 ("│"); the raw
+# Markdown at demo/tour.md:20 borders them with an ASCII pipe ("|", U+007C) —
+# a different codepoint. A pattern that requires the *rendered* glyph between
+# these two cells can therefore only ever come from mdmost's own drawing, not
+# from less showing the source, however less happens to wrap the line. That's
+# the anchor here — not a width margin (a plain substring match on "Steady
+# since dawn, unusual" alone only worked because the source line is one
+# character longer than the undragged pane is wide, and would silently stop
+# proving anything if `Barometer`/`1013 hPa` were ever shortened).
 [[scene]]
 drag = { from = [51, 15], to = [37, 15] }
-await = "Steady since dawn, unusual"
+await = "hPa +│ +Steady since dawn, unusual"
 hold_cs = 200
 
 [[scene]]
@@ -110,7 +120,7 @@ hold_cs = 160
 
 [[scene]]
 drag = { from = [51, 15], to = [37, 15] }
-await = "Steady since dawn, unusual"
+await = "hPa +│ +Steady since dawn, unusual"
 hold_cs = 200
 
 [[scene]]
