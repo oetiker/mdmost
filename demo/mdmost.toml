@@ -20,7 +20,6 @@ move_cs = 2
 # tmux has to start, then `bash` and `mdmost` inside it. A short floor here races the
 # first prompt and the demo types into nothing.
 startup_ms = 2500
-settle_ms = 300
 
 # `q` quits mdmost, which is the last process standing, which ends the tmux session.
 quit_keys = ["q"]
