@@ -318,32 +318,26 @@ hold_cs = 60
 keys = ["Enter"]
 hold_cs = 220
 
-# Hover, spelled as a raw SGR motion report rather than as a scene.
-#
-# ansidrama moves its pointer *silently*: `Recorder::move_to` pushes one frame per cell
-# and sends no bytes, so a recorded pointer never lights anything and a recorded click
-# arrives with no motion before it. The escape hatch — a raw escape in `keys` goes to
-# the terminal untouched — is what delivers the one event mdmost needs, `\e[<35;x;yM`
-# being motion with no button held. The cost is that a `keys` frame draws the text
-# caret instead of the pointer, so this frame shows the link lit and its URL in the
-# status bar with no arrow resting on it. Fixing that means teaching `move_to` to emit
-# these reports itself, which is a change to ansidrama, not to this script.
+# The pointer glides to the link and rests on it. ansidrama >=0.4.0 reports its motion
+# to an application in any-event tracking, which mdmost is (`src/tui/term.rs:249`), so
+# the link lights and the status bar names its host with a real arrow on screen.
 [[scene]]
-keys = ["\u001B[<35;12;19M"]
+move = { x = 12, y = 19 }
+await = { find = "github.com", row = -1 }
 hold_cs = 240
 
-# The same report at the marker before the click, and not only for tidiness: hover is
-# sticky without it. A pointer that never reported leaving the link would leave the URL
-# standing in the status bar for the rest of the recording, over a footnote it has
+# The pointer moves off the link to the footnote marker. Without this the URL would
+# stand in the status bar for the rest of the recording, over a footnote it has
 # nothing to do with.
 [[scene]]
-keys = ["\u001B[<35;28;24M"]
+move = { x = 28, y = 24 }
 hold_cs = 60
 
 # The note opens in a box *above* its marker — twelve rows will not fit in the five
 # below it — and the page behind it does not move.
 [[scene]]
 click = { x = 28, y = 24 }
+await = "↓ 8 more"
 hold_cs = 300
 
 # `↓ 8 more` in the box's bottom edge, and the cursor keys spend themselves on the note
@@ -365,7 +359,7 @@ hold_cs = 240
 # follow. (90, 6) is blank canvas to the right of the code frame, well clear of both
 # the box and any control.
 [[scene]]
-keys = ["\u001B[<35;90;6M"]
+move = { x = 90, y = 6 }
 hold_cs = 40
 
 [[scene]]
@@ -405,6 +399,7 @@ hold_cs = 220
 
 [[scene]]
 keys = ["F"]
+await = { find = "github.com", row = -1 }
 hold_cs = 300
 
 [[scene]]
