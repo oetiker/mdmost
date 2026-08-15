@@ -128,7 +128,7 @@ drag = { from = [37, 15], to = [51, 15] }
 hold_cs = 200
 
 # ─── Act 3: scrolling what cannot reflow ─────────────────────────────────────────
-# The five-column table needs sixty columns and the pane has forty-seven. `Right`
+# The five-column table needs sixty columns and the pane has forty-nine. `Right`
 # moves the table and nothing else: the prose above it does not stir, and the `↔`
 # readout counts the columns still off the edge. `g` comes back to the top left.
 
@@ -374,6 +374,13 @@ hold_cs = 240
 # breadcrumb is absent (the URL takes its place); the instant the pointer leaves, the
 # breadcrumb reappears. So its presence, row-scoped to the status bar, is proof the
 # URL is gone.
+#
+# This is the gate's load-bearing assumption, not an incidental detail: it depends on
+# `Drop::Url` and `Drop::Context` contending for the same width, so if the status bar is
+# ever changed to stop dropping the breadcrumb first — or to show both segments at once —
+# this `await` starts matching a screen that still has the URL on it, and the gate goes
+# decorative silently. That is exactly the failure mode this re-think exists to catch, so
+# a status-bar change is a reason to re-verify this gate by eye, not just re-run it.
 [[scene]]
 move = { x = 28, y = 24 }
 await = { find = "Source, kept", row = -1 }

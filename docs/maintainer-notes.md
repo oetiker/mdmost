@@ -218,9 +218,9 @@ Six things in there are load-bearing and easy to break:
     Escape `. [ ] ( ) + * ? | ^ $ { } \` or the match tests something other than what it
     looks like. `[copy]` unescaped is a *character class* matching one `c`, `o`, `p` or
     `y` — it is not the button label, and a script carrying it "passes" while verifying
-    nothing. It must be `\[copy\]`. (Two patterns in `demo/tour.md` — the sentence
-    naming the pipeline width, and `github.com` — carry an unescaped `.`; that is a
-    deliberate, harmless wildcard, not an oversight.) `regex_lite` has no implicit
+    nothing. It must be `\[copy\]`. (Two patterns in `demo/mdmost.toml` — the filename
+    `demo/tour.md`, and `github.com` — carry an unescaped `.`; that is a deliberate,
+    harmless wildcard, not an oversight.) `regex_lite` has no implicit
     multiline mode, so `^` anchors the whole string, not each line.
   - **`row` is 0-indexed; `tmux capture-pane` is 1-indexed.** `resolve_row`
     (`pattern.rs:64-68`) uses a non-negative row as the array index directly, so row 0
@@ -263,13 +263,16 @@ visible even where it does nothing useful. And when this happens, treat it as th
 doing its job: the abort means a miss that used to pass silently is now caught, not that
 something regressed.
 
-Recording takes about five minutes and the result is lossless WebP, about 1.7 MB. Frame
-count is reproducible under the current recorder: two consecutive full recordings
-produced 908 frames each, with a byte-identical `manifest.tsv`. The WebP bytes
-themselves were not re-checked this round; the earlier finding — same frame count and
-loop duration, but a few dozen bytes drift between runs — still stands as the last
-measurement of that. Re-record only when the demo actually changes, not as routine
-hygiene.
+Recording takes about five minutes and the result is lossless WebP. The recording shipped
+in commit `299bc81` is 1,594,864 bytes (about 1.6 MB) across 922 frames. Frame count was
+found reproducible under the current recorder on an earlier, gate-free baseline script
+(before the `await` gates and the restored theme beat existed): two consecutive full
+recordings of *that* script produced 908 frames each, with a byte-identical
+`manifest.tsv`. The shipped script's own frame count has not been re-run a second time to
+confirm the same reproducibility, and its WebP bytes were not re-checked either — the
+earlier finding of a few dozen bytes' drift between otherwise-identical runs still stands
+as the last measurement of that, on the baseline script. Re-record only when the demo
+actually changes, not as routine hygiene.
 
 **`--dump-png <dir>` writes `manifest.tsv` beside the frames**, mapping `frame`,
 `scene`, `input`, `kind` and `hold_cs` for every frame — the old run log's frame tally
@@ -360,7 +363,7 @@ record; that is one four-minute probe per question. Results:
 | same, padded with ten empty scenes | 911 | **light — correct** |
 | same, plus `G` instead of the walk | 902 | **light — correct** |
 | **the full tour — the walk `F F F f Enter`** | 906 | **DARK, captioned `theme: light`** |
-| **the full tour, re-recorded 2026-08-15 against ansidrama 0.4.0 (commit `299bc81`)** | 919 | **light — correct** |
+| **the full tour, re-recorded 2026-08-16 against ansidrama 0.4.0 (commit `299bc81`)** | 919 | **light — correct** |
 
 The last row is the same trigger configuration as the row above it — the full tour, walk and all — carrying
 the fix forward past 0.3.0. It is not a new bisect; it is confirmation that the earlier fix still holds.
