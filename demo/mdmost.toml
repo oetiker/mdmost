@@ -82,6 +82,7 @@ hold_cs = 40
 
 [[scene]]
 keys = ["Enter"]
+await = { find = "demo/tour.md", row = -1 }
 hold_cs = 260
 
 # ─── Act 2: the drags ────────────────────────────────────────────────────────────
@@ -100,6 +101,7 @@ hold_cs = 160
 
 [[scene]]
 drag = { from = [51, 15], to = [37, 15] }
+await = "Steady since dawn, unusual"
 hold_cs = 200
 
 [[scene]]
@@ -108,6 +110,7 @@ hold_cs = 160
 
 [[scene]]
 drag = { from = [51, 15], to = [37, 15] }
+await = "Steady since dawn, unusual"
 hold_cs = 200
 
 [[scene]]
@@ -126,6 +129,7 @@ hold_cs = 200
 [[scene]]
 keys = ["Right", "Right", "Right", "Right", "Right", "Right"]
 type_cs = 14
+await = { find = "↔ 14/14", row = -1 }
 hold_cs = 240
 
 [[scene]]
