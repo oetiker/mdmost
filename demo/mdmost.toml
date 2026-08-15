@@ -185,19 +185,21 @@ click = { x = 20, y = 25 }
 hold_cs = 30
 
 # The status bar's copy notice is not available as a gate here — at 49 columns it drops
-# to fit (Task 3) — so this waits for the paste to land in `nano` instead, and it is
-# row-scoped rather than trusting a plain substring. mdmost's own table header is on
-# screen throughout, one row below this one at row 2, framed as "│ Instrument │ Reading
-# │ Remark │"; row 1 in mdmost's pane is only the frame's top border (`╭──┬──┬──[copy]─
-# ╮`), no cell text at all. So this exact row, on nano's side, holds tab-expanded
-# spacing ("Instrument      Reading Remark") that only the TSV paste can produce — and
-# even without that accident of layout, a run of plain spaces could never come from
-# mdmost's own rendering, which always separates cells with U+2502 ("│"), not
-# whitespace (`export::table_tsv`, `render::table` — the same discriminator as act 2's
-# drag, read in the opposite direction).
+# to fit (Task 3) — so this waits for the paste to land in `nano` instead. Row-scoped
+# matching runs the regex against `grid[idx].trim_end()` alone (`ansidrama/src/pattern.rs`)
+# — no other row's text is in the haystack — so `^` (no `(?m)`, `regex_lite`) anchors to
+# offset 0 of *that one row*, which is column 1 of the frame. mdmost is the right pane and
+# never draws anything before roughly column 51, so a `^`-anchored pattern can only ever
+# match nano's half of the row: it is incapable of matching mdmost's own rendering,
+# regardless of what mdmost is showing or where it is scrolled. The text itself is
+# tab-expanded TSV spacing ("Instrument      Reading Remark") that only the paste
+# produces — mdmost always separates cells with U+2502 ("│"), never plain spaces
+# (`export::table_tsv`, `render::table` — the same discriminator as act 2's drag, read in
+# the opposite direction), which is a second, independent reason this could never be
+# mdmost's own text even without the anchor.
 [[scene]]
 keys = ["C-b", "]"]
-await = { find = 'Instrument +Reading +Remark', row = 1 }
+await = { find = '^Instrument +Reading +Remark', row = 1 }
 hold_cs = 260
 
 # The fenced block's `[copy]` button — the Rust source that was written, not the
@@ -229,16 +231,18 @@ click = { x = 20, y = 25 }
 hold_cs = 30
 
 # The pasted Rust source lands on nano's row 5, its first line — verified live, the same
-# way the frame's row 1 above was. mdmost's own framed rendering of the identical text
-# sits on row 5 too, but two panes over: nano's copy starts flush at column 0, while
-# mdmost's is boxed at `[copy]` (94, 1) with the frame's left border and a padding
-# column ahead of it. Row-scoping to 5 does not by itself separate the panes — both
-# occupy that row — but at this row the two occurrences never collide: mdmost's part of
-# row 5 is blank (a rule sits above it at row 4, the code frame's top edge), so nano's
-# text is the only text row 5 has to offer.
+# way the frame's row 1 above was. The same literal text (syntax colour doesn't change
+# characters) sits on mdmost's row 5 too, boxed at `[copy]` (94, 1) behind the frame's
+# left border and a padding column, so this cannot lean on "mdmost's half of this row
+# happens to be blank" the way paste 1 above can — it isn't, and a positional argument
+# like that would only hold for as long as mdmost stays scrolled exactly here. `^`
+# (row-scoped, so it anchors to column 1 of the frame — see the note on the first paste)
+# fixes that by construction: mdmost is the right pane and never draws before roughly
+# column 51, so `^fn reading...` can only match nano's flush-left copy, never mdmost's
+# framed one, wherever mdmost happens to be scrolled.
 [[scene]]
 keys = ["C-b", "]"]
-await = { find = 'fn reading\(s: &Sample\) -> Option<Reading> \{', row = 5 }
+await = { find = '^fn reading\(s: &Sample\) -> Option<Reading> \{', row = 5 }
 hold_cs = 260
 
 # A dragged paragraph — the Markdown behind the cells, not the cells.
@@ -265,12 +269,14 @@ hold_cs = 30
 # for that: this `await` cannot be satisfied until the screen has gone quiet, so a paste
 # still arriving in a second write keeps the wait open rather than letting a stale frame
 # slip through. Row 12 is the paragraph's first line, landing right after the fenced
-# block's closing `}` on row 11; mdmost's own row 12 at this scroll position is prose
-# from later in the document ("and nothing else."), so there is nothing there for this
-# text to collide with.
+# block's closing `}` on row 11, flush at column 1 in nano — verified live, not assumed.
+# `^` anchors there for the same structural reason as the two pastes above: row-scoped
+# matching leaves only that one row's text in the haystack, so offset 0 is column 1 of
+# the frame, which is nano's ground and never mdmost's, independent of whatever mdmost
+# is showing on its own half of row 12 at this or any other scroll position.
 [[scene]]
 keys = ["C-b", "]"]
-await = { find = 'A pager renders\. It does not merely print a', row = 12 }
+await = { find = '^A pager renders\. It does not merely print a', row = 12 }
 hold_cs = 300
 
 # ─── Act 5: full width ───────────────────────────────────────────────────────────
