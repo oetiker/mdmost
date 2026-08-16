@@ -45,17 +45,21 @@ sudo rpm -i mdmost-*.x86_64.rpm
 There is no apt or yum repository, so `apt upgrade` will not find new versions: come
 back to the releases page for those.
 
-**Any Linux** — the tarballs are static musl builds and need nothing installed:
+**Any Linux** — the tarballs are static musl builds and need nothing installed. The
+archive carries the man page beside the binary, so install both:
 
 ```sh
 tar xzf mdmost-*-x86_64-unknown-linux-musl.tar.gz
-sudo install mdmost/mdmost /usr/local/bin/
+sudo install -Dm755 mdmost/mdmost       /usr/local/bin/mdmost
+sudo install -Dm644 mdmost/man/mdmost.1 /usr/local/share/man/man1/mdmost.1
 ```
 
-**Rust** — `cargo install mdmost`, or `cargo build --release` from a checkout. Rust 2024
-edition; no system dependencies beyond a terminal that speaks ANSI truecolour. Pure Rust
-all the way down — the build needs no C compiler, which is why the regex engine behind
-the highlighter is `fancy-regex` rather than oniguruma.
+**Rust** — `cargo install mdmost`, or `cargo build --release` from a checkout. Neither
+route gives you a man page: `cargo install` does not install them at all, and the page
+is generated rather than shipped. Run `make man` in a checkout if you want one (it
+needs pandoc). Rust 2024 edition; no system dependencies beyond a terminal that speaks
+ANSI truecolour. Pure Rust all the way down — the build needs no C compiler, which is
+why the regex engine behind the highlighter is `fancy-regex` rather than oniguruma.
 
 Two honest caveats. The **macOS** tarball binaries are neither signed nor notarised, so
 Gatekeeper will quarantine them; `brew install` is the path of least resistance. The

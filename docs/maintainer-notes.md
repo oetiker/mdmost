@@ -171,6 +171,20 @@ builds it once at the top of `build-binaries`, where the tarball, the deb and th
 all read it out of the working tree. Homebrew reads it from our tarball. The Windows zip
 ships no man page and so skips pandoc entirely.
 
+**All four packaging paths were verified on 2026-08-16**, by building them rather than
+by reading the metadata:
+
+| Path | Where the page lands | How it was checked |
+| --- | --- | --- |
+| deb | `/usr/share/man/man1/mdmost.1.gz` | `cargo deb --no-build` then `dpkg-deb -c` |
+| rpm | `/usr/share/man/man1/mdmost.1` | `cargo generate-rpm` then `rpm2cpio \| zstd -dc \| cpio -t` |
+| tarball | `mdmost/man/mdmost.1` | staged exactly as `release.yml` does, then `tar tzf` |
+| Homebrew | `man1.install "man/mdmost.1"` | both formula paths resolve inside the unpacked tarball |
+
+`cargo-deb` gzips the page because Debian policy wants it that way; the rpm ships it
+raw. `man` reads either. Note that `cargo install` installs **no** man page — that is
+cargo's limitation, not a packaging bug, and the README says so.
+
 Things worth knowing before you go hunting:
 
 - **`man --warnings` always reports `cannot select font 'C'` and `'CB'`.** Those are
