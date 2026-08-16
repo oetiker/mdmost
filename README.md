@@ -1,64 +1,19 @@
 # mdmost
 
-A full-screen terminal pager for a single Markdown document — `less`, but it knows what
-Markdown means.
+like less but for Markdown
 
-It parses the document once, then draws it as styled Unicode: tables get real borders
-and negotiated column widths, fenced code is syntax-highlighted, and Mermaid diagrams
-are laid out as box art rather than shown as source. Resize the terminal and everything
-reflows, because rendering is a pure function of `(document, width, theme, options)`.
+A full-screen terminal pager for one Markdown document. It parses the file once and
+draws it as styled Unicode: tables get real borders and negotiated column widths,
+fenced code is syntax-highlighted, and Mermaid diagrams are laid out as box art rather
+than shown as source. Resize the terminal and everything reflows, because rendering is
+a pure function of `(document, width, theme, options)`.
 
-![less on the left, mdmost on the right, on the same file](docs/demo/mdmost.webp)
+![less on the left, mdmost on the right, on the same file](https://raw.githubusercontent.com/oetiker/mdmost/main/docs/demo/mdmost.webp)
 
-The same document in `less` and in `mdmost`, side by side. Dragging the divider is the
-whole argument: a table renegotiates its column widths, a diagram re-lays its node
-boxes, and prose only re-wraps. Content too wide to fold — a five-column table, a
-diagram that wants 188 columns — scrolls sideways rather than being mangled, and it
-scrolls alone, while the prose around it holds still. The copies at the end cross into
-the neighbouring pane as a table's TSV, a fenced block's own source, and a paragraph's
-Markdown.
-
-Heading levels are told apart by the rule underneath them — heavy, light, then dashed.
-
-Set `title_banner = true` and a document whose first block is its one and only `#`
-heading opens with that title in the FIGlet *Small* font, wrapped between words over as
-many lines as it needs and centred. It is **off by default**: art in place of someone
-else's title is a decoration, and a default is the wrong place to hold that opinion.
-Turned on, it still declines — and draws an ordinary heading — when the title is not
-plain ASCII, or when a single word is too wide for the measure to break.
-
-A document that nests three or more section levels also gets **section numbers** — `1`,
-`1.1`, `1.1.1` — in front of its headings and in the contents pane, drawn in a quiet
-grey of their own so it is obvious they are `mdmost`'s and not the author's. A lone `#`
-title is not a section: it stays unnumbered and its `##`s are numbered `1`, `2`, `3`. A
-flat document gets nothing, because it needs nothing. `section_numbers = false` turns
-them off.
-
-```
- ╭──────────┬───────────┬─────────────╮
- │ Language │ Extension │ Highlighted │
- ├──────────┼───────────┼─────────────┤
- │ Rust     │    .rs    │         yes │
- │ Python   │    .py    │         yes │
- │ TOML     │   .toml   │         yes │
- ╰──────────┴───────────┴─────────────╯
-
- ╭ rust ────────────────────────────────────────────────────╮
- │ fn main() {                                              │
- │     println!("hello");                                   │
- │ }                                                        │
- ╰──────────────────────────────────────────────────────────╯
-```
-
-## What it is not
-
-The scope is deliberately narrow, and these are decisions rather than gaps:
-
-- **Not an editor.** The document is read-only.
-- **Not a file browser.** One document per invocation; there is no tree, no next-file.
-- **No HTML.** Raw HTML in the source is skipped rather than rendered or shown.
-- **No raster images.** An image becomes a captioned placeholder with its alt text and
-  target — no sixel, no kitty protocol.
+The same document in `less` and in `mdmost`. Dragging the divider is the whole argument:
+a table renegotiates its column widths, a diagram re-lays its node boxes, and prose only
+re-wraps. Content too wide to fold scrolls sideways rather than being mangled, and it
+scrolls alone, while the prose around it holds still.
 
 ## Install
 
@@ -93,380 +48,119 @@ tar xzf mdmost-*-x86_64-unknown-linux-musl.tar.gz
 sudo install mdmost/mdmost /usr/local/bin/
 ```
 
-**macOS without Homebrew** — the tarball binaries are neither signed nor notarised, so
-Gatekeeper will quarantine them; `brew install` above is the path of least resistance.
+**Rust** — `cargo install mdmost`, or `cargo build --release` from a checkout. Rust 2024
+edition; no system dependencies beyond a terminal that speaks ANSI truecolour. Pure Rust
+all the way down — the build needs no C compiler, which is why the regex engine behind
+the highlighter is `fancy-regex` rather than oniguruma.
 
-**Windows** — unzip `mdmost-<version>-x86_64-pc-windows-msvc.zip` and put `mdmost.exe`
-on your `PATH`. The Windows build compiles and is checked on every push, but it has not
-been exercised in anger: expect the mouse, the clipboard and font detection to be less
-well behaved there than on Unix.
-
-**Rust** —
-
-```sh
-cargo install mdmost
-```
-
-**From source** —
-
-```sh
-cargo build --release
-install -m755 target/release/mdmost ~/.local/bin/
-```
-
-Rust 2024 edition; no system dependencies beyond a terminal that speaks ANSI truecolour.
-Pure Rust all the way down — the build needs no C compiler, which is why the regex engine
-behind the highlighter is `fancy-regex` rather than oniguruma.
+Two honest caveats. The **macOS** tarball binaries are neither signed nor notarised, so
+Gatekeeper will quarantine them; `brew install` is the path of least resistance. The
+**Windows** build compiles and is checked on every push but has never been exercised in
+anger: expect the mouse, the clipboard and font detection to be less well behaved there
+than on Unix.
 
 ## Quick start
 
 ```sh
 mdmost README.md              # open a document
 mdmost                        # read standard input
-cat notes.md | mdmost         # same, keyboard still works (see below)
+cat notes.md | mdmost         # same, keyboard still works
 export PAGER=mdmost           # use it as your pager
+mdmost --mouse README.md      # wheel, drag-to-copy, clickable links
 mdmost --render-once notes.md # print one frame and exit
 ```
 
-Two things make the pipe cases work. When the input is a pipe, the keyboard is read from
-`/dev/tty`, so `cat x.md | mdmost` is still interactive. When *stdout* is not a terminal,
-`--render-once` is implied, so `mdmost x.md | cat` produces plain text instead of escape
-soup — and `--render-once` emits truecolour to a terminal and plain text otherwise, which
-is what makes it usable for scripting and snapshotting.
+Two things make the pipe cases work. When the input is a pipe the keyboard is read from
+`/dev/tty`, so `cat x.md | mdmost` is still interactive; and when *stdout* is not a
+terminal `--render-once` is implied, so `mdmost x.md | cat` produces plain text instead
+of escape soup. That is what makes `mdmost --render-once --width 80 doc.md` usable for
+scripting and snapshotting.
 
-```sh
-mdmost --render-once --width 80 --no-icons doc.md > snapshot.txt
-```
+Every flag is in the
+[manual](https://github.com/oetiker/mdmost/blob/main/docs/manual.md#options), or in
+`man mdmost`.
 
-### Options
+## What makes it different
 
-| Option | Meaning |
-|---|---|
-| `--render-once` | Render one frame to stdout and exit. Needs no terminal. |
-| `--width N` | Render the whole document at this width instead of the terminal's. |
-| `--body-width N` | Cap the prose body at N columns and centre it; `0` for no cap. |
-| `--no-body-width` | Let the body use the full terminal width. |
-| `--theme NAME` | The theme to start in. |
-| `--no-icons` | Use plain Unicode instead of Nerd Font glyphs, at the same display width. |
-| `--icons` | Use Nerd Font glyphs even if none appears to be installed. |
-| `--mouse` | Capture the mouse: wheel scrolls, the scrollbar drags, clicks jump in the contents pane, and dragging over the document copies the Markdown source behind it. |
-| `--toc` | Start with the table-of-contents pane open. |
-| `--config PATH` | Read configuration from this file instead of the default. |
-| `--licenses` | Print the licences of the bundled syntax definitions and exit. |
+**Everything is width-driven.** No layout decision is taken at parse time, so a resize
+re-renders rather than patching. Table columns are negotiated against the space
+available, and a cell is itself a nested document, so Markdown inside a table cell works.
 
-Exit codes: `0` success, `1` unreadable input, `2` bad arguments. There is no `--color`
-flag — the truecolour decision is made from whether stdout is a terminal.
+**A selection copies the source, not the screen.** Drag over a rendered heading and you
+get `# Wide diagram` on the clipboard; over a bold word, `**bold**`; over a link,
+`[text](url)`. Code frames and tables also carry a `[copy]` button — the table arrives as
+tab-separated cells a spreadsheet will split into columns.
 
-## Syntax highlighting
+**Links, anchors and footnotes are live.** Clicking an `http` link opens it; a `#heading`
+reference scrolls there. No mouse is needed: `f` walks a keyboard cursor from one control
+to the next and `enter` follows it, with the full URL in the status bar first. A footnote
+marker opens the note in a box beside it without moving the page.
 
-Fenced code is highlighted from the syntax definitions curated by
-[`bat`](https://github.com/sharkdp/bat) — a little over two hundred languages, compiled
-into the binary, so there is nothing to install and nothing to configure. That includes
-the ones a 2020s README actually contains: TypeScript and TSX, Kotlin, Swift, Zig, Nix,
-TOML, Dockerfile, Terraform/HCL, Elixir, Dart, Julia, Protobuf, GraphQL, Vue, Svelte,
-Sass and SCSS, F#, CMake, Solidity, Nim, x86-64 assembly, `.env` files, `go.mod`,
-`nginx.conf` and `.gitignore`.
+**Mermaid becomes box art.** All seven families are drawn as Unicode rather than dumped
+as source, and anything outside the supported subset degrades to a highlighted code block
+with a caption saying why — a diagram never takes the document down with it.
 
-Two definitions are missing on purpose: **PowerShell** and **ARM assembly** need regex
-features the pure-Rust engine cannot compile, and `mdmost` uses that engine so the build
-needs no C toolchain. They render as plain text, like any tag we do not know.
+## What it is not
 
-The fence tag is matched against every syntax name and every file extension, so `rs`,
-`py`, `yml`, `sh`, `ts`, `tsx`, `kt`, `c++`, `hcl` and their friends all land where you
-would expect; a short table of aliases covers the rest (`golang`, `console`, `jsonc`,
-`csharp`, `fsharp`, `objc`, `plaintext`, …). Only the first word of the info string is
-read, so ```` ```rust,no_run ```` highlights as Rust. **A tag nobody recognises is never
-an error** — the block is drawn as plain themed text, still framed, still with its label.
+The scope is deliberately narrow, and these are decisions rather than gaps:
 
-Colours never come from the syntax definitions. Each scope is mapped to a semantic slot
-— keyword, string, number, comment, type, namespace, escape — and the slot is filled from
-the active `mdmost` theme, so code sits inside the palette instead of fighting it.
+- **Not an editor.** The document is read-only.
+- **Not a file browser.** One document per invocation; there is no tree, no next-file.
+- **No HTML.** Raw HTML in the source is skipped rather than rendered or shown.
+- **No raster images.** An image becomes a captioned placeholder with its alt text and
+  target — no sixel, no kitty protocol.
 
-TOML and Dockerfile use definitions written for `mdmost` rather than the bundled ones,
-because the bundled TOML gives a `[table.header]` no scope at all and the bundled
-Dockerfile emits a whole `RUN` line as one undifferentiated span.
+## Terminal setup
 
-## Nerd Fonts
+`mdmost` draws box-drawing, block and geometric characters. If your terminal font does
+not cover them it falls back to one that does, and a fallback with a different advance
+width makes a line of box characters a different width from the text around it — so the
+frames shear. Nothing inside the pager can correct that.
 
-Task boxes, code fences and the status bar are drawn with Nerd Font glyphs when a Nerd
-Font is available, and with plain Unicode equivalents **of the same display width** when
-it is not — so the difference is what the markers look like, never where anything sits.
-Nothing shifts, nothing reflows, and no feature is lost either way.
-
-List bullets and task boxes are **ASCII in both cases** and so are unaffected by any of
-this; the only thing the setting still changes inside the document is the code-fence
-language icon.
-
-List bullets (`*`, `>`, `+`, `-`, one per nesting level) and task boxes (`[ ]`, `[x]`)
-are **ASCII**, whether or not a Nerd Font is present. Lists turn up in nearly every
-document, so their markers are the things on the page that can least afford to be
-invisible, and ASCII is the only character class that renders everywhere without a font
-survey — most of these are also the literal Markdown source the author typed. Headings
-have no marker at all — the rule beneath a heading says which level it is.
-
-**`mdmost` works out which to use, and errs towards plain.** No terminal can be asked
-what font it is using, so mdmost asks fontconfig whether an installed font covers every
-glyph it would draw, and uses glyphs only if one does. It picks plain whenever it cannot
-establish that — in particular when `fc-list` is unavailable, when output is not going to
-a terminal, on `TERM=dumb` or the Linux console, and **over SSH**, where the fonts on the
-machine running mdmost say nothing about the terminal drawing the pixels. Guessing wrong
-towards plain costs a little elegance; guessing wrong towards glyphs fills the screen
-with replacement boxes, so the tie does not go to the prettier answer.
-
-To decide for yourself, in increasing order of authority:
-
-| | |
-|---|---|
-| `icons = true` / `false` in the configuration | settles it for this machine |
-| `MDMOST_ICONS=1` / `0` in the environment | settles it for this shell — the natural thing to export in the profile on a server you always reach from the same well-equipped terminal |
-| `--icons` / `--no-icons` | settles it for this run |
-
-## Keys
-
-Bindings are remappable, and the in-app help overlay (`h` or `F1`) is generated from the
-same live binding table as the list below, so the two cannot drift apart.
-
-#### Help and exit
-
-| Keys | Action |
-|---|---|
-| `h`, `f1` | Show or hide this help |
-| `esc` | Clear the search, close the overlay or pane |
-| `q` | Quit |
-
-#### Movement
-
-| Keys | Action |
-|---|---|
-| `j`, `down` | Scroll down one line |
-| `k`, `up` | Scroll up one line |
-| `d`, `ctrl-d` | Scroll down half a screen |
-| `u`, `ctrl-u` | Scroll up half a screen |
-| `space`, `ctrl-f`, `pgdn` | Scroll down one screen |
-| `b`, `ctrl-b`, `pgup` | Scroll up one screen |
-| `g`, `home` | Go to the top, and back to the left edge |
-| `G`, `end` | Go to the bottom of the document |
-| `%` | Jump N percent into the document (`50%`) |
-| `left` | Scroll left (wide content) |
-| `right` | Scroll right (wide content) |
-
-#### Navigation
-
-| Keys | Action |
-|---|---|
-| `[` | Go to the previous heading |
-| `]` | Go to the next heading |
-| `=`, `ctrl-g` | Report where you are |
-| `tab` | Show or hide the table of contents |
-| `f` | Move the keyboard cursor to the next link or button |
-| `F` | Move the keyboard cursor to the previous link or button |
-| `enter` | Jump to the selected heading, or follow the link or button under the keyboard cursor |
-
-#### Search
-
-| Keys | Action |
-|---|---|
-| `/` | Search forward |
-| `?` | Search backward |
-| `n`, `ctrl-down` | Go to the next match |
-| `N`, `ctrl-up` | Go to the previous match |
-| `ctrl-r` | Switch literal / regex search |
-
-#### View
-
-| Keys | Action |
-|---|---|
-| `t` | Switch to the next theme |
-| `-` | Show or hide code line numbers |
-| `S` | Save the current settings for next time |
-
-Notes on a few of these:
-
-- Keys that take a count take it as a prefix: `10j`, `50%`.
-- `Esc` unwinds one step at a time — it clears a search, then a filter, then returns
-  focus from the contents pane, then closes it. It never quits; `q` does that.
-- `/` inside the contents pane filters the headings fuzzily instead of searching the
-  document.
-- While a search is live the status bar carries the query, which match you are on out of
-  how many there are — `⌕ needle 3/17` — and, when there is more than one, the keys that
-  step between them: `n/N next/prev`, with `or Ctrl-↓/Ctrl-↑` beside it when the terminal
-  is wide enough. It always names the keys you have actually bound, not the defaults.
-  The current match is highlighted differently from the rest, and
-  reaching one scrolls sideways as well as down, so a hit inside a wide table or a long
-  code line is actually on screen when you arrive at it.
-- `←` / `→` scroll content that is wider than the terminal, such as a wide table or a
-  long code line. Neither is ever reflowed or mangled to fit.
-- `S` writes the settings you can change — theme, line numbers, contents pane, body
-  width — back to the configuration file, and tells you which file it wrote. It edits
-  that file rather than regenerating it: your comments, your ordering and any key a
-  newer mdmost understands are all still there afterwards, the previous version is kept
-  as `config.toml.bak`, and a save whose result would not read back identically is
-  refused rather than guessed at.
-
-## Links
-
-Clicking a link opens it in your browser; clicking a `#heading` reference scrolls that
-heading to the top of the viewport. Both work with no `--mouse` flag: press `f` (or
-`F` to go backward) to move a keyboard cursor from one link or button to the next
-anywhere in the document, scrolling to bring it on screen — the same way `n` steps to
-the next search hit — and `enter` to follow whatever it is on. The status bar shows the
-full URL under the cursor exactly as it does for a mouse hover, so `enter` never sends
-you somewhere unseen. Unlike the `[copy]` buttons below, links are never hidden when
-the mouse was not captured — a link is content, not chrome, and hiding it would mean
-hiding part of the document. `Esc` puts the cursor away. Only `http`/`https` links
-open; anything else is shown as plain text.
-
-## Selecting and copying
-
-With `--mouse` (or `mouse = true`) a left drag over the document selects, and releasing
-puts the **Markdown source** behind the selection on the clipboard — not the glyphs on
-screen. Dragging over a rendered heading `◆ Wide diagram` copies `# Wide diagram`; over
-a bold word, `**bold**`; over a link, `[text](url)`; across a code fence, the fence and
-its content verbatim. A drag that reflows across several rows copies the source's own
-line breaks, not the renderer's. `Esc` clears the highlight.
-
-A code frame and a table each carry a `[copy]` in the right of their top edge. Pressing
-it copies the **whole block** — the code exactly as it is written, the table as a grid of
-tab-separated cells that a spreadsheet splits into columns, with an HTML flavour offered
-alongside where the local clipboard takes one. The label reads `[copied]` for a moment
-and the status bar names what went out, `code` or `table`. There is no key for it and no
-setting: the buttons appear only when the mouse was actually captured, because a control
-nobody can press is worse than none. They are dropped where they would not fit, and a
-table wider than the terminal carries its button off to the right until you scroll to it.
-
-Two things are worth knowing. A selection over a Mermaid diagram has no source map to
-invert — the renderer records one for inline text and for code lines, not for box art —
-so it copies what is drawn instead, and the status bar says `rendered text` rather than
-`Markdown source`. And the copy goes out as OSC 52 first, which works over SSH but which
-the terminal never acknowledges: if that is the only route that ran, the status bar says
-`sent … (unconfirmed)` rather than `copied`. `tmux` needs `set -g set-clipboard on` to
-pass it along, and `xterm` needs `allowWindowOps`. On a local display server the
-`arboard` fallback runs too and the report becomes `copied`.
-
-Turning the mouse on is a trade: capturing it takes away the terminal's own
-drag-select, which outlives the pager and which your fingers already know.
+The [manual's terminal setup
+section](https://github.com/oetiker/mdmost/blob/main/docs/manual.md#terminal-setup)
+lists exactly which Unicode blocks a font has to cover, gives a fontconfig fallback
+chain you can paste, and names a font stack known to work. Nerd Font icons are detected
+rather than assumed, and `--no-icons` turns them off at the same display width.
 
 ## Configuration
 
-TOML, at `~/.config/mdmost/config.toml` (or the platform's configuration directory —
-`--config PATH` overrides it). A broken configuration never stops the program from
-starting: the problem is reported and the rest of the file still applies, so one bad key
-binding costs you that binding and nothing else.
+TOML, at `~/.config/mdmost/config.toml`. A broken file never stops the program from
+starting: the problem is reported and the rest of the file still applies.
 
 ```toml
 theme        = "dark"    # name of a built-in or a [themes.*] table
-icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to detect
 line_numbers = false     # line-number gutter in fenced code blocks
-title_banner = false     # off; true sets a lone `#` title as a wrapped FIGlet banner
-section_numbers = true   # number headings when a document nests three levels or more
-mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies source,
-                         # and code frames and tables get a [copy] button
-scroll_step  = 3         # document lines per mouse-wheel notch
+mouse        = false     # wheel, drag-to-copy, and [copy] buttons
 body_width   = 72        # widest the prose body is laid out; 0 for no cap
-
-[toc]
-open  = false            # start with the contents pane open
-width = 32               # width of the contents pane, in columns
-
-[keys]
-"ctrl-n" = "line_down"   # bind a chord to an action
-"t"      = "none"        # "none" removes a default binding
-
-[themes.midnight]
-base   = "dark"          # inherit everything unspecified from a built-in
-accent = "#ff5f87"
-green  = "#a6e3a1"
+section_numbers = true   # number headings when a document nests three levels or more
+title_banner = false     # true sets a lone `#` title as a FIGlet banner
 ```
 
-A `[themes.<name>]` table inherits from `base` (`"dark"` or `"light"`), so a custom theme
-can be a two-line tweak rather than a full palette. Overridable colours: `bg`, `surface`,
-`overlay`, `fg`, `muted`, `border`, `accent`, `red`, `orange`, `yellow`, `green`, `cyan`,
-`blue`, `purple`, plus `dark = true|false` to tell the renderer which way the palette
-leans. `t` cycles through the built-ins and anything you have defined.
+`S` writes the settings you changed back to that file, keeping your comments and
+ordering. The full schema — every key, `[toc]`, `[keys]` and custom `[themes.*]` — is in
+the
+[manual](https://github.com/oetiker/mdmost/blob/main/docs/manual.md#configuration).
 
-## Line length
+## Keys
 
-Prose is capped at 72 columns by default and centred when the terminal is wider,
-because a line that runs the full width of a wide terminal is hard to come back from —
-the eye loses the start of the next one. Set `body_width` (or `--body-width`) to taste,
-or `0` / `--no-body-width` to switch the cap off. Seventy-two is inside the readable
-band rather than at the top of it, so the cap bites on an 80-column terminal too — but
-only on prose.
-
-The cap is about text that can be reflowed, so it does not apply to everything:
-
-- **Tables and Mermaid diagrams ignore the cap** and are laid out at the full terminal
-  width. Both stop at their natural width — a table does not stretch its columns to fill
-  the room, and a diagram is drawn at the narrowest width that works — so this costs
-  nothing when they are small. Wherever it ends up, a block is centred on the same axis
-  as the prose rather than stranded at the left edge; only something as wide as the
-  terminal starts at the margin.
-- **Everything else takes the full width as soon as the cap would cut it short.** That
-  is what a fenced code block gets: a short snippet sits with the prose, and a block with
-  a long line takes the whole terminal. The same applies to a wide table or fence nested
-  inside a block quote or list item.
-- Content wider than the terminal itself is unaffected by any of this: it is still laid
-  out at the width it needs and reached with `←` / `→`.
-
-`--width` is a different setting and does not replace this one: it changes the width the
-whole document is rendered at, including tables and code. `--body-width` caps only the
-prose within whatever that width is.
-
-## Mermaid
-
-Fenced ```` ```mermaid ```` blocks are parsed and drawn as Unicode box art. All seven
-families are supported; anything outside the supported subset degrades to a
-syntax-highlighted code block with a dim caption saying why, so a diagram never takes the
-document down with it.
-
-| Family | Supported |
+| Keys | Action |
 |---|---|
-| `flowchart` / `graph` | Directions `TD`/`TB`/`LR`/`RL`/`BT`; shapes `[rect]`, `(round)`, `([stadium])`, `{rhombus}`, `((circle))`, `[[subroutine]]`, `[(cylinder)]`; edges `-->`, `---`, `-.->`, `==>` with `\|label\|` and `-- label -->`; nested `subgraph`. Out of scope: `click`, `style`/`classDef`, `linkStyle`. |
-| `sequenceDiagram` | `participant`/`actor` with `as`; arrows `->`, `-->`, `->>`, `-->>`, `-x`, `--x`; self-messages; `activate`/`deactivate` and `+`/`-`; `Note left of\|right of\|over`; `loop`, `alt`/`else`, `opt`, `par`/`and`, `critical`. Out of scope: `autonumber`, `box`, `link`, `rect`. |
-| `classDiagram` | Three-compartment boxes, visibility `+ - # ~`, `$`/`*` classifiers, generics, `<<interface>>`/`<<abstract>>` and other stereotypes; relations `<\|--`, `*--`, `o--`, `-->`, `..>`, `..\|>` with `"1"`/`"0..*"` cardinalities. |
-| `erDiagram` | Entities with attribute tables (`type name PK "comment"`, including `PK`/`FK`/`UK`), aliases, crow's-foot cardinalities `\|\|--o{`, `}o--\|\|`, `\|\|--\|\|`, `}\|..\|{`, and relationship labels. |
-| `stateDiagram-v2` | `[*]` start/end markers per scope, `S --> T : label`, composite `state X { … }`, `<<choice>>`, `<<fork>>`/`<<join>>`, `note left of`/`right of`. |
-| `pie` | `title`, `showData`, `"label" : value`. Drawn as a sorted bar chart with percentages — a circle in character cells reads badly, so bars are the honest choice. |
-| `gantt` | `title`, `dateFormat`, `axisFormat`, `section`, tasks with `after X` / durations / explicit dates, and `done`/`active`/`crit`/`milestone` tags. The time scale is chosen from the available width. |
+| `q` | Quit — `esc` never quits |
+| `h`, `f1` | Show or hide the help overlay |
+| `j`, `k` | Scroll one line |
+| `space`, `b` | Scroll one screen |
+| `g`, `G` | Top, bottom |
+| `/`, `n`, `N` | Search, next match, previous |
+| `tab` | Show or hide the contents pane |
+| `f`, `enter` | Walk to the next link or button, then follow it |
+| `t` | Next theme |
+| `left`, `right` | Scroll wide content sideways |
 
-Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
-
-```
-                                      ┌───────┐
-                                      │ Start │
-                                      └───┬───┘
-                                          ▼
-                                        ╱───╲
-                                       │ OK? │
-                                        ╲─┬─╱
-                                ╭─────────┤
-                                │yes      │no
-                                │         ▼
-                                ▼     ╭───────╮
-                             ┌────┐   ├───────┤
-                             │ Go │   │ Store │
-                             └────┘   ├───────┤
-                                      ╰───────╯
-```
-
-## Rendering rules worth knowing
-
-- **Everything is width-driven.** No layout decision is taken at parse time, so a resize
-  re-renders rather than patching. Table columns are negotiated against the available
-  width; a cell is itself a nested document, so Markdown inside a table cell works.
-- **A table whose rows wrap gets air between them.** While every row fits on one line the
-  table is drawn dense. As soon as one row wraps, a blank line goes between every pair of
-  rows, because multi-line rows packed edge to edge read as one block of prose. The zebra
-  stripe is carried through the gap by a half block, so the shading still groups each
-  row's lines. Decided at the width you are reading at, so the same table is dense in a
-  wide terminal and spaced in a narrow one.
-- **Grapheme-safe throughout.** Widths are display columns, never bytes or `char`s.
-  Combining marks, ZWJ emoji sequences and regional-indicator flags are never split, and
-  every row the pager draws is padded to exactly the width of the pane.
-- **Wide content scrolls, it does not mangle.** A table or code line too wide for the
-  terminal keeps its shape and is reached with `←`/`→`. A cut line is marked with a `›`
-  at the edge — or a `‹` once you have scrolled — while a box's own rules close with the
-  corner they belong to, so the frame still reads as a box that continues.
+All 45 bindings, and how to remap them, are in `man mdmost` or the
+[manual](https://github.com/oetiker/mdmost/blob/main/docs/manual.md#keys). The in-app
+help overlay is generated from the same live binding table, so it never drifts from what
+you have actually bound.
 
 ## Development
 
@@ -474,10 +168,12 @@ Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+make man          # build man/mdmost.1 from docs/manual.md; needs pandoc
 ```
 
-Snapshot tests use [`insta`](https://insta.rs); property tests use `proptest`. The design
-spec lives in `docs/superpowers/specs/`, and QA reports in `docs/qa/`.
+Snapshot tests use [`insta`](https://insta.rs); property tests use `proptest`. The man
+page is generated and is not in git. Design specs live in `docs/superpowers/specs/`, and
+QA reports in `docs/qa/`.
 
 ## License
 

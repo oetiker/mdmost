@@ -2,7 +2,7 @@
 name = "mdmost"
 version = "0.1.0"
 edition = "2024"
-description = "A full-screen terminal pager for a single Markdown document"
+description = "like less but for Markdown"
 license = "MIT"
 repository = "https://github.com/oetiker/mdmost"
 readme = "README.md"
