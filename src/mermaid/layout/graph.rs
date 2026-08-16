@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The shared layered graph layout engine.
 //!
 //! Flowchart, class, ER and state diagrams are all "boxes joined by edges", so they all

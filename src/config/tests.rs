@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Configuration tests.
 
 use std::path::Path;

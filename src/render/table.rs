@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Table rendering: column-width negotiation, recursive per-cell rendering, borders.
 //!
 //! The algorithm is design spec §7, in order:

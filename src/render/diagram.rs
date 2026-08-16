@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Finding the width a diagram wants, for a caller that can give it one.
 //!
 //! Every other renderer in this module answers "draw this into `width` columns". This

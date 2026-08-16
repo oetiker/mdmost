@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Palette and semantic style lookup.
 //!
 //! A [`Theme`] is a plain data structure: a [`Palette`] of raw colours plus a set of

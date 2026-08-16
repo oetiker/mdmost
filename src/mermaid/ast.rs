@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The typed Mermaid diagram AST.
 //!
 //! [`parse`](crate::mermaid::parse::parse) turns Mermaid source into a [`Diagram`];

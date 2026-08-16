@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Unit tests for the internals: language resolution, tab stops, line semantics and
 //! the size guards. Behaviour visible through the public API is exercised by the
 //! integration suites in `tests/highlight_*.rs`.

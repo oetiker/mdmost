@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Property tests for the class, ER and state renderers (design spec §13.3).
 //!
 //! The shared engine has its own property tests in `mermaid_layout_property.rs`; these

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Calls out to the two renderer collaborators owned by other workstreams.
 //!
 //! The block renderer depends on two functions it does not own:

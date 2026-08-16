@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The glyph set used by the chrome.
 //!
 //! Two sets exist and they are structurally identical, so nothing in the drawing code

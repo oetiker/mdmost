@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The chrome: table-of-contents pane, status bar and help overlay.
 //!
 //! The table-of-contents pane and the status bar are pure functions of [`App`]. The

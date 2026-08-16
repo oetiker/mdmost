@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The pager's state machine.
 //!
 //! Everything here is pure state plus pure transitions: no `ratatui`, no `crossterm`,

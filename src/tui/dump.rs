@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Writing a [`Canvas`] to a stream, for `--render-once`.
 //!
 //! Two flavours, chosen by the caller from whether the destination is a terminal

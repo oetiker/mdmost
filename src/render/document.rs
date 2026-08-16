@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The document renderer: the one entry point every user-facing path goes through.
 //!
 //! The pager and `--render-once` both call [`render_document`], so what is piped is what

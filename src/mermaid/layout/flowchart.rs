@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `flowchart` / `graph` layout (design spec §6.1).
 //!
 //! All the work is done by the shared engine in [`graph`](super::graph); this module

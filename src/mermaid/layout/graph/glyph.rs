@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Line masks and the box-drawing glyphs they map to.
 //!
 //! The routing engine never picks a glyph directly. It records, for every character

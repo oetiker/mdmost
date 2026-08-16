@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Putting text on the clipboard, and being honest about whether it landed.
 //!
 //! # Why OSC 52 first

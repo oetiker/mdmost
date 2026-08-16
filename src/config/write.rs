@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Writing the settings back to the configuration file, on request.
 //!
 //! Design spec §12.1. The reader presses `S` and next time the pager comes up the way

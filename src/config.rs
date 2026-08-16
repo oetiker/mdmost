@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Configuration: TOML loading and merging, themes, key bindings.
 //!
 //! The file lives at `~/.config/mdmost/config.toml` (or wherever the platform's

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Formatting of class members into the one-line form drawn in a compartment.
 //!
 //! Mermaid accepts a member written either way round (`+int age` and `+age: int` are

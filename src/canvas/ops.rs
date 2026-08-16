@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Composition operations on canvases.
 //!
 //! These are the operations block, table and diagram renderers assemble their output

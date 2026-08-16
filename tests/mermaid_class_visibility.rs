@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! A class member's visibility marker, read from the source rather than built by hand.
 //!
 //! `mermaid_layout_class.rs` builds its members directly in the AST, which is right for a

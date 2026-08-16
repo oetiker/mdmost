@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Diagram layout onto a [`Canvas`](crate::canvas::Canvas).
 //!
 //! The families that are "boxes joined by edges" — flowchart (§6.1), class (§6.3), ER

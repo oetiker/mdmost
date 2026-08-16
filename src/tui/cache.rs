@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The rendered-document cache.
 //!
 //! Design spec §3 makes rendering a pure function of `(document, width, theme,

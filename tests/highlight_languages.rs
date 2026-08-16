@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Per-language colouring: does a token that *is* a keyword get the theme's keyword
 //! style, in both built-in themes?
 

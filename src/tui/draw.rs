@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Painting the application onto a `ratatui` frame.
 //!
 //! Nothing here decides anything: every value drawn comes from [`super::app::App`].

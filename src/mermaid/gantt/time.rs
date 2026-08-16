@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Proleptic Gregorian calendar arithmetic and `axisFormat` rendering.
 //!
 //! Gantt tasks arrive with their dates already resolved to seconds since the Unix

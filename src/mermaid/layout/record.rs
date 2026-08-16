@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The compartment box shared by class and ER nodes.
 //!
 //! A `classDiagram` node is a name over a field list over a method list (design spec

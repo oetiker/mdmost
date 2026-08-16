@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Unit tests for the renderers.
 //!
 //! Every helper here asserts the two invariants that hold for *all* rendered output:

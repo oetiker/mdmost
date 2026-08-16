@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The clickable `[copy]` drawn into the top edge of a code frame or a table.
 //!
 //! ASCII, unconditionally — not a Nerd Font glyph behind detection and not a lone

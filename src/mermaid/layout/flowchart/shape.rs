@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Flowchart node boxes, one per shape of design spec §6.1.
 //!
 //! Every shape is built from the same two steps — wrap the label, then draw an outline

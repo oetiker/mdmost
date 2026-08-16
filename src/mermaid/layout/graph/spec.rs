@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The engine's input types: what a caller describes, and how nodes are drawn.
 //!
 //! A caller builds a [`GraphSpec`] — pure topology, no geometry — and supplies a

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Coordinate assignment across the flow direction, on the character grid.
 //!
 //! Positions are integer cell offsets from the start of the cross axis — columns for a

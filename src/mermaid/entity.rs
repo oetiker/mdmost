@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Character entity escapes in Mermaid label text.
 //!
 //! Mermaid renders through HTML, so a diagram author who wants a `<` in a label has to

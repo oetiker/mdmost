@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `erDiagram` layout (design spec §6.4).
 //!
 //! An entity is a name over an attribute table, drawn with the shared compartment box

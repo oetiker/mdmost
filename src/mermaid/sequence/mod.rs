@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `sequenceDiagram` — participants, lifelines, arrows, notes and frames
 //! (design spec §6.2).
 //!

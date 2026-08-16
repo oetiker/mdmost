@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Golden snapshot tests over the adversarial corpus.
 //!
 //! This file establishes the pattern the renderer workstreams extend:

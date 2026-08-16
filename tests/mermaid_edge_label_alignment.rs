@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Edge-label alignment, measured on rendered output rather than on the layout.
 //!
 //! `mermaid_layout_flowchart.rs` pins the same invariant by handing the layout engine a

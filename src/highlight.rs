@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Fenced code block highlighting.
 //!
 //! The whole module exists to serve one function, [`highlight`], which turns the body

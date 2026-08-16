@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Snapshot tests of flowchart layout (design spec §6.1).
 //!
 //! The parser is deliberately not involved: every case is a hand-built

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `pie` parsing (design spec §6.5).
 //!
 //! Supported: `pie`, `pie showData`, `pie title X`, a separate `title X` line, and

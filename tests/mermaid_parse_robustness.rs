@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Graceful-failure tests for the Mermaid parser (design spec §6 and §12).
 //!
 //! Malformed or out-of-subset input must return a [`MermaidError`] with a readable

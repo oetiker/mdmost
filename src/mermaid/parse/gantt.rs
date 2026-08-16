@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `gantt` parsing (design spec §6.6).
 //!
 //! Supported: `title`, `dateFormat`, `axisFormat`, `section`, and tasks with the

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Crossing reduction: the median heuristic followed by adjacent-transpose passes.
 //!
 //! Four down/up sweeps are enough in practice and keep the 100-node case fast

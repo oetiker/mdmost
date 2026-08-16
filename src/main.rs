@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The `mdmost` binary.
 //!
 //! This is the CLI edge of the program: argument parsing, stdin handling and the

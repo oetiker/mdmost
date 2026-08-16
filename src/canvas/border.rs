@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Box-drawing glyph sets.
 
 /// Which horizontal edge of a box a rule row is.

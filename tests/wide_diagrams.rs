@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Wide diagrams are laid out wide and scrolled to, rather than dumped as source.
 //!
 //! The pager may make a block wider than the viewport (`render::document`), so a diagram that

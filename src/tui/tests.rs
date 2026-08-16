@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Application-state tests.
 //!
 //! Every test here drives the real state machine with no terminal in sight, which is

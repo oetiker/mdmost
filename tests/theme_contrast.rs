@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Measured contrast floors for the colours a reader looks at all day.
 //!
 //! `theme_headings` asserts *relationships* — this level is quieter than that one —

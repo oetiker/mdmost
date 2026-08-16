@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Property tests for the shared graph layout engine (design spec §13.3).
 //!
 //! The engine is exercised directly rather than through the flowchart parser, so the

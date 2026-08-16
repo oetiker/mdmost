@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Mermaid diagrams rendered as Unicode box art.
 //!
 //! Parsing produces a typed [`Diagram`](ast::Diagram); layout turns it into a

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Rendering tests for `sequenceDiagram` (design spec §6.2).
 //!
 //! Snapshots are named `<fixture>@<width>` and are reviewed with `cargo insta review`.

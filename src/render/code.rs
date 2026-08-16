@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Fenced and indented code blocks, and the Mermaid fences routed out of them.
 //!
 //! Code never wraps (design spec §8): a line wider than the frame is clipped and the

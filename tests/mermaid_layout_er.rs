@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Snapshot tests of ER-diagram layout (design spec §6.4).
 //!
 //! Every case is a hand-built [`ErDiagram`], so a change in `mermaid::parse` can never

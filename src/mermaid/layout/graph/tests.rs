@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Engine-level tests: the invariants every layout must satisfy.
 
 use crate::canvas::{BorderSet, Canvas};

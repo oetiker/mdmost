@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The mapping between flow space and canvas cells.
 //!
 //! Layout and routing are written once, for a graph that flows in the direction of

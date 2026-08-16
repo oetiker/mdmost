@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `mdmost` — a full-screen terminal pager for a single Markdown document.
 //!
 //! # Architecture

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Property tests for the renderers (design spec §13.3).
 //!
 //! Three properties are asserted for every input at every width:

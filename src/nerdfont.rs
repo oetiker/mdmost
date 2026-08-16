@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Deciding whether this terminal can draw Nerd Font glyphs.
 //!
 //! # Why this is a guess

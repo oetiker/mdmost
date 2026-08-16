@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The built-in themes.
 //!
 //! Both themes are derived from a [`Palette`] by the same function, so the two are

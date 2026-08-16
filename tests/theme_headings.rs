@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The heading system: one hue family that recedes with depth, rules that take the tint
 //! of the level they belong to, and none of them fainter than the page's own chrome.
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Greedy, grapheme-safe, width-aware line wrapping.
 //!
 //! [`wrap_spans`] is the single wrapping implementation in `mdmost`.
