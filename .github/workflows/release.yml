@@ -118,6 +118,21 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # man/ is not in git; it is generated from docs/manual.md. Three steps in this
+      # job need the page — the tarball, the deb and the rpm — so it is built once
+      # here, before any of them. The Windows zip ships no man page, so that leg
+      # skips pandoc rather than installing something nothing uses.
+      - name: Build the man page
+        if: '!matrix.windows'
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install pandoc
+          else
+            sudo apt-get update && sudo apt-get install -y pandoc
+          fi
+          make man
+        shell: bash
+
       - name: Install cross
         if: matrix.cross
         # Pinned to the released version, not `main`: the static-musl build cannot be
@@ -141,7 +156,7 @@ jobs:
           ARCHIVE="mdmost-${{ needs.version.outputs.version }}-${{ matrix.target }}.tar.gz"
           cp "$BINARY" staging/mdmost/
           cp man/mdmost.1 staging/mdmost/man/
-          cp README.md LICENSE-MIT staging/mdmost/
+          cp README.md LICENSE staging/mdmost/
           tar -czvf "dist/${ARCHIVE}" -C staging mdmost
         shell: bash
 
@@ -153,7 +168,7 @@ jobs:
           $ARCHIVE = "mdmost-${{ needs.version.outputs.version }}-${{ matrix.target }}.zip"
           Copy-Item "target/${{ matrix.target }}/release/mdmost.exe" staging/mdmost/
           Copy-Item README.md staging/mdmost/
-          Copy-Item LICENSE-MIT staging/mdmost/
+          Copy-Item LICENSE staging/mdmost/
           Compress-Archive -Path staging/mdmost -DestinationPath "dist/$ARCHIVE"
         shell: pwsh
 

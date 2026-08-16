@@ -5,7 +5,24 @@ use std::path::Path;
 use super::*;
 
 /// The README, so its documented configuration can be checked against the parser.
+///
+/// Its example is deliberately a short taster now; the full schema moved to the manual.
 const README: &str = include_str!("../../README.md");
+
+/// The manual, which owns the complete documented configuration.
+const MANUAL: &str = include_str!("../../docs/manual.md");
+
+/// The first fenced `toml` block of a document.
+///
+/// Both documents show a starting configuration, and a reader copies whichever one they
+/// are looking at, so both are checked.
+fn first_toml_example(document: &'static str, which: &str) -> &'static str {
+    document
+        .split("```toml")
+        .nth(1)
+        .and_then(|rest| rest.split("```").next())
+        .unwrap_or_else(|| panic!("{which} must contain a toml example"))
+}
 
 /// A throwaway path, used only in error messages.
 fn path() -> &'static Path {
@@ -102,7 +119,7 @@ fn an_unknown_key_inside_toc_costs_only_itself_too() {
 }
 
 #[test]
-fn the_configuration_example_in_the_readme_is_valid() {
+fn the_configuration_example_in_the_manual_is_valid() {
     // The README's example used `toc_open` and `toc_width`, which have never been keys —
     // the real ones live in `[toc]`. Copying the documented starting configuration
     // therefore produced a file that was rejected in full, so the reader got none of the
@@ -110,16 +127,16 @@ fn the_configuration_example_in_the_readme_is_valid() {
     // it went to stderr before the alternate screen opened and the restore wiped it.
     //
     // Prose about configuration cannot be checked by reading it, so it is checked here.
-    let example = README
-        .split("```toml")
-        .nth(1)
-        .and_then(|rest| rest.split("```").next())
-        .expect("the README must contain a toml example");
+    //
+    // The complete example lives in the manual now; the README keeps a short taster,
+    // which `the_configuration_taster_in_the_readme_is_valid` covers. This test is the
+    // strict one because the manual is what claims to be the full schema.
+    let example = first_toml_example(MANUAL, "the manual");
 
     let loaded = Config::parse_str(example, path());
     assert!(
         loaded.problems.is_empty(),
-        "the README's example configuration does not load cleanly: {:?}",
+        "the manual's example configuration does not load cleanly: {:?}",
         loaded.problems
     );
 
@@ -136,6 +153,29 @@ fn the_configuration_example_in_the_readme_is_valid() {
         loaded.config.resolve_theme("midnight").is_ok(),
         "the example's [themes.midnight] must resolve"
     );
+}
+
+#[test]
+fn the_configuration_taster_in_the_readme_is_valid() {
+    // The README shows a shorter starting configuration than the manual does, and a
+    // reader copies whichever document they happen to be reading. A short example is
+    // not a safe example: it is the same paste into the same parser.
+    let example = first_toml_example(README, "the README");
+
+    let loaded = Config::parse_str(example, path());
+    assert!(
+        loaded.problems.is_empty(),
+        "the README's example configuration does not load cleanly: {:?}",
+        loaded.problems
+    );
+
+    // And it must be the settings it claims to be, not merely parseable.
+    assert_eq!(loaded.config.theme, "dark");
+    assert!(!loaded.config.line_numbers);
+    assert!(!loaded.config.mouse);
+    assert_eq!(loaded.config.body_width, Some(72));
+    assert!(loaded.config.section_numbers);
+    assert!(!loaded.config.title_banner);
 }
 
 #[test]

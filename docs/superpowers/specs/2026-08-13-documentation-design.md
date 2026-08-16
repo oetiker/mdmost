@@ -1,7 +1,7 @@
 # Documentation design — one manual, three audiences
 
 Date: 2026-08-13
-Status: proposed, awaiting owner review
+Status: **executed 2026-08-16** — see `docs/superpowers/plans/2026-08-16-documentation-split.md`
 
 ## 1. The problem
 
@@ -245,15 +245,38 @@ constrain the renderer — only the honesty of the documentation.
 
 ## 10. Open questions for the owner
 
-1. **The tagline.** The README currently opens with "`less`, but it knows what Markdown
-   means"; the demo card was changed on 2026-08-13 to "less but moreso and it knows
-   Markdown"; `Cargo.toml`'s description is a third, flatter wording. One of the three
-   should win in all three places.
+1. ~~**The tagline.**~~ **Answered 2026-08-16: `like less but for Markdown`.** It is now
+   the README's opening line and `Cargo.toml`'s `description`. `demo/mdmost.toml`
+   already carried it verbatim, so the demo needed no change. The deb
+   `extended-description` and the rpm `summary` stay descriptive — they are package
+   metadata, not the tagline, and the three places named here did not include them.
 2. ~~**The demo could show icons.**~~ **Answered 2026-08-13: `icons = true`.** The old
    justification — "ansidrama's bundled JetBrains Mono, which has no Nerd Font glyphs" —
    was a claim about someone else's bundled font that stopped being true when they added
    two more. `demo/config.toml` now pins icons ON, and says why it is pinned rather than
-   detected. **The demo must be re-recorded against an ansidrama new enough to carry
-   Symbols Nerd Font**, which the owner is releasing; until then the recording on disk
-   does not match its own config. This is demo work, tracked here only because this spec
-   is where the error surfaced.
+   detected. ~~**The demo must be re-recorded against an ansidrama new enough to carry
+   Symbols Nerd Font**~~ — **done before this spec was executed.** The tour was
+   re-recorded against ansidrama 0.4.0 (`299bc81`), so the recording on disk matches its
+   own config and the documentation split touched nothing under `demo/`.
+
+## 11. What executing it changed about the spec
+
+Three things were found by building it, and are recorded here because the spec argued
+otherwise or was silent:
+
+1. **§9's "renders without roff warnings" is unachievable as written.** pandoc's own font
+   macros always warn — `cannot select font 'CB'` from its probe preamble, and
+   `cannot select font 'C'` from every fenced code block. The criterion in force is
+   "no warning other than those two". The warning that *does* matter and was hit twice is
+   `table wider than line length minus indentation`.
+2. **Tables do not survive the man writer when a column holds prose.** The Mermaid family
+   table and the terminal-setup block table both had to become definition lists. This is
+   not a loss — the rest of the page is definition lists anyway — but §5 assumed the
+   Mermaid table would move across intact.
+3. **§7's test, written as specified, measures the wrong thing.** "Every non-ASCII
+   codepoint the renderer emits" collects the *document's* characters as well as
+   mdmost's, because the renderer passes text through: the first run reported Tangut,
+   Korean, family-emoji ZWJ sequences and math alphanumerics out of `tests/corpus/`.
+   Subtracting each source's own non-ASCII set is what isolates the glyphs mdmost draws.
+   The corrected inventory also has **no Arrows block** — Mermaid draws its arrowheads
+   from Geometric Shapes — which the spec's prose had assumed.
