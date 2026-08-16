@@ -1,23 +1,13 @@
 # mdmost
 
-like less but for Markdown
+A full-screen terminal pager for one Markdown document
 
-A full-screen terminal pager for one Markdown document — one you can resize, point at
-and copy out of while you are reading it. Drag the edge of the window and the table
-you are looking at renegotiates its columns to fit. Drag across a paragraph and what
-lands on the clipboard is the Markdown that produced it, not the glyphs on screen.
-
-It renders properly too: real table borders with negotiated widths, syntax-highlighted
-code, and Mermaid drawn as box art rather than dumped as source. What will not fit at
-any width is not mangled to make it fit — a wide table or diagram scrolls sideways by
-itself, while the prose around it stays put.
+* resize the terminal and everyting will reflow
+* mermaind diagrams -> rendered
+* hilight with the mouse -> markdown source copied
+* table too wide -> side scrolling just the table
 
 ![less on the left, mdmost on the right, on the same file](https://raw.githubusercontent.com/oetiker/mdmost/main/docs/demo/mdmost.webp)
-
-One file, `less` on the left and `mdmost` on the right. Watch the divider move: the
-table renegotiates its columns and the diagram re-lays its boxes, live, at every width
-in between. At the end, three copies cross into the other pane — a table as TSV, a
-fenced block as its own source, a paragraph as Markdown.
 
 ## Install
 
@@ -123,58 +113,15 @@ marker opens the note in a box beside it without moving the page.
 as source, and anything outside the supported subset degrades to a highlighted code block
 with a caption saying why — a diagram never takes the document down with it.
 
-## How it compares
-
-Checked in August 2026 against `mdcat` 2.15.0, `glow` 2.1.2, `frogmouth` 0.9.1,
-`bat` 0.26.1 and `less` 590. `part` means the tool does some of it, or does it in a
-way that is not really the same thing — the footnotes say which.
-
-| | mdmost | mdcat | glow | frogmouth | bat | less |
-|---|---|---|---|---|---|---|
-| Reflows on resize | yes | no | yes | yes | no | no |
-| Table borders | box | rules | rules | rules | no | no |
-| Markdown in table cells | yes | yes | yes | part | no | no |
-| Mermaid as a diagram | yes | yes | no | no | no | no |
-| Highlighted code | yes | yes | yes | yes | yes | no |
-| In-document search | yes | part | no | no | yes | yes |
-| Contents pane | yes | part | no | yes | no | no |
-| Keyboard link following | yes | part | no | yes | no | no |
-| Copy Markdown source | yes | no | part | no | n/a | n/a |
-| Inline images | no | yes | no | no | no | no |
-| More than one file | no | part | yes | yes | part | part |
-
-The three rows that this was written for are resizing, the mouse and copying. Drag the
-divider and the table renegotiates its columns while you watch; drag across the text
-and what lands on the clipboard is the Markdown that produced it. Those only mean
-anything in a program that owns the screen for as long as you are reading, which is
-why `mdcat` and `bat` are a different kind of tool rather than a worse one: they
-render once, print, and exit.
-
-`mdcat` is worth knowing about anyway, because it does things this does not. It draws
-Mermaid, negotiates table widths, styles markup inside cells, and compiles the same
-`bat` syntax definitions — and it puts **real images** on your terminal, which mdmost
-will never do. The widely known `swsnr/mdcat` was archived in June 2026; the live fork
-is `BIRSAx2/mdcat`. `frogmouth` is the only genuine file browser here, though it has
-had no release since 2023.
-
-Smaller print, so the table is not read for more than it says. `glow` reflows and
-styles table cells just as this does; what it does not do is negotiate column widths
-into a closed box or draw diagrams, and its `c` key copies the whole document rather
-than a selection. `mdcat`'s contents is a list it prints, not a pane; its links are
-OSC 8, so your terminal follows them rather than `mdcat`; and searching means the
-`$PAGER` it hands off to. For `bat` and `less` the screen already *is* the Markdown
-source, so copying it is not a feature they implement — hence `n/a` rather than a tick
-they did not earn.
 
 ## What it is not
 
 The scope is deliberately narrow, and these are decisions rather than gaps:
 
 - **Not an editor.** The document is read-only.
-- **Not a file browser.** One document per invocation; there is no tree, no next-file.
 - **No HTML.** Raw HTML in the source is skipped rather than rendered or shown.
-- **No raster images.** An image becomes a captioned placeholder with its alt text and
-  target — no sixel, no kitty protocol.
+- **No images.** An image becomes a captioned placeholder with its alt text and
+  target — no sixel, no kitty protocol (yet).
 
 ## Terminal setup
 

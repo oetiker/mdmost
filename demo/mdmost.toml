@@ -70,7 +70,7 @@ text = "#8d95a8"
 # the second line had been read.
 [[scene]]
 card = { lines = ["mdmost", "like less but for Markdown"], fg = "#fef9c3" }
-hold_cs = 780
+hold_cs = 300
 
 [[scene]]
 click = { x = 20, y = 25 }
