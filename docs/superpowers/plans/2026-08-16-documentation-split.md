@@ -35,11 +35,11 @@ These were tested on the repository machine on 2026-08-16, not inferred. Do not 
 | pandoc turns a definition list into `.TP` | ran the writer on a probe file | confirmed |
 | `#`/`##` become `.SH`/`.SS` | same probe | confirmed |
 | YAML metadata order in `.TH` | same probe | `.TH "MDMOST" "1" "<date>" "<footer>" "<header>"` |
-| `man --warnings` on pandoc output | `man --warnings -l probe.1` | **one warning always: `cannot select font 'CB'`** |
+| `man --warnings` on pandoc output | `man --warnings -l probe.1` | **font warnings always: `cannot select font 'CB'`, and `'C'` once the page contains a code block** |
 | the crate already ships a `LICENSE` | `cargo package --list` | confirmed |
 | `man/mdmost.1` is currently tracked | `git ls-files man/` | confirmed — it must be removed from the index |
 
-**The `CB` font warning is pandoc's own font-probe preamble** (`.ie "\f[CB]x\f[]"x"`), present in every page pandoc generates. Spec §9's acceptance criterion "renders without roff warnings" cannot be met literally. **The criterion this plan holds itself to is: no warnings other than that one.**
+**The font warnings are pandoc's own font macros**, not defects. `CB` comes from the font-probe preamble (`.ie "\f[CB]x\f[]"x"`) in every page pandoc generates; `C` comes from `\f[C]`, which pandoc emits for every fenced code block, and appeared as soon as the manual gained one. Spec §9's acceptance criterion "renders without roff warnings" cannot be met literally. **The criterion this plan holds itself to is: no warnings other than `cannot select font 'C'` and `'CB'`.**
 
 ## File structure
 
@@ -266,7 +266,7 @@ Run: `make man`
 Expected: `man/mdmost.1` is written with no pandoc error.
 
 Run: `MANWIDTH=80 man --warnings -l man/mdmost.1 > /dev/null`
-Expected: exit 0, and **the only warning is `cannot select font 'CB'`**. Any other warning is a defect in the manual — fix it before continuing.
+Expected: exit 0, and **the only warnings are `cannot select font 'C'` / `'CB'`**. Any other warning is a defect in the manual — fix it before continuing.
 
 Run: `grep -c '^\.TP' man/mdmost.1`
 Expected: a count in the mid-fifties — twelve options, forty-five keys, two environment entries, one file, three exit codes. An implausibly low count means a definition list did not parse, usually because the `:` line is not indented by four spaces or the blank line before it is missing.
@@ -553,7 +553,7 @@ Run: `make man`
 Expected: no pandoc error.
 
 Run: `MANWIDTH=80 man --warnings -l man/mdmost.1 > /dev/null`
-Expected: exit 0, only the `CB` warning.
+Expected: exit 0, only the pandoc font warnings.
 
 Run: `grep -n '^\.SH' man/mdmost.1`
 Expected: the sections in order — `NAME`, `SYNOPSIS`, `DESCRIPTION`, `OPTIONS`, `KEYS`, `LINKS AND FOOTNOTES`, `SELECTING AND COPYING`, `CONFIGURATION`, `RENDERING`, `ENVIRONMENT`, `FILES`, `EXIT STATUS`, `SEE ALSO`, `AUTHOR`.
@@ -969,7 +969,7 @@ This is condensed from `README.md:189-223`, which Task 6 deletes.
 
 Run: `make man`
 Run: `MANWIDTH=80 man --warnings -l man/mdmost.1 > /dev/null`
-Expected: exit 0, only the `CB` warning. **A fenced XML block is the likely culprit if a new warning appears** — switch to an indented block.
+Expected: exit 0, only the pandoc font warnings. **A fenced XML block is the likely culprit if a new warning appears** — switch to an indented block.
 
 Run: `MANWIDTH=80 man -l man/mdmost.1 | grep -A30 "TERMINAL SETUP"`
 Expected: read it. The table must be legible at 80 columns and the XML must not be reflowed into one line.
@@ -1172,7 +1172,7 @@ Add a short note under §10 recording that §10.1 was answered `like less but fo
 
 - `docs/manual.md` is the source; `man/mdmost.1` is generated and gitignored.
 - `make man` needs pandoc; 3.1.3 is what this was designed against.
-- **`man --warnings` always reports `cannot select font 'CB'`** — that is pandoc's own font probe, not a defect. Any other warning is one.
+- **`man --warnings` always reports `cannot select font 'C'` and `'CB'`** — pandoc's own font macros, not defects. Any other warning is one. In particular `table wider than line length minus indentation` is real: roff cannot fit a prose-width table column, so use a definition list instead.
 - Edit the `date:` in the front matter by hand when the manual is substantively revised. It is deliberately not the build date, and `footer` deliberately carries no version.
 - Adding a glyph to the renderer fails `tests/glyph_inventory.rs` with the codepoint named. Add it to `INVENTORY` **and** to the manual's `TERMINAL SETUP` table.
 
@@ -1184,7 +1184,7 @@ rm -rf /scratch/oetiker/claude-tmp/manual-accept
 git clone --no-hardlinks . /scratch/oetiker/claude-tmp/manual-accept
 ( cd /scratch/oetiker/claude-tmp/manual-accept && ls man/ 2>&1; make man && ls -l man/mdmost.1 )
 
-# 2. renders without roff warnings other than pandoc's CB probe
+# 2. renders without roff warnings other than pandoc's own font macros
 MANWIDTH=80 man --warnings -l man/mdmost.1 > /dev/null
 
 # 3. the four key groups are .TP entries under .SS headings
@@ -1207,7 +1207,7 @@ cargo test -j4 --test glyph_inventory
 git diff main --stat -- Formula/mdmost.rb
 ```
 
-Expected: (1) no `man/` in the clone, then the file appears; (2) only the `CB` warning; (3) mid-fifties, four `.SS`; (4) `0`; (5) and (6) no output; (7) PASS; (8) no change to the formula.
+Expected: (1) no `man/` in the clone, then the file appears; (2) only the pandoc font warnings; (3) around 58, five `.SS` (four key groups plus Notes); (4) `0`; (5) and (6) no output; (7) PASS; (8) no change to the formula.
 
 **Two criteria cannot be checked here and must be stated as unverified, not quietly dropped:**
 - "A release run produces a tarball containing `man/mdmost.1`, and deb and rpm packages that install it to `/usr/share/man/man1/`." The release workflow has never executed — see the handoff §3.3. This plan does not make it run.
