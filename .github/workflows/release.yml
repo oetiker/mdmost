@@ -118,6 +118,21 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # man/ is not in git; it is generated from docs/manual.md. Three steps in this
+      # job need the page — the tarball, the deb and the rpm — so it is built once
+      # here, before any of them. The Windows zip ships no man page, so that leg
+      # skips pandoc rather than installing something nothing uses.
+      - name: Build the man page
+        if: '!matrix.windows'
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install pandoc
+          else
+            sudo apt-get update && sudo apt-get install -y pandoc
+          fi
+          make man
+        shell: bash
+
       - name: Install cross
         if: matrix.cross
         # Pinned to the released version, not `main`: the static-musl build cannot be
