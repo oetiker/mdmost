@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The terminal cell.
 
 use compact_str::CompactString;

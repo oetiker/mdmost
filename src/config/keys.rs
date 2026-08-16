@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Key chords and the actions they trigger.
 //!
 //! Deliberately independent of `crossterm`: the design spec makes [`crate::tui`] the

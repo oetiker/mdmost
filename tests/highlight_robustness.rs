@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The contract [`highlight`](mdmost::highlight::highlight) owes its callers: line
 //! semantics, text preservation, no wrapping, no panics, and a bounded cost.
 

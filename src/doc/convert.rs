@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Conversion from the comrak arena AST to the owned [`Node`](super::Node) tree.
 //!
 //! Keeping this here means [`super`] holds only the owned data model.

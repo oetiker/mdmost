@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Sub-cell bar fills: the eighth-block glyphs and the fraction arithmetic.
 //!
 //! A terminal can show eighths of a column, which is what lets a pie slice, a gantt bar

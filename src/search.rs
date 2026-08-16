@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Search over the document source, mapped onto canvas positions.
 //!
 //! Searching happens in the **source text**, never in the rendered canvas: that is what

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `stateDiagram-v2` layout (design spec §6.7).
 //!
 //! States are [`NodeArt`] boxes and composite states are [`GroupSpec`] containers, so

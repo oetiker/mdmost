@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Painting the application onto a `ratatui` frame.
 //!
 //! Nothing here decides anything: every value drawn comes from [`super::app::App`].
@@ -564,7 +565,7 @@ pub(super) struct Marks<'a> {
 /// A row cut on a box's *rule* is closed with that box's own corner or tee instead. A
 /// chevron sitting where a `╮` belongs turns a table or a code fence into a frame that
 /// never closes, which reads as a rendering fault rather than as scrollable content
-/// (`docs/qa/visual-review-3.md` §11).
+/// (the 2026-08-09 visual review §11).
 ///
 /// The same argument runs one step further, and this is what makes the marking *per row*
 /// rather than per block. A widened code fence or table carries its own wall down the far

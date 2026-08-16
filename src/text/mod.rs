@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Grapheme-cluster-safe, display-width-aware text primitives.
 //!
 //! This module is the *single* home of width and grapheme logic in `mdmost`. The

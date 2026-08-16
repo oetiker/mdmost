@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Inline spans to styled, wrapped lines.
 //!
 //! Inline content is flattened into [`Span`]s carrying semantic styles, wrapped by

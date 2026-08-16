@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Snapshot tests of class-diagram layout (design spec §6.3).
 //!
 //! Every case is a hand-built [`ClassDiagram`], so a change in `mermaid::parse` can

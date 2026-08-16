@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The two glyph sets the renderer draws with.
 //!
 //! Design spec §9 asks for Nerd Font glyphs on list markers, task boxes and code-fence

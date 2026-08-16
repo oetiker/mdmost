@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Calendar arithmetic for gantt charts.
 //!
 //! Gantt tasks are resolved to absolute instants at parse time (see

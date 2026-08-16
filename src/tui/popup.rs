@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The footnote popup: where the box goes, and what is in it.
 //!
 //! Two things live here, and neither of them draws anything or touches an [`App`]:

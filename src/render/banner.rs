@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The `FIGlet` banner drawn for a document whose one `#` heading is its title.
 //!
 //! **Added 2026-08-09 at the owner's request** (design spec §9): "for documents where

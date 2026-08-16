@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Terminal lifecycle and the event loop.
 //!
 //! Design spec §12 treats a wrecked terminal as a release blocker, so restoration is

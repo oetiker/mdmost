@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Vertical layout: which rows every element of the body occupies.
 //!
 //! The planner walks the diagram once, keeping a row cursor and a stack of open

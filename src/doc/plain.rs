@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Plain-text input: the `$PAGER` path for streams that are not Markdown.
 //!
 //! `export PAGER=mdmost` points `git log`, `--help` output and man pages at this

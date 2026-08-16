@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Independent end-to-end smoke tests owned by the integrator.
 //!
 //! These deliberately duplicate no module's internal tests. They assert only that the

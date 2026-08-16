@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The HTML flavour: the upgrade a local clipboard can carry.
 //!
 //! Offered beside the TSV, never instead of it — OSC 52 has no MIME flavours, so a

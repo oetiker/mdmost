@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Snapshot tests of state-diagram layout (design spec §6.7).
 //!
 //! Every case is a hand-built [`StateDiagram`], so a change in `mermaid::parse` can

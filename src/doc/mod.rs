@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The owned document AST.
 //!
 //! The document is parsed exactly once, into an **owned** tree that carries no

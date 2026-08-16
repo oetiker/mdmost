@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Section numbers for a deeply nested document (design spec §9.3).
 //!
 //! A document that nests three or more section levels is hard to keep a position in:

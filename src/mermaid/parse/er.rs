@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `erDiagram` parsing (design spec §6.4).
 //!
 //! Supported: entity declarations with `{ type name PK "comment" }` attribute blocks,

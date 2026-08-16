@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The help overlay's content.
 //!
 //! The overlay is *generated from the live key table* (design spec §10), so a rebound

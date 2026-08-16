@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Search tests.
 
 use super::*;

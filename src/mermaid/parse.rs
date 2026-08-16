@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Mermaid source to a typed [`Diagram`].
 //!
 //! The public interface named in design spec §5 is

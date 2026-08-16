@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Character entities in Mermaid label text.
 //!
 //! Mermaid renders through HTML, so a diagram in the wild writes `<` as `&lt;` — that

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Orthogonal edge routing on the character grid.
 //!
 //! Routing happens in *flow space*: one axis runs along the graph direction ("flow"),

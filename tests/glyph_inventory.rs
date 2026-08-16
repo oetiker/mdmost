@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The manual claims mdmost draws a particular set of Unicode blocks. This pins
 //! that claim to what the renderer actually emits.
 //!

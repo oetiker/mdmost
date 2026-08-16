@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Layer assignment: cycle breaking, longest-path ranking and dummy-node insertion.
 //!
 //! The result is the *layered graph* every later stage works on: a list of virtual

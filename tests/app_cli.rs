@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Integration tests for the command-line interface.
 //!
 //! These drive the real binary, headlessly, exactly as the QA and snapshot workflows

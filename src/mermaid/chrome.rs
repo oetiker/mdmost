@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Chrome shared by the three purpose-built Mermaid chart renderers.
 //!
 //! [`sequence`](crate::mermaid::sequence), [`pie`](crate::mermaid::pie) and

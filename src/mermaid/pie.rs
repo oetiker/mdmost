@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `pie` charts, drawn as a sorted horizontal bar chart (design spec §6.5).
 //!
 //! A circle drawn in character cells reads badly, so the honest rendering of a pie

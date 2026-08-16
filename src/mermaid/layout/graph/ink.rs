@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The edge overlay: a grid of line masks that is merged onto a [`Canvas`].
 //!
 //! Routing happens entirely in this grid, which knows nothing about diagram families.

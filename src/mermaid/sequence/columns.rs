@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Horizontal layout: where every lifeline sits.
 //!
 //! One solver turns the whole diagram into a set of *distance constraints* between

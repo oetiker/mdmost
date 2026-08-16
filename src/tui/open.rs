@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Opening a link in the reader's browser, and being honest about whether it worked.
 //!
 //! # Why the command is split from the spawn

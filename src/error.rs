@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Library error types.
 //!
 //! Every fallible operation in the `mdmost` library reports failures through one of

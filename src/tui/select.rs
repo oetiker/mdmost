@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Mouse text selection, mapped back onto the document source.
 //!
 //! With mouse capture on, the terminal's own drag-select is gone (see

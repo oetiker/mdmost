@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `gantt` charts, drawn as a time axis with per-section bar rows (design spec §6.6).
 //!
 //! Task dates arrive fully resolved from the parser, so this module's job is purely

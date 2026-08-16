@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The pager must not outlive the terminal it is drawing on.
 //!
 //! A terminal can go away impolitely: a pty master closed without a hangup signal, an

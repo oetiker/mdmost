@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `classDiagram` parsing (design spec §6.3).
 //!
 //! Supported: `class X { … }` member blocks and the equivalent `X : +int age` line

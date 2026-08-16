@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Keeping other people's diagnostics off the alternate screen.
 //!
 //! While the pager runs, the screen is a canvas `mdmost` owns outright: every cell on

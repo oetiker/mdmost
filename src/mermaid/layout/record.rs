@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The compartment box shared by class and ER nodes.
 //!
 //! A `classDiagram` node is a name over a field list over a method list (design spec
@@ -5,7 +6,7 @@
 //! same drawing — a framed box divided by full-width rules — so it is built once here
 //! rather than twice in the two family modules (design spec §14).
 //!
-//! Two rules come from the visual review in `docs/qa/visual-review.md` and are worth
+//! Two rules come from the visual review in the 2026-08-09 visual review and are worth
 //! stating because they are easy to get wrong:
 //!
 //! * **Content is body-weight ink; structure is dim.** Member and attribute text is the

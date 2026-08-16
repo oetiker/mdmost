@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Attribution for the third-party syntax definitions compiled into the binary.
 //!
 //! [`BUNDLED_SYNTAXES`](super::BUNDLED_SYNTAXES) embeds a couple of hundred syntax

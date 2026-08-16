@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `stateDiagram-v2` parsing (design spec §6.7).
 //!
 //! Supported: `[*] --> S` start and end markers (per scope), `S --> T : label`,

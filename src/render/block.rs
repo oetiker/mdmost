@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Block-level rendering: headings, paragraphs, lists, quotes, rules, code blocks and
 //! image placeholders.
 //!

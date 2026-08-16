@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The ratatui application: panes, scrolling, key dispatch, help overlay, status bar.
 //!
 //! This is the only module that depends on `ratatui` and `crossterm`; it converts

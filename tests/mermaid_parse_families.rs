@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Parser acceptance tests, one module per Mermaid family (design spec §6.1–§6.7).
 //!
 //! The sources are taken from Mermaid's own documentation examples, so a passing test

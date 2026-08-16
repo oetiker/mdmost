@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Unit tests for the canvas contract.
 //!
 //! Every test asserts [`Canvas::check_invariants`] after the operation under test:

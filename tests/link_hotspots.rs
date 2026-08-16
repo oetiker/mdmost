@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Hotspot geometry is render-time: assert on `canvas.hotspots()`, no terminal needed.
 //!
 //! Every position here is a *document* position, so it carries

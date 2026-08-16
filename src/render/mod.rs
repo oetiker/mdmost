@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Renderers: AST plus width budget plus theme in, [`Canvas`](crate::canvas::Canvas) out.
 //!
 //! Rendering is recursive over a *width budget*. A renderer is handed the number of

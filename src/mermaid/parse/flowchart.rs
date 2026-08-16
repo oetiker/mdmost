@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `flowchart` / `graph` parsing (design spec §6.1).
 //!
 //! Supported: all five directions, the seven documented node shapes (any other

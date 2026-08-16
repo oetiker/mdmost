@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `sequenceDiagram` parsing (design spec §6.2).
 //!
 //! Supported: `participant`/`actor` with `as` aliases and implicit participants from

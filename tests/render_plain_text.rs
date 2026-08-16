@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `$PAGER` behaviour: a stream that is not Markdown must survive being paged.
 //!
 //! `export PAGER=mdmost` points `git log`, `--help` output and man pages at this

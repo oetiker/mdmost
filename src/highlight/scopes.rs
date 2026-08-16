@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The scope → semantic style mapping.
 //!
 //! `syntect` describes every token by a *scope stack* such as

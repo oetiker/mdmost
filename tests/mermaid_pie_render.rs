@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Rendering tests for `pie` charts (design spec §6.5).
 //!
 //! Snapshots are named `<fixture>@<width>` and are reviewed with `cargo insta review`.

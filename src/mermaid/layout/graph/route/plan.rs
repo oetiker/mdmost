@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Planning half of the router: ports, channels, label bands and rank offsets.
 //!
 //! Nothing here draws; it only decides *where* things go, which keeps the painting

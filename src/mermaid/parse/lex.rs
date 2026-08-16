@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Shared lexical helpers for the seven Mermaid family parsers.
 //!
 //! Everything in this module is family-agnostic string surgery: comment stripping,

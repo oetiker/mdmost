@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Saving settings back to the configuration file, without destroying it.
 //!
 //! Design spec §12.1. The reader presses `S` and the settings they are looking at are

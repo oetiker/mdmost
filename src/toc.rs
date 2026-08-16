@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The table of contents: heading tree, current position, fuzzy filter.
 //!
 //! A [`Toc`] is built from [`crate::doc::Doc::headings`] and holds a flat list in

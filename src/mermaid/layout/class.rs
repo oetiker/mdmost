@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! `classDiagram` layout (design spec §6.3).
 //!
 //! The three-compartment class box is a [`NodeArt`]; the relations map onto the

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The attribute table inside an entity box.
 //!
 //! Design spec §6.4 describes an entity's `{ … }` block as a table, so it is drawn as

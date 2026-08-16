@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Stable heading identifiers.
 
 use std::collections::HashMap;

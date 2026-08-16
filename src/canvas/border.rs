@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Box-drawing glyph sets.
 
 /// Which horizontal edge of a box a rule row is.
@@ -6,7 +7,7 @@
 /// rule ends in a top corner, an interior separator in a side tee, a bottom rule in a
 /// bottom corner. Ending all three with the same "there is more to the right" chevron is
 /// what made a clipped table read as a broken box rather than a scrollable one
-/// (`docs/qa/visual-review-3.md` §11).
+/// (the 2026-08-09 visual review §11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rule {
     /// The top edge of a box.

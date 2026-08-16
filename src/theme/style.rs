@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Truecolor colours, attributes and styles.
 //!
 //! `mdmost` deliberately defines its own [`Style`] type instead of using

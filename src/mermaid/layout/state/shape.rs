@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The node bodies of a state diagram (design spec §6.7).
 //!
 //! Five shapes: the rounded box of an ordinary state, the filled dot that starts a

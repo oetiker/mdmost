@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Which link targets become controls, and which stay inert.
 //!
 //! An allowlist, and deliberately a short one. Only `http` and `https` get a

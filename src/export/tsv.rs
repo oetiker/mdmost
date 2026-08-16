@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The tab-separated grid: the payload every reader receives.
 
 use crate::doc::{Node, NodeKind};

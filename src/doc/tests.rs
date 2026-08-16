@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Unit tests for the owned document tree.
 
 use super::*;

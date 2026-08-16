@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Styled text runs.
 //!
 //! [`Span`] and [`Line`] are the currency between anything that produces styled text

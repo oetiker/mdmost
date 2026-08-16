@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Unit tests for the text primitives.
 //!
 //! The Unicode corpus used throughout: CJK (double width), emoji (double width),

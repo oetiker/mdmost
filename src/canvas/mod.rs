@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! The `Canvas`: the single currency between renderers and the viewport.
 //!
 //! Every renderer — block, table, code, Mermaid, image placeholder — returns a

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Fit is monotone in width, and `TooNarrow.needed` is a true floor.
 //!
 //! The engine degrades through a ladder whose label budget is `width / share`, so a

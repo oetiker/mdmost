@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Popup layout is pure geometry: no terminal, no `App`, no buffer.
 //!
 //! The pager's own tests drive the box through the painted frame, one document at a

@@ -33,61 +33,36 @@ produces plain text rather than escape sequences.
 
 # OPTIONS
 
-`--render-once`
+- **`--render-once`** — Render one frame to standard output and exit. Needs no terminal.
+  Truecolour goes to a terminal and plain text goes anywhere else, which is what makes
+  it usable for scripting and snapshotting.
 
-:   Render one frame to standard output and exit. Needs no terminal. Truecolour
-    goes to a terminal and plain text goes anywhere else, which is what makes it
-    usable for scripting and snapshotting.
+- **`--width N`** — Render the whole document at this width instead of the terminal's.
 
-`--width N`
+- **`--body-width N`** — Cap the prose body at N columns and centre it; `0` for no cap.
 
-:   Render the whole document at this width instead of the terminal's.
+- **`--no-body-width`** — Let the body use the full terminal width.
 
-`--body-width N`
+- **`--theme NAME`** — The theme to start in.
 
-:   Cap the prose body at N columns and centre it; `0` for no cap.
+- **`--icons`** — Use Nerd Font glyphs even if none appears to be installed.
 
-`--no-body-width`
+- **`--no-icons`** — Use plain Unicode instead of Nerd Font glyphs, at the same display
+  width.
 
-:   Let the body use the full terminal width.
+- **`--mouse`** — Capture the mouse: the wheel scrolls, the scrollbar drags, clicks jump
+  in the contents pane, and dragging over the document copies the Markdown source behind
+  it.
 
-`--theme NAME`
+- **`--toc`** — Start with the table-of-contents pane open.
 
-:   The theme to start in.
+- **`--config PATH`** — Read configuration from this file instead of the default.
 
-`--icons`
+- **`--licenses`** — Print the licences of the bundled syntax definitions and exit.
 
-:   Use Nerd Font glyphs even if none appears to be installed.
+- **`-h`, `--help`** — Print help and exit.
 
-`--no-icons`
-
-:   Use plain Unicode instead of Nerd Font glyphs, at the same display width.
-
-`--mouse`
-
-:   Capture the mouse: the wheel scrolls, the scrollbar drags, clicks jump in the
-    contents pane, and dragging over the document copies the Markdown source
-    behind it.
-
-`--toc`
-
-:   Start with the table-of-contents pane open.
-
-`--config PATH`
-
-:   Read configuration from this file instead of the default.
-
-`--licenses`
-
-:   Print the licences of the bundled syntax definitions and exit.
-
-`-h`, `--help`
-
-:   Print help and exit.
-
-`-V`, `--version`
-
-:   Print the version and exit.
+- **`-V`, `--version`** — Print the version and exit.
 
 There is no `--color` flag. The truecolour decision is made from whether standard
 output is a terminal, which is the same question `--render-once` already answers.
@@ -101,129 +76,73 @@ bound rather than the defaults.
 
 ## Moving
 
-`j`, `Down`
+- **`j`, `Down`** — Scroll down one line.
 
-:   Scroll down one line.
+- **`k`, `Up`** — Scroll up one line.
 
-`k`, `Up`
+- **`d`, `Ctrl-d`** — Scroll down half a screen.
 
-:   Scroll up one line.
+- **`u`, `Ctrl-u`** — Scroll up half a screen.
 
-`d`, `Ctrl-d`
+- **`space`, `Ctrl-f`, `PgDn`** — Scroll down one screen.
 
-:   Scroll down half a screen.
+- **`b`, `Ctrl-b`, `PgUp`** — Scroll up one screen.
 
-`u`, `Ctrl-u`
+- **`g`, `Home`** — Go to the top, and back to the left edge.
 
-:   Scroll up half a screen.
+- **`G`, `End`** — Go to the bottom of the document.
 
-`space`, `Ctrl-f`, `PgDn`
+- **`%`** — Jump N percent into the document, as in `50%`.
 
-:   Scroll down one screen.
-
-`b`, `Ctrl-b`, `PgUp`
-
-:   Scroll up one screen.
-
-`g`, `Home`
-
-:   Go to the top, and back to the left edge.
-
-`G`, `End`
-
-:   Go to the bottom of the document.
-
-`%`
-
-:   Jump N percent into the document, as in `50%`.
-
-`Left`, `Right`
-
-:   Scroll content that is wider than the terminal, such as a wide table or a
-    long code line. Neither is ever reflowed or mangled to fit.
+- **`Left`, `Right`** — Scroll content that is wider than the terminal, such as a wide
+  table or a long code line. Neither is ever reflowed or mangled to fit.
 
 ## Structure
 
-`[`
+- **`[`** — Go to the previous heading.
 
-:   Go to the previous heading.
+- **`]`** — Go to the next heading.
 
-`]`
+- **`=`, `Ctrl-g`** — Report where you are.
 
-:   Go to the next heading.
+- **`Tab`** — Show or hide the table of contents.
 
-`=`, `Ctrl-g`
+- **`f`** — Move the keyboard cursor to the next link or button in the document,
+  scrolling to bring it into view.
 
-:   Report where you are.
+- **`F`** — Move the keyboard cursor to the previous link or button in the document,
+  scrolling to bring it into view.
 
-`Tab`
-
-:   Show or hide the table of contents.
-
-`f`
-
-:   Move the keyboard cursor to the next link or button in the document,
-    scrolling to bring it into view.
-
-`F`
-
-:   Move the keyboard cursor to the previous link or button in the document,
-    scrolling to bring it into view.
-
-`Enter`
-
-:   Jump to the selected heading, or follow the link or button under the keyboard
-    cursor. The status bar shows the full URL under the cursor, the same as it
-    does for a mouse hover, so `Enter` never sends you somewhere unseen.
+- **`Enter`** — Jump to the selected heading, or follow the link or button under the
+  keyboard cursor. The status bar shows the full URL under the cursor, the same as it
+  does for a mouse hover, so `Enter` never sends you somewhere unseen.
 
 ## Searching
 
-`/`
+- **`/`** — Search forward.
 
-:   Search forward.
+- **`?`** — Search backward.
 
-`?`
+- **`n`, `Ctrl-Down`** — Go to the next match.
 
-:   Search backward.
+- **`N`, `Ctrl-Up`** — Go to the previous match.
 
-`n`, `Ctrl-Down`
-
-:   Go to the next match.
-
-`N`, `Ctrl-Up`
-
-:   Go to the previous match.
-
-`Ctrl-r`
-
-:   Switch between literal and regex search.
+- **`Ctrl-r`** — Switch between literal and regex search.
 
 ## Other
 
-`t`
+- **`t`** — Switch to the next theme. This cycles through the built-ins and anything you
+  have defined.
 
-:   Switch to the next theme. This cycles through the built-ins and anything you
-    have defined.
+- **`-`** — Show or hide code line numbers.
 
-`-`
+- **`S`** — Save the current settings for next time.
 
-:   Show or hide code line numbers.
+- **`h`, `F1`** — Show or hide the help overlay.
 
-`S`
+- **`Esc`** — Clear the search, or close the overlay or pane. It never quits.
 
-:   Save the current settings for next time.
-
-`h`, `F1`
-
-:   Show or hide the help overlay.
-
-`Esc`
-
-:   Clear the search, or close the overlay or pane. It never quits.
-
-`q`
-
-:   Quit.
+- **`q`** — Quit.
 
 ## Notes on a few of these
 
@@ -372,17 +291,11 @@ through the built-ins and anything you have defined.
 
 Three settings answer the same question, in increasing order of authority:
 
-`icons = true` / `false`
+- **`icons = true` / `false`** — Settles it for this machine.
 
-:   Settles it for this machine.
+- **`MDMOST_ICONS=1` / `0`** — Settles it for this shell. See **ENVIRONMENT**.
 
-`MDMOST_ICONS=1` / `0`
-
-:   Settles it for this shell. See **ENVIRONMENT**.
-
-`--icons` / `--no-icons`
-
-:   Settles it for this run.
+- **`--icons` / `--no-icons`** — Settles it for this run.
 
 Omit all three and **mdmost** decides for itself. How it decides, and why it errs
 towards plain, is under **TERMINAL SETUP**.
@@ -481,50 +394,35 @@ families are supported; anything outside the supported subset degrades to a
 syntax-highlighted code block with a dim caption saying why, so a diagram never
 takes the document down with it.
 
-`flowchart` / `graph`
+- **`flowchart` / `graph`** — Directions `TD`/`TB`/`LR`/`RL`/`BT`; shapes `[rect]`,
+  `(round)`, `([stadium])`, `{rhombus}`, `((circle))`, `[[subroutine]]`, `[(cylinder)]`;
+  edges `-->`, `---`, `-.->`, `==>` with `|label|` and `-- label -->`; nested
+  `subgraph`. Out of scope: `click`, `style`/`classDef`, `linkStyle`.
 
-:   Directions `TD`/`TB`/`LR`/`RL`/`BT`; shapes `[rect]`, `(round)`,
-    `([stadium])`, `{rhombus}`, `((circle))`, `[[subroutine]]`, `[(cylinder)]`;
-    edges `-->`, `---`, `-.->`, `==>` with `|label|` and `-- label -->`; nested
-    `subgraph`. Out of scope: `click`, `style`/`classDef`, `linkStyle`.
+- **`sequenceDiagram`** — `participant`/`actor` with `as`; arrows `->`, `-->`, `->>`,
+  `-->>`, `-x`, `--x`; self-messages; `activate`/`deactivate` and `+`/`-`; `Note left
+  of|right of|over`; `loop`, `alt`/`else`, `opt`, `par`/`and`, `critical`. Out of scope:
+  `autonumber`, `box`, `link`, `rect`.
 
-`sequenceDiagram`
+- **`classDiagram`** — Three-compartment boxes, visibility `+ - # ~`, `$`/`*`
+  classifiers, generics, `<<interface>>`/`<<abstract>>` and other stereotypes; relations
+  `<|--`, `*--`, `o--`, `-->`, `..>`, `..|>` with `"1"`/`"0..*"` cardinalities.
 
-:   `participant`/`actor` with `as`; arrows `->`, `-->`, `->>`, `-->>`, `-x`,
-    `--x`; self-messages; `activate`/`deactivate` and `+`/`-`;
-    `Note left of|right of|over`; `loop`, `alt`/`else`, `opt`, `par`/`and`,
-    `critical`. Out of scope: `autonumber`, `box`, `link`, `rect`.
+- **`erDiagram`** — Entities with attribute tables (`type name PK "comment"`, including
+  `PK`/`FK`/`UK`), aliases, crow's-foot cardinalities `||--o{`, `}o--||`, `||--||`,
+  `}|..|{`, and relationship labels.
 
-`classDiagram`
+- **`stateDiagram-v2`** — `[*]` start and end markers per scope, `S --> T : label`,
+  composite `state X { … }`, `<<choice>>`, `<<fork>>`/`<<join>>`, `note left of` and
+  `note right of`.
 
-:   Three-compartment boxes, visibility `+ - # ~`, `$`/`*` classifiers,
-    generics, `<<interface>>`/`<<abstract>>` and other stereotypes; relations
-    `<|--`, `*--`, `o--`, `-->`, `..>`, `..|>` with `"1"`/`"0..*"`
-    cardinalities.
+- **`pie`** — `title`, `showData`, `"label" : value`. Drawn as a sorted bar chart with
+  percentages --- a circle in character cells reads badly, so bars are the honest
+  choice.
 
-`erDiagram`
-
-:   Entities with attribute tables (`type name PK "comment"`, including
-    `PK`/`FK`/`UK`), aliases, crow's-foot cardinalities `||--o{`, `}o--||`,
-    `||--||`, `}|..|{`, and relationship labels.
-
-`stateDiagram-v2`
-
-:   `[*]` start and end markers per scope, `S --> T : label`, composite
-    `state X { … }`, `<<choice>>`, `<<fork>>`/`<<join>>`, `note left of` and
-    `note right of`.
-
-`pie`
-
-:   `title`, `showData`, `"label" : value`. Drawn as a sorted bar chart with
-    percentages --- a circle in character cells reads badly, so bars are the
-    honest choice.
-
-`gantt`
-
-:   `title`, `dateFormat`, `axisFormat`, `section`, tasks with `after X`,
-    durations or explicit dates, and `done`/`active`/`crit`/`milestone` tags.
-    The time scale is chosen from the available width.
+- **`gantt`** — `title`, `dateFormat`, `axisFormat`, `section`, tasks with `after X`,
+  durations or explicit dates, and `done`/`active`/`crit`/`milestone` tags. The time
+  scale is chosen from the available width.
 
 Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
 
@@ -571,46 +469,28 @@ font, or a fallback behind it, has to cover them. This is a statement about
 coverage, not about which font you should use: any font or chain that covers
 these will do.
 
-Box Drawing (U+2500-U+257F)
+- **Box Drawing (U+2500-U+257F)** — Every table border, code frame and diagram box.
 
-:   Every table border, code frame and diagram box.
+- **Block Elements (U+2580-U+259F)** — Zebra stripes, the scrollbar, gantt bars.
 
-Block Elements (U+2580-U+259F)
+- **Geometric Shapes (U+25A0-U+25FF)** — Heading marks, diagram node shapes, arrowheads.
 
-:   Zebra stripes, the scrollbar, gantt bars.
+- **General Punctuation (U+2000-U+206F)** — The elision marker.
 
-Geometric Shapes (U+25A0-U+25FF)
+- **Mathematical Operators (U+2200-U+22FF)** — Class-diagram relations.
 
-:   Heading marks, diagram node shapes, arrowheads.
+- **Misc Mathematical Symbols-A (U+27C0-U+27EF)** — Class-diagram generics.
 
-General Punctuation (U+2000-U+206F)
+- **Dingbats (U+2700-U+27BF)** — The marker on a degraded diagram's caption.
 
-:   The elision marker.
+- **Latin-1 Supplement (U+0080-U+00FF)** — Whatever HTML entities the document decodes
+  to.
 
-Mathematical Operators (U+2200-U+22FF)
+- **Specials (U+FFF0-U+FFFF)** — The replacement character, drawn in place of one that
+  cannot be represented.
 
-:   Class-diagram relations.
-
-Misc Mathematical Symbols-A (U+27C0-U+27EF)
-
-:   Class-diagram generics.
-
-Dingbats (U+2700-U+27BF)
-
-:   The marker on a degraded diagram's caption.
-
-Latin-1 Supplement (U+0080-U+00FF)
-
-:   Whatever HTML entities the document decodes to.
-
-Specials (U+FFF0-U+FFFF)
-
-:   The replacement character, drawn in place of one that cannot be
-    represented.
-
-Private Use Area (U+E000-U+F8FF)
-
-:   Code-fence language icons --- **only when icons are on**.
+- **Private Use Area (U+E000-U+F8FF)** — Code-fence language icons --- **only when icons
+  are on**.
 
 The Private Use Area row is the one you can opt out of, with `--no-icons`.
 Everything above it is drawn whatever you do.
@@ -669,17 +549,12 @@ their configuration.
 
 This trio, consulted in that order, covers everything **mdmost** draws:
 
-**JetBrains Mono**
+- **JetBrains Mono** — The text font.
 
-:   The text font.
+- **Symbols Nerd Font** — The Private Use Area icons.
 
-**Symbols Nerd Font**
-
-:   The Private Use Area icons.
-
-**JuliaMono**
-
-:   Unicode's symbol blocks --- arrows, geometric shapes, dingbats, braille.
+- **JuliaMono** — Unicode's symbol blocks --- arrows, geometric shapes, dingbats,
+  braille.
 
 It is named because it is known to work, not because **mdmost** wants it.
 
@@ -705,43 +580,31 @@ than let it detect, see **CONFIGURATION**.
 
 # ENVIRONMENT
 
-`MDMOST_ICONS`
+- **`MDMOST_ICONS`** — `1` or `0` forces Nerd Font glyphs on or off. It outranks the
+  configuration file and is outranked by `--icons` and `--no-icons`. Exporting it in a
+  profile is the natural thing to do on a server you always reach from the same
+  well-equipped terminal.
 
-:   `1` or `0` forces Nerd Font glyphs on or off. It outranks the configuration
-    file and is outranked by `--icons` and `--no-icons`. Exporting it in a
-    profile is the natural thing to do on a server you always reach from the same
-    well-equipped terminal.
-
-`PAGER`
-
-:   **mdmost** is usable as a pager; `export PAGER=mdmost` is the intended use.
+- **`PAGER`** — **mdmost** is usable as a pager; `export PAGER=mdmost` is the intended
+  use.
 
 # FILES
 
-*~/.config/mdmost/config.toml*
+- ***~/.config/mdmost/config.toml*** — Configuration, in TOML. A broken file never stops
+  the program from starting: the problem is reported and the rest of the file still
+  applies, so one bad key binding costs you that binding and nothing else. The
+  platform's own configuration directory is used where it differs.
 
-:   Configuration, in TOML. A broken file never stops the program from starting:
-    the problem is reported and the rest of the file still applies, so one bad
-    key binding costs you that binding and nothing else. The platform's own
-    configuration directory is used where it differs.
-
-*config.toml.bak*
-
-:   The previous configuration, kept beside it whenever `S` writes a new one.
+- ***config.toml.bak*** — The previous configuration, kept beside it whenever `S` writes
+  a new one.
 
 # EXIT STATUS
 
-`0`
+- **`0`** — Success, including a quit from the pager and a broken pipe.
 
-:   Success, including a quit from the pager and a broken pipe.
+- **`1`** — The document could not be read, or the terminal could not be set up.
 
-`1`
-
-:   The document could not be read, or the terminal could not be set up.
-
-`2`
-
-:   The command line could not be parsed.
+- **`2`** — The command line could not be parsed.
 
 # SEE ALSO
 

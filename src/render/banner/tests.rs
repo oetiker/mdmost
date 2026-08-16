@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Unit tests for the `FIGlet` title banner.
 //!
 //! The art is checked against `figlet -f Small` rather than against itself: a

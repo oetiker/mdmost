@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! A cap on the width of the prose body, with a dispensation for what cannot reflow.
 //!
 //! Design spec §3.2. Prose past a hundred-odd columns is hard to read — the eye loses

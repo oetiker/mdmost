@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Turning a parsed table into clipboard payloads.
 //!
 //! A pure function from AST to string: this module depends on [`crate::doc`] and nothing
