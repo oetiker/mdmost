@@ -154,6 +154,43 @@ What is deliberately not automated, and why, is in
 `docs/superpowers/specs/2026-08-09-publishing-design.md` §1 — there is no apt/yum
 repository, no Pages site, no container image and no macOS notarisation.
 
+## Regenerating the man page
+
+`docs/manual.md` is the source. `man/mdmost.1` is generated from it and **is not in
+git** — `man/` is gitignored, so a fresh clone has no page until you build one:
+
+```sh
+make man          # needs pandoc; 3.1.3 is what this was designed against
+```
+
+A generated file under version control can disagree with its source, and then it needs
+a staleness gate. A file that does not exist cannot be stale, so there is no gate. CI
+runs the same `make man`: `ci.yml`'s `docs` job builds it and throws it away, purely so
+a manual that stops converting fails the pull request that broke it; `release.yml`
+builds it once at the top of `build-binaries`, where the tarball, the deb and the rpm
+all read it out of the working tree. Homebrew reads it from our tarball. The Windows zip
+ships no man page and so skips pandoc entirely.
+
+Things worth knowing before you go hunting:
+
+- **`man --warnings` always reports `cannot select font 'C'` and `'CB'`.** Those are
+  pandoc's own font macros — the probe preamble, and `\f[C]` for every fenced code
+  block. They are not defects and cannot be removed. **Any other warning is real.**
+- **`table wider than line length minus indentation` is the one to act on.** roff cannot
+  fit a table column holding a paragraph of prose. Both tables that hit this became
+  definition lists, which is the shape the rest of the page uses anyway and which pandoc
+  turns into `.TP`.
+- **Section headings are ALL-CAPS level-1 headings.** pandoc maps `#` to `.SH` and `##`
+  to `.SS`. A definition list — term, blank line, then `:` and four spaces — becomes
+  `.TP`. Get the indentation wrong and the entry silently renders as a paragraph.
+- **Edit `date:` in the front matter by hand** when the manual is substantively revised.
+  It is deliberately not the build date, and `footer:` deliberately carries no version:
+  a version there would make every release regenerate the page for no reader benefit.
+- **Adding a glyph to the renderer fails `tests/glyph_inventory.rs`** with the codepoint
+  named. Add it to `INVENTORY` **and** to the manual's `TERMINAL SETUP` list — the block
+  names are compared verbatim, so keep the wording identical. That test cannot see the
+  TUI chrome; the Arrows line in that section is maintained by hand.
+
 ## Regenerating the demo
 
 `docs/demo/mdmost.webp` is the README's hero image. It is recorded with

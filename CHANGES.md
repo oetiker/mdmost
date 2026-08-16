@@ -36,4 +36,13 @@
 
 ### Changed
 
+- The documentation is one manual with three faces. `docs/manual.md` is the single
+  source for every key, option and config field; `man/mdmost.1` is generated from
+  it by `make man` and is no longer kept in git; the README is a 30-second pitch
+  that links to the rest. A new terminal-setup section says which Unicode blocks
+  your font has to cover, and a test keeps that list matching the renderer.
+- The licence file is named `LICENSE` rather than `LICENSE-MIT`, which is the name
+  forges, packagers and licence scanners look for. Both packages now install it to
+  `/usr/share/doc/mdmost/LICENSE`.
+
 ### Fixed
