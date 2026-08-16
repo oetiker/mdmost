@@ -120,21 +120,28 @@ way that is not really the same thing — the footnotes say which.
 | Inline images | no | yes | no | no | no | no |
 | More than one file | no | part | yes | yes | part | part |
 
-**`mdcat` is the closest thing to a rival**, and its column is worth reading before
-mine. It renders Mermaid too, negotiates table widths, and uses the very same `bat`
-syntax definitions. It prints to stdout rather than running a screen, which is where
-the differences come from: no reflow, no pane, no selection — and, in exchange, real
-inline images, which mdmost does not have and does not plan to. Note that the widely
-known `swsnr/mdcat` was archived in June 2026; the live fork is `BIRSAx2/mdcat`.
+The three rows that this was written for are resizing, the mouse and copying. Drag the
+divider and the table renegotiates its columns while you watch; drag across the text
+and what lands on the clipboard is the Markdown that produced it. Those only mean
+anything in a program that owns the screen for as long as you are reading, which is
+why `mdcat` and `bat` are a different kind of tool rather than a worse one: they
+render once, print, and exit.
 
-Smaller print. `glow` reflows and styles table cells just as this does — what it does
-not do is renegotiate column widths into a closed box, or draw diagrams; its `c` key
-copies the whole document rather than a selection. `frogmouth` is the only real file
-browser here, but it has had no release since 2023. `mdcat`'s table of contents is a
-list it prints, not a pane; its links are OSC 8, so the terminal follows them, not
-`mdcat`; and searching means the `$PAGER` it hands off to. For `bat` and `less` the
-screen already *is* the Markdown source, so "copy the source" is not a feature they
-implement — hence `n/a` rather than a tick they did not earn.
+`mdcat` is worth knowing about anyway, because it does things this does not. It draws
+Mermaid, negotiates table widths, styles markup inside cells, and compiles the same
+`bat` syntax definitions — and it puts **real images** on your terminal, which mdmost
+will never do. The widely known `swsnr/mdcat` was archived in June 2026; the live fork
+is `BIRSAx2/mdcat`. `frogmouth` is the only genuine file browser here, though it has
+had no release since 2023.
+
+Smaller print, so the table is not read for more than it says. `glow` reflows and
+styles table cells just as this does; what it does not do is negotiate column widths
+into a closed box or draw diagrams, and its `c` key copies the whole document rather
+than a selection. `mdcat`'s contents is a list it prints, not a pane; its links are
+OSC 8, so your terminal follows them rather than `mdcat`; and searching means the
+`$PAGER` it hands off to. For `bat` and `less` the screen already *is* the Markdown
+source, so copying it is not a feature they implement — hence `n/a` rather than a tick
+they did not earn.
 
 ## What it is not
 
