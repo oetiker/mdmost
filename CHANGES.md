@@ -4,6 +4,14 @@
 
 ### New
 
+### Changed
+
+### Fixed
+
+## 0.1.0 - 2026-08-16
+
+### New
+
 - A full-screen terminal pager for a single Markdown document: styled Unicode
   rendering, real table borders with negotiated column widths, syntax-highlighted
   code fences, and Mermaid diagrams laid out as box art.
