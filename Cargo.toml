@@ -99,7 +99,7 @@ split-debuginfo = "unpacked"
 [package.metadata.deb]
 maintainer = "Tobias Oetiker <tobi@oetiker.ch>"
 copyright = "2026, Tobias Oetiker <tobi@oetiker.ch>"
-license-file = ["LICENSE-MIT", "0"]
+license-file = ["LICENSE", "0"]
 extended-description = """\
 A full-screen terminal pager for a single Markdown document. Tables get real \
 borders and negotiated column widths, fenced code is syntax-highlighted, and \
@@ -112,7 +112,7 @@ assets = [
     ["target/release/mdmost", "usr/bin/", "755"],
     ["man/mdmost.1", "usr/share/man/man1/", "644"],
     ["README.md", "usr/share/doc/mdmost/README.md", "644"],
-    ["LICENSE-MIT", "usr/share/doc/mdmost/LICENSE-MIT", "644"],
+    ["LICENSE", "usr/share/doc/mdmost/LICENSE", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -125,5 +125,5 @@ assets = [
     { source = "target/release/mdmost", dest = "/usr/bin/mdmost", mode = "755" },
     { source = "man/mdmost.1", dest = "/usr/share/man/man1/mdmost.1", mode = "644", doc = true },
     { source = "README.md", dest = "/usr/share/doc/mdmost/README.md", mode = "644", doc = true },
-    { source = "LICENSE-MIT", dest = "/usr/share/doc/mdmost/LICENSE-MIT", mode = "644", doc = true },
+    { source = "LICENSE", dest = "/usr/share/doc/mdmost/LICENSE", mode = "644", doc = true },
 ]
