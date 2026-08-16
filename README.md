@@ -172,8 +172,7 @@ make man          # build man/mdmost.1 from docs/manual.md; needs pandoc
 ```
 
 Snapshot tests use [`insta`](https://insta.rs); property tests use `proptest`. The man
-page is generated and is not in git. Design specs live in `docs/superpowers/specs/`, and
-QA reports in `docs/qa/`.
+page is generated and is not in git. Design specs live in `docs/superpowers/specs/`.
 
 ## License
 

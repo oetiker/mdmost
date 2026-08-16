@@ -94,7 +94,7 @@ impl Canvas {
     /// A box drawn wider than the room it has is cut on a *rule* row as readily as on a
     /// content row, and stamping "there is more to the right" over the rule leaves a
     /// `╭` with no `╮`: the shape stops reading as a table and starts reading as a
-    /// rendering fault (`docs/qa/visual-review-3.md` §11). Closing the rule with its own
+    /// rendering fault (the 2026-08-09 visual review §11). Closing the rule with its own
     /// corner or tee says the same thing more honestly — the box is whole, and the
     /// *content* is what continues.
     ///

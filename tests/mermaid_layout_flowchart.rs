@@ -256,7 +256,7 @@ fn a_single_node_and_no_edges() {
     ));
 }
 
-/// The chart from `docs/qa/visual-review-3.md` §1, which used to give up below 92
+/// The chart from the 2026-08-09 visual review §1, which used to give up below 92
 /// columns and dump its own source instead.
 ///
 /// It is a small, entirely ordinary `flowchart LR`, and 80 columns is the default

@@ -1165,7 +1165,7 @@ fn a_clipped_table_is_still_detected_and_widened() {
 
 #[test]
 fn a_viewport_edge_closes_the_frame_it_cuts() {
-    // `docs/qa/visual-review-3.md` §11, in the pager rather than the renderer: the
+    // the 2026-08-09 visual review §11, in the pager rather than the renderer: the
     // window, not the render, is what truncates a widened block, so the edge markers are
     // where a table or a fence gets its frame broken. A rule ends in its own glyph on
     // whichever side it was cut; the content rows between them keep the chevron.

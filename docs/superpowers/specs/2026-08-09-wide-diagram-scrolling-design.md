@@ -12,7 +12,7 @@ first repairs the scroll model it would extend.
 
 A Mermaid diagram that will not fit degrades through the layout engine's fit
 ladder; when the ladder is exhausted the block falls back to a dump of its own
-Mermaid source (`docs/qa/visual-review-3.md` §1).
+Mermaid source (the 2026-08-09 visual review §1).
 
 In the pager this is worse than it sounds. `render::document::render_document`
 widens any block that comes back clipped, so **for the too-narrow case** the

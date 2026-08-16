@@ -1039,7 +1039,7 @@ fn a_cell_too_narrow_for_a_nested_table_still_renders() {
 
 #[test]
 fn a_clipped_table_closes_its_rules_and_marks_only_its_content() {
-    // `docs/qa/visual-review-3.md` §11: the chevron was stamped on the rule rows too, so
+    // the 2026-08-09 visual review §11: the chevron was stamped on the rule rows too, so
     // a clipped table showed a `╭` with no `╮` and read as a rendering fault rather than
     // as something to scroll. A rule ends in its own corner or tee; the chevron belongs
     // on the content rows, which are what is actually cut off.
