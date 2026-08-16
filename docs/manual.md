@@ -564,6 +564,145 @@ are the literal Markdown the author typed.
 rendered or shown. An image becomes a captioned placeholder with its alt text and
 target; there is no sixel and no kitty protocol.
 
+# TERMINAL SETUP
+
+**mdmost** draws with characters from the Unicode blocks below. Your terminal
+font, or a fallback behind it, has to cover them. This is a statement about
+coverage, not about which font you should use: any font or chain that covers
+these will do.
+
+Box Drawing (U+2500-U+257F)
+
+:   Every table border, code frame and diagram box.
+
+Block Elements (U+2580-U+259F)
+
+:   Zebra stripes, the scrollbar, gantt bars.
+
+Geometric Shapes (U+25A0-U+25FF)
+
+:   Heading marks, diagram node shapes, arrowheads.
+
+General Punctuation (U+2000-U+206F)
+
+:   The elision marker.
+
+Mathematical Operators (U+2200-U+22FF)
+
+:   Class-diagram relations.
+
+Misc Mathematical Symbols-A (U+27C0-U+27EF)
+
+:   Class-diagram generics.
+
+Dingbats (U+2700-U+27BF)
+
+:   The marker on a degraded diagram's caption.
+
+Latin-1 Supplement (U+0080-U+00FF)
+
+:   Whatever HTML entities the document decodes to.
+
+Specials (U+FFF0-U+FFFF)
+
+:   The replacement character, drawn in place of one that cannot be
+    represented.
+
+Private Use Area (U+E000-U+F8FF)
+
+:   Code-fence language icons --- **only when icons are on**.
+
+The Private Use Area row is the one you can opt out of, with `--no-icons`.
+Everything above it is drawn whatever you do.
+
+The interface adds one block the document never needs: **Arrows**
+(U+2190-U+21FF), for the `Ctrl` key hints the status bar shows beside a live
+search, and the search indicator itself.
+
+The document's own text is not on this list and cannot be. A font that does not
+cover the language you are reading was already a problem before **mdmost**
+opened it.
+
+## What goes wrong without it
+
+A missing glyph is not usually a blank box. The terminal falls back to another
+font, and that font's advance width need not match the base font's --- so a line
+made *entirely* of box characters comes out a different width from the text lines
+around it, and the frame stops lining up. A table's rules overshoot its contents;
+a diagram's boxes shear.
+
+This is not something **mdmost** can correct from the inside. Every row it draws
+is padded to exactly the width of the pane, measured in display columns; what the
+terminal then does with those columns is the font stack's business.
+
+If you have seen these frames misalign in a web browser, that is the same fault
+one layer up. GitHub strips CSS from Markdown, so the font stack there is not
+ours to set either.
+
+## Fixing it
+
+On Linux, fontconfig decides. Put a fallback chain in
+*~/.config/fontconfig/fonts.conf* and run `fc-cache -f`:
+
+```xml
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <alias>
+    <family>monospace</family>
+    <prefer>
+      <family>JetBrains Mono</family>
+      <family>Symbols Nerd Font</family>
+      <family>JuliaMono</family>
+    </prefer>
+  </alias>
+</fontconfig>
+```
+
+On macOS and Windows fontconfig is not in play and the terminal decides. Set the
+fallback in the terminal's own font settings --- iTerm2 has a separate font for
+non-ASCII text, Windows Terminal takes a font fallback list in its
+*settings.json*, and Kitty and WezTerm both take an explicit fallback list in
+their configuration.
+
+## A stack known to work
+
+This trio, consulted in that order, covers everything **mdmost** draws:
+
+**JetBrains Mono**
+
+:   The text font.
+
+**Symbols Nerd Font**
+
+:   The Private Use Area icons.
+
+**JuliaMono**
+
+:   Unicode's symbol blocks --- arrows, geometric shapes, dingbats, braille.
+
+It is named because it is known to work, not because **mdmost** wants it.
+
+## Icons are detected, not assumed
+
+No terminal can be asked what font it is using. So **mdmost** asks fontconfig
+whether an installed font covers every glyph it would draw, and uses icons only
+if one does.
+
+It picks plain whenever it cannot establish that: when `fc-list` is unavailable,
+when output is not going to a terminal, on `TERM=dumb` or the Linux console, and
+**over SSH**, where the fonts on the machine running **mdmost** say nothing about
+the terminal drawing the pixels.
+
+Guessing wrong towards plain costs a little elegance; guessing wrong towards
+icons fills the screen with replacement boxes. The tie does not go to the
+prettier answer.
+
+Plain and icon glyphs occupy **the same display width**, so nothing shifts and
+nothing reflows either way --- the difference is what the markers look like,
+never where anything sits, and no feature is lost. To decide for yourself rather
+than let it detect, see **CONFIGURATION**.
+
 # ENVIRONMENT
 
 `MDMOST_ICONS`
