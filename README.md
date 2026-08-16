@@ -100,6 +100,42 @@ marker opens the note in a box beside it without moving the page.
 as source, and anything outside the supported subset degrades to a highlighted code block
 with a caption saying why — a diagram never takes the document down with it.
 
+## How it compares
+
+Checked in August 2026 against `mdcat` 2.15.0, `glow` 2.1.2, `frogmouth` 0.9.1,
+`bat` 0.26.1 and `less` 590. `part` means the tool does some of it, or does it in a
+way that is not really the same thing — the footnotes say which.
+
+| | mdmost | mdcat | glow | frogmouth | bat | less |
+|---|---|---|---|---|---|---|
+| Reflows on resize | yes | no | yes | yes | no | no |
+| Table borders | box | rules | rules | rules | no | no |
+| Markdown in table cells | yes | yes | yes | part | no | no |
+| Mermaid as a diagram | yes | yes | no | no | no | no |
+| Highlighted code | yes | yes | yes | yes | yes | no |
+| In-document search | yes | part | no | no | yes | yes |
+| Contents pane | yes | part | no | yes | no | no |
+| Keyboard link following | yes | part | no | yes | no | no |
+| Copy Markdown source | yes | no | part | no | n/a | n/a |
+| Inline images | no | yes | no | no | no | no |
+| More than one file | no | part | yes | yes | part | part |
+
+**`mdcat` is the closest thing to a rival**, and its column is worth reading before
+mine. It renders Mermaid too, negotiates table widths, and uses the very same `bat`
+syntax definitions. It prints to stdout rather than running a screen, which is where
+the differences come from: no reflow, no pane, no selection — and, in exchange, real
+inline images, which mdmost does not have and does not plan to. Note that the widely
+known `swsnr/mdcat` was archived in June 2026; the live fork is `BIRSAx2/mdcat`.
+
+Smaller print. `glow` reflows and styles table cells just as this does — what it does
+not do is renegotiate column widths into a closed box, or draw diagrams; its `c` key
+copies the whole document rather than a selection. `frogmouth` is the only real file
+browser here, but it has had no release since 2023. `mdcat`'s table of contents is a
+list it prints, not a pane; its links are OSC 8, so the terminal follows them, not
+`mdcat`; and searching means the `$PAGER` it hands off to. For `bat` and `less` the
+screen already *is* the Markdown source, so "copy the source" is not a feature they
+implement — hence `n/a` rather than a tick they did not earn.
+
 ## What it is not
 
 The scope is deliberately narrow, and these are decisions rather than gaps:
