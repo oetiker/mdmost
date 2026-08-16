@@ -95,8 +95,7 @@ continues off-screen still reads as a frame.
 **The mouse works properly.** With `--mouse` the wheel scrolls, the scrollbar drags,
 contents entries jump, links light up under the pointer with their target in the status
 bar, and code frames and tables grow a `[copy]` button. It is off by default because
-capturing the mouse takes away the terminal's own drag-select, and that is your call to
-make rather than mine.
+capturing the mouse takes away the terminal's own drag-select.
 
 **A selection copies the source, not the screen.** Drag over a rendered heading and you
 get `# Wide diagram` on the clipboard; over a bold word, `**bold**`; over a link,
