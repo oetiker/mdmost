@@ -19,23 +19,6 @@ brew trust --formula oetiker/mdmost/mdmost
 brew install mdmost
 ```
 
-Homebrew 6.0 stopped loading formulae from third-party taps until they are trusted, so
-the middle line is required. It trusts this one formula rather than the whole tap.
-`brew install oetiker/mdmost/mdmost` does the same thing in one step, because a
-fully-qualified name trusts the formula it names. On Homebrew 5 and older there is no
-`brew trust` command and no trust to grant: skip that line.
-
-On **macOS**, `brew install` may stop with *Your Command Line Tools are too outdated*.
-The formula ships prebuilt binaries and compiles nothing, but Homebrew calls any install
-without a matching bottle a source build, and a source build insists on working developer
-tools. Releases ship bottles for current macOS, so this only comes up on a Mac older than
-those bottles. The commands Homebrew prints are the fix:
-
-```sh
-sudo rm -rf /Library/Developer/CommandLineTools
-sudo xcode-select --install
-```
-
 **Debian, Ubuntu** — download `mdmost_<version>_amd64.deb` (or `_arm64.deb`) from the
 [releases page](https://github.com/oetiker/mdmost/releases):
 
