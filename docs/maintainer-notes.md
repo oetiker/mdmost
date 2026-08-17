@@ -230,6 +230,42 @@ Things worth knowing before you go hunting:
   names are compared verbatim, so keep the wording identical. That test cannot see the
   TUI chrome; the Arrows line in that section is maintained by hand.
 
+## Homebrew bottles exist to dodge the compiler check
+
+Nothing in the formula is compiled: it unpacks a release tarball. But Homebrew calls any
+install with no matching bottle a **source build**, and a source build runs
+`fatal_build_from_source_checks`, which aborts with *Your Command Line Tools are too
+outdated* on a Mac whose CLT is older than its macOS. `bottle :unneeded`, which used to
+say "no compiler needed", was removed in Homebrew 3.0. A bottle is the only way left.
+
+Four things to know before touching `.github/workflows/release.yml`:
+
+- **One bottle per architecture is enough.** `find_older_compatible_tag` in Homebrew's
+  `extend/os/mac/utils/bottles.rb` accepts a bottle built for an *older or equal* macOS of
+  the same architecture. The fallback only reaches upward, so bottles are built on the
+  oldest runner image per architecture: `macos-14` for arm64, `macos-13` for Intel.
+  `macos-13` is the last Intel image GitHub has; that leg is `continue-on-error` because it
+  will eventually vanish, and when it does Intel Macs simply go back to the source path.
+- **The filename is renamed on upload.** `brew bottle` writes
+  `mdmost--<version>.<tag>.bottle.tar.gz`, with two dashes, which is what GitHub Packages
+  wants. A plain `root_url` like ours is fetched as `mdmost-<version>.<tag>.bottle.tar.gz`,
+  with one. Compare `Bottle::Filename#url_encode` with `#github_packages`. Both names are
+  in the `--json` output as `filename` and `local_filename`, so the workflow reads them
+  rather than constructing either.
+- **The `bottle do` block is generated, not patched.** Which architectures produced a
+  bottle is not known ahead of time, and a `sha256` line for a bottle that was never
+  uploaded sends Homebrew after a file that is not there. The generated block carries its
+  own `# BOTTLE-START` / `# BOTTLE-END` markers and replaces that range in place, which is
+  what keeps the rewrite idempotent. Removing those markers fails the job by design.
+- **`bottles` runs after `homebrew`, not beside it.** It installs from the tap, so the
+  version and the four url `sha256` lines have to be on `main` first. As a side effect
+  `brew install --build-bottle` checksums the published tarball, so this doubles as an
+  end-to-end test of what `create-release` uploaded.
+
+Homebrew 6.0 also stopped loading formulae from untrusted third-party taps, so CI taps and
+then runs `brew trust --formula oetiker/mdmost/mdmost`. The `|| true` after it is for a
+runner image still on Homebrew 5, where the command does not exist.
+
 ## Regenerating the demo
 
 `docs/demo/mdmost.webp` is the README's hero image. It is recorded with

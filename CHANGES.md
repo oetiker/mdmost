@@ -4,10 +4,23 @@
 
 ### New
 
+- Releases now ship Homebrew bottles for macOS. Without one, Homebrew treats the
+  formula as a source build even though nothing in it is compiled, and refuses to
+  install on a Mac whose Command Line Tools are older than its macOS. One bottle per
+  architecture covers later macOS releases too.
+
 ### Changed
+
+- The Homebrew instructions now include `brew trust --formula oetiker/mdmost/mdmost`.
+  Homebrew 6.0 stopped loading formulae from third-party taps until they are trusted, so
+  `brew install mdmost` alone no longer finds the formula.
 
 ### Fixed
 
+- `mdmost` with no arguments at a terminal prints its help and exits instead of hanging.
+  It read standard input whenever no file was named, so bare `mdmost` sat waiting on a
+  terminal nobody was typing into, which is indistinguishable from a hang. `mdmost -`
+  still reads standard input on purpose, and `cat x.md | mdmost` is unchanged.
 - The release no longer tags a commit whose `Cargo.toml` and `Cargo.lock` disagree
   about the version, which is what stopped `v0.1.1` from reaching crates.io. The
   version bump refreshed the lock with `cargo update --offline`, but that job never

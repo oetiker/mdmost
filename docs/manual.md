@@ -26,7 +26,9 @@ everything reflows and the same table is drawn dense in a wide terminal and
 spaced in a narrow one.
 
 With no *FILE*, the document is read from standard input and the keyboard is read
-from */dev/tty*, so `cat notes.md | mdmost` stays interactive. When standard
+from */dev/tty*, so `cat notes.md | mdmost` stays interactive. When standard input
+is a terminal there is no document on the way, so **mdmost** prints its help and
+exits rather than waiting; pass `-` to read from a terminal anyway. When standard
 output is not a terminal, `--render-once` is implied, so `mdmost doc.md | cat`
 writes plain text rather than escape sequences.
 

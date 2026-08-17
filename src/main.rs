@@ -16,7 +16,7 @@ use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 use mdmost::config::Config;
 use mdmost::doc::Doc;
@@ -35,7 +35,7 @@ const FALLBACK_WIDTH: u16 = 80;
 #[derive(Debug, Parser)]
 #[command(name = "mdmost", version, about, long_about = None)]
 struct Cli {
-    /// The document to show. Omit it, or pass `-`, to read standard input.
+    /// The document to show. Pass `-`, or pipe one in, to read standard input.
     file: Option<PathBuf>,
 
     /// Render one frame to standard output and exit. Needs no terminal.
@@ -194,6 +194,14 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         return Ok(ExitCode::from(EXIT_USAGE));
     }
 
+    // Before the config file is touched, because this path answers a question about the
+    // program rather than showing a document.
+    let input = input_source(cli.file.as_deref(), io::stdin().is_terminal());
+    if input == Input::Nothing {
+        Cli::command().print_help()?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
     let loaded = match &cli.config {
         Some(path) => Config::load_from(path),
         None => Config::load(),
@@ -207,7 +215,11 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         return Ok(ExitCode::from(EXIT_USAGE));
     }
 
-    let (source, title) = match read_input(cli.file.as_deref()) {
+    let (source, title) = match read_input(match input {
+        Input::File(path) => Some(path),
+        // `Nothing` returned above, so this is standard input either way.
+        Input::Stdin | Input::Nothing => None,
+    }) {
         Ok(pair) => pair,
         Err(error) => {
             let _ = writeln!(io::stderr(), "mdmost: {error}");
@@ -336,13 +348,41 @@ fn render_once(
     Ok(ExitCode::SUCCESS)
 }
 
+/// Where the document is to come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Input<'a> {
+    /// A file named on the command line.
+    File(&'a Path),
+    /// Standard input, because it was piped in or because `-` asked for it.
+    Stdin,
+    /// Nothing at all: no file, and standard input is the terminal the reader is
+    /// sitting at. There is no document on the way and waiting for one looks like a
+    /// hang, so bare `mdmost` is taken as a question about the program.
+    Nothing,
+}
+
+/// What the arguments and the state of standard input say to read.
+///
+/// Split out from [`read_input`] because the interesting case is the one the test
+/// suite cannot stage: integration tests run with pipes on both ends, so standard
+/// input is never a terminal there.
+fn input_source(file: Option<&Path>, stdin_is_terminal: bool) -> Input<'_> {
+    match file {
+        // `-` is a request, not a default. Someone who types it at a terminal means
+        // it, and `mdmost --licenses | mdmost -` relies on it.
+        Some(path) if path.as_os_str() == "-" => Input::Stdin,
+        Some(path) => Input::File(path),
+        None if stdin_is_terminal => Input::Nothing,
+        None => Input::Stdin,
+    }
+}
+
 /// Reads the document and works out what to call it in the status bar.
+///
+/// `None` is standard input; [`input_source`] has already decided that it is the right
+/// place to read from.
 fn read_input(file: Option<&Path>) -> Result<(String, String), mdmost::Error> {
-    let from_stdin = match file {
-        None => true,
-        Some(path) => path.as_os_str() == "-",
-    };
-    if from_stdin {
+    if file.is_none() {
         let mut source = String::new();
         io::stdin()
             .read_to_string(&mut source)
@@ -362,4 +402,44 @@ fn read_input(file: Option<&Path>) -> Result<(String, String), mdmost::Error> {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
     Ok((source, title))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Input, input_source};
+    use std::path::Path;
+
+    #[test]
+    fn a_named_file_is_read_whatever_standard_input_is() {
+        let path = Path::new("notes.md");
+        for stdin_is_terminal in [true, false] {
+            assert_eq!(
+                input_source(Some(path), stdin_is_terminal),
+                Input::File(path)
+            );
+        }
+    }
+
+    #[test]
+    fn a_pipe_with_no_file_is_standard_input() {
+        assert_eq!(input_source(None, false), Input::Stdin);
+    }
+
+    #[test]
+    fn nothing_at_all_is_neither_a_document_nor_a_wait() {
+        // The bug this guards: bare `mdmost` at a prompt used to block in
+        // `read_to_string` on a terminal nobody was typing into, which is
+        // indistinguishable from a hang.
+        assert_eq!(input_source(None, true), Input::Nothing);
+    }
+
+    #[test]
+    fn a_dash_asks_for_standard_input_even_at_a_terminal() {
+        // `mdmost --licenses | mdmost -` is documented, and someone who types the dash
+        // has said what they want; only the *absence* of an argument is ambiguous.
+        let dash = Path::new("-");
+        for stdin_is_terminal in [true, false] {
+            assert_eq!(input_source(Some(dash), stdin_is_terminal), Input::Stdin);
+        }
+    }
 }

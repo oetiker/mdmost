@@ -12,6 +12,23 @@ class Mdmost < Formula
   version "0.1.1"
   license "MIT"
 
+  # Bottles exist for one reason: without one, Homebrew treats this formula as a source
+  # build and refuses to install on a Mac whose Command Line Tools are older than its
+  # macOS, even though nothing here is compiled. The block is rewritten by
+  # .github/workflows/release.yml once a release's bottles exist, and the marker
+  # comments are the range that rewrite replaces — do not remove them. Empty means no
+  # bottle is published yet, which costs nothing but that check.
+  #
+  # One bottle per architecture is enough: on macOS, Homebrew falls back to a bottle
+  # built for an *older* macOS of the same architecture (find_older_compatible_tag in
+  # extend/os/mac/utils/bottles.rb), so these keep working on later releases. That
+  # fallback only reaches upward, which is why the bottles are built on the oldest
+  # runner image available for each architecture.
+  # BOTTLE-START
+  bottle do
+  end
+  # BOTTLE-END
+
   on_macos do
     on_arm do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-aarch64-apple-darwin.tar.gz"
