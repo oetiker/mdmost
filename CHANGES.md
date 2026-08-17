@@ -8,6 +8,10 @@
 
 ### Fixed
 
+- `mdmost` with no arguments at a terminal prints its help and exits instead of hanging.
+  It read standard input whenever no file was named, so bare `mdmost` sat waiting on a
+  terminal nobody was typing into, which is indistinguishable from a hang. `mdmost -`
+  still reads standard input on purpose, and `cat x.md | mdmost` is unchanged.
 - The release no longer tags a commit whose `Cargo.toml` and `Cargo.lock` disagree
   about the version, which is what stopped `v0.1.1` from reaching crates.io. The
   version bump refreshed the lock with `cargo update --offline`, but that job never

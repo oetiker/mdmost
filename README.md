@@ -61,7 +61,7 @@ than on Unix.
 
 ```sh
 mdmost README.md              # open a document
-mdmost                        # read standard input
+mdmost -                      # read standard input
 cat notes.md | mdmost         # same, keyboard still works
 export PAGER=mdmost           # use it as your pager
 mdmost --mouse README.md      # wheel, drag-to-copy, clickable links
@@ -72,7 +72,8 @@ Two rules make the pipe cases work. When the input is a pipe, the keyboard is re
 `/dev/tty`, so `cat x.md | mdmost` stays interactive. When *stdout* is not a terminal,
 `--render-once` is implied, so `mdmost x.md | cat` produces plain text instead of escape
 sequences. `mdmost --render-once --width 80 doc.md` is therefore usable for scripting and
-snapshotting.
+snapshotting. Bare `mdmost` at a prompt has no document coming, so it prints its help
+instead of waiting on a terminal nobody is typing into.
 
 Every flag is in the
 [manual](https://github.com/oetiker/mdmost/blob/main/docs/manual.md#options), or in
