@@ -8,6 +8,16 @@
 
 ### Fixed
 
+- The release no longer tags a commit whose `Cargo.toml` and `Cargo.lock` disagree
+  about the version, which is what stopped `v0.1.1` from reaching crates.io. The
+  version bump refreshed the lock with `cargo update --offline`, but that job never
+  fetches the registry, so the resolve failed on the first dependency it looked up —
+  and a trailing `|| true` swallowed it. `cargo publish` then re-resolved, rewrote
+  `Cargo.lock` itself, and refused to publish a dirty tree. The lock update now runs
+  online, is not allowed to fail quietly, and is checked before the commit is made;
+  `cargo publish --locked` names the lock if it is ever stale again. `Cargo.lock` is
+  brought up to `0.1.1` here, so the tree is consistent again.
+
 ## 0.1.1 - 2026-08-17
 
 ### New

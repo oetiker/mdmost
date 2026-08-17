@@ -57,10 +57,30 @@ jobs:
 
       - name: Update Cargo.toml version
         run: |
-          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.version }}"/' Cargo.toml
-          # Keep Cargo.lock's own record of the version in step, so the release commit
-          # is not immediately dirty for anyone who builds it.
-          cargo update --workspace --offline || cargo update -p mdmost --offline || true
+          VERSION="${{ steps.version.outputs.version }}"
+          sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+
+          # Cargo.lock records this package's own version too, so it has to move with
+          # Cargo.toml. If it does not, the release commit is internally inconsistent:
+          # dirty the moment anyone builds it, and fatal at `cargo publish`, which
+          # re-resolves, rewrites Cargo.lock and then refuses to publish a dirty tree.
+          #
+          # Not `--offline`. This job checks out and edits Cargo.toml without ever
+          # fetching the registry, so an offline resolve cannot find a single
+          # dependency and dies with "no matching package named `anyhow` found".
+          # `--workspace` keeps it to the workspace's own entry -- no dependency is
+          # touched, which is what makes running it here safe.
+          #
+          # And no `|| true`. Swallowing the failure is what turned a broken step into
+          # a broken release: v0.1.1 was tagged with Cargo.toml at 0.1.1 and
+          # Cargo.lock still at 0.1.0, and the publish failed 6 minutes later.
+          cargo update --workspace
+
+          # Fail here rather than at the end of the run if the lock did not take.
+          if ! grep -A1 '^name = "mdmost"$' Cargo.lock | grep -qx "version = \"${VERSION}\""; then
+            echo "::error::Cargo.lock does not record version ${VERSION}"
+            exit 1
+          fi
 
       - name: Update CHANGES.md
         run: |
@@ -247,7 +267,15 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Publish
-        run: cargo publish --token "${{ secrets.CRATES_IO_TOKEN }}"
+        # `--locked` publishes exactly what the tag locked, and turns a stale
+        # Cargo.lock into an error that names the lock rather than into the puzzling
+        # "working directory contains changes that were not yet committed" that comes
+        # from cargo silently rewriting it first.
+        #
+        # The token goes through the environment because `--token` is deprecated.
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish --locked
 
   homebrew:
     name: Update Homebrew formula
