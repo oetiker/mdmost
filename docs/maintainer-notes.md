@@ -154,6 +154,31 @@ What is deliberately not automated, and why, is in
 `docs/superpowers/specs/2026-08-09-publishing-design.md` §1 — there is no apt/yum
 repository, no Pages site, no container image and no macOS notarisation.
 
+## Why the defaults are what they are
+
+The manual states these defaults without arguing for them, because a man page is a
+reference. The arguments are here, so that a later change is a decision rather than an
+accident:
+
+- **The prose cap is 72 columns.** A line that runs the full width of a wide terminal is
+  hard to come back from: the eye loses the start of the next one. Seventy-two is inside
+  the readable band rather than at the top of it, which is why the cap still bites on an
+  80-column terminal.
+- **`title_banner` is off.** FIGlet art in place of someone else's title is a decoration,
+  and a default is the wrong place to hold that opinion.
+- **Icon detection breaks the tie towards plain.** Guessing wrong towards plain costs a
+  little elegance; guessing wrong towards icons fills the screen with replacement boxes.
+  See also `render::glyph` and the note on `unicode-width` above.
+- **List bullets and task boxes are ASCII.** Lists turn up in nearly every document, so
+  their markers are the glyphs that can least afford to be invisible, and most of them
+  are the literal Markdown the author typed.
+- **`pie` is drawn as sorted bars.** A circle in character cells reads badly.
+- **`[copy]` buttons appear only when the mouse was captured.** A control nobody can
+  press is worse than none.
+- **Colours never come from the syntax definitions.** Each scope maps to a semantic slot
+  and the slot is filled from the active theme, so code sits inside the palette instead
+  of fighting it.
+
 ## Regenerating the man page
 
 `docs/manual.md` is the source. `man/mdmost.1` is generated from it and **is not in
