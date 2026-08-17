@@ -1,0 +1,21 @@
+# Declares that mdmost can open Markdown, so a file manager offers it. It does not
+# claim the association: choosing the default is the user's business, with
+# `xdg-mime default mdmost.desktop text/markdown`.
+#
+# text/x-markdown needs no line of its own -- shared-mime-info declares it an alias
+# of text/markdown, so it resolves through it.
+#
+# Terminal=true is the weak part of this route. mdmost needs a terminal, so the
+# desktop has to find a terminal emulator to put it in, and which one it settles on
+# -- or whether it settles on one at all -- has changed more than once. A
+# double-click that appears to do nothing is this; the terminal fragments beside this
+# file are the more dependable answer.
+
+[Desktop Entry]
+Type=Application
+Name=mdmost
+Comment=Read a Markdown document in the terminal
+Exec=mdmost %f
+Terminal=true
+MimeType=text/markdown;
+Categories=Utility;TextEditor;ConsoleOnly;

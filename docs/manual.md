@@ -3,7 +3,7 @@ title: MDMOST
 section: 1
 header: mdmost manual
 footer: mdmost
-date: 2026-08-13
+date: 2026-08-17
 ---
 
 # NAME
@@ -577,6 +577,176 @@ Plain and icon glyphs occupy **the same display width**, so nothing shifts and
 nothing reflows either way --- the difference is what the markers look like,
 never where anything sits, and no feature is lost. To decide for yourself rather
 than let it detect, see **CONFIGURATION**.
+
+# DEFAULT MARKDOWN VIEWER
+
+Two unrelated mechanisms can hand a Markdown file to **mdmost**. Which one you
+want depends on where you click.
+
+- **The desktop's file association** — What a file manager consults when you
+  double-click *notes.md*. It is a registry belonging to the operating system, and
+  on Linux it is an open standard that any program may register with.
+
+- **The terminal's own link handling** — What runs when you click a `file://` link
+  in terminal output. The terminal settles this itself, before the operating system
+  is ever consulted, so it is configured once per terminal and behaves the same on
+  Linux and on macOS.
+
+On macOS only the second is open to **mdmost**. Launch Services binds a file type
+to an *application bundle*, and a program that draws in a terminal has no bundle to
+register. That is why the macOS instructions below are per terminal rather than
+system-wide, and it is not a gap that a package can close.
+
+Neither mechanism is how you make **mdmost** the pager that other command-line
+programs reach for; for that see `PAGER` under **ENVIRONMENT**.
+
+## The desktop file association on Linux
+
+Markdown's registered media type is `text/markdown`. Describe **mdmost** to the
+desktop in *~/.local/share/applications/mdmost.desktop*:
+
+```ini
+[Desktop Entry]
+Type=Application
+Name=mdmost
+Comment=Read a Markdown document in the terminal
+Exec=mdmost %f
+Terminal=true
+MimeType=text/markdown;
+Categories=Utility;TextEditor;ConsoleOnly;
+```
+
+Then refresh the lookup cache and claim the type:
+
+```sh
+update-desktop-database ~/.local/share/applications
+xdg-mime default mdmost.desktop text/markdown
+```
+
+`xdg-mime query default text/markdown` now answers `mdmost.desktop`.
+
+Three things about that file are worth knowing:
+
+- **`Terminal=true` is the weak part** — **mdmost** needs a terminal, so the desktop
+  has to find a terminal emulator to put it in. Which one it settles on, and whether
+  it manages to settle on one at all, has changed more than once. A double-click
+  that appears to do nothing is this, and the per-terminal setup below is the more
+  dependable answer.
+
+- **`text/x-markdown` needs no line of its own** — The shared-mime-info database
+  declares it an alias of `text/markdown`, so it resolves through it.
+
+- **`Exec` is resolved on `PATH`** — A bare `mdmost` is right here, and it is what
+  a packaged copy of this file has to say.
+
+The `.deb` and the `.rpm` install that entry to */usr/share/applications* already, so
+on those there is nothing to write: **mdmost** is offered for a Markdown file to every
+user on the machine, and only the `xdg-mime` line above is left to you. Write the file
+yourself when you installed from Homebrew or the tarball, or when you want it for one
+account rather than all of them.
+
+What no package does, and none should, is decide which application wins. Declaring
+that **mdmost** *can* open Markdown is a package's business; setting the default is
+the user's. The freedesktop specification reserves a system-wide *mimeapps.list* for
+the desktop environment, so a package that shipped one would be taking the
+association away from every editor on the machine.
+
+## Clicking a file:// link in the terminal
+
+A terminal turns `file:///path/to/notes.md` in its output into a link and hands it
+to the operating system's opener when clicked. The terminals below can be told to
+run something else instead, which keeps the whole business inside the terminal:
+nothing to register, and the same configuration on both platforms.
+
+Two points apply to all of them:
+
+- **Name mdmost by absolute path** — These terminals execute the program directly
+  rather than through a shell, so it is looked up on the terminal's own `PATH`, and a
+  terminal launched from the macOS Dock inherits a bare `PATH` with no Homebrew
+  prefix in it. Use the output of `command -v mdmost`.
+
+- **A link stops at whitespace** — The usual link patterns match runs of non-space
+  characters, so a path holding a literal space is only recognised as far as the
+  space. Percent-encode it as `%20`.
+
+### WezTerm
+
+WezTerm emits an `open-uri` event before it hands a link to the operating system,
+and a handler returning `false` suppresses that hand-off. In
+*~/.config/wezterm/wezterm.lua*:
+
+```lua
+local wezterm = require 'wezterm'
+
+local MDMOST = '/opt/homebrew/bin/mdmost'
+local MARKDOWN = {
+  md = true, markdown = true, mkd = true, mdown = true,
+}
+
+wezterm.on('open-uri', function(window, pane, uri)
+  -- Split host from path, then drop any query or fragment. A
+  -- '#' that belongs to the filename arrives percent-encoded,
+  -- so a literal one here is a delimiter.
+  local host, path = uri:match '^file://([^/]*)(/[^?#]*)'
+  if not path or (host ~= '' and host ~= 'localhost') then
+    return
+  end
+  path = path:gsub('%%(%x%x)', function(hex)
+    return string.char(tonumber(hex, 16))
+  end)
+  local ext = path:match '%.(%a+)$'
+  if not ext or not MARKDOWN[ext:lower()] then
+    return
+  end
+  local dir = path:match '^(.*)/[^/]*$'
+  if dir == nil or dir == '' then
+    dir = '/'
+  end
+  window:perform_action(
+    wezterm.action.SpawnCommandInNewWindow {
+      args = { MDMOST, path },
+      cwd = dir,
+    },
+    pane
+  )
+  return false
+end)
+```
+
+Returning nothing for everything else is what keeps `https` going to the browser
+and a remote host's `file://` out of a pager that has no such file to open. Do not
+reach for `wezterm.glob` to locate the binary: it is an async function, and calling
+it from a required module raises *attempt to yield across a C-call boundary*, which
+looks exactly like the binary not being installed.
+
+### Kitty
+
+Kitty reads *~/.config/kitty/open-actions.conf*, at that same path on Linux and on
+macOS. A stanza is match lines followed by action lines:
+
+```
+protocol file
+ext md,markdown,mkd,mdown
+action launch --type=os-window /opt/homebrew/bin/mdmost ${FILE_PATH}
+```
+
+`${FILE_PATH}` arrives decoded and unquoted, so there is nothing left to unescape.
+Add `--title ${FILE}` to name the window after the document, and drop
+`--type=os-window` for a new tab in the window you clicked in instead.
+
+### iTerm2
+
+iTerm2 has no per-scheme hook. What it has is Semantic History, under **Settings
+-> Profiles -> Advanced**: set it to **Run command...**, where `\1` stands for the
+path. Two things make it the coarser instrument. It fires on a Cmd-click over a
+filename rather than over a `file://` link, and it fires for every file rather than
+for Markdown alone --- so the command has to be a small script of your own that
+looks at the extension and hands anything else to an editor.
+
+### Terminal.app
+
+There is nothing to configure. Terminal.app passes every link it recognises to
+Launch Services and offers no way to intervene.
 
 # ENVIRONMENT
 

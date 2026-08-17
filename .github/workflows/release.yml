@@ -157,6 +157,9 @@ jobs:
           cp "$BINARY" staging/mdmost/
           cp man/mdmost.1 staging/mdmost/man/
           cp README.md LICENSE staging/mdmost/
+          # The Homebrew formula installs integrations/ out of this tarball, so it has
+          # to be in here; `brew install` never sees the repository.
+          cp -R integrations staging/mdmost/
           tar -czvf "dist/${ARCHIVE}" -C staging mdmost
         shell: bash
 
