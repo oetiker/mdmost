@@ -324,3 +324,168 @@ jobs:
           git add Formula/mdmost.rb
           git commit -m "Homebrew formula for ${{ needs.version.outputs.tag }}"
           git push origin main
+
+  # Nothing here is compiled, but a formula with no bottle is a *source build* as far as
+  # Homebrew is concerned, and a source build refuses to run on a Mac whose Command Line
+  # Tools are older than its macOS. Bottling is how that check is skipped.
+  #
+  # This runs after `homebrew` on purpose: it installs the formula from the tap, so the
+  # version and the sha256 lines that job pushed have to be on `main` first.
+  bottles:
+    name: Bottle on ${{ matrix.os }}
+    needs: [version, homebrew]
+    runs-on: ${{ matrix.os }}
+    # Only the leg that is expected to rot is allowed to fail quietly. A missing Intel
+    # bottle is a slow install for Intel Macs; a broken arm64 bottle is a real defect and
+    # fails the release.
+    continue-on-error: ${{ matrix.optional || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest image per architecture, because Homebrew's fallback lets a bottle
+          # serve *newer* macOS and never older. macos-13 is the last Intel image there
+          # is; when GitHub retires it, this leg starts failing and Intel Macs go back to
+          # the source path, which is why it is the optional one.
+          - os: macos-14
+          - os: macos-13
+            optional: true
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+    steps:
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Tap and trust
+        # Homebrew 6.0 stopped loading formulae from third-party taps until they are
+        # trusted. `brew trust` does not exist before that, and the `||` keeps this
+        # working on a runner image that is still on Homebrew 5.
+        run: |
+          brew tap oetiker/mdmost https://github.com/oetiker/mdmost
+          brew trust --formula oetiker/mdmost/mdmost || true
+
+      - name: Build the bottle
+        # `--build-bottle` also downloads and checksums the release tarball, so this is
+        # an end-to-end test of the artifacts `create-release` published.
+        run: |
+          brew install --build-bottle oetiker/mdmost/mdmost
+          brew bottle --json --no-rebuild \
+            --root-url="https://github.com/oetiker/mdmost/releases/download/${{ needs.version.outputs.tag }}" \
+            oetiker/mdmost/mdmost
+          ls -la ./*.bottle.*
+
+      - name: Upload bottle
+        uses: actions/upload-artifact@v7
+        with:
+          name: bottle-${{ matrix.os }}
+          path: |
+            ./*.bottle.tar.gz
+            ./*.bottle.json
+
+  publish-bottles:
+    name: Publish bottles
+    needs: [version, bottles]
+    # A skipped or failed `bottles` leg would otherwise skip this job too, and one
+    # architecture is worth publishing on its own. The steps below handle finding no
+    # bottles at all.
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Download bottles
+        uses: actions/download-artifact@v8
+        with:
+          path: bottles
+          pattern: bottle-*
+          merge-multiple: true
+
+      - name: Upload bottles to the release
+        # `brew bottle` writes `name--version.tag.bottle.tar.gz`, with two dashes, which
+        # is the name GitHub Packages wants. A plain `root_url` like ours is fetched as
+        # `name-version.tag.bottle.tar.gz`, with one — see `Bottle::Filename#url_encode`
+        # against `#github_packages` in Homebrew. The json carries both names, so the
+        # rename is read from it rather than guessed at.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          jsons=(bottles/*.bottle.json)
+          if [ ${#jsons[@]} -eq 0 ]; then
+            echo "::warning::no bottles were built; the formula keeps an empty bottle block"
+            exit 0
+          fi
+          for json in "${jsons[@]}"; do
+            # One tag per runner in practice, but read them all rather than assume it.
+            jq -r '.[].bottle.tags[] | "\(.local_filename)\t\(.filename)"' "$json" \
+            | while IFS=$'\t' read -r local_name upload_name; do
+                mv "bottles/${local_name}" "bottles/${upload_name}"
+                echo "uploading ${upload_name}"
+                gh release upload "${{ needs.version.outputs.tag }}" \
+                  "bottles/${upload_name}" --clobber
+              done
+          done
+
+      - name: Rewrite the bottle block
+        # Generated rather than patched line by line: which architectures produced a
+        # bottle is not known ahead of time, and a `sha256` line for a bottle that was
+        # never uploaded would send Homebrew after a file that does not exist.
+        run: |
+          shopt -s nullglob
+          jsons=(bottles/*.bottle.json)
+          # Not `[ ... ] && exit 0`: the steps run under `bash -e`, where a false test as
+          # the head of an AND-list fails the step.
+          if [ ${#jsons[@]} -eq 0 ]; then
+            echo "no bottles to write"
+            exit 0
+          fi
+          {
+            echo "  # BOTTLE-START"
+            echo "  bottle do"
+            echo "    root_url \"https://github.com/oetiker/mdmost/releases/download/${{ needs.version.outputs.tag }}\""
+            for json in "${jsons[@]}"; do
+              # `cellar` sits on the bottle, and `brew bottle` copies it onto each tag;
+              # read the tag's own value first and fall back to the bottle's.
+              jq -r '.[].bottle as $b | $b.tags | to_entries[]
+                     | "    sha256 cellar: :\(.value.cellar // $b.cellar), \(.key): \"\(.value.sha256)\""' "$json"
+            done
+            echo "  end"
+            echo "  # BOTTLE-END"
+          } > bottle-block.txt
+          cat bottle-block.txt
+          # The generated block carries its own markers, so it replaces the old range
+          # exactly where that range was. Substituting in place rather than deleting and
+          # re-inserting is what keeps this idempotent: every release rewrites the same
+          # lines instead of drifting the whitespace around them.
+          grep -q '# BOTTLE-START' Formula/mdmost.rb || {
+            echo "::error::the bottle markers are gone from Formula/mdmost.rb"
+            exit 1
+          }
+          awk '
+            /# BOTTLE-START/ {
+              while ((getline line < "bottle-block.txt") > 0) print line
+              inside = 1
+              next
+            }
+            /# BOTTLE-END/ { inside = 0; next }
+            !inside
+          ' Formula/mdmost.rb > Formula/mdmost.rb.new
+          mv Formula/mdmost.rb.new Formula/mdmost.rb
+          cat Formula/mdmost.rb
+
+      - name: Commit
+        run: |
+          if git diff --quiet Formula/mdmost.rb; then
+            echo "no bottle changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/mdmost.rb
+          git commit -m "Homebrew bottles for ${{ needs.version.outputs.tag }}"
+          git push origin main
