@@ -114,11 +114,26 @@ is a pure function of the document, width, theme and options, so a resize \
 reflows everything. A single static binary."""
 section = "utils"
 priority = "optional"
+# The desktop entry is installed for real, not as an example: this package is a
+# system-wide install, so every user on the machine should be offered mdmost for a
+# Markdown file. It only declares the capability -- no mimeapps.list is shipped, so
+# the default stays each user's own choice. desktop-file-utils carries a dpkg trigger
+# on /usr/share/applications, so update-desktop-database runs without a maintainer
+# script of ours.
+#
+# The terminal fragments cannot be installed the same way. WezTerm and kitty each
+# read one file owned by the user, and neither has a drop-in directory, so anywhere
+# a package put them would be somewhere nothing reads. They go in as examples, at the
+# path Debian Policy 12.6 names for them.
 assets = [
     ["target/release/mdmost", "usr/bin/", "755"],
     ["man/mdmost.1", "usr/share/man/man1/", "644"],
+    ["integrations/xdg/mdmost.desktop", "usr/share/applications/", "644"],
     ["README.md", "usr/share/doc/mdmost/README.md", "644"],
     ["LICENSE", "usr/share/doc/mdmost/LICENSE", "644"],
+    ["integrations/README.md", "usr/share/doc/mdmost/examples/README.md", "644"],
+    ["integrations/wezterm/md-open.lua", "usr/share/doc/mdmost/examples/wezterm/", "644"],
+    ["integrations/kitty/open-actions.conf", "usr/share/doc/mdmost/examples/kitty/", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -130,6 +145,13 @@ auto-req = "no"
 assets = [
     { source = "target/release/mdmost", dest = "/usr/bin/mdmost", mode = "755" },
     { source = "man/mdmost.1", dest = "/usr/share/man/man1/mdmost.1", mode = "644", doc = true },
+    # Installed for real rather than as an example, and not doc: see the note above
+    # the [package.metadata.deb] assets. desktop-file-utils carries an RPM file
+    # trigger on this directory, so no scriptlet of ours is needed either.
+    { source = "integrations/xdg/mdmost.desktop", dest = "/usr/share/applications/mdmost.desktop", mode = "644" },
     { source = "README.md", dest = "/usr/share/doc/mdmost/README.md", mode = "644", doc = true },
     { source = "LICENSE", dest = "/usr/share/doc/mdmost/LICENSE", mode = "644", doc = true },
+    { source = "integrations/README.md", dest = "/usr/share/doc/mdmost/examples/README.md", mode = "644", doc = true },
+    { source = "integrations/wezterm/md-open.lua", dest = "/usr/share/doc/mdmost/examples/wezterm/md-open.lua", mode = "644", doc = true },
+    { source = "integrations/kitty/open-actions.conf", dest = "/usr/share/doc/mdmost/examples/kitty/open-actions.conf", mode = "644", doc = true },
 ]

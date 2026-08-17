@@ -41,6 +41,21 @@
 - Prebuilt binaries for Linux (static musl, x86_64 and aarch64), macOS (Intel and
   Apple silicon) and Windows, with `.deb` and `.rpm` packages, a Homebrew tap in this
   repository, and publication to crates.io.
+- Configuration fragments in `integrations/` that make **mdmost** the thing a click
+  opens a Markdown file with: a WezTerm Lua module, a kitty `open-actions.conf`
+  stanza, and an XDG desktop entry. The terminal fragments hook the terminal's own
+  link handling rather than the operating system's file association, so they need
+  nothing registered and work the same on Linux and macOS — which is the only route
+  open on macOS, where Launch Services binds a file type to an application bundle
+  and a terminal program has none. The `.deb` and the `.rpm` install the desktop
+  entry to `/usr/share/applications`, so a system-wide install offers **mdmost** for a
+  Markdown file to every user on the machine — declaring what it can open, while
+  leaving which application wins to `xdg-mime`. The terminal fragments cannot be
+  installed that way, because neither WezTerm nor kitty has a drop-in directory and
+  each reads one file owned by the user, so those ship as examples in
+  `/usr/share/doc/mdmost/examples/`. Homebrew keeps all three under `pkgshare`: its
+  prefix is not on a desktop session's `XDG_DATA_DIRS`, so a desktop entry installed
+  there would never be found.
 
 ### Changed
 
@@ -48,7 +63,10 @@
   source for every key, option and config field; `man/mdmost.1` is generated from
   it by `make man` and is no longer kept in git; the README is a 30-second pitch
   that links to the rest. A new terminal-setup section says which Unicode blocks
-  your font has to cover, and a test keeps that list matching the renderer.
+  your font has to cover, and a test keeps that list matching the renderer. A
+  **DEFAULT MARKDOWN VIEWER** section covers the two separate mechanisms that can
+  hand a file to **mdmost** — the desktop's file association and the terminal's own
+  link handling — with the configuration for each.
 - The licence file is named `LICENSE` rather than `LICENSE-MIT`, which is the name
   forges, packagers and licence scanners look for. Both packages now install it to
   `/usr/share/doc/mdmost/LICENSE`.

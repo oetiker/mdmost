@@ -37,6 +37,18 @@ class Mdmost < Formula
   def install
     bin.install "mdmost"
     man1.install "man/mdmost.1"
+    # Terminal configuration fragments, as examples. Nothing loads them from here:
+    # WezTerm and kitty each read one file owned by the user, so these are copied by
+    # hand. See integrations/README.md, and mdmost(1) DEFAULT MARKDOWN VIEWER.
+    pkgshare.install "integrations"
+  end
+
+  def caveats
+    <<~EOS
+      To open Markdown files with mdmost by clicking a file:// link in your
+      terminal, copy the fragment for it out of:
+        #{opt_pkgshare}/integrations
+    EOS
   end
 
   test do
