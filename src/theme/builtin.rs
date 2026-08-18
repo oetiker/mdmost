@@ -134,11 +134,24 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
         heading_number: muted,
         text: TextStyles {
             body: base,
-            emphasis: base.italic(),
-            strong: base.bold(),
-            strikethrough: muted.strikethrough(),
-            link: base.fg(p.blue).underline(),
-            link_url: muted,
+            // # Inline spans carry no background of their own
+            //
+            // Everything below `body` is applied *over* whatever the surrounding block
+            // established, so setting a background here does not paint the page: it
+            // repaints whatever the text is standing on. The one place that is visible
+            // is a table's zebra stripe, where `**bold**` used to punch a page-coloured
+            // hole in the band for exactly as many cells as the run was long. Inline
+            // code already knew this (see `code` below); the rule is now the whole
+            // family's, and `body` is the only member that carries a background at all.
+            //
+            // Weight and slant are also *only* weight and slant: `emphasis` and `strong`
+            // set no colour either, so bold link text stays the link hue instead of
+            // reverting to body ink halfway through the link.
+            emphasis: Style::new().italic(),
+            strong: Style::new().bold(),
+            strikethrough: Style::new().fg(p.muted).strikethrough(),
+            link: Style::new().fg(p.blue).underline(),
+            link_url: Style::new().fg(p.muted),
             // A hue and nothing else. Inline code used to be raised onto `surface` like
             // a code block, but a run of words is not a block: the raised strip made a
             // sentence lumpy, and `surface` is also what the table zebra stripes with,
@@ -149,9 +162,9 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             code: Style::new().fg(p.magenta),
             // A footnote reference is a link to elsewhere in the document, so it wears
             // the link hue rather than the heading accent.
-            footnote_ref: base.fg(p.blue),
-            image_alt: base.fg(p.cyan).italic(),
-            dim: muted,
+            footnote_ref: Style::new().fg(p.blue),
+            image_alt: Style::new().fg(p.cyan).italic(),
+            dim: Style::new().fg(p.muted),
         },
         block: BlockStyles {
             quote_bar: base.fg(p.accent),

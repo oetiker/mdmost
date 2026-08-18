@@ -207,22 +207,53 @@ fn inline_markup_carries_the_theme_styles() {
     let row = canvas.row_text(0);
     assert_eq!(row.trim(), "em st del code");
     let column = |needle: &str| row.find(needle).expect("substring present");
-    assert_eq!(style_at(&canvas, 0, column("em")), theme.text.emphasis);
-    assert_eq!(style_at(&canvas, 0, column("st")), theme.text.strong);
+    // Every inline style is applied *over* the style of whatever it sits in, so what
+    // lands on the page is the body style wearing the span's own marks — which is
+    // exactly how each of them is applied.
+    let over = |style| theme.text.body.patch(style);
+    assert_eq!(
+        style_at(&canvas, 0, column("em")),
+        over(theme.text.emphasis)
+    );
+    assert_eq!(style_at(&canvas, 0, column("st")), over(theme.text.strong));
     assert_eq!(
         style_at(&canvas, 0, column("del")),
-        theme.text.strikethrough
+        over(theme.text.strikethrough)
     );
-    // Inline code sets no background of its own, so what lands on the page is the body
-    // style wearing the code hue — which is exactly how it is applied.
-    assert_eq!(
-        style_at(&canvas, 0, column("code")),
-        theme.text.body.patch(theme.text.code)
-    );
-    assert_eq!(
-        theme.text.code.bg, None,
-        "inline code is a colour, not a box: it must not carry a background"
-    );
+    assert_eq!(style_at(&canvas, 0, column("code")), over(theme.text.code));
+}
+
+#[test]
+fn no_inline_style_but_the_body_carries_a_background() {
+    // An inline span is painted over ground somebody else laid: the page, a table cell,
+    // a striped table cell. A background here does not colour the page, it *replaces*
+    // whatever the text is standing on for the length of the run — which is how
+    // `**bold**` came to punch a page-coloured hole in a zebra stripe. Only `body`,
+    // which is that ground for ordinary prose, may carry one.
+    for theme in [Theme::default_dark(), Theme::default_light()] {
+        let text = &theme.text;
+        for (name, style) in [
+            ("emphasis", text.emphasis),
+            ("strong", text.strong),
+            ("strikethrough", text.strikethrough),
+            ("link", text.link),
+            ("link_url", text.link_url),
+            ("code", text.code),
+            ("footnote_ref", text.footnote_ref),
+            ("image_alt", text.image_alt),
+            ("dim", text.dim),
+        ] {
+            assert_eq!(
+                style.bg, None,
+                "{name} carries a background in the {} theme",
+                theme.name
+            );
+        }
+        assert!(
+            text.body.bg.is_some(),
+            "the body style is the ground, and must name it"
+        );
+    }
 }
 
 #[test]
@@ -2024,6 +2055,61 @@ fn inline_code_in_a_table_takes_the_ground_of_the_row_it_sits_on() {
             Some(want),
             "inline code on row {row} does not take that row's ground"
         );
+    }
+}
+
+/// A table whose second body row is striped and whose cells contain bold and linked
+/// text — the two inline styles that used to bring a background of their own.
+const STRIPED_MARKUP: &str = "\
+| part | does |
+| --- | --- |
+| **doc** | parse |
+| **render** | lay out |
+";
+
+#[test]
+fn bold_text_in_a_table_takes_the_ground_of_the_row_it_sits_on() {
+    // `**bold**` used to be defined as the body style plus weight, and the body style
+    // names the *page* background. Patched over a striped cell that background won, so
+    // every bold run inside a stripe was drawn on a page-coloured patch exactly as long
+    // as the run — a white box around the letters, on the one row where it shows.
+    let theme = Theme::default_dark();
+    let page = theme.palette.bg;
+    let stripe = theme
+        .table
+        .row_alt
+        .bg
+        .expect("the stripe is defined as a background");
+    let canvas = render(STRIPED_MARKUP, 40);
+
+    // The header is bold too, so the runs are found by their text rather than by their
+    // weight: `doc` sits on a plain body row and `render` on the striped one below it.
+    // The border glyphs are multi-byte, so the byte offset a search returns is counted
+    // back into columns before it can index cells.
+    let find = |needle: &str| {
+        (0..canvas.height())
+            .find_map(|row| {
+                let text = canvas.row_text(row);
+                let byte = text.find(needle)?;
+                Some((row, text[..byte].chars().count()))
+            })
+            .unwrap_or_else(|| panic!("{needle} is on the page"))
+    };
+    for (needle, want) in [("doc", page), ("render", stripe)] {
+        let (row, column) = find(needle);
+        for offset in 0..needle.len() {
+            let style = style_at(&canvas, row, column + offset);
+            assert!(
+                style.attrs.contains(Attributes::BOLD),
+                "{needle} is not drawn bold at {row}:{}",
+                column + offset
+            );
+            assert_eq!(
+                style.bg,
+                Some(want),
+                "{needle} does not take the ground of row {row}"
+            );
+        }
     }
 }
 

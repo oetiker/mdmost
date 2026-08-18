@@ -8,6 +8,13 @@
 
 ### Fixed
 
+- Bold, italic, struck-through and linked text inside a striped table row keeps the
+  stripe. Those styles were defined as body text plus a mark, and body text names the
+  page background, so each run repainted the band it stood on — a page-coloured box
+  around the letters for exactly as long as the run. Inline code already avoided this;
+  now no inline style carries a background at all. Bold link text also keeps the link
+  colour instead of reverting to body ink.
+
 ## 0.1.2 - 2026-08-18
 
 ### New

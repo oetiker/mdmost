@@ -82,9 +82,15 @@ impl Palette {
 }
 
 /// Styles for inline text spans.
+///
+/// Every field but [`body`](Self::body) is applied *over* the style of whatever the span
+/// sits in — a paragraph, a table cell, a striped table cell — so none of them names a
+/// background. One that did would repaint that ground for the length of the run rather
+/// than colouring the page; `render::tests` asserts the rule for both built-in themes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextStyles {
-    /// Ordinary body text.
+    /// Ordinary body text. The one member that carries a background: it *is* the ground
+    /// the others are laid over.
     pub body: Style,
     /// `*emphasis*`.
     pub emphasis: Style,
