@@ -466,8 +466,8 @@ coverage will do.
 
 - **Dingbats (U+2700-U+27BF)** — The marker on a degraded diagram's caption.
 
-- **Latin-1 Supplement (U+0080-U+00FF)** — Whatever HTML entities the document decodes
-  to.
+- **Latin-1 Supplement (U+0080-U+00FF)** — The scrollbar track, and whatever HTML
+  entities the document decodes to.
 
 - **Specials (U+FFF0-U+FFFF)** — The replacement character, drawn in place of one that
   cannot be represented.

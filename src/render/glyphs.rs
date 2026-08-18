@@ -265,20 +265,53 @@ const GENERIC_LANGUAGE_ICON: &str = "\u{f121}"; // nf-fa-code
 /// — a second hand-written list of the same code points — is exactly the kind of
 /// duplicate enumeration this project has repeatedly watched drift out of step with the
 /// copy that actually draws.
+///
+/// # Which code points may be added
+///
+/// **Only ones that mean the same thing in Nerd Fonts 3.0 and in the current release.**
+/// Adding a row costs twice, and both costs are paid by readers whose font is older
+/// than the row:
+///
+/// * [`Glyphs::nerd_glyphs`] is what font detection demands coverage of, so a code
+///   point missing from a reader's font turns *every* icon off, not just this one;
+/// * the Devicons range was **remapped after 3.0**, and detection asks fontconfig
+///   whether a font has a code point, never what it draws there. `U+E794` is
+///   `nf-dev-cmake` today and was `nf-dev-bintray` in 3.0.2; `U+E723` is
+///   `nf-dev-ansible` today and was `nf-dev-blackberry`.
+///   A font from that era passes the probe and then draws the wrong picture.
+///
+/// So the eligible set is the code points that are in both `glyphnames.json` releases
+/// under the same name — the Seti (`U+E600`–`U+E6FF`), classic Devicons
+/// (`U+E700`–`U+E7FF`) and Font Awesome ranges, which a test in this module pins.
+/// Material Design is stable too but is barred for a different reason, given with that
+/// test. Where a language exists in both a stable and a remapped range, the stable one
+/// is taken even when it is the less pretty drawing: `julia`, `kotlin`, `elixir`, `zig`,
+/// `powershell`, `ocaml`, `terraform`, `graphql`, `vue` and `svelte` are Seti's rather
+/// than the Devicons additions that carry those names now.
+///
+/// A language with no stable icon gets no row — `nix` and `cobol` are the ones asked
+/// for so far. It falls back to [`GENERIC_LANGUAGE_ICON`], which is what an unknown
+/// fence gets anyway, and that is a far smaller loss than a detection failure that
+/// silences the whole set, or than a font drawing a file-sharing service's logo over a
+/// `cmake` fence.
 const LANGUAGE_ICONS: &[(&[&str], &str)] = &[
     (&["rust", "rs"], "\u{e7a8}"),                 // nf-dev-rust
     (&["python", "py"], "\u{e73c}"),               // nf-dev-python
-    (&["javascript", "js", "jsx"], "\u{e74e}"),    // nf-dev-javascript
+    (&["javascript", "js", "jsx"], "\u{e74e}"),    // nf-dev-javascript_alt
     (&["typescript", "ts", "tsx"], "\u{e628}"),    // nf-seti-typescript
-    (&["go"], "\u{e724}"),                         // nf-dev-go
+    (&["go", "golang"], "\u{e724}"),               // nf-dev-go
     (&["java"], "\u{e738}"),                       // nf-dev-java
     (&["ruby", "rb"], "\u{e739}"),                 // nf-dev-ruby
     (&["php"], "\u{e73d}"),                        // nf-dev-php
+    (&["perl", "pl", "pm"], "\u{e769}"),           // nf-dev-perl
+    (&["lua"], "\u{e620}"),                        // nf-seti-lua
     (&["html"], "\u{e736}"),                       // nf-dev-html5
     (&["css", "scss", "sass"], "\u{e749}"),        // nf-dev-css3
     (&["markdown", "md"], "\u{e73e}"),             // nf-dev-markdown
     (&["json"], "\u{e60b}"),                       // nf-seti-json
+    (&["xml", "xsl", "svg"], "\u{e619}"),          // nf-seti-xml
     (&["yaml", "yml", "toml", "ini"], "\u{e615}"), // nf-seti-config
+    (&["csv", "tsv"], "\u{e64a}"),                 // nf-seti-csv
     (&["sql", "postgres", "mysql"], "\u{e706}"),   // nf-dev-database
     (&["docker", "dockerfile"], "\u{e7b0}"),       // nf-dev-docker
     (&["git", "diff", "patch"], "\u{e702}"),       // nf-dev-git
@@ -286,7 +319,37 @@ const LANGUAGE_ICONS: &[(&[&str], &str)] = &[
         &["sh", "bash", "zsh", "fish", "shell", "console"],
         "\u{e795}", // nf-dev-terminal
     ),
+    (
+        &["powershell", "pwsh", "ps1"],
+        "\u{e683}", // nf-seti-powershell
+    ),
     (&["c", "h", "cpp", "cc", "hpp", "cxx"], "\u{e61e}"), // nf-custom-c
+    (&["csharp", "cs", "c#"], "\u{e648}"),                // nf-seti-c_sharp
+    (&["fsharp", "fs", "f#"], "\u{e7a7}"),                // nf-dev-fsharp
+    (&["swift"], "\u{e755}"),                             // nf-dev-swift
+    (&["kotlin", "kt", "kts"], "\u{e634}"),               // nf-seti-kotlin
+    (&["scala", "sbt"], "\u{e737}"),                      // nf-dev-scala
+    (&["groovy", "gradle"], "\u{e775}"),                  // nf-dev-groovy
+    (&["dart"], "\u{e798}"),                              // nf-dev-dart
+    (&["zig"], "\u{e6a9}"),                               // nf-seti-zig
+    (&["nim"], "\u{e677}"),                               // nf-seti-nim
+    (&["crystal", "cr"], "\u{e62f}"),                     // nf-seti-crystal
+    (&["haskell", "hs"], "\u{e777}"),                     // nf-dev-haskell
+    (&["elixir", "ex", "exs"], "\u{e62d}"),               // nf-seti-elixir
+    (&["erlang", "erl"], "\u{e7b1}"),                     // nf-dev-erlang
+    (&["clojure", "clj", "cljs", "edn"], "\u{e768}"),     // nf-dev-clojure
+    (&["ocaml", "ml", "mli"], "\u{e67a}"),                // nf-seti-ocaml
+    (&["prolog"], "\u{e685}"),                            // nf-seti-prolog
+    (&["julia", "jl"], "\u{e624}"),                       // nf-seti-julia
+    (&["r"], "\u{e68a}"),                                 // nf-seti-r
+    (&["asm", "nasm", "s"], "\u{e6ab}"),                  // nf-custom-asm
+    (&["vim", "viml", "vimscript"], "\u{e7c5}"),          // nf-dev-vim
+    (&["make", "makefile", "cmake"], "\u{e673}"),         // nf-seti-makefile
+    (&["terraform", "tf", "hcl"], "\u{e69a}"),            // nf-seti-terraform
+    (&["graphql", "gql"], "\u{e662}"),                    // nf-seti-graphql
+    (&["vue"], "\u{e6a0}"),                               // nf-seti-vue
+    (&["svelte"], "\u{e697}"),                            // nf-seti-svelte
+    (&["tex", "latex", "bibtex"], "\u{e69b}"),            // nf-seti-tex
 ];
 
 impl Default for Glyphs {
@@ -311,32 +374,70 @@ mod tests {
     }
 
     /// Every code-fence icon the set can draw, including the generic fallback.
+    ///
+    /// Driven off [`LANGUAGE_ICONS`] itself rather than a written-out list of
+    /// languages, so a row added to the table is a row the width and coverage
+    /// assertions below cover on the same commit. The list used to be written out, and
+    /// half the table had grown past it.
     fn language_icons(set: Glyphs) -> Vec<&'static str> {
         let mut out = Vec::new();
-        for language in [
-            Some("rust"),
-            Some("python"),
-            Some("javascript"),
-            Some("typescript"),
-            Some("go"),
-            Some("java"),
-            Some("ruby"),
-            Some("php"),
-            Some("html"),
-            Some("css"),
-            Some("markdown"),
-            Some("json"),
-            Some("yaml"),
-            Some("sql"),
-            Some("docker"),
-            Some("git"),
-            Some("bash"),
-            Some("c"),
-            Some("nothing-in-particular"),
-        ] {
-            out.extend(set.language(language));
+        for (names, _) in LANGUAGE_ICONS {
+            for name in *names {
+                out.extend(set.language(Some(name)));
+            }
         }
+        out.extend(set.language(Some("nothing-in-particular")));
         out
+    }
+
+    /// The ranges a code-fence icon may be taken from; see [`LANGUAGE_ICONS`].
+    ///
+    /// Seti and the classic Devicons together fill `U+E600`–`U+E7FF`, and Font Awesome
+    /// fills `U+F000`–`U+F2FF`. What these have in common is that their assignments have
+    /// not moved since Nerd Fonts 3.0, so a reader whose font predates a row we added
+    /// still draws the picture the row names — or fails detection outright, which is
+    /// honest. Two ranges are deliberately outside the rule:
+    ///
+    /// * the Devicons *extension* above `U+E7FF`, remapped after 3.0. A font from that
+    ///   era has those code points, passes the probe, and draws something else entirely.
+    /// * Material Design, `U+F0000` and up. The patch draws that range at twice the
+    ///   advance of an ASCII character while `unicode-width` reports one, which is the
+    ///   discrepancy the task box was moved out of the renderer to escape (see
+    ///   [`Glyphs::NERD`]). The chrome may use it — it measures its own bar — but a
+    ///   language icon sits in a fence title the layout has already budgeted for.
+    const STABLE_RANGES: [std::ops::RangeInclusive<u32>; 2] = [0xe600..=0xe7ff, 0xf000..=0xf2ff];
+
+    #[test]
+    fn every_language_icon_comes_from_a_range_that_has_not_been_remapped() {
+        let icons = LANGUAGE_ICONS
+            .iter()
+            .map(|(names, icon)| (names[0], *icon))
+            .chain([("the generic fallback", GENERIC_LANGUAGE_ICON)]);
+        for (language, icon) in icons {
+            let point = u32::from(icon.chars().next().expect("an icon is a code point"));
+            assert!(
+                STABLE_RANGES.iter().any(|range| range.contains(&point)),
+                "the icon for {language} is U+{point:04X}, which is outside every range \
+                 whose assignments have been stable since Nerd Fonts 3.0"
+            );
+        }
+    }
+
+    #[test]
+    fn no_language_name_is_claimed_twice() {
+        // The lookup takes the first row that matches, so a name in two rows would draw
+        // whichever row happens to be higher up — silently, and differently after any
+        // reordering.
+        let mut seen: Vec<&str> = Vec::new();
+        for (names, _) in LANGUAGE_ICONS {
+            for name in *names {
+                assert!(
+                    !seen.contains(name),
+                    "{name} appears in two rows of the table"
+                );
+                seen.push(name);
+            }
+        }
     }
 
     #[test]

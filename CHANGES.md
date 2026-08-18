@@ -4,9 +4,28 @@
 
 ### New
 
+- Code fences carry a language icon for 50 languages instead of 18. Perl, Lua, Swift,
+  Kotlin, Scala, Haskell, Elixir, Erlang, Clojure, OCaml, Julia, R, Dart, Zig, Nim,
+  Crystal, Groovy, Prolog, C#, F#, PowerShell, assembly, Vim script, XML, CSV, TeX,
+  Make, Terraform, GraphQL, Vue and Svelte are now named, along with more spellings of
+  the languages that were already there. An unnamed language still gets the generic
+  code icon.
+
 ### Changed
 
+- The scrollbar track is a column of dots rather than an unbroken line. The thumb moves
+  in half cells, so its end lands mid-cell on every second scroll step; against a solid
+  rule the line alternately met the thumb and stood a half cell clear of it, and the
+  flicker at that join was more visible than the smoothness it came from.
+
 ### Fixed
+
+- Bold, italic, struck-through and linked text inside a striped table row keeps the
+  stripe. Those styles were defined as body text plus a mark, and body text names the
+  page background, so each run repainted the band it stood on — a page-coloured box
+  around the letters for exactly as long as the run. Inline code already avoided this;
+  now no inline style carries a background at all. Bold link text also keeps the link
+  colour instead of reverting to body ink.
 
 ## 0.1.2 - 2026-08-18
 
