@@ -4,6 +4,14 @@
 
 ### New
 
+### Changed
+
+### Fixed
+
+## 0.2.0 - 2026-08-18
+
+### New
+
 - Code fences carry a language icon for 50 languages instead of 18. Perl, Lua, Swift,
   Kotlin, Scala, Haskell, Elixir, Erlang, Clojure, OCaml, Julia, R, Dart, Zig, Nim,
   Crystal, Groovy, Prolog, C#, F#, PowerShell, assembly, Vim script, XML, CSV, TeX,
