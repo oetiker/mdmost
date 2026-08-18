@@ -27,6 +27,14 @@
   now no inline style carries a background at all. Bold link text also keeps the link
   colour instead of reverting to body ink.
 
+- The release workflow builds its Intel bottle on `macos-15-intel`. It asked for
+  `macos-13`, which GitHub retired in December 2025, and a retired image does not fail a
+  job — it leaves it queued for the 24 hours GitHub waits before cancelling it. The
+  bottle-publishing step waits on the whole matrix, so nothing was published at all:
+  v0.1.2 shipped with an empty bottle block and no bottles on the release, despite the
+  arm64 one having built successfully. Intel bottles now cover macOS 15 and later, which
+  is as far back as the last Intel runner image reaches.
+
 ## 0.1.2 - 2026-08-18
 
 ### New

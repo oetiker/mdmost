@@ -338,17 +338,33 @@ jobs:
     # Only the leg that is expected to rot is allowed to fail quietly. A missing Intel
     # bottle is a slow install for Intel Macs; a broken arm64 bottle is a real defect and
     # fails the release.
+    #
+    # `continue-on-error` covers a leg that *runs* and fails. It does nothing for a leg
+    # that never starts, and that is the failure these labels actually have: a retired
+    # image leaves the job **queued** with no runner for the 24 hours GitHub waits before
+    # cancelling it, `publish-bottles` never fans in, and the bottle the other leg built
+    # in half a minute is left in an artifact nobody collects. That is what happened to
+    # v0.1.2, which shipped with an empty bottle block. Nothing in the workflow can catch
+    # it — `timeout-minutes` bounds run time, not queue time — so the labels below have
+    # to be kept current by hand, and a release that sits in `queued` is the symptom.
     continue-on-error: ${{ matrix.optional || false }}
     strategy:
       fail-fast: false
       matrix:
         include:
           # The oldest image per architecture, because Homebrew's fallback lets a bottle
-          # serve *newer* macOS and never older. macos-13 is the last Intel image there
-          # is; when GitHub retires it, this leg starts failing and Intel Macs go back to
-          # the source path, which is why it is the optional one.
+          # serve *newer* macOS and never older.
+          #
+          # macos-14 is arm64 and is now deprecated; it still schedules, and moving up to
+          # macos-15 would narrow the bottle to Sequoia and later, so it stays until it
+          # stops working. macos-15-intel is the last x86_64 image GitHub will ever
+          # offer — a standard runner, not a paid larger one — and it goes away in August
+          # 2027 along with Intel support altogether. Being macOS 15, its bottle serves
+          # Sequoia and later only: an Intel Mac on Ventura or Sonoma gets the source
+          # path, and there is no older Intel runner left to change that. It is the
+          # optional leg for that reason.
           - os: macos-14
-          - os: macos-13
+          - os: macos-15-intel
             optional: true
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
