@@ -4,6 +4,13 @@
 
 ### New
 
+- Code fences carry a language icon for 50 languages instead of 18. Perl, Lua, Swift,
+  Kotlin, Scala, Haskell, Elixir, Erlang, Clojure, OCaml, Julia, R, Dart, Zig, Nim,
+  Crystal, Groovy, Prolog, C#, F#, PowerShell, assembly, Vim script, XML, CSV, TeX,
+  Make, Terraform, GraphQL, Vue and Svelte are now named, along with more spellings of
+  the languages that were already there. An unnamed language still gets the generic
+  code icon.
+
 ### Changed
 
 - The scrollbar track is a column of dots rather than an unbroken line. The thumb moves
