@@ -4,6 +4,14 @@
 
 ### New
 
+### Changed
+
+### Fixed
+
+## 0.1.2 - 2026-08-18
+
+### New
+
 - Releases now ship Homebrew bottles for macOS. Without one, Homebrew treats the
   formula as a source build even though nothing in it is compiled, and refuses to
   install on a Mac whose Command Line Tools are older than its macOS. One bottle per
