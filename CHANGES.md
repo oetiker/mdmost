@@ -6,6 +6,11 @@
 
 ### Changed
 
+- The scrollbar track is a column of dots rather than an unbroken line. The thumb moves
+  in half cells, so its end lands mid-cell on every second scroll step; against a solid
+  rule the line alternately met the thumb and stood a half cell clear of it, and the
+  flicker at that join was more visible than the smoothness it came from.
+
 ### Fixed
 
 - Bold, italic, struck-through and linked text inside a striped table row keeps the

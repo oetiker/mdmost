@@ -3257,6 +3257,53 @@ fn a_press_on_the_scrollbar_track_puts_the_thumb_under_the_pointer() {
 }
 
 #[test]
+fn the_scrollbar_track_is_broken_so_the_thumb_never_appears_to_touch_it() {
+    // Owner report: the thumb moves in half-cells, so its end lands mid-cell on every
+    // second step, and against an unbroken rule the line alternately met the thumb and
+    // stood clear of it. Dots have no join to break: whatever the thumb's parity, the
+    // cell above it looks the same as every other track cell.
+    //
+    // Asserted over the whole track and at both parities, because the defect was
+    // *between* two states rather than in either one.
+    let mut app = pager(&long_document(400));
+    let height = bar_height(&app);
+    let column = app.scrollbar_column();
+    let mut seen_half = false;
+    for row in 0..height {
+        app.scrollbar_press(height, row);
+        app.scrollbar_release();
+        let (start, length) = app.scrollbar_thumb(height);
+        seen_half |= start % 2 == 1 || length % 2 == 1;
+        let buffer = framed_buffer(&mut app, 80, height + 1);
+        for y in 0..height {
+            let symbol = buffer
+                .cell((column, y))
+                .expect("the gutter is inside the frame")
+                .symbol();
+            let filled = (start..start + length).contains(&(usize::from(y) * 2));
+            let lower = (start..start + length).contains(&(usize::from(y) * 2 + 1));
+            let want = match (filled, lower) {
+                (true, true) => "\u{2588}",
+                (true, false) => "\u{2580}",
+                (false, true) => "\u{2584}",
+                (false, false) => super::draw::TRACK,
+            };
+            assert_eq!(
+                symbol,
+                want,
+                "row {y} of the gutter with the thumb at {start}..{}",
+                start + length
+            );
+        }
+    }
+    assert!(
+        seen_half,
+        "the sample must put the thumb on a half-cell boundary at least once, \
+         or the case this is about is never reached"
+    );
+}
+
+#[test]
 fn the_scrollbar_reaches_both_extremes_exactly() {
     for (name, mut app) in scrollbar_pagers() {
         let height = bar_height(&app);
