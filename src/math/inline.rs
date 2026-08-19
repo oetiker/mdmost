@@ -81,13 +81,13 @@ fn write_events(events: &[Event<'_>], spacing: Spacing) -> Result<String, MathEr
                 let big = is_large_op(events, index);
                 // The base is written under the caller's spacing; the scripts are not,
                 // because a space in a script group makes §5.1's all-or-nothing rule
-                // decline it. A script always sits flush against its base -- `\sin^2 x`
-                // reads `sin²x`, not `sin ²x` -- so a trailing space the base would
-                // otherwise have earned (a function name normally gets one) is trimmed;
-                // `take_group`'s group branch already trims via `write_events`, but its
-                // single-event branch does not, so this covers both.
-                let base = take_group(events, &mut index, spacing)?;
-                out.push_str(base.trim_end());
+                // decline it. Written into the real `out`, not an isolated buffer --
+                // `take_base` needs the true accumulated context to get the base's own
+                // *leading* space right (`2\sin^2 x` needs the space before `sin` that
+                // separates it from `2`, same as plain `2\sin x` does) -- and always
+                // trims the *trailing* one, because a script sits flush against its
+                // base regardless of context: `\sin^2 x` reads `sin²x`, not `sin ²x`.
+                take_base(events, &mut index, &mut out, spacing)?;
                 match ty {
                     ScriptType::Subscript => {
                         let sub = take_group(events, &mut index, Spacing::Suppressed)?;
@@ -120,6 +120,42 @@ fn write_events(events: &[Event<'_>], spacing: Spacing) -> Result<String, MathEr
     // A formula ending in an operator or a function name would otherwise keep the
     // space written after it.
     Ok(out.trim_end().to_string())
+}
+
+/// Writes a script's base directly into `out`.
+///
+/// Unlike `take_group`, this does not build the base in an isolated buffer first. An
+/// isolated buffer always starts empty, so a single-token base's own head-of-run check
+/// (`spaced_word`'s `out.is_empty()`) would wrongly conclude it opens the formula even
+/// when it does not -- `2\sin^2 x` needs the leading space `2\sin x` gets, and an
+/// isolated buffer cannot see the `2` already written. Writing straight into the real
+/// `out` gives that check the true context. The trailing space a function name would
+/// otherwise earn is then trimmed unconditionally, because a script always sits flush
+/// against its base no matter what precedes it.
+fn take_base(
+    events: &[Event<'_>],
+    index: &mut usize,
+    out: &mut String,
+    spacing: Spacing,
+) -> Result<(), MathError> {
+    let Some(first) = events.get(*index) else {
+        return Err(MathError::NotInline("an unfinished script"));
+    };
+    if matches!(first, Event::Begin(_)) {
+        // A group is its own bracketed context (`{\sin x}^2`) -- consistent with every
+        // other group in this walk, its first token is head-of-run *within the group*,
+        // which `take_group` already gets right via its own fresh buffer.
+        let group = take_group(events, index, spacing)?;
+        out.push_str(group.trim_end());
+        return Ok(());
+    }
+    let start = out.len();
+    write_one(events, index, out, spacing)?;
+    // Trim only what this call appended -- never reach back before `start`.
+    while out.len() > start && out.ends_with(' ') {
+        out.pop();
+    }
+    Ok(())
 }
 
 /// Renders the next operand — a single event, or a balanced `Begin`..`End` group.

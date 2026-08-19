@@ -163,6 +163,22 @@ fn a_script_sits_flush_against_a_function_name_base() {
 }
 
 #[test]
+fn a_function_used_as_a_script_base_still_gets_its_own_leading_space() {
+    // `take_group`'s single-event branch used to build the base in a fresh, isolated
+    // buffer, so `spaced_word`'s "am I at the head of a run?" check always saw an
+    // empty buffer and always answered yes -- even when the base plainly was not at
+    // the head of the formula. That silently dropped the leading space whenever an
+    // `Ordinary`/`Number` token (which writes no space of its own) preceded the
+    // scripted function name. A preceding `BinaryOp`/`Relation` masked the bug because
+    // those already write their own trailing space, so `2 + \sin^2 x` was never wrong
+    // -- these four are the two working and the two broken shapes side by side.
+    assert_eq!(rendered(r"2\sin x"), "2 sin x");
+    assert_eq!(rendered(r"2\sin^2 x"), "2 sin²x");
+    assert_eq!(rendered(r"x\sin y"), "x sin y");
+    assert_eq!(rendered(r"x\sin^2 y"), "x sin²y");
+}
+
+#[test]
 fn a_nested_script_composes_without_panicking() {
     // The inner `y^2` is raised on its own (`y²`), but that result contains `²`, which
     // has no superscript form of its own -- so the outer raise declines and falls back
