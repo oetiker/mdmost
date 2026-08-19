@@ -179,6 +179,18 @@ fn a_function_used_as_a_script_base_still_gets_its_own_leading_space() {
 }
 
 #[test]
+fn a_group_used_as_a_script_base_still_gets_its_own_leading_space() {
+    // The same bug as above, in the sibling path: `take_group`'s group branch built a
+    // `{…}` base by recursing into its own isolated buffer, so a group's first token
+    // was just as blind to real context as a bare token was. `take_base` now writes a
+    // group base straight into `out` via `write_into`, since a group is a typographic
+    // bracket, not a spacing barrier -- its first token's leading space is earned (or
+    // not) by what precedes the *group*, not by the group's own emptiness.
+    assert_eq!(rendered(r"{\sin x}^2"), "sin x²");
+    assert_eq!(rendered(r"2{\sin x}^2"), "2 sin x²");
+}
+
+#[test]
 fn a_nested_script_composes_without_panicking() {
     // The inner `y^2` is raised on its own (`y²`), but that result contains `²`, which
     // has no superscript form of its own -- so the outer raise declines and falls back

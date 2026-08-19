@@ -58,7 +58,23 @@ enum Spacing {
 /// Writes an already-collected event stream.
 ///
 /// Split from [`render_inline`] so that later tasks can test the walk without going
-/// through the parser, and so the error path above stays one statement.
+/// through the parser, and so the error path above stays one statement. A thin wrapper
+/// over [`write_into`], which does the actual walking into a caller-supplied buffer;
+/// this just gives that walk its own buffer and trims the trailing space a formula
+/// ending in an operator or a function name would otherwise keep.
+fn write_events(events: &[Event<'_>], spacing: Spacing) -> Result<String, MathError> {
+    let mut out = String::new();
+    write_into(events, &mut out, spacing)?;
+    Ok(out.trim_end().to_string())
+}
+
+/// Writes an already-collected event stream into `out`, continuing whatever is already
+/// there rather than starting fresh.
+///
+/// This is what lets a group's *first* token see real context: `take_base`'s group
+/// branch calls this directly on the caller's accumulated `out`, so a function name
+/// that opens a `{…}` base still gets the leading space its position (not the group's)
+/// earns it -- see `take_base`'s doc comment.
 ///
 /// `pulldown-latex` emits `Event::Script { ty, .. }` followed by the base and then the
 /// script operand(s) as complete sub-sequences (confirmed against the parser's own unit
@@ -66,8 +82,7 @@ enum Spacing {
 /// `Script`, base `a`, subscript `2`, superscript `{1+3}` — base first, then subscript,
 /// then superscript, regardless of the order the source wrote them). So this walk takes
 /// groups rather than single events.
-fn write_events(events: &[Event<'_>], spacing: Spacing) -> Result<String, MathError> {
-    let mut out = String::new();
+fn write_into(events: &[Event<'_>], out: &mut String, spacing: Spacing) -> Result<(), MathError> {
     let mut index = 0usize;
     while index < events.len() {
         match &events[index] {
@@ -81,13 +96,13 @@ fn write_events(events: &[Event<'_>], spacing: Spacing) -> Result<String, MathEr
                 let big = is_large_op(events, index);
                 // The base is written under the caller's spacing; the scripts are not,
                 // because a space in a script group makes §5.1's all-or-nothing rule
-                // decline it. Written into the real `out`, not an isolated buffer --
-                // `take_base` needs the true accumulated context to get the base's own
-                // *leading* space right (`2\sin^2 x` needs the space before `sin` that
-                // separates it from `2`, same as plain `2\sin x` does) -- and always
-                // trims the *trailing* one, because a script sits flush against its
-                // base regardless of context: `\sin^2 x` reads `sin²x`, not `sin ²x`.
-                take_base(events, &mut index, &mut out, spacing)?;
+                // decline it. `take_base` writes it straight into `out` (not an
+                // isolated buffer) so its own leading space sees the true accumulated
+                // context (`2\sin^2 x` needs the space before `sin` that separates it
+                // from `2`, same as plain `2\sin x` does) and always trims the
+                // trailing one, because a script sits flush against its base
+                // regardless of context: `\sin^2 x` reads `sin²x`, not `sin ²x`.
+                take_base(events, &mut index, out, spacing)?;
                 match ty {
                     ScriptType::Subscript => {
                         let sub = take_group(events, &mut index, Spacing::Suppressed)?;
@@ -105,33 +120,53 @@ fn write_events(events: &[Event<'_>], spacing: Spacing) -> Result<String, MathEr
                     }
                 }
                 if big {
-                    after_large_op(&mut out, spacing);
+                    after_large_op(out, spacing);
                 }
             }
             _ => {
                 let big = is_large_op(events, index);
-                write_one(events, &mut index, &mut out, spacing)?;
+                write_one(events, &mut index, out, spacing)?;
                 if big {
-                    after_large_op(&mut out, spacing);
+                    after_large_op(out, spacing);
                 }
             }
         }
     }
-    // A formula ending in an operator or a function name would otherwise keep the
-    // space written after it.
-    Ok(out.trim_end().to_string())
+    Ok(())
+}
+
+/// Index of the `Event::End` matching the `Event::Begin` at `events[open]`.
+fn group_end(events: &[Event<'_>], open: usize) -> Result<usize, MathError> {
+    let mut depth = 1usize;
+    let mut cursor = open + 1;
+    while cursor < events.len() && depth > 0 {
+        match events[cursor] {
+            Event::Begin(_) => depth += 1,
+            Event::End => depth -= 1,
+            _ => {}
+        }
+        cursor += 1;
+    }
+    if depth > 0 {
+        return Err(MathError::NotInline("an unclosed group"));
+    }
+    Ok(cursor)
 }
 
 /// Writes a script's base directly into `out`.
 ///
 /// Unlike `take_group`, this does not build the base in an isolated buffer first. An
-/// isolated buffer always starts empty, so a single-token base's own head-of-run check
+/// isolated buffer always starts empty, so the base's own head-of-run check
 /// (`spaced_word`'s `out.is_empty()`) would wrongly conclude it opens the formula even
 /// when it does not -- `2\sin^2 x` needs the leading space `2\sin x` gets, and an
 /// isolated buffer cannot see the `2` already written. Writing straight into the real
-/// `out` gives that check the true context. The trailing space a function name would
-/// otherwise earn is then trimmed unconditionally, because a script always sits flush
-/// against its base no matter what precedes it.
+/// `out` gives that check the true context. This applies just as much to a `{…}` base
+/// as to a bare one: `2{\sin x}^2` needs that same leading space before `sin`, because
+/// a group is a typographic bracket, not a spacing barrier, so its first token is
+/// written via `write_into` on `out` itself rather than recursed into an isolated
+/// buffer. Either way, the trailing space a function name would otherwise earn is then
+/// trimmed unconditionally, because a script always sits flush against its base no
+/// matter what precedes it.
 fn take_base(
     events: &[Event<'_>],
     index: &mut usize,
@@ -141,16 +176,15 @@ fn take_base(
     let Some(first) = events.get(*index) else {
         return Err(MathError::NotInline("an unfinished script"));
     };
-    if matches!(first, Event::Begin(_)) {
-        // A group is its own bracketed context (`{\sin x}^2`) -- consistent with every
-        // other group in this walk, its first token is head-of-run *within the group*,
-        // which `take_group` already gets right via its own fresh buffer.
-        let group = take_group(events, index, spacing)?;
-        out.push_str(group.trim_end());
-        return Ok(());
-    }
     let start = out.len();
-    write_one(events, index, out, spacing)?;
+    if matches!(first, Event::Begin(_)) {
+        let group_start = *index + 1;
+        let cursor = group_end(events, *index)?;
+        write_into(&events[group_start..cursor - 1], out, spacing)?;
+        *index = cursor;
+    } else {
+        write_one(events, index, out, spacing)?;
+    }
     // Trim only what this call appended -- never reach back before `start`.
     while out.len() > start && out.ends_with(' ') {
         out.pop();
@@ -159,6 +193,11 @@ fn take_base(
 }
 
 /// Renders the next operand — a single event, or a balanced `Begin`..`End` group.
+///
+/// Always builds the result in its own isolated buffer, unlike `take_base`: this is
+/// used only for a script's own sub/superscript operand, which is about to be raised or
+/// lowered as self-contained text (§5.1), not spliced into the surrounding run, so it
+/// must not see -- or leak -- the caller's spacing context.
 fn take_group(
     events: &[Event<'_>],
     index: &mut usize,
@@ -173,19 +212,7 @@ fn take_group(
         return Ok(out);
     }
     let start = *index + 1;
-    let mut depth = 1usize;
-    let mut cursor = start;
-    while cursor < events.len() && depth > 0 {
-        match events[cursor] {
-            Event::Begin(_) => depth += 1,
-            Event::End => depth -= 1,
-            _ => {}
-        }
-        cursor += 1;
-    }
-    if depth > 0 {
-        return Err(MathError::NotInline("an unclosed group"));
-    }
+    let cursor = group_end(events, *index)?;
     let inner = write_events(&events[start..cursor - 1], spacing)?;
     *index = cursor;
     Ok(inner)
