@@ -222,12 +222,18 @@ fn group_end(events: &[Event<'_>], open: usize) -> Result<usize, MathError> {
 /// when it does not -- `2\sin^2 x` needs the leading space `2\sin x` gets, and an
 /// isolated buffer cannot see the `2` already written. Writing straight into the real
 /// `out` gives that check the true context. This applies just as much to a `{…}` base
-/// as to a bare one: `2{\sin x}^2` needs that same leading space before `sin`, because
-/// a group is a typographic bracket, not a spacing barrier, so its first token is
-/// written via `write_into` on `out` itself rather than recursed into an isolated
-/// buffer. Either way, the trailing space a function name would otherwise earn is then
-/// trimmed unconditionally, because a script always sits flush against its base no
-/// matter what precedes it.
+/// as to a bare one: `2{\sin x}^2` needs that same leading space before `sin`, so its
+/// first token is written via `write_into` on `out` itself rather than recursed into an
+/// isolated buffer. Either way, the trailing space a function name would otherwise earn
+/// is then trimmed unconditionally, because a script always sits flush against its base
+/// no matter what precedes it.
+///
+/// A group is a typographic bracket for spacing, as above, but *not* for grouping: a
+/// script applies to the whole base, not to whatever atom happened to be written last,
+/// so `2{ab}^2` must read `2(ab)²`, not `2ab²`. The `{…}` branch below restores that
+/// grouping after the fact, by bracketing what it just appended -- it cannot bracket
+/// first and write second, because the bracket characters themselves must not be part
+/// of what the head-of-run check or the trailing-space trim see.
 fn take_base(
     events: &[Event<'_>],
     index: &mut usize,
@@ -248,6 +254,17 @@ fn take_base(
         let cursor = group_end(events, *index)?;
         write_into(&events[group_start..cursor - 1], out, spacing)?;
         *index = cursor;
+        // A script applies to the whole base group, not just its last atom -- a
+        // group is a typographic bracket for grouping as much as it is for spacing
+        // (see this function's doc comment on the latter), so `2{ab}^2` must read
+        // `2(ab)²`, the same visual grouping `bracketed()` already gives a fraction
+        // or radical operand. `write_into` wrote straight into `out`, so any leading
+        // space it added for head-of-run spacing sits before `start`'s tail and must
+        // stay outside the parentheses.
+        let leading_space = out[start..].starts_with(' ');
+        let body_start = start + usize::from(leading_space);
+        let body = out.split_off(body_start);
+        out.push_str(&bracketed(&body));
     } else {
         write_one(events, index, out, spacing)?;
     }
