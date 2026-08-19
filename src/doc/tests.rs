@@ -743,3 +743,275 @@ fn an_inline_formula_alone_counts_as_markup_for_auto() {
         "a lone inline formula must not fall back to the plain-text path"
     );
 }
+
+#[test]
+fn backslash_parens_are_ignored_by_default() {
+    let doc = Doc::parse(r"The area is \(\pi r^2\) here.");
+    assert!(
+        !doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+        "backslash delimiters are off unless asked for"
+    );
+}
+
+#[test]
+fn backslash_parens_become_inline_math_when_enabled() {
+    let source = r"The area is \(\pi r^2\) here.";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    let math = doc.root().children[0]
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node");
+    let NodeKind::Math { literal, display } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, r"\pi r^2");
+    assert!(!display);
+    // The span covers the delimiters, exactly as a dollar formula's does.
+    assert_eq!(
+        &doc.source()[math.source.start..math.source.end],
+        r"\(\pi r^2\)"
+    );
+}
+
+#[test]
+fn backslash_brackets_are_display_math() {
+    let doc = Doc::parse_with(
+        r"\[ E = mc^2 \]",
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(&node.kind, NodeKind::Math { display: true, .. })),
+        "\\[ ... \\] must be display math"
+    );
+}
+
+#[test]
+fn every_span_still_indexes_the_unmodified_source() {
+    // §3.1's whole claim: spans are subdivided, never shifted. The text after the
+    // formula must still name its own bytes.
+    let source = r"The area is \(\pi r^2\) here.";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+        "the scan must actually have produced a formula, or this asserts nothing"
+    );
+    for child in &doc.root().children[0].children {
+        if let NodeKind::Text(text) = &child.kind {
+            assert_eq!(
+                &doc.source()[child.source.start..child.source.end],
+                text,
+                "a text node's span must still be a copy of its own bytes"
+            );
+        }
+    }
+}
+
+#[test]
+fn turning_backslash_math_on_shifts_nothing_and_changes_no_prose() {
+    // Spec §14 asks for the on/off comparison, and this is the whole of §3.1's claim:
+    // the rendering differs, and the spans are subdivided rather than moved. The `\*`
+    // is in the fixture because a math flag must not change how ordinary prose renders.
+    let source = "The area is \\(\\pi r^2\\) here, and a \\* star.\n";
+    let off = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: false,
+        },
+    );
+    let on = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+
+    let kids = |doc: &Doc| doc.root().children[0].children.len();
+    assert_ne!(kids(&off), kids(&on), "the two trees must actually differ");
+
+    let hull = |doc: &Doc| {
+        let kids = &doc.root().children[0].children;
+        (
+            kids.first().expect("a child").source.start,
+            kids.last().expect("a child").source.end,
+        )
+    };
+    assert_eq!(hull(&off), hull(&on), "subdivided, never shifted");
+
+    let text: String = on.root().children[0]
+        .children
+        .iter()
+        .filter_map(|node| match &node.kind {
+            NodeKind::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        text.contains("a * star"),
+        "the escape still draws a star: {text:?}"
+    );
+}
+
+#[test]
+fn backslash_brackets_are_found_when_comrak_splits_them_from_surrounding_prose() {
+    // Regression for the run-boundary fix: comrak's own parser splits `\[…\]` into
+    // separate `Text` AST nodes at parse time (`[` and `]` also open its link-bracket
+    // matching), leaving the escaping backslash in neither sibling's own `sourcepos`.
+    // A scan confined to one node's span can never see it; grouping the run of `Text`
+    // siblings and extending to the neighbouring boundary is what finds it.
+    let source = "The formula is \\[ E = mc^2 \\] here.\n";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    let math = doc.root().children[0]
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node: the run-boundary fix regressed");
+    let NodeKind::Math { literal, display } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "E = mc^2");
+    assert!(display);
+    assert_eq!(
+        &doc.source()[math.source.start..math.source.end],
+        "\\[ E = mc^2 \\]"
+    );
+    // And the prose before and after must still be byte-for-byte copies of their spans.
+    for child in &doc.root().children[0].children {
+        if let NodeKind::Text(text) = &child.kind {
+            assert_eq!(&doc.source()[child.source.start..child.source.end], text);
+        }
+    }
+}
+
+#[test]
+fn an_unterminated_backslash_paren_does_not_panic_and_produces_no_formula() {
+    let source = "Text with \\(no closer here.\n";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        !doc.root().children[0]
+            .children
+            .iter()
+            .any(|n| matches!(n.kind, NodeKind::Math { .. })),
+        "an unterminated opener must not produce a formula"
+    );
+}
+
+#[test]
+fn nested_backslash_parens_do_not_panic() {
+    // Not a nesting-aware parser: the first `\)` closes the formula, so the inner `\(`
+    // becomes literal content of the outer one's LaTeX rather than a formula of its own.
+    let source = "\\(\\(inner\\)\\) after\n";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    let math = doc.root().children[0]
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node");
+    let NodeKind::Math { literal, .. } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "\\(inner");
+}
+
+#[test]
+fn a_doubled_backslash_before_a_paren_is_a_known_false_positive() {
+    // No escape mechanism exists for `\(` (see the module doc): the raw scan cannot
+    // distinguish a genuine opener from the second backslash of `\\(`, which draws a
+    // literal `\` followed by `(` and still spells the two-byte pattern this scan looks
+    // for. Recorded so a future change to this behaviour is a deliberate one, not a
+    // silent regression.
+    let source = r"\\(not really math\) done";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        doc.root().children[0]
+            .children
+            .iter()
+            .any(|n| matches!(n.kind, NodeKind::Math { .. })),
+        "current, documented behaviour: the doubled backslash is still read as an opener"
+    );
+}
+
+#[test]
+fn arbitrary_source_around_backslash_math_never_panics() {
+    let cases = [
+        "日本語 \\(x^2\\) 文字",
+        "emoji \u{1F389} \\(a+b\\) \u{1F38A} more",
+        "\\(unterminated",
+        "\\[unterminated",
+        "\\(\\[mixed\\]\\)",
+        "\\)\\] stray closers only",
+        "",
+        "\\(\\)",
+        "\\[\\]",
+        "\\",
+        "\\(",
+    ];
+    for source in cases {
+        let doc = Doc::parse_with(
+            source,
+            MathSyntax {
+                dollars: true,
+                backslash: true,
+            },
+        );
+        // Must not panic; walking touches every span, so a bad offset would too.
+        doc.root().walk(&mut |node| {
+            if let NodeKind::Text(text) = &node.kind {
+                let _ = doc
+                    .source()
+                    .get(node.source.start..node.source.end)
+                    .map(|s| s == text);
+            }
+        });
+    }
+}

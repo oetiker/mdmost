@@ -19,6 +19,7 @@
 //! assert!(matches!(doc.root().children[0].kind, NodeKind::Heading { level: 1, .. }));
 //! ```
 
+mod backslash;
 mod convert;
 mod plain;
 pub(crate) mod slug;

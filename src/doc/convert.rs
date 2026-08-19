@@ -163,6 +163,11 @@ pub(super) fn document<'a>(
     let offsets = LineOffsets::new(source);
     let mut doc = convert(root, &offsets, math, slugger, headings);
     number_footnotes(&mut doc);
+    // Before `split_transcriptions`: that pass cuts a node of its own around every
+    // backslash escape, and `\(` is one, so afterwards there is nothing left to find.
+    if math.backslash {
+        super::backslash::split_backslash_math(&mut doc, source);
+    }
     split_transcriptions(&mut doc, source);
     doc
 }
@@ -235,7 +240,7 @@ fn segments(node: &Node, source: &str) -> Option<Vec<(String, SourceSpan)>> {
 /// Returns `None` the moment the two stop re-synchronising: an entity that expands to
 /// more than one character (`&fjlig;` is `fj`), a tab comrak widened, anything unknown.
 /// The caller then keeps the node whole, which is exactly today's behaviour.
-fn align(src: &str, text: &str, start: usize) -> Option<Vec<(String, SourceSpan)>> {
+pub(super) fn align(src: &str, text: &str, start: usize) -> Option<Vec<(String, SourceSpan)>> {
     let mut out: Vec<(String, SourceSpan)> = Vec::new();
     let (mut s, mut t) = (0usize, 0usize);
     let (mut run_s, mut run_t) = (0usize, 0usize);
