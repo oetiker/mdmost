@@ -1592,7 +1592,7 @@ fn render_block_and_render_blocks_agree_with_the_document_renderer() {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     let whole = render_flat(&doc, 30 + 2 * DOCUMENT_MARGIN, &theme, &PLAIN);
-    let parts = render_blocks(&doc.root().children, 30, &theme, &PLAIN);
+    let parts = render_blocks(&doc.root().children, 30, &theme, &PLAIN, doc.source());
     assert_eq!(
         body_rows(&whole),
         body_rows(&parts.indent(DOCUMENT_MARGIN, DOCUMENT_MARGIN, theme.base()))

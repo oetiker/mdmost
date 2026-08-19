@@ -1611,7 +1611,13 @@ impl App {
                 _ => id.to_string(),
             };
             (
-                crate::render::render_blocks(&node.children, width, &self.theme, &options),
+                crate::render::render_blocks(
+                    &node.children,
+                    width,
+                    &self.theme,
+                    &options,
+                    self.doc.source(),
+                ),
                 label,
             )
         };

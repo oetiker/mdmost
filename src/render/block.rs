@@ -91,8 +91,25 @@ pub fn render_block_numbered(
 }
 
 /// Renders a sequence of blocks at `width` columns, separated by blank rows.
-pub fn render_blocks(nodes: &[Node], width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
-    render_sequence(nodes, width, Ctx::new(theme, options), true)
+///
+/// `source` is the whole document text, the same way [`render_block_numbered`] takes it:
+/// a footnote popup renders a node's children through this, and design spec §9's "the
+/// reader sees the verbatim source" promise does not stop at the popup's edge — a
+/// formula that will not draw there must show its source, dollars included, exactly as
+/// it does in the body, not a hole where the source used to be.
+pub fn render_blocks(
+    nodes: &[Node],
+    width: u16,
+    theme: &Theme,
+    options: &RenderOptions,
+    source: &str,
+) -> Canvas {
+    render_sequence(
+        nodes,
+        width,
+        Ctx::new(theme, options).with_source(source),
+        true,
+    )
 }
 
 /// Renders a sequence of sibling blocks.

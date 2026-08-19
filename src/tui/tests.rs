@@ -7421,3 +7421,20 @@ fn a_drag_inside_inline_math_yields_the_whole_formula() {
         "$E = mc^2$"
     );
 }
+
+#[test]
+fn a_popup_shows_the_source_of_math_that_will_not_draw() {
+    // Design spec §9's "the reader sees the verbatim source" does not stop at the
+    // popup's edge: `render_blocks` — the footnote popup's own renderer, entered
+    // through the real click path, not a synthetic canvas — used to build its `Ctx`
+    // with no document source at all, so a formula that failed to draw fell back to
+    // `source_of`'s bounds-checked empty string instead of its LaTeX. `\frac{1}` is
+    // missing its second argument, the same fixture `math::tests` uses for a parse
+    // failure, so `render_inline` is guaranteed to return `Err` here.
+    let mut app = open_footnote("a[^n]\n\n[^n]: bad math $\\frac{1}$ here\n", 80, 24);
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(
+        text.contains(r"$\frac{1}$"),
+        "a formula that will not draw shows its source, not a hole: {text:?}"
+    );
+}
