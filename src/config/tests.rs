@@ -18,13 +18,16 @@ const MANUAL: &str = include_str!("../../docs/manual.md");
 /// Both documents show a starting configuration, and a reader copies whichever one they
 /// are looking at, so both are checked.
 ///
-/// The closing fence must open its own line, indented at most three spaces — the same
-/// rule `CommonMark` itself closes a fenced code block with — rather than merely contain
+/// The closing fence must open its own line, indented at most three spaces, with
+/// nothing but the backticks and trailing whitespace on it — the same rule
+/// `CommonMark` itself closes a fenced code block with — rather than merely contain
 /// three backticks anywhere in the text that follows. A naive "next fence marker
 /// anywhere" reading once truncated the manual's own example: a config comment named
 /// math's fenced `math` syntax mid-line, and that mid-line occurrence closed the block
 /// early, silently dropping every key after it (`toc_width` included) from what this
-/// test checked.
+/// test checked. The trailing-whitespace clause matters too: a line like `` ``` this
+/// is not really a close `` carries content after its backticks and must not close
+/// the block either, even though it starts with three of them.
 fn first_toml_example(document: &'static str, which: &str) -> &'static str {
     let rest = document
         .split("```toml")
@@ -34,7 +37,9 @@ fn first_toml_example(document: &'static str, which: &str) -> &'static str {
     for line in rest.split_inclusive('\n') {
         let content = line.strip_suffix('\n').unwrap_or(line);
         let trimmed = content.trim_start_matches(' ');
-        if content.len() - trimmed.len() <= 3 && trimmed.starts_with("```") {
+        let indent = content.len() - trimmed.len();
+        let backticks = trimmed.chars().take_while(|&c| c == '`').count();
+        if indent <= 3 && backticks >= 3 && trimmed[backticks..].trim().is_empty() {
             return &rest[..offset];
         }
         offset += line.len();
@@ -55,6 +60,43 @@ icons = true
 
 More prose.
 ";
+
+/// A line that opens with three backticks but carries content after them is not a
+/// closing fence either — `CommonMark`'s closing-fence line may hold only the fence
+/// characters and trailing whitespace. This line is not valid TOML on its own, so
+/// unlike the fixtures above, the point here is the boundary `first_toml_example`
+/// draws, not that the extracted text parses cleanly: a real closing fence line
+/// contains only backticks, so this line, which does not, must be skipped over as
+/// content rather than mistaken for the close.
+const FALSE_CLOSE_DOCUMENT: &str = "\
+Some prose.
+
+```toml
+theme = \"dark\"
+``` this is not really a close
+icons = true
+```
+
+More prose.
+";
+
+#[test]
+fn a_closing_fence_line_with_trailing_content_does_not_close_the_example() {
+    let example = first_toml_example(FALSE_CLOSE_DOCUMENT, "the fixture");
+    assert!(
+        example.contains("this is not really a close"),
+        "the false close is content, and must stay inside the example: {example:?}"
+    );
+    assert!(
+        example.contains("icons"),
+        "the false close must be skipped, so `icons` must still be inside the \
+         example, found only after the real close: {example:?}"
+    );
+    assert!(
+        !example.contains("More prose"),
+        "the example must stop at the real closing fence: {example:?}"
+    );
+}
 
 #[test]
 fn a_mid_line_triple_backtick_does_not_close_the_toml_example_early() {
