@@ -223,6 +223,7 @@ pub fn label_spans(canvas: &mut Canvas, label: &Label, piece: &Piece, row: usize
             row,
             col: u16::try_from(col + span.col).unwrap_or(u16::MAX),
             cols: u16::try_from(span.cols).unwrap_or(u16::MAX),
+            copied: true,
         });
     }
 }

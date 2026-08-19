@@ -87,6 +87,16 @@ pub struct SearchSpan {
     pub col: u16,
     /// How many display columns the text occupies.
     pub cols: u16,
+    /// Whether the source is a byte-for-byte copy of the cells this span names.
+    ///
+    /// `true` for everything the renderer drew from text, which is what lets `search`
+    /// and `select` convert between bytes and columns *inside* a span. `false` for a
+    /// span that stands for a construct whose drawn form is not its source — a formula,
+    /// whose cells say `E = mc²` where its bytes say `$E = mc^2$` (design spec §10).
+    ///
+    /// A span with `copied: false` has **no interior position**. Anything that would
+    /// index into it must take all of it or none of it.
+    pub copied: bool,
 }
 
 /// The leading columns of one row that are chrome rather than content.

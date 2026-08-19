@@ -523,6 +523,7 @@ pub(crate) fn render_title(node: &Node, id: &str, width: u16, ctx: Ctx<'_>) -> O
                 row,
                 col: letter.col,
                 cols: letter.cols,
+                copied: true,
             });
         }
     }

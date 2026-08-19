@@ -12,6 +12,7 @@ fn span(source_start: usize, source_end: usize, row: usize, col: u16, cols: u16)
         row,
         col,
         cols,
+        copied: true,
     }
 }
 
@@ -264,4 +265,27 @@ fn search_matches_inside_a_quoted_fence() {
     let markdown = "> ```\n> let needle = 1;\n> ```\n";
     let hits = hits_for(markdown, "needle");
     assert_eq!(hits.len(), 1);
+}
+
+#[test]
+fn an_atomic_span_highlights_whole_when_a_search_hits_inside_it() {
+    // A formula's drawn cells are not a copy of its source, so the column arithmetic
+    // that serves ordinary text cannot place a hit inside one. An atomic span
+    // highlights all of itself instead of part of nothing.
+    let span = SearchSpan {
+        source_start: 10,
+        source_end: 20,
+        unit: None,
+        row: 0,
+        col: 4,
+        cols: 3,
+        copied: false,
+    };
+    let segments = segments_for("x".repeat(40).as_str(), &[span], 12, 15);
+    assert_eq!(segments.len(), 1);
+    assert_eq!(segments[0].col, 4);
+    assert_eq!(
+        segments[0].cols, 3,
+        "an atomic span highlights all of itself"
+    );
 }

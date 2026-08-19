@@ -540,6 +540,7 @@ fn code_area(
                     row,
                     col: u16::try_from(gutter).unwrap_or(u16::MAX),
                     cols: u16::try_from(drawn).unwrap_or(u16::MAX),
+                    copied: true,
                 });
             }
         }

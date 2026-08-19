@@ -371,6 +371,19 @@ fn segments_for(source: &str, spans: &[SearchSpan], start: usize, end: usize) ->
         .iter()
         .filter(|span| span.source_start < end && span.source_end > start)
         .filter_map(|span| {
+            // A span with no interior position is taken whole or not at all: measuring a
+            // prefix of its source against its cells would place a highlight using an
+            // arithmetic its body cannot support.
+            // A span with no interior position is taken whole or not at all: measuring a
+            // prefix of its source against its cells would place a highlight using an
+            // arithmetic its body cannot support.
+            if !span.copied {
+                return Some(Segment {
+                    row: span.row,
+                    col: span.col,
+                    cols: span.cols,
+                });
+            }
             let overlap_start = span.source_start.max(start);
             let overlap_end = span.source_end.min(end);
             let prefix = slice(source, span.source_start, overlap_start);

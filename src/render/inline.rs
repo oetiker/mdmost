@@ -40,6 +40,20 @@ enum Origin {
     /// from these bytes: `&amp;` drawing an `&`. Nothing in it copies anything, so it
     /// maps as an indivisible unit and never joins a neighbouring run.
     Transcribed(SourceSpan),
+    /// The whole run maps to these bytes as a unit, and it may be any width.
+    ///
+    /// Parallel to [`Origin::Transcribed`] and deliberately separate from it: that one
+    /// is a single entity reference drawing a single column, and its one-column rule is
+    /// what keeps `select`'s column arithmetic walkable. This one is a *construct with
+    /// no interior* — a formula — which does not need that arithmetic because nothing
+    /// may index inside it. It emits a span with `copied: false`, which is how `search`
+    /// and `select` are told (design spec §10).
+    ///
+    /// `flatten` and `reconcile` handle it starting now, and the unit tests below
+    /// build it directly; production code does not construct it yet — the formula
+    /// renderer that will is stage 1's Task 10.
+    #[allow(dead_code, reason = "constructed by Task 10's math wiring")]
+    Atom(SourceSpan),
 }
 
 /// The control a piece belongs to, if any.
@@ -186,7 +200,7 @@ fn trim_edges(pieces: &mut Vec<Piece>) {
                 // claiming bytes for text it no longer draws. Defensive: it is one
                 // grapheme, so trimming it is all-or-nothing and the piece below is
                 // dropped whole — a `&nbsp;` opening a paragraph is that case.
-                Some(Origin::Transcribed(_)) | None => None,
+                Some(Origin::Transcribed(_)) | Some(Origin::Atom(_)) | None => None,
             };
             first.text = trimmed.to_string();
         }
@@ -272,6 +286,18 @@ fn flatten(pieces: &[Piece]) -> Vec<Anchored<'_>> {
                         }),
                 );
             }
+            // Every cluster carries the *same* span — the whole formula — so `reconcile`
+            // coalesces them into one span of the formula's full width. Giving only the
+            // first cluster a source would leave a one-column span, and a search hit or
+            // a drag anywhere past the first cell would miss it entirely.
+            Some(Origin::Atom(source)) => {
+                out.extend(clusters.into_iter().map(|cluster| Anchored {
+                    text: cluster,
+                    source: Some(source),
+                    copied: false,
+                    control,
+                }));
+            }
             None => out.extend(clusters.into_iter().map(|cluster| Anchored {
                 text: cluster,
                 source: None,
@@ -320,19 +346,39 @@ fn reconcile(lines: &[Line], flat: &[Anchored<'_>]) -> (Vec<SearchSpan>, Vec<Hot
                 row,
                 col,
                 cols,
+                copied: true,
             };
             match entry.and_then(|entry| entry.source.map(|source| (source, entry.copied))) {
-                // A run grows only while it stays a byte-for-byte copy of the cells it
-                // names — `select` and `search` both convert between bytes and columns
-                // inside a span by walking its source. A transcribed cluster is
-                // therefore a span of its own, and closes the run either side of it.
-                Some((source, false)) => {
-                    out.extend(run.take());
-                    out.push(span(source));
-                }
+                // Two shapes share this arm. A transcription (`&amp;` drawing `&`) is one
+                // cluster naming its own bytes, and stays a span of its own. An atom is
+                // several clusters all naming the *same* bytes, and they coalesce into
+                // one span of the formula's full width. The test is the source range,
+                // which only an atom repeats.
+                Some((source, false)) => match run.as_mut() {
+                    Some(current)
+                        if !current.copied
+                            && current.source_start == source.start
+                            && current.source_end == source.end
+                            && current.col + current.cols == col =>
+                    {
+                        current.cols += cols;
+                    }
+                    _ => {
+                        out.extend(run.take());
+                        run = Some(SearchSpan {
+                            copied: false,
+                            // The same pair `select::resolve` computes when `unit` is
+                            // `None`, written out because spec §10 names it: the whole
+                            // construct is the unit.
+                            unit: Some((source.start, source.end)),
+                            ..span(source)
+                        });
+                    }
+                },
                 Some((source, true)) => match run.as_mut() {
                     Some(current)
-                        if current.source_end == source.start
+                        if current.copied
+                            && current.source_end == source.start
                             && current.col + current.cols == col =>
                     {
                         current.source_end = source.end;
@@ -629,4 +675,126 @@ pub(crate) fn natural_width(nodes: &[Node], ctx: Ctx<'_>) -> usize {
 /// The narrowest width inline content can be wrapped to without splitting a word.
 pub(crate) fn min_width(nodes: &[Node], ctx: Ctx<'_>) -> usize {
     crate::text::spans_min_width(&inline_spans(nodes, ctx))
+}
+
+// `Origin::Atom` is not constructed anywhere yet — Task 10 wires a real formula
+// renderer onto it — so `flatten` and `reconcile`'s handling of it has no exerciser
+// outside these tests. Built directly on the `Piece`/`Origin` machinery rather than
+// through `render_inline`, since there is no source document yet that produces an
+// atom to render.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A piece whose whole text stands for `source` as one unit, the shape a formula
+    /// takes (design spec §10).
+    fn atom_piece(text: &str, source: SourceSpan) -> Piece {
+        Piece {
+            text: text.to_string(),
+            style: Style::NONE,
+            origin: Some(Origin::Atom(source)),
+            control: None,
+        }
+    }
+
+    /// Runs the `flatten` / `reconcile` pair the way [`render_pieces`] does.
+    fn spans_for(pieces: &[Piece]) -> Vec<SearchSpan> {
+        let spans: Vec<Span> = pieces
+            .iter()
+            .map(|piece| Span::new(piece.text.clone(), piece.style))
+            .collect();
+        let lines = wrap(&spans, 40);
+        reconcile(&lines, &flatten(pieces)).0
+    }
+
+    #[test]
+    fn an_atom_coalesces_into_one_span_of_its_full_width() {
+        // "E = mc²" stands for the 11-byte "$E = mc^2$" as a unit: every grapheme of
+        // it must carry the same source range, or `reconcile` would see a change of
+        // source at each cluster and cut the run into one span per cell.
+        let source = SourceSpan::new(0, 11);
+        let pieces = vec![atom_piece("E = mc²", source)];
+        let found = spans_for(&pieces);
+        assert_eq!(
+            found.len(),
+            1,
+            "one span for the whole formula, not one per cluster: {found:?}"
+        );
+        let span = found[0];
+        assert!(
+            !span.copied,
+            "a formula's cells are not a copy of its source"
+        );
+        assert_eq!(span.source_start, 0);
+        assert_eq!(span.source_end, 11);
+        assert_eq!(
+            span.unit,
+            Some((0, 11)),
+            "the unit is the same range as the span itself (design spec §10)"
+        );
+        assert_eq!(span.cols, display_width("E = mc²") as u16);
+    }
+
+    #[test]
+    fn two_adjacent_atoms_stay_two_spans() {
+        // Two different formulas back to back would be column-contiguous, which is
+        // the same shape a growing run looks for. Only a shared source range may
+        // coalesce a run; two distinct ones must not merge into one.
+        let first = SourceSpan::new(0, 3);
+        let second = SourceSpan::new(3, 6);
+        let pieces = vec![atom_piece("a", first), atom_piece("b", second)];
+        let found = spans_for(&pieces);
+        assert_eq!(
+            found.len(),
+            2,
+            "distinct formulas stay distinct spans: {found:?}"
+        );
+        assert_eq!(found[0].source_start, 0);
+        assert_eq!(found[1].source_start, 3);
+    }
+
+    #[test]
+    fn a_copied_run_after_an_atom_does_not_join_its_span() {
+        // The atom's bytes end at 11 and the copied text right after it starts at 11
+        // too — the exact coincidence that would satisfy the copied arm's adjacency
+        // check on byte offset alone. Only `current.copied` guards against that text
+        // being folded into the formula's non-copied span. "y" trails "x " so wrapping
+        // does not trim it as end-of-line whitespace and erase the very cluster this
+        // test depends on.
+        let atom_source = SourceSpan::new(0, 11);
+        let pieces = vec![
+            atom_piece("x", atom_source),
+            Piece::anchored(" y".to_string(), Style::NONE, SourceSpan::new(11, 13)),
+        ];
+        let found = spans_for(&pieces);
+        assert_eq!(
+            found.len(),
+            2,
+            "the atom and the copied text stay separate spans: {found:?}"
+        );
+        assert!(!found[0].copied);
+        assert!(found[1].copied);
+        assert_eq!(
+            found[0].source_end, 11,
+            "the atom's own span is not widened"
+        );
+        assert_eq!(found[1].source_start, 11);
+        assert_eq!(found[1].source_end, 13);
+    }
+
+    #[test]
+    fn trimming_a_leading_atom_drops_its_origin() {
+        // A partial trim off an atom is nonsense the same way it is for a
+        // transcription: the piece below no longer draws the bytes it would claim,
+        // so the whole origin is dropped rather than adjusted.
+        let source = SourceSpan::new(5, 10);
+        let mut pieces = vec![atom_piece(" x", source)];
+        trim_edges(&mut pieces);
+        assert_eq!(pieces.len(), 1);
+        assert_eq!(pieces[0].text, "x");
+        assert!(
+            pieces[0].origin.is_none(),
+            "a trimmed atom keeps no source at all"
+        );
+    }
 }
