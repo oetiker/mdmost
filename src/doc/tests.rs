@@ -687,3 +687,59 @@ fn math_off_leaves_dollars_as_text() {
         "with math off, nothing may parse as math"
     );
 }
+
+#[test]
+fn math_off_leaves_a_math_fence_as_a_code_block() {
+    // The fence arm's `math.dollars` guard is what spec §3 relies on: without it, a
+    // reader who turned math off would still see a ```math fence stop being a code
+    // block. This is a gate, and a gate is tested by the case where it does not fire.
+    let doc = Doc::parse_with(
+        "```math\nx^2\n```\n",
+        MathSyntax {
+            dollars: false,
+            backslash: false,
+        },
+    );
+    let block = &doc.root().children[0];
+    assert!(
+        matches!(block.kind, NodeKind::CodeBlock { .. }),
+        "with math off, a ```math fence must stay a code block, not become NodeKind::Math"
+    );
+}
+
+#[test]
+fn backtick_dollar_math_becomes_a_math_node() {
+    let doc = Doc::parse("Einstein wrote $`E = mc^2`$ here.\n");
+    let math =
+        find(doc.root(), &|n| matches!(n.kind, NodeKind::Math { .. })).expect("no math node");
+    let NodeKind::Math { literal, display } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "E = mc^2");
+    assert!(!display);
+}
+
+#[test]
+fn a_fence_only_document_counts_as_markup_for_auto() {
+    // Before this task a ```math fence was `NodeKind::CodeBlock { fenced: true }`,
+    // which `has_markup` counts as markup. It must still count now that it is
+    // `NodeKind::Math`, or `parse_auto` would silently reflow a formula as plain text.
+    let doc = Doc::parse_auto("```math\nx^2\n```\n");
+    assert!(
+        find(doc.root(), &|n| matches!(
+            &n.kind,
+            NodeKind::Math { display: true, .. }
+        ))
+        .is_some(),
+        "a lone math fence must not fall back to the plain-text path"
+    );
+}
+
+#[test]
+fn an_inline_formula_alone_counts_as_markup_for_auto() {
+    let doc = Doc::parse_auto("$E = mc^2$\n");
+    assert!(
+        find(doc.root(), &|n| matches!(n.kind, NodeKind::Math { .. })).is_some(),
+        "a lone inline formula must not fall back to the plain-text path"
+    );
+}

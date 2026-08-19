@@ -46,6 +46,12 @@ pub(super) fn has_markup(root: &Node) -> bool {
         | NodeKind::Strong
         | NodeKind::Strikethrough
         | NodeKind::Image { .. } => return true,
+        // Nobody types `$$…$$` or a ```` ```math ```` fence by accident, and inline
+        // `$…$` only reaches this node at all after comrak applies Pandoc's own
+        // heuristics (no space after the opening `$`, none before the closing, no
+        // digit after) — stronger evidence of intent than `Emph` or `Strong` above,
+        // which carry no such filter and already count as markup.
+        NodeKind::Math { .. } => return true,
         NodeKind::CodeBlock { fenced, .. } => return *fenced,
         NodeKind::Link { url, .. } if !is_autolink(root, url) => return true,
         _ => {}
