@@ -6,7 +6,7 @@
 //! stream and writes text, and any construct that genuinely needs a second row is
 //! reported as [`MathError::NotInline`] rather than being approximated into nonsense.
 
-use pulldown_latex::event::{Content, Event};
+use pulldown_latex::event::{Content, DelimiterType, Event};
 use pulldown_latex::{Parser, Storage};
 
 use crate::error::MathError;
@@ -60,9 +60,24 @@ enum Spacing {
 /// through the parser, and so the error path above stays one statement.
 fn write_events(events: &[Event<'_>], spacing: Spacing) -> Result<String, MathError> {
     let mut out = String::new();
-    for event in events {
+    for (index, event) in events.iter().enumerate() {
         match event {
-            Event::Content(content) => write_content(content, &mut out, spacing),
+            Event::Content(content) => {
+                // A function name reads tight against an opening delimiter that
+                // immediately follows it — `\sin(x)` is `sin(x)`, not `sin (x)`, which
+                // is how real LaTeX sets it too: the gap after an operator name comes
+                // from separating it from its operand, and a delimited group is
+                // already visibly its own thing without one. Only `write_content`'s
+                // `Function` arm reads this flag; every other arm ignores it.
+                let followed_by_open_delimiter = matches!(
+                    events.get(index + 1),
+                    Some(Event::Content(Content::Delimiter {
+                        ty: DelimiterType::Open,
+                        ..
+                    }))
+                );
+                write_content(content, &mut out, spacing, followed_by_open_delimiter);
+            }
             // A group boundary draws nothing of itself. What a group *does* — a
             // fraction, a root, a matrix — arrives as `Visual` or as an environment,
             // and those are Task 5's.
@@ -75,7 +90,8 @@ fn write_events(events: &[Event<'_>], spacing: Spacing) -> Result<String, MathEr
             _ => return Err(MathError::NotInline("this construct")),
         }
     }
-    // A formula ending in an operator would otherwise keep the space written after it.
+    // A formula ending in an operator or a function name would otherwise keep the
+    // space written after it.
     Ok(out.trim_end().to_string())
 }
 
@@ -85,10 +101,22 @@ fn write_events(events: &[Event<'_>], spacing: Spacing) -> Result<String, MathEr
 /// deliberately no symbol table in this crate: a second table would drift from the one
 /// upstream maintains, and drift here means a formula that renders differently here
 /// than everywhere else.
-fn write_content(content: &Content<'_>, out: &mut String, spacing: Spacing) {
+fn write_content(
+    content: &Content<'_>,
+    out: &mut String,
+    spacing: Spacing,
+    followed_by_open_delimiter: bool,
+) {
     match content {
-        Content::Text(text) | Content::Number(text) | Content::Function(text) => {
+        Content::Text(text) | Content::Number(text) => {
             out.push_str(text);
+        }
+        // A function name is a word, not an operator: it is never unary the way a
+        // leading `-` can be, so unlike `spaced` below it does not suppress *both*
+        // sides at the head of a run, only the leading one -- `\sin x` must read
+        // `sin x` even though `\sin` opens the formula.
+        Content::Function(text) => {
+            spaced_word(out, text, spacing, followed_by_open_delimiter);
         }
         Content::BinaryOp { content, .. } => {
             spaced(out, content.encode_utf8(&mut [0u8; 4]), spacing);
@@ -130,4 +158,25 @@ fn spaced(out: &mut String, text: &str, spacing: Spacing) {
     }
     out.push_str(text);
     out.push(' ');
+}
+
+/// Writes a function name (`sin`, `log`, …) with a leading space unless it opens the
+/// run, and a trailing space unless spacing is suppressed or `suppress_trailing` says
+/// the next thing is an opening delimiter it should sit against.
+///
+/// Deliberately not `spaced`: a word can never be unary, so — unlike an operator at the
+/// head of a run — its own trailing space is never dropped just for being first. Only
+/// its leading space follows the "never at the head of a run" rule.
+fn spaced_word(out: &mut String, text: &str, spacing: Spacing, suppress_trailing: bool) {
+    if spacing == Spacing::Suppressed {
+        out.push_str(text);
+        return;
+    }
+    if !out.is_empty() && !out.ends_with(' ') {
+        out.push(' ');
+    }
+    out.push_str(text);
+    if !suppress_trailing {
+        out.push(' ');
+    }
 }

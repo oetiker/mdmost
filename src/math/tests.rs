@@ -85,6 +85,31 @@ fn a_function_name_is_written_as_its_word() {
 }
 
 #[test]
+fn a_function_name_is_separated_from_its_operand() {
+    // `sinx` reads as a product of three variables, not the function applied to `x` --
+    // this is the defect a real document would hit on day one, not a tightness quibble.
+    assert_eq!(rendered(r"\sin x"), "sin x");
+    assert_eq!(rendered(r"\log n"), "log n");
+}
+
+#[test]
+fn a_function_name_at_the_head_of_a_run_still_gets_its_trailing_space() {
+    // Unlike a leading `BinaryOp`, a leading `Function` is never unary -- it is a word,
+    // and `\sin x` opening a formula must still read `sin x`, not `sinx`.
+    assert_eq!(rendered(r"\sin x"), "sin x");
+    assert_eq!(rendered("1 + 2"), "1 + 2");
+    assert_eq!(rendered("-x"), "−x");
+}
+
+#[test]
+fn a_function_name_sits_tight_against_an_opening_delimiter() {
+    // Chosen over `sin (x)`: real LaTeX sets `\sin(x)` tight too -- the gap after an
+    // operator name separates it from its operand, and a delimited group `(x)` is
+    // already visibly its own thing without one.
+    assert_eq!(rendered(r"\sin(x)"), "sin(x)");
+}
+
+#[test]
 fn a_two_character_relation_is_written_as_one_spaced_unit() {
     // `RelationContent` can hold two characters (`\shortparallel` and its relatives);
     // `\coloneq` is one, and its own doc comment names it as the reason
