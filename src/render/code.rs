@@ -468,14 +468,33 @@ fn join_edge(
         // old label has to go completely, not be partly overwritten — and put the label
         // back down after the junction.
         out.hline(row, 1, inner, &set.horizontal.to_string(), frame);
+        // Re-ellipsize rather than `Line::truncated`. A caption is already ellipsized
+        // once, in `fallback`, against the frame's full width — before anyone here
+        // knows whether the gutter is even going to shift it. Shifting it right of the
+        // junction shrinks its budget a second time, and a hard `truncated` on an
+        // already-ellipsized string just chops more characters off the end with no new
+        // `…` and no room reserved for the trailing space before the corner — found by
+        // rendering an over-long Mermaid caption with line numbers on, where the fixed
+        // corruption (`di┴play`) was replaced by a caption cut straight into `╯` with
+        // no mark that it had been shortened at all. Ellipsizing the label's own text
+        // against the *actual*, post-shift room is the same "shorten and mark it" every
+        // other label in the program uses, applied where the shift is actually decided
+        // — one truncation, not two disagreeing ones. Every label reaching this branch
+        // in the program is one style throughout (`Line::styled`, or `title`'s icon and
+        // name sharing `theme.code.language`, which `Line::push` already merges into a
+        // single span) so concatenating loses nothing; a label that were not could
+        // still only lose *inner* style boundaries, never characters.
+        let text: String = label.spans.iter().map(|span| span.text.as_str()).collect();
+        let style = label.spans.first().map_or(frame, |span| span.style);
+        let room = inner.saturating_sub(col);
         let mut spaced = Line::empty();
         spaced.push(Span::new(" ", frame));
-        for span in &label.spans {
-            spaced.push(span.clone());
-        }
+        spaced.push(Span::new(
+            crate::text::ellipsize(&text, room.saturating_sub(2)),
+            style,
+        ));
         spaced.push(Span::new(" ", frame));
-        let room = inner.saturating_sub(col);
-        out.write_line(row, col + 1, &spaced.truncated(room), frame);
+        out.write_line(row, col + 1, &spaced, frame);
     }
     // Only once the column is clear (never occupied, or just cleared above) does the
     // junction get drawn — the label wins the column either way, which is what keeps a

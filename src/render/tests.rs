@@ -3898,6 +3898,39 @@ fn the_formula_is_the_first_row_inside_the_frame_for_both_dollars_and_a_fence() 
 /// `a_mermaid_fence_degrades_to_a_captioned_code_block` never caught this because its
 /// `lines()` helper renders without line numbers, the one configuration the bug cannot
 /// appear in.
+/// A caption long enough to need ellipsizing keeps its `…` and the space before the
+/// corner even after it is shifted right of the gutter's junction column.
+///
+/// Regression test for a defect introduced, found, and fixed within this same review
+/// round: fixing the junction corruption above (see that test) by re-drawing the
+/// caption after the junction column initially truncated it with `Line::truncated` —
+/// a hard clip, chosen because it is what the *title* edge already used and titles
+/// never need ellipsizing in practice. A caption does. The result was a caption cut
+/// straight into `╯` with no `…` and no trailing space — `sequence… ╯` became
+/// `sequen╯` — which reads as a rendering fault rather than a deliberate shortening.
+/// `join_edge` now re-ellipsizes the label's own text against the room actually left
+/// after the shift, the same "shorten and mark it" every other truncated label in the
+/// program uses.
+#[test]
+fn an_overlong_caption_still_ellipsizes_after_the_gutter_shifts_it() {
+    let numbered = RenderOptions::new(false, true);
+    for width in [60u16, 100] {
+        let out = lines_with("```mermaid\nnot a diagram at all\n```\n", width, &numbered);
+        let last = out
+            .last()
+            .unwrap_or_else(|| panic!("no rows at width {width}"));
+        assert!(
+            last.contains('…'),
+            "an over-long caption must still be marked as shortened at width {width}; got {last:?}"
+        );
+        assert!(
+            last.ends_with(&format!("{} ╯", crate::text::ELLIPSIS)),
+            "a space must separate the ellipsis from the corner, matching the \
+             un-shifted case, at width {width}; got {last:?}"
+        );
+    }
+}
+
 #[test]
 fn the_caption_is_not_corrupted_by_the_gutter_junction_with_line_numbers_on() {
     let numbered = RenderOptions::new(false, true);
