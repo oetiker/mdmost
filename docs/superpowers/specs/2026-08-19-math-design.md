@@ -21,7 +21,9 @@ re-derive them.
 | Inline scripts are Unicode when complete, ASCII otherwise | Never a lookalike glyph. §5. |
 | Tall delimiters are box drawing | The characters mdmost already draws with. §6.4. |
 | Big operators are single characters | §6.3. |
-| Two config keys, `math` and `math_inline` | §12. |
+| Macros are global to the document | Not TeX's rule, and not GitHub's. §16. |
+| `\(…\)` and `\[…\]` are read behind a key, default off | §3.1. |
+| Three config keys | §12. |
 | A formula is atomic for selection | Which is not a new rule. §10. |
 
 **Not in scope.** Terminal image protocols. Numbered equations and `\tag`. Anything
@@ -74,6 +76,33 @@ heuristics (`src/parser/inlines.rs:2131`): no space after an opening `$`, no spa
 before a closing `$`, and a closing `$` may not be followed by a digit. `costs $5 and
 $10` is not math. `$PATH is under $HOME` is not math. No heuristic of our own is
 written, and none should be added later without a corpus showing the need.
+
+### 3.1 Backslash delimiters
+
+`\(…\)` and `\[…\]` are MathJax's own defaults, and they are how mathematics
+arrives in a Markdown file that was pasted out of an AI assistant. No Markdown renderer
+of note accepts them — GitHub, Obsidian, Jupyter and Quarto are all dollars — and there
+is a small ecosystem of tools whose only job is rewriting them into dollars.
+
+That is a weaker argument for a renderer than it is for a **pager**. GitHub renders
+documents written for GitHub. This renders whatever is on disk, and a notes file
+somebody pasted an answer into an hour ago is squarely in scope.
+
+They are therefore read, but only when `math_backslash` is on, and it is **off by
+default** so that a document renders the same here as it does on GitHub unless the
+reader has asked otherwise.
+
+**They are found by re-reading the source, not by rewriting it.** CommonMark treats
+`\(` as a backslash escape and eats the backslash, so by the time comrak has produced a
+text node its content reads `(\pi r^2)` and the delimiters are gone. The scan therefore
+runs over `doc.source[node.span]` — the original bytes, which are still exactly there —
+and splits the text node into text and math children whose spans are **subdivisions of
+the parent's span**.
+
+Nothing is rewritten and no offset moves. That is the whole reason for doing it this
+way: every byte offset in this application, from a `SourceSpan` to a search hit to the
+clipboard, indexes one unmodified string, and a pre-pass that rewrote `\(` to `$` would
+shift every offset after it by one and break all three.
 
 ## 4. The box model
 
@@ -310,14 +339,23 @@ two entries.
 |---|---|---|---|
 | `math` | `--math` / `--no-math` | `true` | `Doc::parse`. Off means the comrak extensions are never enabled and `$` is ordinary text. |
 | `math_inline` | `--math-inline` / `--no-math-inline` | `true` | the renderer. Off means §5.3; `$$` blocks and ```` ```math ```` fences still render. |
+| `math_backslash` | `--math-backslash` / `--no-math-backslash` | `false` | `Doc::parse`. On means `\(…\)` and `\[…\]` are read as well. §3.1. |
 
-Two keys and not one because comrak's `math_dollars` covers `$` and `$$` together, so
-"inline off, display on" cannot be a parser setting. Both are plain `bool` — neither
-has the tri-state `icons` needs, because neither is detected.
+`math` and `math_inline` are two keys and not one because comrak's `math_dollars`
+covers `$` and `$$` together, so "inline off, display on" cannot be a parser setting.
+All three are plain `bool` — none has the tri-state `icons` needs, because none is
+detected.
 
-Both names go in the key list at `src/config.rs:577` and in the generated file written
-by `src/config/write.rs`. Named `math_inline` rather than `inline_math` so the pair
-sorts together in that file.
+`math` dominates: with it off, `math_inline` and `math_backslash` do nothing, because
+there is no math in the tree for either to act on.
+
+`math_backslash` defaults off and the other two default on, and the asymmetry is the
+point: the first two make a document that already renders elsewhere render here, and
+the third makes a document render that renders nowhere else.
+
+All three names go in the key list at `src/config.rs:577` and in the generated file
+written by `src/config/write.rs`. Named `math_inline` rather than `inline_math` so the
+family sorts together in that file.
 
 ## 13. The glyph inventory
 
@@ -347,31 +385,86 @@ codepoints for everything else, as it does now.
 | the script table of §5.1 | every claimed codepoint exists and measures one column |
 | `tests/glyph_inventory.rs` | §13's amended subtraction |
 | a `math = false` snapshot | a document with `$` in it renders byte-identically to today |
+| a three-block macro document | a macro defined in the first block resolves in the third, and a use *before* its definition does not — §16.2's ordering rule in both directions |
+| a definition-only block | contributes exactly zero rows to the canvas — §16.3 |
+| `math_backslash` on and off over one pasted-assistant document | the rendering differs and every `SourceSpan` in the tree is unchanged, which is §3.1's whole claim |
 
-The last one is the regression that matters most to a reader who did not ask for this.
+The `math = false` snapshot is the regression that matters most to a reader who did not
+ask for any of this.
 
 ## 15. Phasing
 
 Three implementation plans against this one spec, each shippable alone.
 
-1. **Plumbing and inline.** The two config keys, the comrak options, `NodeKind::Math`,
-   `atoms.rs`, the script table, one-row layout, §5.3's fallback, §9's failure path,
-   the proptest. Ships `E = mc²`.
+1. **Plumbing and inline.** All three config keys, the comrak options,
+   `NodeKind::Math`, §3.1's source scan, `atoms.rs`, the script table, one-row layout,
+   §5.3's fallback, §9's failure path, the proptest. Ships `E = mc²`.
+
+   Every change to `src/doc/` is in this stage, deliberately. The document layer is
+   touched once and then left alone while the layout engine is built on top of it.
+
 2. **Display core.** `boxes.rs`, `build.rs`, `draw.rs`, fractions, radicals, scripts,
    big operators, tall delimiters, centring, §7's overflow and side-scroll, the framed
-   source fallback, §10's span, §11's theme slots.
+   source fallback, §10's span, §11's theme slots, and §16's global macros with the
+   empty-block rule that goes with them.
+
+   Macros land here rather than later because this is the stage where a document that
+   defines them starts rendering its display math — carrying them any further would
+   mean shipping one release that renders such a document wrongly.
+
 3. **Grids and the tail.** `grid.rs`: matrices, `cases`, `align`, `alignat`,
    `gathered`, `array` column specifications. Then `substack`, accents,
-   over- and underbraces, colour, and §16's macro preamble.
+   over- and underbraces, and colour.
 
-## 16. Open item
+## 16. Global macros
 
-**`\newcommand` does not cross formulas.** `MacroContext` is private and built fresh
-per `Parser`, so a macro defined in an early block is unknown to a later one. Documents
-do rely on defining macros once at the top.
+**A macro defined anywhere in the document is visible to every formula after it.** This
+is neither TeX's rule nor GitHub's, and it is a deliberate choice rather than an
+accident of implementation, so it is written down here.
 
-The fix needs no upstream change: collect `\newcommand` and `\def` from earlier math
-nodes in document order and prepend them as a preamble to each later formula's source.
-It costs one owned `String` per formula. It belongs in stage 3, and the ordering rule —
-a macro is visible to formulas after the one that defines it, and not before — has to
-be written down where a reader will find it, because it is not TeX's rule.
+### 16.1 Why, given that GitHub does not
+
+The evidence is not that documents already rely on it — they cannot, on the platform
+most of them are written for. It is that people keep asking for it and are told no:
+
+- GitHub shipped `\newcommand` and then **withdrew** cross-block support shortly after
+  launch. It works inside one block only.
+- Open requests for exactly this behaviour stand against Zettlr, `vscode-markdown` and
+  GitLab.
+- The two renderers that do have it have named it: KaTeX added the `globalGroup` option
+  in 0.12.0, and Typora supports it outright.
+
+So this is a feature a reader has probably wanted and been refused, not one they have
+come to depend on. It cannot break a document that does not define macros, and the only
+documents whose rendering it changes are the ones that define a macro once at the top —
+which change from broken to working.
+
+### 16.2 How
+
+`MacroContext` is private in `pulldown-latex` and is built fresh per `Parser`, so
+macros cannot be carried across formulas through its API. They do not need to be:
+collect the `\newcommand` and `\def` definitions from earlier math nodes in document
+order, and prepend them as a preamble to each later formula's source. One owned
+`String` per formula, and no upstream change.
+
+The ordering rule is the one the sentence at the top of this section states: **visible
+after the defining formula, not before.** A single pass in document order gives that for
+free, and it is the rule a reader can predict without knowing anything about how the
+document is walked. A definition that appears after its use is not found, and that is
+not a bug to be fixed by a second pass.
+
+### 16.3 A block that draws nothing draws nothing
+
+A document with global macros opens with a block that exists only to define them:
+
+```markdown
+$$\newcommand{\R}{\mathbb{R}}\newcommand{\eps}{\varepsilon}$$
+```
+
+**A display block whose layout produces no cells contributes no rows** — no frame, no
+caption, no blank line, nothing. Otherwise every such document opens with a hole in it,
+which is what GitHub does and what nobody wants.
+
+The rule is stated over the *result* and not over `\newcommand`, so a block holding only
+`\def`, only whitespace or only a comment behaves identically, and no list of
+invisible commands has to be maintained anywhere.
