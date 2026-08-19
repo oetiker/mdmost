@@ -3814,6 +3814,25 @@ fn the_formula_carries_one_atomic_span_over_all_its_cells() {
 }
 
 #[test]
+fn render_block_with_no_source_falls_back_to_the_bare_formula_instead_of_dropping_it() {
+    // `render_block` (unlike `render_block_numbered`) has no whole-document source to
+    // slice a formula's verbatim bytes from. Before this fix, `source_of` degraded to
+    // `""` and the formula's content simply disappeared -- a gap with no signal at all,
+    // not the "caller's own text" CHANGES.md used to claim. It now falls back to the
+    // bare LaTeX, with no surrounding `$…$` since there is nothing to take them from.
+    let doc = Doc::parse(r"A matrix $\begin{pmatrix} 1 & 0 \end{pmatrix}$ inline.");
+    let paragraph = &doc.root().children[0];
+    let canvas = render_block(paragraph, 80, &Theme::default_dark(), &PLAIN);
+    assert!(
+        canvas
+            .row_text(0)
+            .contains(r"\begin{pmatrix} 1 & 0 \end{pmatrix}"),
+        "expected the bare formula, got {:?}",
+        canvas.row_text(0)
+    );
+}
+
+#[test]
 fn display_math_shows_its_source_in_a_captioned_frame_for_now() {
     let doc = Doc::parse("$$\n\\frac{a}{b}\n$$\n");
     let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);

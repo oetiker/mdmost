@@ -478,11 +478,27 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, ids: &mut usize, out: &mu
                     // §5.3: the verbatim source, delimiters included. Reached for two
                     // reasons — `math_inline = false`, and a formula that would not
                     // draw — and it is deliberately the same rendering for both.
-                    None => out.push(Piece::transcribable(
-                        source_of(ctx, node.source),
-                        style,
-                        node.source,
-                    )),
+                    //
+                    // `ctx.source` is empty for the handful of standalone entry points
+                    // that render a block or a table on its own with no whole-document
+                    // source (see `source_of`'s doc comment) — `render_block` and
+                    // `render_table`'s public callers, chiefly. There, `source_of`
+                    // degrades to `""`, and pushing that would make the formula's
+                    // content vanish rather than fall back to anything: a caller sees a
+                    // gap with no signal at all. `literal` — the bare LaTeX with no
+                    // delimiters — is always available regardless of `ctx.source`, and
+                    // falling back to it is exactly what `src/export/html.rs`'s Math
+                    // arm already does for the same reason, so this closes the same
+                    // hole rather than only documenting it.
+                    None => {
+                        let source = source_of(ctx, node.source);
+                        let text = if ctx.source.is_empty() {
+                            literal.clone()
+                        } else {
+                            source
+                        };
+                        out.push(Piece::transcribable(text, style, node.source));
+                    }
                 }
             }
             NodeKind::Emph => collect(

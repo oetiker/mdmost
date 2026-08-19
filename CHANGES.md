@@ -9,11 +9,12 @@ No format for this existed in this file before now; entries here are API breaks 
 minor bump rather than a patch.
 
 - `render_block_numbered` and `render_blocks` each gained a `source: &str` parameter, so
-  that a formula which cannot be drawn can fall back to its own verbatim bytes (see
-  New, below) wherever either function is the caller's entry point — the document body
-  and the footnote popup. `render_block` and `render_table` keep their old signatures;
-  neither has a call site in this binary, and a caller using either now gets no
-  verbatim-source fallback for math inside it, only the caller's own text otherwise.
+  that a formula which cannot be drawn can fall back to its own verbatim bytes, delimiters
+  included (see New, below), wherever either function is the caller's entry point — the
+  document body and the footnote popup. `render_block` and `render_table` keep their old
+  signatures; neither has a call site in this binary, and a caller using either instead
+  falls back to the formula's bare LaTeX with no surrounding `$…$`, since there is no
+  whole-document source to slice the delimiters from.
 
 ### New
 

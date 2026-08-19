@@ -59,6 +59,11 @@ pub(crate) fn heading_rule(level: u8) -> Option<&'static str> {
 ///
 /// The result is exactly `width` columns wide, and empty for a node that renders to
 /// nothing.
+///
+/// This entry point has no whole-document source to give a formula that will not draw
+/// (unlike [`render_block_numbered`]), so such a formula falls back to its bare LaTeX
+/// with no surrounding `$…$` rather than to the verbatim bytes design spec §5.3
+/// describes. Use [`render_block_numbered`] when that matters.
 pub fn render_block(node: &Node, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
     render_block_ctx(node, width, Ctx::new(theme, options))
 }
