@@ -41,6 +41,8 @@ use crate::numbering::Numbering;
 use crate::render::{Limits, RenderOptions, margins, render_block_numbered, render_flat};
 use crate::theme::Theme;
 
+use super::block;
+
 /// The glyph the renderers paint in a row's last column when content is cut off.
 ///
 /// This used to be a copy, kept because the module lived under `tui` and reaching into
@@ -92,7 +94,7 @@ pub fn render_document(
     // put bare inline content there, `render_sequence` groups it into one wrapped run
     // and this per-block assembly would not — so hand those documents back to the
     // renderer whole rather than laying them out differently here.
-    if blocks.iter().any(is_inline) {
+    if blocks.iter().any(block::is_inline) {
         return render_flat(doc, width, theme, options);
     }
 
@@ -543,28 +545,4 @@ impl ClipTest {
             .flatten()
             .any(|cell| cell.text() == OVERFLOW_MARKER && self.styles.contains(&cell.style()))
     }
-}
-
-/// Whether a node is inline content rather than a block of its own.
-///
-/// Mirrors `render::block::is_inline`, which is private; only the top level of a
-/// document is tested against it, and only to decline the per-block path. Display math
-/// (`display: true`) is excluded for the same reason it is there: the document layer
-/// hoists a lone `$$…$$` paragraph into a block, and this must not fold it back into an
-/// inline run.
-fn is_inline(node: &Node) -> bool {
-    matches!(
-        node.kind,
-        NodeKind::Text(_)
-            | NodeKind::SoftBreak
-            | NodeKind::LineBreak
-            | NodeKind::Code { .. }
-            | NodeKind::Math { display: false, .. }
-            | NodeKind::Emph
-            | NodeKind::Strong
-            | NodeKind::Strikethrough
-            | NodeKind::Link { .. }
-            | NodeKind::FootnoteReference { .. }
-            | NodeKind::SkippedHtml { block: false, .. }
-    )
 }

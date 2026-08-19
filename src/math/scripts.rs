@@ -173,12 +173,14 @@ mod tests {
 
     #[test]
     fn every_substitute_is_one_column_and_distinct_from_its_plain_form() {
-        use unicode_width::UnicodeWidthChar;
+        // `crate::text::display_width` is this crate's one home for column arithmetic
+        // (see its module doc); calling `unicode_width` directly here would be the only
+        // exception in the tree.
         for (name, table) in [("superscript", SUPERSCRIPTS), ("subscript", SUBSCRIPTS)] {
             for (plain, sub) in table {
                 assert_eq!(
-                    sub.width(),
-                    Some(1),
+                    crate::text::display_width(&sub.to_string()),
+                    1,
                     "{name} for {plain:?} is U+{:04X}, which is not one column wide; \
                      the layout counts columns and would drift",
                     *sub as u32
