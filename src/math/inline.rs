@@ -209,7 +209,12 @@ fn take_base(
         return Err(MathError::NotInline("an unfinished script"));
     };
     let start = out.len();
-    if matches!(first, Event::Begin(_)) {
+    // `\left(…\right)` as a base still needs its own delimiters -- `write_one`'s
+    // `LeftRight` arm is the one place that knows how to draw them, so this delegates
+    // rather than repeating that logic here and risking it drift out of sync.
+    if matches!(first, Event::Begin(Grouping::LeftRight(..))) {
+        write_one(events, index, out, spacing)?;
+    } else if matches!(first, Event::Begin(_)) {
         let group_start = *index + 1;
         let cursor = group_end(events, *index)?;
         write_into(&events[group_start..cursor - 1], out, spacing)?;
@@ -260,6 +265,33 @@ fn write_one(
     let Some(event) = events.get(*index) else {
         return Err(MathError::NotInline("an unfinished script"));
     };
+    // `\left…\right` sizes to its content and, on one row, degrades to the plain
+    // delimiter character rather than the tall box design spec §6.4 draws when there is
+    // room for one: `(x)`, never `╭x╮`. Those characters live in `Grouping::LeftRight`'s
+    // own two fields, not as separate `Content` events either side (verified against
+    // `event.rs:316` in the vendored crate source) — a comment here once claimed
+    // otherwise, which is why the delimiters used to vanish silently. So this is the one
+    // grouping that must write something at its own boundary rather than only at what is
+    // inside it, which means it cannot share the single-event, index-plus-one shape the
+    // rest of this match uses: it consumes the whole group itself and returns early.
+    if let Event::Begin(Grouping::LeftRight(opening, closing)) = event {
+        let opening = *opening;
+        let closing = *closing;
+        let group_start = *index + 1;
+        let cursor = group_end(events, *index)?;
+        // `None` is a real `\left.` or `\right.` — an intentionally invisible
+        // delimiter, not a missing one — so nothing is written for it, not a
+        // placeholder.
+        if let Some(delim) = opening {
+            out.push(delim);
+        }
+        write_into(&events[group_start..cursor - 1], out, spacing)?;
+        if let Some(delim) = closing {
+            out.push(delim);
+        }
+        *index = cursor;
+        return Ok(());
+    }
     match event {
         Event::Content(content) => {
             // A function name reads tight against an opening delimiter that
@@ -279,11 +311,12 @@ fn write_one(
         }
         // A group boundary draws nothing of itself. What a group *does* — a
         // fraction, a root, a matrix — arrives as `Visual` or as an environment.
-        // `Normal` is `{}`; `LeftRight` is `\left(…\right)`, which draws its
-        // delimiters as ordinary `Content` either side. Everything else — a matrix,
-        // `cases`, an `array`, an `align` — is a grid, and a grid is exactly the
-        // failure spec §9 describes: a well-formed formula in the wrong place.
-        Event::Begin(Grouping::Normal | Grouping::LeftRight(..)) | Event::End => {}
+        // `Normal` is `{}`, drawn by its content alone. `LeftRight` is handled above,
+        // before this match, because it must draw its own delimiters. Everything
+        // else — a matrix, `cases`, an `array`, an `align` — is a grid, and a grid is
+        // exactly the failure spec §9 describes: a well-formed formula in the wrong
+        // place.
+        Event::Begin(Grouping::Normal) | Event::End => {}
         Event::Begin(grouping) => return Err(MathError::NotInline(grouping_name(grouping))),
         Event::StateChange(_) => {}
         // Only a *horizontal* spacing command draws a column. `\mathstrut` and

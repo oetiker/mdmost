@@ -271,6 +271,12 @@ proptest::proptest! {
                 proptest::sample::select(vec![
                     "\\frac", "\\sqrt", "\\sum", "{", "}", "^", "_", "&", "\\\\",
                     "\\begin{pmatrix}", "\\end{pmatrix}", "\\alpha", "$", "\\",
+                    // Delimiter-aware vocabulary, added alongside the `\left`/`\right`
+                    // fix: bare brackets, `\left`/`\right` themselves, an invisible
+                    // delimiter, and plain letters/digits so a generated string is more
+                    // often something the parser accepts far enough to reach the new
+                    // code, rather than failing at the lexer on every case.
+                    "\\left", "\\right", "(", ")", "[", "]", ".", "a", "1",
                 ]),
                 0..20,
             ).prop_map(|parts| parts.concat())
@@ -278,4 +284,31 @@ proptest::proptest! {
     ) {
         let _ = render_inline(&src);
     }
+}
+
+#[test]
+fn left_right_draws_its_own_delimiter_characters() {
+    // `Grouping::LeftRight` carries its delimiter characters in its own two fields
+    // (`event.rs:316`), not as separate `Content` events either side, so ignoring the
+    // `Begin`/`End` the way `Grouping::Normal` is ignored silently drops them.
+    assert_eq!(rendered(r"\left(x\right)"), "(x)");
+    assert_eq!(rendered(r"\left(a+b\right)"), "(a + b)");
+    assert_eq!(rendered(r"\left[x\right]"), "[x]");
+    // Not just a missing character: without the parentheses this is a different
+    // expression. `a/b²` parses as `a/(b²)`; `(a/b)²` is what the source asked for.
+    assert_eq!(rendered(r"\left(\frac{a}{b}\right)^2"), "(a/b)²");
+    // `\left.` is a deliberately invisible delimiter, not a missing one.
+    assert_eq!(rendered(r"\left.x\right)"), "x)");
+    assert_eq!(rendered(r"\left(x\right."), "(x");
+    // Delimiters sit tight against their content -- no space is added on either side
+    // beyond what the surrounding run already carries, matching `\sin(x)` -> `sin(x)`.
+    assert_eq!(rendered(r"a + \left(b\right)"), "a + (b)");
+}
+
+#[test]
+fn left_right_still_draws_its_delimiters_as_a_script_base() {
+    // `take_base`'s group branch used to strip every group boundary unconditionally,
+    // the same bug as `write_one`'s, in a second place: a `\left...\right` used as a
+    // script's own base would lose its delimiters just the same.
+    assert_eq!(rendered(r"\left(x\right)_0"), "(x)₀");
 }
