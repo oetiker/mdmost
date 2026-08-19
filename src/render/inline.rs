@@ -410,6 +410,10 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, ids: &mut usize, out: &mu
                     node.source,
                 ));
             }
+            // Task 10 renders the formula; here it is deliberately silent rather than
+            // falling into the container wildcard below, which would be misleading —
+            // `Math` never has children to render.
+            NodeKind::Math { .. } => {}
             NodeKind::Emph => collect(
                 &node.children,
                 style.patch(theme.text.emphasis),

@@ -13,13 +13,20 @@ use super::{Heading, ListInfo, Node, NodeKind, SourceSpan, TableInfo};
 use crate::text::Align;
 
 /// The comrak options `mdmost` parses with.
-pub(super) fn options<'a>() -> Options<'a> {
+pub(super) fn options<'a>(math: crate::doc::MathSyntax) -> Options<'a> {
     let mut options = Options::default();
     options.extension.table = true;
     options.extension.strikethrough = true;
     options.extension.tasklist = true;
     options.extension.autolink = true;
     options.extension.footnotes = true;
+    // Both, or neither. `math_dollars` covers `$…$` and `$$…$$`; `math_code` covers the
+    // `` $`…`$ `` form. Turning one on without the other would accept a syntax GitHub
+    // writers do not distinguish between. A ```` ```math ```` fence is neither of them:
+    // comrak leaves it a `CodeBlock` for the whole parse and only its HTML renderer
+    // treats it as math, so `convert` recognises it below instead.
+    options.extension.math_dollars = math.dollars;
+    options.extension.math_code = math.dollars;
     options
 }
 
@@ -149,11 +156,12 @@ fn code_lines(offsets: &LineOffsets<'_>, span: SourceSpan, literal: &str) -> Vec
 pub(super) fn document<'a>(
     root: &'a AstNode<'a>,
     source: &str,
+    math: crate::doc::MathSyntax,
     slugger: &mut Slugger,
     headings: &mut Vec<Heading>,
 ) -> Node {
     let offsets = LineOffsets::new(source);
-    let mut doc = convert(root, &offsets, slugger, headings);
+    let mut doc = convert(root, &offsets, math, slugger, headings);
     number_footnotes(&mut doc);
     split_transcriptions(&mut doc, source);
     doc
@@ -399,6 +407,7 @@ fn apply_footnote_numbers(node: &mut Node, numbers: &HashMap<String, u32>) {
 fn convert<'a>(
     node: &'a AstNode<'a>,
     offsets: &LineOffsets<'_>,
+    math: crate::doc::MathSyntax,
     slugger: &mut Slugger,
     headings: &mut Vec<Heading>,
 ) -> Node {
@@ -427,6 +436,27 @@ fn convert<'a>(
         NodeValue::TaskItem(task) => NodeKind::TaskItem {
             checked: task.symbol.is_some(),
         },
+        // A ```` ```math ```` fence. `math_code` does not cover it — in comrak 0.54 that
+        // extension is the `` $`…`$ `` form alone — and nothing in the parser sets
+        // `display_math` for a fence, so it arrives here as an ordinary code block and is
+        // recognised by its info string.
+        //
+        // The guard is not optional. Spec §3 requires that `math = false` parses a
+        // document exactly as it did before math existed, and without it a ```` ```math ````
+        // fence would stop being a code block whatever the reader configured.
+        NodeValue::CodeBlock(code)
+            if math.dollars
+                && code
+                    .info
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|word| word.eq_ignore_ascii_case("math")) =>
+        {
+            NodeKind::Math {
+                literal: code.literal.clone(),
+                display: true,
+            }
+        }
         NodeValue::CodeBlock(code) => {
             let info = code.info.clone();
             let language = info
@@ -493,9 +523,15 @@ fn convert<'a>(
             block: false,
             literal: html.clone(),
         },
-        NodeValue::Raw(text) | NodeValue::Math(comrak::nodes::NodeMath { literal: text, .. }) => {
-            NodeKind::Text(text.clone())
-        }
+        NodeValue::Math(comrak::nodes::NodeMath {
+            literal,
+            display_math,
+            ..
+        }) => NodeKind::Math {
+            literal: literal.clone(),
+            display: *display_math,
+        },
+        NodeValue::Raw(text) => NodeKind::Text(text.clone()),
         // Everything else is a container we do not style specially; treat it as a
         // paragraph-like wrapper so its children still render.
         _ => NodeKind::Paragraph,
@@ -507,7 +543,7 @@ fn convert<'a>(
     if !matches!(owned.kind, NodeKind::SkippedHtml { .. }) {
         owned.children = node
             .children()
-            .map(|child| convert(child, offsets, slugger, headings))
+            .map(|child| convert(child, offsets, math, slugger, headings))
             .collect();
     }
 

@@ -151,6 +151,30 @@ pub struct TableInfo {
     pub columns: usize,
 }
 
+/// Which math delimiters the parser recognises.
+///
+/// The **one** place the document tree depends on configuration, and deliberately so
+/// (design spec §3): `dollars: false` must mean a document parses exactly as it did
+/// before math existed, so that no reader who never wanted this can have a `$` change
+/// the shape of anything. `math_inline` is not here — it acts in the renderer and never
+/// changes the tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MathSyntax {
+    /// `$…$`, `$$…$$`, `` $`…`$ `` and ```` ```math ```` fences.
+    pub dollars: bool,
+    /// `\(…\)` and `\[…\]`, which no other Markdown renderer accepts (§3.1).
+    pub backslash: bool,
+}
+
+impl Default for MathSyntax {
+    fn default() -> Self {
+        Self {
+            dollars: true,
+            backslash: false,
+        }
+    }
+}
+
 /// What a [`Node`] is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -233,6 +257,16 @@ pub enum NodeKind {
         /// The code text.
         literal: String,
     },
+    /// A formula, inline or display.
+    ///
+    /// The node's [`source`](Node::source) covers the delimiters as well as the
+    /// formula, which is what lets a copy of it paste back as math.
+    Math {
+        /// The LaTeX, without its delimiters.
+        literal: String,
+        /// `true` for `$$…$$` and a ```` ```math ```` fence, `false` for `$…$`.
+        display: bool,
+    },
     /// Emphasis (`*x*`).
     Emph,
     /// Strong emphasis (`**x**`).
@@ -299,7 +333,7 @@ impl Node {
     fn collect_text(&self, out: &mut String) {
         match &self.kind {
             NodeKind::Text(text) => out.push_str(text),
-            NodeKind::Code { literal } => out.push_str(literal),
+            NodeKind::Code { literal } | NodeKind::Math { literal, .. } => out.push_str(literal),
             NodeKind::SoftBreak | NodeKind::LineBreak => out.push(' '),
             NodeKind::SkippedHtml { .. } => {}
             _ => {}
@@ -348,12 +382,17 @@ impl Doc {
     /// Line endings are normalised first, so a CRLF document becomes an ordinary one
     /// here and stays one everywhere after; see [`normalise_line_endings`].
     pub fn parse(source: &str) -> Self {
+        Self::parse_with(source, MathSyntax::default())
+    }
+
+    /// Parses `source` as Markdown, recognising the math delimiters `math` names.
+    pub fn parse_with(source: &str, math: MathSyntax) -> Self {
         let source = &*normalise_line_endings(source);
         let arena = Arena::new();
-        let root = parse_document(&arena, source, &convert::options());
+        let root = parse_document(&arena, source, &convert::options(math));
         let mut slugger = Slugger::new();
         let mut headings = Vec::new();
-        let owned = convert::document(root, source, &mut slugger, &mut headings);
+        let owned = convert::document(root, source, math, &mut slugger, &mut headings);
 
         let mut hasher = DefaultHasher::new();
         source.hash(&mut hasher);
@@ -373,7 +412,12 @@ impl Doc {
     /// bodies framed as code (usability review P17). A stream carrying any Markdown
     /// markup at all still takes the full Markdown path.
     pub fn parse_auto(source: &str) -> Self {
-        let markdown = Self::parse(source);
+        Self::parse_auto_with(source, MathSyntax::default())
+    }
+
+    /// [`Doc::parse_auto`], with an explicit math syntax.
+    pub fn parse_auto_with(source: &str, math: MathSyntax) -> Self {
+        let markdown = Self::parse_with(source, math);
         if plain::has_markup(markdown.root()) {
             markdown
         } else {

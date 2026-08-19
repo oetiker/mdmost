@@ -608,3 +608,76 @@ fn a_crlf_code_blocks_literal_carries_no_carriage_return() {
         .collect();
     assert_eq!(located, vec!["let a = 1;", "", "let b = 2;"]);
 }
+
+#[test]
+fn dollar_math_becomes_a_math_node() {
+    let doc = Doc::parse("Einstein wrote $E = mc^2$ here.\n");
+    let para = &doc.root().children[0];
+    let math = para
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node");
+    let NodeKind::Math { literal, display } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "E = mc^2");
+    assert!(!display);
+    // The span covers the delimiters, which is what a copy of the formula needs.
+    assert_eq!(&doc.source()[math.source.start..math.source.end], "$E = mc^2$");
+}
+
+#[test]
+fn double_dollars_are_display_math() {
+    let doc = Doc::parse("$$x^2$$\n");
+    let math = doc.root().children[0]
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node");
+    let NodeKind::Math { display, .. } = &math.kind else {
+        unreachable!()
+    };
+    assert!(display);
+}
+
+#[test]
+fn a_math_fence_is_display_math() {
+    let doc = Doc::parse("```math\nx^2\n```\n");
+    assert!(
+        doc.root()
+            .children
+            .iter()
+            .any(|node| matches!(&node.kind, NodeKind::Math { display: true, .. })),
+        "a ```math fence must parse as display math"
+    );
+}
+
+#[test]
+fn currency_in_prose_is_not_math() {
+    // comrak applies Pandoc's heuristics: no space before a closing `$`. This test is
+    // here so that a later change to `options()` cannot silently start eating prose.
+    let doc = Doc::parse("It costs $5 and $10 in total.\n");
+    assert!(
+        !doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+        "currency must not parse as math"
+    );
+}
+
+#[test]
+fn math_off_leaves_dollars_as_text() {
+    let doc = Doc::parse_with(
+        "Einstein wrote $E = mc^2$ here.\n",
+        MathSyntax { dollars: false, backslash: false },
+    );
+    assert!(
+        !doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+        "with math off, nothing may parse as math"
+    );
+}
