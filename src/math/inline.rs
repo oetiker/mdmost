@@ -260,11 +260,18 @@ fn take_base(
         // `2(ab)²`, the same visual grouping `bracketed()` already gives a fraction
         // or radical operand. `write_into` wrote straight into `out`, so any leading
         // space it added for head-of-run spacing sits before `start`'s tail and must
-        // stay outside the parentheses.
+        // stay outside the parentheses. The trailing space a function name or an
+        // operator can leave (`\sum` writes `∑ `, ready for what follows it) must be
+        // trimmed *before* bracketing, not after: sealed inside the parentheses it
+        // would make a one-character base count as two, so `bracketed()`'s
+        // single-atom exemption would never fire and `{\sum}^2` would draw `(∑ )²`
+        // instead of `∑²`. The unconditional trim below only ever sees `out`'s new
+        // tail from *outside* the parentheses this pushes, so it cannot reach a space
+        // sealed in here.
         let leading_space = out[start..].starts_with(' ');
         let body_start = start + usize::from(leading_space);
         let body = out.split_off(body_start);
-        out.push_str(&bracketed(&body));
+        out.push_str(&bracketed(body.trim_end()));
     } else if let Event::Visual(visual) = first {
         // `write_one` has no arm for `Event::Visual` at all -- a fraction or a radical
         // is drawn only by `write_into`'s own match, never by `write_one`'s -- so

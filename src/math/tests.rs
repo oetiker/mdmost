@@ -204,6 +204,36 @@ fn a_multi_atom_brace_group_used_as_a_script_base_keeps_its_grouping() {
 }
 
 #[test]
+fn a_trailing_space_inside_a_bracketed_base_does_not_defeat_the_single_atom_exemption() {
+    // Regression caught in re-review: bracketing ran *before* the unconditional
+    // trailing-space trim at the bottom of `take_base`, so a trailing space
+    // `write_into` leaves behind (a big operator's own spacing, or a function name's)
+    // was sealed *inside* the new parentheses -- which made a genuinely one-character
+    // base count as two, so `bracketed()`'s single-atom exemption never fired.
+    // `{\sum}^2` drew `(∑ )²` instead of the correct `∑²`, a straight regression
+    // against the version before the C1 fix. The body is now trimmed before it is
+    // bracketed, not after.
+    assert_eq!(rendered(r"{\sum}^2"), "∑²");
+    assert_eq!(rendered(r"{\prod}^2"), "∏²");
+    assert_eq!(rendered(r"{\int}^2"), "∫²");
+    // Multi-character bases still bracket correctly with the trailing space gone.
+    assert_eq!(rendered(r"{\sin}^2"), "(sin)²");
+    assert_eq!(rendered(r"2{\log}_2"), "2 (log)₂");
+    assert_eq!(rendered(r"{a+}^2"), "(a +)²");
+}
+
+#[test]
+fn an_empty_brace_group_used_as_a_script_base_brackets_an_empty_body() {
+    // Degenerate LaTeX -- an empty group has nothing to be misread as a bigger
+    // expression -- but it is worth pinning rather than guarding against: an empty
+    // base is zero characters, not one, so `bracketed()`'s single-atom exemption
+    // does not apply to it either way, and drawing `()` is an honest, consistent
+    // answer for "a group, and it was empty" rather than a special case earning its
+    // own branch.
+    assert_eq!(rendered(r"{}^2"), "()²");
+}
+
+#[test]
 fn a_nested_script_composes_without_panicking() {
     // The inner `y^2` is raised on its own (`y²`), but that result contains `²`, which
     // has no superscript form of its own -- so the outer raise declines and falls back
