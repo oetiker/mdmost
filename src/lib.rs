@@ -51,6 +51,7 @@ pub mod doc;
 pub mod error;
 pub mod export;
 pub mod highlight;
+pub mod math;
 pub mod mermaid;
 pub mod nerdfont;
 pub mod numbering;
