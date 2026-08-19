@@ -8,8 +8,8 @@ expression: canvas.plain_text()
  Inline math sits on the line: E = mc², and α × β, and the subscripted                                                  
  aᵢⱼ beside the flat a_{bc} that Unicode cannot lower.                                                                  
                                                                                                                         
- Scripts that exist are raised: xⁿ⁺¹. Scripts that do not are written                                                   
- flat: x^q.                                                                                                             
+ Scripts that exist are raised: xⁿ⁺¹, and e⁻ˣ raises the minus sign too.                                                
+ Scripts that do not are written flat: x^q.                                                                             
                                                                                                                         
  Structures are linearised inline: a/b, √x, and ∑ᵢ₌₁ⁿ i.                                                                
                                                                                                                         

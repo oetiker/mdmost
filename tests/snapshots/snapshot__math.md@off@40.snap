@@ -12,8 +12,9 @@ expression: canvas.plain_text()
  lower.                                 
                                         
  Scripts that exist are raised:         
- $x^{n+1}$. Scripts that do not are     
- written flat: $x^q$.                   
+ $x^{n+1}$, and $e^{-x}$ raises the     
+ minus sign too. Scripts that do not    
+ are written flat: $x^q$.               
                                         
  Structures are linearised inline:      
  $\frac{a}{b}$, $\sqrt{x}$, and         

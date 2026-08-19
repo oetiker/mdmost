@@ -20,8 +20,11 @@ Document
   Paragraph
     Text("Scripts that exist are raised: ")
     Math
-    Text(". Scripts that do not are written flat:")
+    Text(", and ")
+    Math
+    Text(" raises the minus sign too.")
     SoftBreak
+    Text("Scripts that do not are written flat: ")
     Math
     Text(".")
   Paragraph

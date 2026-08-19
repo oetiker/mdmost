@@ -10,7 +10,8 @@ expression: canvas.plain_text()
  beside the flat a_{bc} that Unicode    
  cannot lower.                          
                                         
- Scripts that exist are raised: xⁿ⁺¹.   
+ Scripts that exist are raised: xⁿ⁺¹,   
+ and e⁻ˣ raises the minus sign too.     
  Scripts that do not are written flat:  
  x^q.                                   
                                         
