@@ -418,3 +418,32 @@ fn a_config_theme_shadowing_a_builtin_does_not_stall_the_cycle() {
     assert_eq!(config.next_theme_name("dark"), "light");
     assert_eq!(config.next_theme_name("light"), "dark");
 }
+
+#[test]
+fn math_keys_have_the_documented_defaults() {
+    let config = Config::default();
+    assert!(config.math, "math is on by default");
+    assert!(config.math_inline, "inline math is on by default");
+    assert!(
+        !config.math_backslash,
+        "backslash delimiters are off by default: no other renderer accepts them"
+    );
+}
+
+#[test]
+fn math_keys_are_read_from_the_file() {
+    let loaded = Config::parse_str(
+        "math = false\nmath_inline = false\nmath_backslash = true\n",
+        path(),
+    );
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert!(!loaded.config.math);
+    assert!(!loaded.config.math_inline);
+    assert!(loaded.config.math_backslash);
+}
+
+#[test]
+fn a_misspelt_math_key_is_reported_and_dropped() {
+    let loaded = Config::parse_str("mathinline = true\n", path());
+    assert_eq!(loaded.problems.len(), 1, "{:?}", loaded.problems);
+}

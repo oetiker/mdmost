@@ -425,6 +425,7 @@ impl App {
             .with_title_banner(self.config.title_banner)
             .with_section_numbers(self.config.section_numbers)
             .with_copy_button(self.copy_button)
+            .with_math_inline(self.config.math_inline)
     }
 
     /// Turns the copy buttons on or off.

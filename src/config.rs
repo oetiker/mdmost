@@ -74,6 +74,36 @@ pub struct Config {
     pub icons: Option<bool>,
     /// Whether fenced code blocks are drawn with a line-number gutter.
     pub line_numbers: bool,
+    /// Whether math is parsed at all.
+    ///
+    /// On by default, and it acts on the **parser**: off means comrak's math extensions
+    /// are never enabled, so `$` is ordinary text and a document parses exactly as it
+    /// did before math existed. That is what makes this the escape hatch — no reader who
+    /// never wanted this can have a `$` change the shape of anything (design spec §12).
+    ///
+    /// This key dominates the two below: with it off, neither has anything to act on.
+    pub math: bool,
+    /// Whether inline `$…$` math is laid out, as opposed to shown as its own source.
+    ///
+    /// On by default, and it acts on the **renderer**, not the parser — comrak's
+    /// `math_dollars` covers `$` and `$$` together, so "inline off, display on" cannot
+    /// be a parser setting. Off, an inline formula is drawn as the exact bytes the
+    /// author typed, delimiters included; `$$` blocks and ```` ```math ```` fences still
+    /// render (design spec §5.3).
+    ///
+    /// The cost of that, documented rather than engineered around: the content was still
+    /// *parsed* as math, so it is no longer Markdown. `$a *b* c$` shows a literal `*b*`.
+    /// A reader who wants the old behaviour exactly wants `math = false`.
+    pub math_inline: bool,
+    /// Whether `\(…\)` and `\[…\]` are read as math.
+    ///
+    /// **Off by default**, unlike the two above, and the asymmetry is the point: those
+    /// two make a document that already renders elsewhere render here, and this one
+    /// makes a document render that renders nowhere else. These are `MathJax`'s defaults
+    /// and no Markdown renderer of note accepts them — but they are how mathematics
+    /// arrives in a file somebody pasted an assistant's answer into, which is squarely
+    /// what a pager is pointed at (design spec §3.1).
+    pub math_backslash: bool,
     /// Whether a document titled by a lone `#` heading opens with a `FIGlet` banner.
     ///
     /// **Off by default**, and deliberately so: a banner is a decoration the reader did
@@ -138,6 +168,9 @@ impl Default for Config {
             theme: "dark".to_string(),
             icons: None,
             line_numbers: false,
+            math: true,
+            math_inline: true,
+            math_backslash: false,
             title_banner: false,
             section_numbers: true,
             toc_open: false,
@@ -311,6 +344,9 @@ struct RawConfig {
     theme: Option<String>,
     icons: Option<bool>,
     line_numbers: Option<bool>,
+    math: Option<bool>,
+    math_inline: Option<bool>,
+    math_backslash: Option<bool>,
     title_banner: Option<bool>,
     section_numbers: Option<bool>,
     mouse: Option<bool>,
@@ -371,6 +407,15 @@ impl RawConfig {
 
         if let Some(line_numbers) = self.line_numbers {
             config.line_numbers = line_numbers;
+        }
+        if let Some(math) = self.math {
+            config.math = math;
+        }
+        if let Some(math_inline) = self.math_inline {
+            config.math_inline = math_inline;
+        }
+        if let Some(math_backslash) = self.math_backslash {
+            config.math_backslash = math_backslash;
         }
         if let Some(title_banner) = self.title_banner {
             config.title_banner = title_banner;
@@ -576,6 +621,9 @@ const KNOWN_KEYS: &[&str] = &[
     "theme",
     "icons",
     "line_numbers",
+    "math",
+    "math_inline",
+    "math_backslash",
     "title_banner",
     "section_numbers",
     "mouse",

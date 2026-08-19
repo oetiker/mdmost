@@ -107,6 +107,11 @@ pub struct RenderOptions {
     /// granted: a button nobody can click is worse than no button. `--render-once`
     /// leaves it off, because a dump is text in a pipe.
     pub copy_button: bool,
+    /// Whether inline `$…$` math is laid out rather than shown as its own source.
+    ///
+    /// On by default. Off is design spec §5.3's rendering, which is also where an
+    /// inline formula goes when it fails to lay out — one fallback, two reasons.
+    pub math_inline: bool,
 }
 
 impl RenderOptions {
@@ -118,6 +123,7 @@ impl RenderOptions {
             title_banner: false,
             section_numbers: true,
             copy_button: false,
+            math_inline: true,
         }
     }
 
@@ -144,6 +150,15 @@ impl RenderOptions {
     pub const fn with_copy_button(self, copy_button: bool) -> Self {
         Self {
             copy_button,
+            ..self
+        }
+    }
+
+    /// The same options with inline math laid out, or shown as its source, instead.
+    #[must_use]
+    pub const fn with_math_inline(self, math_inline: bool) -> Self {
+        Self {
+            math_inline,
             ..self
         }
     }

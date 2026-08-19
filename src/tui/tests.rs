@@ -37,9 +37,14 @@ Kappa lambda mu. Needle again.
 
 /// Builds an app over `source` at a fixed size.
 fn pager(source: &str) -> App {
+    pager_with(source, Config::default())
+}
+
+/// Builds an app over `source` at a fixed size, with a given configuration.
+fn pager_with(source: &str, config: Config) -> App {
     let mut app = App::new(
         Doc::parse(source),
-        Config::default(),
+        config,
         AppOptions {
             config_path: None,
             title: "sample.md".to_string(),
@@ -52,6 +57,21 @@ fn pager(source: &str) -> App {
     app.resize(80, 12);
     let _ = app.canvas();
     app
+}
+
+#[test]
+fn the_pager_passes_math_inline_to_the_renderer() {
+    // The pager builds its own `RenderOptions` in `App::render_options`, so a key wired
+    // only into the `--render-once` path at `src/main.rs` would do nothing in the way
+    // mdmost is normally used. That is the failure this test exists to catch.
+    let source = "Einstein wrote $E = mc^2$ here.\n";
+    assert!(pager(source).render_options().math_inline, "on by default");
+
+    let config = Config {
+        math_inline: false,
+        ..Config::default()
+    };
+    assert!(!pager_with(source, config).render_options().math_inline);
 }
 
 #[test]

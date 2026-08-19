@@ -80,6 +80,30 @@ struct Cli {
     #[arg(long, conflicts_with = "no_icons")]
     icons: bool,
 
+    /// Do not parse math at all: `$` stays ordinary text.
+    #[arg(long)]
+    no_math: bool,
+
+    /// Parse math even if the config file turns it off.
+    #[arg(long, conflicts_with = "no_math")]
+    math: bool,
+
+    /// Show inline `$...$` math as its source rather than laying it out.
+    #[arg(long)]
+    no_math_inline: bool,
+
+    /// Lay out inline math even if the config file turns it off.
+    #[arg(long, conflicts_with = "no_math_inline")]
+    math_inline: bool,
+
+    /// Also read `\(...\)` and `\[...\]` as math.
+    #[arg(long)]
+    math_backslash: bool,
+
+    /// Do not read `\(...\)` and `\[...\]`, even if the config file does.
+    #[arg(long, conflicts_with = "math_backslash")]
+    no_math_backslash: bool,
+
     /// Capture the mouse: wheel scrolls, the scrollbar drags, clicks jump in the contents
     /// pane, and dragging over the document copies the Markdown source behind it.
     ///
@@ -155,6 +179,17 @@ fn resolve_icons(cli: &Cli, configured: Option<bool>) -> bool {
     configured.unwrap_or_else(mdmost::nerdfont::detect)
 }
 
+/// A flag pair overriding a configured boolean: `--x` wins, then `--no-x`, then the file.
+fn resolve_flag(on: bool, off: bool, configured: bool) -> bool {
+    if off {
+        return false;
+    }
+    if on {
+        return true;
+    }
+    configured
+}
+
 /// `MDMOST_ICONS` as a yes or a no, or `None` if it is unset or not either.
 ///
 /// An unrecognised value is ignored rather than rejected: this is a convenience meant
@@ -226,7 +261,21 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             return Ok(ExitCode::from(EXIT_INPUT));
         }
     };
-    let doc = Doc::parse_auto(&source);
+    config.math = resolve_flag(cli.math, cli.no_math, config.math);
+    config.math_inline = resolve_flag(cli.math_inline, cli.no_math_inline, config.math_inline);
+    config.math_backslash = resolve_flag(
+        cli.math_backslash,
+        cli.no_math_backslash,
+        config.math_backslash,
+    );
+
+    let doc = Doc::parse_auto_with(
+        &source,
+        mdmost::doc::MathSyntax {
+            dollars: config.math,
+            backslash: config.math && config.math_backslash,
+        },
+    );
 
     let theme_name = cli.theme.clone().unwrap_or_else(|| config.theme.clone());
     let icons = resolve_icons(&cli, config.icons);
@@ -243,8 +292,9 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     let stdout_is_terminal = io::stdout().is_terminal();
 
     if cli.render_once || !stdout_is_terminal {
-        let options =
-            RenderOptions::new(icons, config.line_numbers).with_title_banner(config.title_banner);
+        let options = RenderOptions::new(icons, config.line_numbers)
+            .with_title_banner(config.title_banner)
+            .with_math_inline(config.math_inline);
         return render_once(
             &doc,
             &config,
@@ -406,7 +456,7 @@ fn read_input(file: Option<&Path>) -> Result<(String, String), mdmost::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Input, input_source};
+    use super::{Input, input_source, resolve_flag};
     use std::path::Path;
 
     #[test]
@@ -441,5 +491,21 @@ mod tests {
         for stdin_is_terminal in [true, false] {
             assert_eq!(input_source(Some(dash), stdin_is_terminal), Input::Stdin);
         }
+    }
+
+    #[test]
+    fn a_flag_wins_over_the_configured_value() {
+        assert!(resolve_flag(true, false, false));
+    }
+
+    #[test]
+    fn a_no_flag_wins_over_the_configured_value() {
+        assert!(!resolve_flag(false, true, true));
+    }
+
+    #[test]
+    fn neither_flag_leaves_the_configured_value_alone() {
+        assert!(resolve_flag(false, false, true));
+        assert!(!resolve_flag(false, false, false));
     }
 }

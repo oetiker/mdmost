@@ -115,6 +115,21 @@ impl Config {
             },
             Entry {
                 section: None,
+                key: "math",
+                value: Some(self.math.to_string()),
+            },
+            Entry {
+                section: None,
+                key: "math_inline",
+                value: Some(self.math_inline.to_string()),
+            },
+            Entry {
+                section: None,
+                key: "math_backslash",
+                value: Some(self.math_backslash.to_string()),
+            },
+            Entry {
+                section: None,
                 key: "mouse",
                 value: Some(self.mouse.to_string()),
             },
@@ -184,6 +199,15 @@ impl Config {
         }
         if back.line_numbers != self.line_numbers {
             return refuse("line_numbers");
+        }
+        if back.math != self.math {
+            return refuse("math");
+        }
+        if back.math_inline != self.math_inline {
+            return refuse("math_inline");
+        }
+        if back.math_backslash != self.math_backslash {
+            return refuse("math_backslash");
         }
         if back.mouse != self.mouse {
             return refuse("mouse");
