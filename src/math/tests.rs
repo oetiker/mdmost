@@ -268,6 +268,36 @@ fn a_matrix_declines_rather_than_being_flattened() {
     assert_eq!(err, crate::error::MathError::NotInline("a matrix"));
 }
 
+#[test]
+fn a_fraction_or_radical_as_a_script_base_declines_by_name() {
+    // Carried to stage 2 (final review, Task 5): a fraction or a radical drawn on this
+    // row is a two-dimensional box, which a script cannot flatten onto -- correctly
+    // declined, not approximated. Pinned here so stage 2's proper layout of this case
+    // changes a test, not a silent behaviour drift. The message names the position
+    // ("as a script base"), not the construct, because a fraction and a radical both
+    // draw fine elsewhere on this very row (`a_fraction_is_written_with_a_slash`,
+    // `a_root_takes_the_radical_sign`).
+    assert_eq!(
+        render_inline(r"\frac{a}{b}^2").unwrap_err(),
+        crate::error::MathError::NotInline("a fraction as a script base")
+    );
+    assert_eq!(
+        render_inline(r"\sqrt{x}^2").unwrap_err(),
+        crate::error::MathError::NotInline("a radical as a script base")
+    );
+}
+
+#[test]
+fn a_leading_unary_minus_before_a_function_name_keeps_a_space() {
+    // Carried to stage 2 (final review, Task 3): `spaced` suppresses both sides of a
+    // leading operator, but `spaced_word` (a function name) suppresses only its own
+    // leading side, and neither function knows about the other. `-x` reads `−x`
+    // (`a_leading_operator_glues_to_what_follows_instead_of_floating`), but `-\sin x`
+    // reads `− sin x`, not `−sin x` -- correct, merely loose. Pinned so stage 2's
+    // rewrite of this walk changes a test rather than drifting silently.
+    assert_eq!(rendered(r"-\sin x"), "− sin x");
+}
+
 proptest::proptest! {
     /// Design spec §9: a wrecked formula must never take down a document.
     #[test]

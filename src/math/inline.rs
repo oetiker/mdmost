@@ -265,6 +265,16 @@ fn take_base(
         let body_start = start + usize::from(leading_space);
         let body = out.split_off(body_start);
         out.push_str(&bracketed(&body));
+    } else if let Event::Visual(visual) = first {
+        // `write_one` has no arm for `Event::Visual` at all -- a fraction or a radical
+        // is drawn only by `write_into`'s own match, never by `write_one`'s -- so
+        // delegating here would reach its catch-all and report "this construct cannot
+        // be drawn on one row", which is false of a fraction or a radical: both draw
+        // fine elsewhere on this very row (design spec §5.2, §6.1). What actually
+        // cannot be drawn is one of them *in this position*, a two-dimensional box
+        // used as flat script content -- Task 5's carried deferral, real to stage 2's
+        // proper layout rather than to whether the walk can produce one row at all.
+        return Err(MathError::NotInline(visual_as_base_name(visual)));
     } else {
         write_one(events, index, out, spacing)?;
     }
@@ -497,6 +507,23 @@ fn grouping_name(grouping: &Grouping) -> &'static str {
         | Grouping::Alignat { .. }
         | Grouping::Alignedat { .. } => "an aligned environment",
         _ => "a multi-row environment",
+    }
+}
+
+/// What a [`Visual`] is called when it is used as a script base, for
+/// [`MathError::NotInline`]'s payload.
+///
+/// Named for the *position*, not the construct: a fraction or a radical draws fine at
+/// full size elsewhere on the row (`write_into`'s own `Visual` arms), so the generic
+/// "this construct cannot be drawn on one row" `write_one` falls back to is false of the
+/// thing itself. `Negation` never reaches here as things stand -- `take_base` is the only
+/// caller, and nothing routes a negation into a script base without failing earlier --
+/// so it keeps the same generic wording `write_into`'s own catch-all uses for it.
+fn visual_as_base_name(visual: &Visual) -> &'static str {
+    match visual {
+        Visual::Fraction(_) => "a fraction as a script base",
+        Visual::SquareRoot | Visual::Root => "a radical as a script base",
+        _ => "this construct",
     }
 }
 
