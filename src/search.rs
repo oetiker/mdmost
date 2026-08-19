@@ -374,9 +374,6 @@ fn segments_for(source: &str, spans: &[SearchSpan], start: usize, end: usize) ->
             // A span with no interior position is taken whole or not at all: measuring a
             // prefix of its source against its cells would place a highlight using an
             // arithmetic its body cannot support.
-            // A span with no interior position is taken whole or not at all: measuring a
-            // prefix of its source against its cells would place a highlight using an
-            // arithmetic its body cannot support.
             if !span.copied {
                 return Some(Segment {
                     row: span.row,
