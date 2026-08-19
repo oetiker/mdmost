@@ -519,8 +519,15 @@ coverage will do.
 
 - **Latin Extended-C (U+2C60-U+2C7F)** — Math's subscript `j`, the other one.
 
+- **Spacing Modifier Letters (U+02B0-U+02FF)** — Math's raised `h j l r s w x y`, the
+  superscript letters Unicode placed here instead of in Superscripts and Subscripts,
+  above.
+
+- **Phonetic Extensions Supplement (U+1D80-U+1DBF)** — Math's raised `c f z`, the
+  superscript letters Unicode placed here instead.
+
 - **Latin-1 Supplement (U+0080-U+00FF)** — The scrollbar track, whatever HTML entities
-  the document decodes to, and math's raised `1` and `2`.
+  the document decodes to, and math's raised `1`, `2` and `3`.
 
 - **Specials (U+FFF0-U+FFFF)** — The replacement character, drawn in place of one that
   cannot be represented.

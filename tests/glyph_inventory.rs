@@ -124,14 +124,19 @@ const INVENTORY: &[(&str, &str)] = &[
     ("General Punctuation (U+2000-U+206F)", "…"),
     // Class-diagram relation glyphs, and math's radical sign (`\sqrt`).
     ("Mathematical Operators (U+2200-U+22FF)", "∧∨√"),
-    // Math's raised `n` and `+`, and lowered `=` and `1` (design spec §5.1) —
-    // `x^{n+1}` and `\sum_{i=1}^{n}`.
-    ("Superscripts and Subscripts (U+2070-U+209F)", "ⁿ⁺₌₁"),
+    // Math's raised `n`, `+` and `-`, and lowered `=` and `1` (design spec §5.1) —
+    // `x^{n+1}`, `e^{-x}` and `\sum_{i=1}^{n}`.
+    ("Superscripts and Subscripts (U+2070-U+209F)", "ⁿ⁺⁻₌₁"),
     // Math's subscript i — the one Latin subscript letter Unicode placed outside the
     // Superscripts and Subscripts block, above.
     ("Phonetic Extensions (U+1D00-U+1D7F)", "ᵢ"),
     // Math's subscript j — the one Latin subscript letter Unicode placed here instead.
     ("Latin Extended-C (U+2C60-U+2C7F)", "ⱼ"),
+    // Math's raised `h j l r s w x y` — the superscript letters Unicode placed here
+    // instead of in Superscripts and Subscripts, above (design spec §5.1).
+    ("Spacing Modifier Letters (U+02B0-U+02FF)", "ʰʲˡʳˢʷˣʸ"),
+    // Math's raised `c f z` — the superscript letters Unicode placed here instead.
+    ("Phonetic Extensions Supplement (U+1D80-U+1DBF)", "ᶜᶠᶻ"),
     // Every frame, rule, table border and diagram box.
     (
         "Box Drawing (U+2500-U+257F)",
@@ -212,6 +217,82 @@ fn every_glyph_the_renderer_emits_is_in_the_documented_inventory() {
         undocumented.is_empty(),
         "the renderer emits {} codepoint(s) the manual does not document.\n\
          Add them to INVENTORY here and to the manual's TERMINAL SETUP section:\n  {}",
+        undocumented.len(),
+        undocumented.join("\n  ")
+    );
+}
+
+/// Every non-ASCII character `math::render_inline` can substitute for a script operand.
+///
+/// This probes the public API directly rather than reading `src/math/scripts.rs`'s
+/// private substitution tables, on purpose: those tables are a closed set, so asserting
+/// this inventory against them would only prove the tables agree with themselves.
+/// Driving every printable ASCII character through an actual superscript and subscript
+/// is what catches the gap the corpus-only check above cannot -- a substitution the
+/// tables support but no `tests/corpus/*.md` line happens to exercise (as `ˣ`, `ᶜ`,
+/// `ᶠ` and `ᶻ` were, until this test existed).
+fn substituted_script_forms() -> BTreeSet<char> {
+    let mut out = BTreeSet::new();
+    for byte in 0x20u8..=0x7e {
+        let c = char::from(byte);
+        // These have their own meaning to the LaTeX parser and are not script content
+        // in their own right; excluding them keeps every probe a group with exactly
+        // one plain character inside, which is what a substitution table entry is.
+        if "\\{}$&%_^~".contains(c) {
+            continue;
+        }
+        for marker in ['^', '_'] {
+            let src = format!("x{marker}{{{c}}}");
+            if let Ok(rendered) = mdmost::math::render_inline(&src) {
+                out.extend(rendered.chars().filter(|ch| !ch.is_ascii()));
+            }
+        }
+    }
+    out
+}
+
+/// The inclusive codepoint range in an `INVENTORY` label like
+/// `"Superscripts and Subscripts (U+2070-U+209F)"`.
+fn block_range(label: &str) -> std::ops::RangeInclusive<u32> {
+    let hex = label
+        .rsplit('(')
+        .next()
+        .and_then(|s| s.strip_suffix(')'))
+        .expect("every INVENTORY label ends in (U+XXXX-U+YYYY)");
+    let (lo, hi) = hex
+        .split_once('-')
+        .expect("every INVENTORY range has a hyphen");
+    let parse = |s: &str| {
+        u32::from_str_radix(s.trim_start_matches("U+"), 16).expect("every INVENTORY bound is hex")
+    };
+    parse(lo)..=parse(hi)
+}
+
+#[test]
+fn every_script_form_the_renderer_can_draw_falls_in_a_documented_block() {
+    // Block ranges, not the literal example glyphs above: the manual promises a whole
+    // Unicode block per row ("math's raised and lowered digits, operators and
+    // parentheses"), not the handful of examples `INVENTORY` happens to spell out for
+    // the corpus-driven test above. Checking literal glyphs here would flag every
+    // digit and operator the corpus doesn't happen to render, which the manual already
+    // covers by block; checking ranges is what actually matches the manual's claim,
+    // and it is what makes this assertion immune to the corpus's own coverage gaps.
+    let blocks: Vec<_> = INVENTORY
+        .iter()
+        .map(|(label, _)| block_range(label))
+        .collect();
+
+    let undocumented: Vec<String> = substituted_script_forms()
+        .into_iter()
+        .filter(|c| !blocks.iter().any(|range| range.contains(&(*c as u32))))
+        .map(|c| format!("U+{:04X} {c}", c as u32))
+        .collect();
+
+    assert!(
+        undocumented.is_empty(),
+        "the renderer can draw {} script form(s) whose Unicode block the manual does \
+         not document, even though no corpus line happens to reach them.\n\
+         Add the block to INVENTORY here and to the manual's TERMINAL SETUP section:\n  {}",
         undocumented.len(),
         undocumented.join("\n  ")
     );

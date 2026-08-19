@@ -36,6 +36,11 @@ const SUPERSCRIPTS: &[(char, char)] = &[
     ('9', '⁹'),
     ('+', '⁺'),
     ('-', '⁻'),
+    // `pulldown-latex` resolves math-mode `-` to U+2212 MINUS SIGN, not ASCII `-`
+    // (`Content::BinaryOp { content: '−' }`), so a script table keyed on ASCII alone
+    // never matches a negative exponent -- `x^{-1}` needs this entry as much as the
+    // one above, or it silently declines instead of raising to `x⁻¹`.
+    ('\u{2212}', '⁻'),
     ('=', '⁼'),
     ('(', '⁽'),
     (')', '⁾'),
@@ -84,6 +89,9 @@ const SUBSCRIPTS: &[(char, char)] = &[
     ('9', '₉'),
     ('+', '₊'),
     ('-', '₋'),
+    // See the matching comment in `SUPERSCRIPTS`: `pulldown-latex` resolves math-mode
+    // `-` to U+2212, not ASCII `-`, so `x_{-1}` needs this entry to reach `x₋₁`.
+    ('\u{2212}', '₋'),
     ('=', '₌'),
     ('(', '₍'),
     (')', '₎'),

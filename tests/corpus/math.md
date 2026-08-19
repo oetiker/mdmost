@@ -3,8 +3,8 @@
 Inline math sits on the line: $E = mc^2$, and $\alpha \times \beta$, and the
 subscripted $a_{ij}$ beside the flat $a_{bc}$ that Unicode cannot lower.
 
-Scripts that exist are raised: $x^{n+1}$. Scripts that do not are written flat:
-$x^q$.
+Scripts that exist are raised: $x^{n+1}$, and $e^{-x}$ raises the minus sign too.
+Scripts that do not are written flat: $x^q$.
 
 Structures are linearised inline: $\frac{a}{b}$, $\sqrt{x}$, and
 $\sum_{i=1}^{n} i$.
