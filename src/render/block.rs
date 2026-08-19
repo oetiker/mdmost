@@ -258,11 +258,23 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         // No line origins: spec §10 gives a formula one span over the whole construct,
         // and stage 2 is what draws the cells that span can name. Recording per-line
         // spans of the source dump would be a different, wrong answer.
+        //
+        // `trim_matches('\n')`: a `$$…$$` literal is everything between the two lines
+        // of dollars, so it opens with the newline right after the first `$$` and
+        // (usually) closes with the one right before the last — neither is content, and
+        // left in, the opening one draws as a blank first line with the number `1`
+        // against nothing. A fence's literal never carries the leading one (comrak
+        // starts a `CodeBlock` literal at the first content line), so this is a no-op
+        // there and the two forms read identically. Safe to trim here rather than in
+        // `code::fallback` itself: `origins` is `&[]` for this caller (see above), so
+        // there is no line-to-span mapping for a shifted row to desynchronise —
+        // `fallback`'s other caller, Mermaid, keeps its literal untouched and its
+        // `origins` valid.
         NodeKind::Math {
             literal,
             display: true,
         } => code::fallback(
-            literal,
+            literal.trim_matches('\n'),
             Some("math"),
             &"display math is not laid out yet",
             &[],

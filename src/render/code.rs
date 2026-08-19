@@ -37,6 +37,7 @@ use crate::doc::SourceSpan;
 use crate::error::MermaidError;
 use crate::mermaid::Fit;
 use crate::text::{Line, Span, display_width, graphemes};
+use crate::theme::Style;
 
 use super::{Ctx, bridge, button};
 
@@ -315,7 +316,7 @@ fn framed_code(
         title.as_ref(),
         theme.code.background,
     );
-    join_gutter(&mut out, gutter, padding, title.as_ref(), ctx);
+    join_gutter(&mut out, gutter, padding, title.as_ref(), None, ctx);
     pin_gutter(&mut out, gutter, padding, title.as_ref());
     // The label and the junction have already taken what they need of the top edge; the
     // button is the third occupant and the only optional one, so it is the one that
@@ -405,45 +406,83 @@ const CODE_PADDING: u16 = 1;
 /// Without this the gutter is a bar floating between two horizontal edges it does not
 /// meet; with it the block reads as one piece of chrome.
 ///
-/// The top junction and the language label want the same columns — a four-column gutter
-/// puts the `┬` under the third letter of `rust` — and the rule used to be that the
-/// label won and the junction was simply dropped. That left the gutter closed at the
-/// bottom and open at the top, which reads as a box that failed to draw rather than as
-/// a label that took precedence, so the two are no longer in competition: the label is
-/// moved to the *right* of the junction, and the top edge comes out `╭───┬ rust ───╮`,
-/// the mirror of the `╰───┴─────────╯` beneath it. `title` is therefore re-drawn here
-/// rather than being handed to `Canvas::framed`, which knows only one place to put it.
-fn join_gutter(out: &mut Canvas, gutter: usize, padding: u16, title: Option<&Line>, ctx: Ctx<'_>) {
+/// The junctions and the edge labels want the same columns — a four-column gutter puts
+/// the `┬`/`┴` under the third letter of `rust`, or of a caption — and the rule used to
+/// be that the label won and the junction was simply dropped. That left the gutter
+/// closed on one edge and open on the other, which reads as a box that failed to draw
+/// rather than as a label that took precedence, so the two are no longer in competition:
+/// the label is moved to the *right* of the junction, and the top edge comes out
+/// `╭───┬ rust ───╮`, the mirror of `╰───┴ reason ──╯` beneath it. Both labels are
+/// therefore re-drawn here rather than being handed to `Canvas::framed_captioned`, which
+/// knows only one place to put each.
+///
+/// **2026-08-19**: the bottom edge used to skip this — `write_str(last, col, tee_up,
+/// ..)` ran unconditionally, with no check that a caption was standing on `col` the way
+/// the top edge already checked for a title. A caption starts in the same column as a
+/// title (`Canvas::framed_captioned` writes both one column in from their corner), so
+/// any caption long enough to reach the gutter's junction column had a character of its
+/// own text overwritten by `┴` — found by rendering a math fallback with line numbers
+/// on, where `display math is not laid out yet` came out `di┴play`. The same corruption
+/// was already shipping for every Mermaid failure caption long enough to reach that
+/// column (`render::tests::the_caption_is_not_corrupted_by_the_gutter_junction_with_line_numbers_on`
+/// pins both). `join_edge` is what both edges now share, so a fix to one is a fix to
+/// both.
+fn join_gutter(
+    out: &mut Canvas,
+    gutter: usize,
+    padding: u16,
+    title: Option<&Line>,
+    caption: Option<&Line>,
+    ctx: Ctx<'_>,
+) {
     if gutter == 0 {
         return;
     }
     // Inside the frame and the padding, the rule sits two columns left of the code.
     let col = 1 + usize::from(padding) + gutter - 2;
-    let set = BorderSet::ROUNDED;
     let frame = ctx.theme.code.frame;
     let last = out.height().saturating_sub(1);
     let inner = usize::from(out.width()).saturating_sub(2);
+    let set = BorderSet::ROUNDED;
+    join_edge(out, 0, col, inner, title, set.tee_down, frame);
+    join_edge(out, last, col, inner, caption, set.tee_up, frame);
+}
+
+/// Draws one junction glyph into one horizontal edge, first moving that edge's label out
+/// of the way if it is standing on the junction column. See [`join_gutter`].
+fn join_edge(
+    out: &mut Canvas,
+    row: usize,
+    col: usize,
+    inner: usize,
+    label: Option<&Line>,
+    junction: char,
+    frame: Style,
+) {
+    let set = BorderSet::ROUNDED;
     if col < inner
-        && out.row_text(0).chars().nth(col) != Some(set.horizontal)
-        && let Some(title) = title
+        && out.row_text(row).chars().nth(col) != Some(set.horizontal)
+        && let Some(label) = label
     {
-        // The label is standing on the junction column. Lay the whole top edge again —
-        // the old label has to go completely, not be partly overwritten — and put the
-        // label back down after the junction.
-        out.hline(0, 1, inner, &set.horizontal.to_string(), frame);
+        // The label is standing on the junction column. Lay the whole edge again — the
+        // old label has to go completely, not be partly overwritten — and put the label
+        // back down after the junction.
+        out.hline(row, 1, inner, &set.horizontal.to_string(), frame);
         let mut spaced = Line::empty();
         spaced.push(Span::new(" ", frame));
-        for span in &title.spans {
+        for span in &label.spans {
             spaced.push(span.clone());
         }
         spaced.push(Span::new(" ", frame));
         let room = inner.saturating_sub(col);
-        out.write_line(0, col + 1, &spaced.truncated(room), frame);
+        out.write_line(row, col + 1, &spaced.truncated(room), frame);
     }
-    if out.row_text(0).chars().nth(col) == Some(set.horizontal) {
-        out.write_str(0, col, &set.tee_down.to_string(), frame);
+    // Only once the column is clear (never occupied, or just cleared above) does the
+    // junction get drawn — the label wins the column either way, which is what keeps a
+    // caption's own text from ever losing a character to `┴`.
+    if out.row_text(row).chars().nth(col) == Some(set.horizontal) {
+        out.write_str(row, col, &junction.to_string(), frame);
     }
-    out.write_str(last, col, &set.tee_up.to_string(), frame);
 }
 
 /// The label drawn into the frame's top edge: the language, with its icon if enabled.
@@ -665,7 +704,7 @@ pub(super) fn fallback(
         theme.code.background,
     );
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
-    join_gutter(&mut out, gutter, padding, Some(&title), ctx);
+    join_gutter(&mut out, gutter, padding, Some(&title), Some(&caption), ctx);
     pin_gutter(&mut out, gutter, padding, Some(&title));
     // The fallback is a highlighted code block showing the block's own source — exactly
     // what a reader who just saw the failure caption wants to copy — so it gets a button
