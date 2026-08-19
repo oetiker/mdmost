@@ -179,8 +179,17 @@ fn resolve_icons(cli: &Cli, configured: Option<bool>) -> bool {
     configured.unwrap_or_else(mdmost::nerdfont::detect)
 }
 
-/// A flag pair overriding a configured boolean: `--x` wins, then `--no-x`, then the file.
+/// A flag pair overriding a configured boolean: either flag wins over the file, and
+/// neither leaves it alone.
+///
+/// `on` and `off` are never both true: every caller declares its pair with clap's
+/// `conflicts_with`, so the two branches below cannot race — which one is checked
+/// first is not a choice this function makes, only `debug_assert!`s.
 fn resolve_flag(on: bool, off: bool, configured: bool) -> bool {
+    debug_assert!(
+        !(on && off),
+        "clap's conflicts_with should make this unreachable"
+    );
     if off {
         return false;
     }
@@ -507,5 +516,15 @@ mod tests {
     fn neither_flag_leaves_the_configured_value_alone() {
         assert!(resolve_flag(false, false, true));
         assert!(!resolve_flag(false, false, false));
+    }
+
+    #[test]
+    #[should_panic(expected = "conflicts_with")]
+    fn both_flags_at_once_is_a_bug_the_caller_must_not_reach() {
+        // Every real caller pairs its flags with clap's `conflicts_with`, so `resolve_flag`
+        // never actually sees both true. This is what makes that an invariant rather than
+        // a hope: a caller that stops declaring the pair trips it here, in debug builds,
+        // rather than silently picking a winner.
+        resolve_flag(true, true, false);
     }
 }
