@@ -188,8 +188,10 @@ fn render_block_set_off(node: &Node, width: u16, ctx: Ctx<'_>) -> (Canvas, bool)
 /// `NodeKind::Math` joined this list for the same reason, found the same way: an
 /// inline formula written mid-sentence was falling through to the block path and
 /// cutting the sentence in two around it. Display math (`display: true`) is written
-/// as, and belongs on, its own line — that distinction is Task 10's to draw, since it
-/// is the one that gives a formula anything to render at all.
+/// as, and belongs on, its own line — the document layer hoists a lone one out of its
+/// paragraph so it reaches [`render_block_ctx`]'s own `NodeKind::Math` arm instead of
+/// this path; excluding `display: true` here is what keeps that hoisted node from
+/// being folded back into an inline run.
 pub(crate) fn is_inline(node: &Node) -> bool {
     matches!(
         node.kind,
@@ -198,7 +200,7 @@ pub(crate) fn is_inline(node: &Node) -> bool {
             | NodeKind::SoftBreak
             | NodeKind::LineBreak
             | NodeKind::Code { .. }
-            | NodeKind::Math { .. }
+            | NodeKind::Math { display: false, .. }
             | NodeKind::Emph
             | NodeKind::Strong
             | NodeKind::Strikethrough
@@ -247,6 +249,26 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         }
         NodeKind::Image { url, .. } => image(node, url, width, ctx),
         NodeKind::SkippedHtml { .. } => html_marker(width, ctx),
+        // Display math is not laid out in this stage. The framed source is not a
+        // placeholder: it is the permanent failure path (design spec §9), reached here
+        // for the temporary reason that nothing can lay it out yet — so the reader sees
+        // the same thing for "cannot be drawn yet" and "cannot be drawn", which is the
+        // truth in both cases.
+        //
+        // No line origins: spec §10 gives a formula one span over the whole construct,
+        // and stage 2 is what draws the cells that span can name. Recording per-line
+        // spans of the source dump would be a different, wrong answer.
+        NodeKind::Math {
+            literal,
+            display: true,
+        } => code::fallback(
+            literal,
+            Some("math"),
+            &"display math is not laid out yet",
+            &[],
+            width,
+            ctx,
+        ),
         // Anything else in a block position is inline content: a bare text run in a
         // table cell, for instance.
         _ => render_inline(std::slice::from_ref(node), width, ctx.base, ctx),
@@ -326,7 +348,16 @@ fn paragraph(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
     if let Some(image) = sole_image(node) {
         return render_block_ctx(image, width, ctx);
     }
-    render_sequence(&node.children, width, ctx, false)
+    // Not `render_sequence`: a paragraph's children are inline content by
+    // construction — comrak never puts a block inside one — so there is no run to
+    // find with `is_inline`. That matters now that `is_inline` says a display formula
+    // (`display: true`) is *not* inline: it is, everywhere except here. A paragraph
+    // with other content beside its `$$…$$` (`hoist_display_math` in `doc::convert`
+    // only lifts a paragraph whose *sole* child is display math) keeps that formula as
+    // prose, shown as its own source mid-sentence — going through `render_sequence`
+    // would instead have split it into a framed block followed by a second, orphaned
+    // inline run for the rest of the sentence.
+    render_inline(&node.children, width, ctx.base, ctx)
 }
 
 /// The image a paragraph consists of, if an image is all it consists of.

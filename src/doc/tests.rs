@@ -633,13 +633,12 @@ fn dollar_math_becomes_a_math_node() {
 #[test]
 fn double_dollars_are_display_math() {
     let doc = Doc::parse("$$x^2$$\n");
-    let math = doc.root().children[0]
-        .children
-        .iter()
-        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
-        .expect("no math node");
+    // A `$$…$$` that is the only content of its paragraph is hoisted (Task 11) into a
+    // block of its own, so the Math node sits at the top level directly rather than
+    // nested inside a Paragraph.
+    let math = &doc.root().children[0];
     let NodeKind::Math { display, .. } = &math.kind else {
-        unreachable!()
+        panic!("no math node, got {:?}", math.kind)
     };
     assert!(display);
 }

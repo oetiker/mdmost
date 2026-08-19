@@ -75,7 +75,14 @@ pub(crate) fn render_code_block(
     if is_mermaid(language) {
         return match bridge::mermaid(literal, width, ctx.theme, Fit::COMPACT) {
             Ok(canvas) => diagram_block(canvas, width, literal, origins, block, ctx),
-            Err(error) => fallback(literal, &error, origins, width, ctx),
+            Err(error) => fallback(
+                literal,
+                Some(MERMAID),
+                &caption(&error),
+                origins,
+                width,
+                ctx,
+            ),
         };
     }
     framed_code(language, literal, fenced, origins, width, ctx)
@@ -608,19 +615,22 @@ fn digit_count(lines: usize) -> usize {
     lines.max(1).ilog10() as usize + 1
 }
 
-/// The mermaid source shown as a framed code block, with the reason in its bottom edge.
+/// A block's source shown as a framed code block, with the reason in its bottom edge.
 ///
 /// The frame's top edge already names the language, so the caption says what happened,
-/// not what the block is.
-fn fallback(
+/// not what the block is. Two callers: a diagram that would not draw, and display math
+/// that cannot be laid out yet — design spec §9's one failure rendering, reached for two
+/// reasons.
+pub(super) fn fallback(
     literal: &str,
-    error: &MermaidError,
+    language: Option<&str>,
+    caption: &dyn std::fmt::Display,
     origins: &[SourceSpan],
     width: u16,
     ctx: Ctx<'_>,
 ) -> Canvas {
     let theme = ctx.theme;
-    let lines = bridge::highlight(Some(MERMAID), literal, theme);
+    let lines = bridge::highlight(language, literal, theme);
     if width < 4 {
         return code_area(&lines, origins, literal, width, false, ctx);
     }
@@ -639,12 +649,12 @@ fn fallback(
         ctx,
     )
     .indent(padding, padding, theme.code.background);
-    let title = Line::styled(MERMAID, theme.code.language);
+    let title = Line::styled(language.unwrap_or_default(), theme.code.language);
     // The bottom edge is as long as the block; a caption longer than that is elided
     // rather than hard-cut, so it never ends mid-word against the corner glyph.
     let room = usize::from(width).saturating_sub(4);
     let caption = Line::styled(
-        crate::text::ellipsize(&caption(error), room),
+        crate::text::ellipsize(&caption.to_string(), room),
         theme.block.caption,
     );
     let mut out = inner.framed_captioned(
@@ -657,9 +667,9 @@ fn fallback(
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
     join_gutter(&mut out, gutter, padding, Some(&title), ctx);
     pin_gutter(&mut out, gutter, padding, Some(&title));
-    // The fallback is a highlighted code block showing Mermaid source — exactly what a
-    // reader who just saw the failure caption wants to copy — so it gets a button the
-    // same way any other framed code block does.
+    // The fallback is a highlighted code block showing the block's own source — exactly
+    // what a reader who just saw the failure caption wants to copy — so it gets a button
+    // the same way any other framed code block does.
     if ctx.options.copy_button && ctx.table_depth == 0 {
         let occupied = top_edge_occupied(&out, Some(&title));
         button::place(

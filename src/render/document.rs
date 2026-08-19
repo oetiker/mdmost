@@ -548,7 +548,10 @@ impl ClipTest {
 /// Whether a node is inline content rather than a block of its own.
 ///
 /// Mirrors `render::block::is_inline`, which is private; only the top level of a
-/// document is tested against it, and only to decline the per-block path.
+/// document is tested against it, and only to decline the per-block path. Display math
+/// (`display: true`) is excluded for the same reason it is there: the document layer
+/// hoists a lone `$$…$$` paragraph into a block, and this must not fold it back into an
+/// inline run.
 fn is_inline(node: &Node) -> bool {
     matches!(
         node.kind,
@@ -556,7 +559,7 @@ fn is_inline(node: &Node) -> bool {
             | NodeKind::SoftBreak
             | NodeKind::LineBreak
             | NodeKind::Code { .. }
-            | NodeKind::Math { .. }
+            | NodeKind::Math { display: false, .. }
             | NodeKind::Emph
             | NodeKind::Strong
             | NodeKind::Strikethrough

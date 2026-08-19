@@ -163,6 +163,7 @@ pub(super) fn document<'a>(
     let offsets = LineOffsets::new(source);
     let mut doc = convert(root, &offsets, math, slugger, headings);
     number_footnotes(&mut doc);
+    hoist_display_math(&mut doc);
     // The pass tolerates either order (`align` re-derives everything from the source
     // regardless of how finely `split_transcriptions` has already cut the run) — moving
     // this after it and rerunning every test here confirmed byte-identical trees. It
@@ -173,6 +174,32 @@ pub(super) fn document<'a>(
     }
     split_transcriptions(&mut doc, source);
     doc
+}
+
+/// Lifts a paragraph whose only child is display math into a block of its own.
+///
+/// comrak parses `$$…$$` with its *inline* code, so a display formula arrives as the
+/// single child of a Paragraph. It is a block — spec §6 lays it out in two dimensions and
+/// spec §7 centres it — so the block renderer has to be able to see it, and the document
+/// layer is where that belongs: stage 2 needs the same shape.
+///
+/// Only a paragraph with exactly one child moves. `text $$x$$ text` is prose with a
+/// formula in it and stays inline, where Task 10's arm shows it as its own source.
+fn hoist_display_math(node: &mut Node) {
+    for child in &mut node.children {
+        hoist_display_math(child);
+    }
+    for child in &mut node.children {
+        let hoist = matches!(child.kind, NodeKind::Paragraph)
+            && matches!(
+                child.children.as_slice(),
+                [only] if matches!(only.kind, NodeKind::Math { display: true, .. })
+            );
+        if hoist {
+            let inner = child.children.remove(0);
+            *child = inner;
+        }
+    }
 }
 
 /// The longest `&…;` treated as an entity: HTML5's longest name is 31 characters.

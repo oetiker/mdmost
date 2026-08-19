@@ -3812,3 +3812,62 @@ fn the_formula_carries_one_atomic_span_over_all_its_cells() {
         crate::text::display_width("E = mc²")
     );
 }
+
+#[test]
+fn display_math_shows_its_source_in_a_captioned_frame_for_now() {
+    let doc = Doc::parse("$$\n\\frac{a}{b}\n$$\n");
+    let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+    let text: String = (0..canvas.height())
+        .map(|row| canvas.row_text(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains(r"\frac{a}{b}"),
+        "display math must show its source until it is laid out; got {text:?}"
+    );
+    // The frame is the whole of this task. Asserting only that the literal appears
+    // somewhere would pass with the implementation deleted: Task 10's inline arm already
+    // draws the verbatim source of a `$$` block it will not lay out.
+    assert!(
+        text.contains('╭') && text.contains('╯'),
+        "the source is framed, not dumped; got {text:?}"
+    );
+    assert!(
+        text.contains("display math is not laid out yet"),
+        "the bottom edge names the reason; got {text:?}"
+    );
+    assert!(canvas.check_invariants().is_ok());
+}
+
+#[test]
+fn a_math_fence_shows_its_source_in_a_captioned_frame_for_now() {
+    let doc = Doc::parse("```math\n\\frac{a}{b}\n```\n");
+    let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+    let text: String = (0..canvas.height())
+        .map(|row| canvas.row_text(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains(r"\frac{a}{b}"), "got {text:?}");
+    assert!(text.contains('╭') && text.contains('╯'), "got {text:?}");
+    assert!(
+        text.contains("display math is not laid out yet"),
+        "got {text:?}"
+    );
+}
+
+#[test]
+fn a_paragraph_with_display_math_and_other_content_is_not_hoisted() {
+    // `$$x$$ and text` is prose with a formula in it, not a lone display block, so it
+    // must stay inline (Task 10's arm) rather than being pulled out as a block.
+    let doc = Doc::parse("$$x$$ and text\n");
+    let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+    let text = canvas.row_text(0);
+    assert!(
+        text.contains("$$x$$") && text.contains("and text"),
+        "prose containing a formula stays one paragraph; got {text:?}"
+    );
+    assert!(
+        !text.contains('╭'),
+        "a paragraph with other content must not gain a frame; got {text:?}"
+    );
+}
