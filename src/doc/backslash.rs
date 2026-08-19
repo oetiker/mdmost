@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! The `\(…\)` and `\[…\]` delimiters, found by reading the source back.
 //!
-//! Design spec §3.1. These are MathJax's own defaults, and they are how mathematics
+//! Design spec §3.1. These are `MathJax`'s own defaults, and they are how mathematics
 //! arrives in a Markdown file somebody pasted an assistant's answer into. No Markdown
 //! renderer of note accepts them — which is a weaker argument for a renderer than it is
 //! for a pager, because this one renders whatever is on disk.
