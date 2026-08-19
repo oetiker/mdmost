@@ -3853,6 +3853,7 @@ fn a_math_fence_shows_its_source_in_a_captioned_frame_for_now() {
         text.contains("display math is not laid out yet"),
         "got {text:?}"
     );
+    assert!(canvas.check_invariants().is_ok());
 }
 
 /// The formula is line 1 of the frame, for both `$$…$$` and a fence — not a blank line
