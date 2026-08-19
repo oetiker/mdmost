@@ -107,15 +107,11 @@ const SUBSCRIPTS: &[(char, char)] = &[
 ];
 
 /// `text` raised, or `None` if any character has no superscript form.
-// Not yet called outside tests: Task 5 wires this into inline math rendering.
-#[allow(dead_code)]
 pub(crate) fn superscript(text: &str) -> Option<String> {
     substitute(text, SUPERSCRIPTS)
 }
 
 /// `text` lowered, or `None` if any character has no subscript form.
-// Not yet called outside tests: Task 5 wires this into inline math rendering.
-#[allow(dead_code)]
 pub(crate) fn subscript(text: &str) -> Option<String> {
     substitute(text, SUBSCRIPTS)
 }

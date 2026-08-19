@@ -128,3 +128,67 @@ fn a_state_change_draws_nothing_of_its_own() {
     // a group; the walk ignores the state change and still writes the content inside.
     assert_eq!(rendered(r"\mathbf{x}"), "x");
 }
+
+#[test]
+fn a_script_whose_characters_all_exist_is_raised_or_lowered() {
+    assert_eq!(rendered("x^2"), "x²");
+    assert_eq!(rendered("E = mc^2"), "E = mc²");
+    assert_eq!(rendered("x_i"), "xᵢ");
+    assert_eq!(rendered("x^{n+1}"), "xⁿ⁺¹");
+    assert_eq!(rendered("a_{ij}"), "aᵢⱼ");
+}
+
+#[test]
+fn a_script_with_no_unicode_form_is_written_flat() {
+    assert_eq!(rendered("x_b"), "x_b");
+    assert_eq!(rendered("x^q"), "x^q");
+    // Braces are kept where they group more than one character, because `a_bc` would
+    // read as `(a_b)c`.
+    assert_eq!(rendered("a_{bc}"), "a_{bc}");
+}
+
+#[test]
+fn a_sub_and_superscript_pair_is_decided_independently() {
+    // The subscript can be lowered and the superscript cannot, so one of each notation
+    // appears in one expression. That is the honest answer: both halves are readable.
+    assert_eq!(rendered("x_i^q"), "xᵢ^q");
+}
+
+#[test]
+fn a_script_sits_flush_against_a_function_name_base() {
+    // A function name normally earns a trailing space (`\sin x` -> `sin x`), but a
+    // script is not a separate operand -- it attaches directly to its base, so
+    // `\sin^2 x` must read `sin²x`, not `sin ²x`.
+    assert_eq!(rendered(r"\sin^2 x"), "sin²x");
+}
+
+#[test]
+fn a_nested_script_composes_without_panicking() {
+    // The inner `y^2` is raised on its own (`y²`), but that result contains `²`, which
+    // has no superscript form of its own -- so the outer raise declines and falls back
+    // to flat notation, keeping the inner substitution rather than discarding it.
+    assert_eq!(rendered("x^{y^2}"), "x^{y²}");
+}
+
+#[test]
+fn an_empty_script_group_declines_and_writes_the_bare_marker() {
+    // `superscript("")` and `subscript("")` both decline (Task 1), so the flat fallback
+    // runs on empty text; a zero-character group never triggers the multi-character
+    // brace rule, so the marker is written alone.
+    assert_eq!(rendered("x^{}"), "x^");
+    assert_eq!(rendered("x_{}"), "x_");
+}
+
+#[test]
+fn a_plain_big_operator_with_no_script_still_gets_its_trailing_space() {
+    assert_eq!(rendered(r"\sum x"), "∑ x");
+}
+
+#[test]
+fn a_script_attached_to_a_big_operator_still_gets_its_trailing_space() {
+    // A big operator takes one space after it and after its limits, so `\sum_{i=1}^{n} i`
+    // reads `∑ᵢ₌₁ⁿ i` and not `∑ᵢ₌₁ⁿi`. The author wrote a space there and
+    // `pulldown-latex` discards literal whitespace in math mode, so this walk is the
+    // only thing that can put one back.
+    assert_eq!(rendered(r"\sum_{i=1}^{n} i"), "∑ᵢ₌₁ⁿ i");
+}
