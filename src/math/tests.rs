@@ -220,3 +220,62 @@ fn a_script_attached_to_a_big_operator_still_gets_its_trailing_space() {
     // only thing that can put one back.
     assert_eq!(rendered(r"\sum_{i=1}^{n} i"), "∑ᵢ₌₁ⁿ i");
 }
+
+#[test]
+fn a_fraction_is_written_with_a_slash() {
+    assert_eq!(rendered(r"\frac{a}{b}"), "a/b");
+    // Parenthesised when a part is more than one atom, because a + b/c is a different
+    // expression from (a + b)/c. A fraction operand keeps its spaces: it is written at
+    // full size and nothing is going to raise it.
+    assert_eq!(rendered(r"\frac{a+b}{c}"), "(a + b)/c");
+    assert_eq!(rendered(r"\frac{1}{2a}"), "1/(2a)");
+}
+
+#[test]
+fn a_root_takes_the_radical_sign() {
+    assert_eq!(rendered(r"\sqrt{x}"), "√x");
+    assert_eq!(rendered(r"\sqrt{b^2-4ac}"), "√(b² − 4ac)");
+    // The degree comes second in the event stream, not first. Getting the two operands
+    // the wrong way round renders this `ˣ√3`, which no test above would notice.
+    assert_eq!(rendered(r"\sqrt[3]{x}"), "³√x");
+}
+
+#[test]
+fn a_big_operator_keeps_its_limits_as_scripts() {
+    assert_eq!(rendered(r"\sum_{i=1}^{n} i"), "∑ᵢ₌₁ⁿ i");
+    assert_eq!(rendered(r"\int_0^1 f"), "∫₀¹ f");
+}
+
+#[test]
+fn a_matrix_declines_rather_than_being_flattened() {
+    // No alignment mark and no row break, so what declines is the *matrix* — the thing
+    // spec §5.2 says is not representable in one row — and not the `&` that a wider
+    // fixture would have tripped over first.
+    let err = render_inline(r"\begin{pmatrix} 1 \end{pmatrix}").unwrap_err();
+    assert_eq!(err, crate::error::MathError::NotInline("a matrix"));
+}
+
+proptest::proptest! {
+    /// Design spec §9: a wrecked formula must never take down a document.
+    #[test]
+    fn arbitrary_input_never_panics(src in ".{0,200}") {
+        let _ = render_inline(&src);
+    }
+
+    /// The same, over strings made of the characters most likely to confuse a parser.
+    #[test]
+    fn latex_shaped_noise_never_panics(
+        src in {
+            use proptest::strategy::Strategy;
+            proptest::collection::vec(
+                proptest::sample::select(vec![
+                    "\\frac", "\\sqrt", "\\sum", "{", "}", "^", "_", "&", "\\\\",
+                    "\\begin{pmatrix}", "\\end{pmatrix}", "\\alpha", "$", "\\",
+                ]),
+                0..20,
+            ).prop_map(|parts| parts.concat())
+        }
+    ) {
+        let _ = render_inline(&src);
+    }
+}

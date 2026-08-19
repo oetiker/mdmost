@@ -6,7 +6,7 @@
 //! stream and writes text, and any construct that genuinely needs a second row is
 //! reported as [`MathError::NotInline`] rather than being approximated into nonsense.
 
-use pulldown_latex::event::{Content, DelimiterType, Event, ScriptType};
+use pulldown_latex::event::{Content, DelimiterType, Event, Grouping, ScriptType, Visual};
 use pulldown_latex::{Parser, Storage};
 
 use crate::error::MathError;
@@ -121,6 +121,38 @@ fn write_into(events: &[Event<'_>], out: &mut String, spacing: Spacing) -> Resul
                 }
                 if big {
                     after_large_op(out, spacing);
+                }
+            }
+            Event::Visual(visual) => {
+                index += 1;
+                match visual {
+                    Visual::Fraction(_) => {
+                        let numerator = take_group(events, &mut index, spacing)?;
+                        let denominator = take_group(events, &mut index, spacing)?;
+                        out.push_str(&bracketed(&numerator));
+                        out.push('/');
+                        out.push_str(&bracketed(&denominator));
+                    }
+                    Visual::SquareRoot => {
+                        let radicand = take_group(events, &mut index, spacing)?;
+                        out.push('√');
+                        out.push_str(&bracketed(&radicand));
+                    }
+                    // Radicand first, then the degree. `pulldown-latex`'s own
+                    // documentation for this variant reads "the radicand and the index
+                    // of the root", and it maps to MathML `mroot`, whose child order is
+                    // base then index. Taking them the other way round renders
+                    // `\sqrt[3]{x}` as `ˣ√3`.
+                    Visual::Root => {
+                        let radicand = take_group(events, &mut index, spacing)?;
+                        let degree = take_group(events, &mut index, Spacing::Suppressed)?;
+                        out.push_str(&raised(&degree));
+                        out.push('√');
+                        out.push_str(&bracketed(&radicand));
+                    }
+                    // A negation slashes the symbol after it, which needs a second
+                    // layer of cells that one row does not have.
+                    _ => return Err(MathError::NotInline("this construct")),
                 }
             }
             _ => {
@@ -246,9 +278,14 @@ fn write_one(
             write_content(content, out, spacing, followed_by_open_delimiter);
         }
         // A group boundary draws nothing of itself. What a group *does* — a
-        // fraction, a root, a matrix — arrives as `Visual` or as an environment,
-        // and those are Task 5's.
-        Event::Begin(_) | Event::End | Event::StateChange(_) => {}
+        // fraction, a root, a matrix — arrives as `Visual` or as an environment.
+        // `Normal` is `{}`; `LeftRight` is `\left(…\right)`, which draws its
+        // delimiters as ordinary `Content` either side. Everything else — a matrix,
+        // `cases`, an `array`, an `align` — is a grid, and a grid is exactly the
+        // failure spec §9 describes: a well-formed formula in the wrong place.
+        Event::Begin(Grouping::Normal | Grouping::LeftRight(..)) | Event::End => {}
+        Event::Begin(grouping) => return Err(MathError::NotInline(grouping_name(grouping))),
+        Event::StateChange(_) => {}
         // Only a *horizontal* spacing command draws a column. `\mathstrut` and
         // `\strut` are `Space { width: None, height: Some(…) }` — vertical struts
         // that occupy no columns at all.
@@ -365,6 +402,40 @@ fn spaced(out: &mut String, text: &str, spacing: Spacing) {
     }
     out.push_str(text);
     out.push(' ');
+}
+
+/// What a grouping is called, for [`MathError::NotInline`]'s payload.
+///
+/// The payload is what the caption shows the reader, so it names the construct rather
+/// than the event. `Normal` and `LeftRight` never reach here.
+fn grouping_name(grouping: &Grouping) -> &'static str {
+    match grouping {
+        Grouping::Matrix { .. } => "a matrix",
+        Grouping::Cases { .. } => "a cases environment",
+        Grouping::Array(_) | Grouping::SubArray { .. } => "an array",
+        Grouping::Align { .. }
+        | Grouping::Aligned
+        | Grouping::Alignat { .. }
+        | Grouping::Alignedat { .. } => "an aligned environment",
+        _ => "a multi-row environment",
+    }
+}
+
+/// `text` in parentheses unless it is a single atom that cannot be misread.
+///
+/// `a/b` needs none; `a + b/c` is a different expression from `(a + b)/c`, and this is
+/// the only thing standing between the two. One grapheme is the only case that is
+/// certainly safe, so it is the only case exempted: a test for "already parenthesised"
+/// would be wrong for `\frac{(a)+(b)}{c}`, where the outer parentheses are two groups
+/// and not one, which is the exact misreading this function exists to prevent. The cost
+/// is `((a))` for an author who bracketed a whole operand themselves, which reads
+/// correctly and is merely redundant.
+fn bracketed(text: &str) -> String {
+    if text.chars().count() == 1 {
+        text.to_string()
+    } else {
+        format!("({text})")
+    }
 }
 
 /// Writes a function name (`sin`, `log`, …) with a leading space unless it opens the
