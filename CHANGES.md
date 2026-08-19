@@ -15,6 +15,21 @@ minor bump rather than a patch.
   signatures; neither has a call site in this binary, and a caller using either instead
   falls back to the formula's bare LaTeX with no surrounding `$…$`, since there is no
   whole-document source to slice the delimiters from.
+- `SearchSpan` gained a public field, `copied: bool` — whether a span is a byte-for-byte
+  copy of the cells it names, as opposed to a formula's atomic span, which is not (design
+  spec §10). `SearchSpan` has no constructor and is not `#[non_exhaustive]`, so any
+  consumer building one by struct literal — as this crate itself does, in sixteen places —
+  stops compiling until the new field is added.
+- `RenderOptions` gained a public field, `math_inline: bool`, and `Config` gained three,
+  `math: bool`, `math_inline: bool` and `math_backslash: bool`. Both types already had a
+  builder (`RenderOptions::with_math_inline` is new alongside it) and `Default`, so an
+  existing caller using either only breaks if it also builds one by struct literal.
+- `Doc::parse` now delegates to `Doc::parse_with(source, MathSyntax::default())`, and
+  `MathSyntax::default()` turns math on (`dollars: true`). Its signature has not changed,
+  so this is a silent behaviour change rather than a compile error: an existing caller's
+  `$…$` now parses as `NodeKind::Math` where it used to parse as `Text`. Use
+  `Doc::parse_with(source, MathSyntax { dollars: false, backslash: false })` to keep the
+  old behaviour.
 
 ### New
 
