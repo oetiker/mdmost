@@ -17,12 +17,57 @@ const MANUAL: &str = include_str!("../../docs/manual.md");
 ///
 /// Both documents show a starting configuration, and a reader copies whichever one they
 /// are looking at, so both are checked.
+///
+/// The closing fence must open its own line, indented at most three spaces — the same
+/// rule `CommonMark` itself closes a fenced code block with — rather than merely contain
+/// three backticks anywhere in the text that follows. A naive "next fence marker
+/// anywhere" reading once truncated the manual's own example: a config comment named
+/// math's fenced `math` syntax mid-line, and that mid-line occurrence closed the block
+/// early, silently dropping every key after it (`toc_width` included) from what this
+/// test checked.
 fn first_toml_example(document: &'static str, which: &str) -> &'static str {
-    document
+    let rest = document
         .split("```toml")
         .nth(1)
-        .and_then(|rest| rest.split("```").next())
-        .unwrap_or_else(|| panic!("{which} must contain a toml example"))
+        .unwrap_or_else(|| panic!("{which} must contain a toml example"));
+    let mut offset = 0usize;
+    for line in rest.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let trimmed = content.trim_start_matches(' ');
+        if content.len() - trimmed.len() <= 3 && trimmed.starts_with("```") {
+            return &rest[..offset];
+        }
+        offset += line.len();
+    }
+    panic!("{which}'s toml example has no closing fence");
+}
+
+/// A fence marker appearing mid-line, inside a comment naming a fenced syntax, must
+/// not close the block early — this is what caught the manual's own `math` key
+/// comment.
+const MID_LINE_FENCE_DOCUMENT: &str = "\
+Some prose.
+
+```toml
+theme = \"dark\"   # a comment that mentions ```math fences mid-line
+icons = true
+```
+
+More prose.
+";
+
+#[test]
+fn a_mid_line_triple_backtick_does_not_close_the_toml_example_early() {
+    let example = first_toml_example(MID_LINE_FENCE_DOCUMENT, "the fixture");
+    assert!(
+        example.contains("icons"),
+        "the real closing fence is the standalone ``` two lines later, so `icons` \
+         must still be inside the example: {example:?}"
+    );
+    let loaded = Config::parse_str(example, path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.theme, "dark");
+    assert_eq!(loaded.config.icons, Some(true));
 }
 
 /// A throwaway path, used only in error messages.
