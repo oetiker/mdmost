@@ -171,6 +171,14 @@ pub(super) fn document<'a>(
     // keeping it.
     if math.backslash {
         super::backslash::split_backslash_math(&mut doc, source);
+        // `\[…\]` creates its own display-math node, which this first hoist ran
+        // before this pass existed and so never saw. Without a second pass, a
+        // paragraph containing only `\[a^2+b^2\]` never gets lifted into a block of
+        // its own, so it renders as bare escaped source while the equivalent
+        // `$$a^2+b^2$$` gets the framed block treatment -- two spellings of the same
+        // construct, rendered two different ways. Re-running the hoist is safe: a
+        // paragraph `$$…$$` already lifted has nothing left for it to do.
+        hoist_display_math(&mut doc);
     }
     split_transcriptions(&mut doc, source);
     doc

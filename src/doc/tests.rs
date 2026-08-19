@@ -791,12 +791,15 @@ fn backslash_brackets_are_display_math() {
             backslash: true,
         },
     );
+    // A paragraph containing only display math is hoisted into a block of its own
+    // (`hoist_display_math`), the same as `$$…$$` -- so the Math node itself is the
+    // document's first child, not nested inside a Paragraph beneath it.
     assert!(
-        doc.root().children[0]
-            .children
-            .iter()
-            .any(|node| matches!(&node.kind, NodeKind::Math { display: true, .. })),
-        "\\[ ... \\] must be display math"
+        matches!(
+            &doc.root().children[0].kind,
+            NodeKind::Math { display: true, .. }
+        ),
+        "\\[ ... \\] must be display math, hoisted to a block of its own"
     );
 }
 
