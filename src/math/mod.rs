@@ -14,4 +14,4 @@ pub(crate) mod scripts;
 #[cfg(test)]
 mod tests;
 
-pub use inline::render_inline;
+pub use inline::{render_inline, symbols};

@@ -41,6 +41,35 @@ pub fn render_inline(src: &str) -> Result<String, MathError> {
     write_events(&events, Spacing::Normal)
 }
 
+/// The characters `src`'s own commands resolved to.
+///
+/// Design spec §13. `pulldown-latex` resolves `\alpha` to `α` and `\times` to `×`; those
+/// are the *document's* characters, asked for by name. What [`render_inline`] puts around
+/// them is mdmost's — §5.1's script forms, §5.2's radical sign, slash and brackets — so
+/// `tests/glyph_inventory.rs` subtracts this and keeps the rest.
+///
+/// # Errors
+///
+/// [`MathError::Parse`] if the LaTeX does not parse.
+pub fn symbols(src: &str) -> Result<String, MathError> {
+    let storage = Storage::new();
+    let mut out = String::new();
+    for event in Parser::new(src, &storage) {
+        let event = event.map_err(|err| MathError::Parse {
+            message: err
+                .to_string()
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string(),
+        })?;
+        if let Event::Content(content) = event {
+            write_content(&content, &mut out, Spacing::Suppressed, false);
+        }
+    }
+    Ok(out)
+}
+
 /// Whether the walk writes the spaces of the spacing rule above.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Spacing {

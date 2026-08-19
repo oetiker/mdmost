@@ -1,0 +1,40 @@
+---
+source: tests/snapshot.rs
+expression: outline(&doc)
+---
+Document
+  Heading(h1, #math)
+    Text("Math")
+  Paragraph
+    Text("Inline math sits on the line: ")
+    Math
+    Text(", and ")
+    Math
+    Text(", and the")
+    SoftBreak
+    Text("subscripted ")
+    Math
+    Text(" beside the flat ")
+    Math
+    Text(" that Unicode cannot lower.")
+  Paragraph
+    Text("Scripts that exist are raised: ")
+    Math
+    Text(". Scripts that do not are written flat:")
+    SoftBreak
+    Math
+    Text(".")
+  Paragraph
+    Text("Structures are linearised inline: ")
+    Math
+    Text(", ")
+    Math
+    Text(", and")
+    SoftBreak
+    Math
+    Text(".")
+  Paragraph
+    Text("Display math is not laid out yet:")
+  Math
+  Paragraph
+    Text("Currency is not math: it costs $5 and $1…")

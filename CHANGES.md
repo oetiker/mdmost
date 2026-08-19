@@ -2,11 +2,44 @@
 
 ## Unreleased
 
+### Breaking
+
+No format for this existed in this file before now; entries here are API breaks a
+`cargo publish` consumer of the library crate would feel, and are why this release is a
+minor bump rather than a patch.
+
+- `render_block_numbered` and `render_blocks` each gained a `source: &str` parameter, so
+  that a formula which cannot be drawn can fall back to its own verbatim bytes (see
+  New, below) wherever either function is the caller's entry point — the document body
+  and the footnote popup. `render_block` and `render_table` keep their old signatures;
+  neither has a call site in this binary, and a caller using either now gets no
+  verbatim-source fallback for math inside it, only the caller's own text otherwise.
+
 ### New
 
-### Changed
+- `$E = mc^2$` reads as `E = mc²` on the line, wherever inline math appears in a
+  document: a paragraph, a table cell, a list item, a footnote. Scripts are Unicode
+  where a full raised or lowered form exists and written flat (`x^q`) where it does
+  not, `\frac{a}{b}` reads `a/b`, `\sqrt{x}` reads `√x`, and a big operator such as
+  `\sum` or `\int` carries its limits as a subscript and superscript on the one
+  character. A `$$…$$` block or a ```` ```math ```` fence is display math; it is not
+  laid out in this version and is shown as its own framed, syntax-highlighted source
+  instead, the same as an unsupported Mermaid diagram. `\(…\)` and `\[…\]` are read as
+  well behind `math_backslash`, off by default. Three configuration keys and their
+  matching `--math`/`--no-math`, `--math-inline`/`--no-math-inline` and
+  `--math-backslash`/`--no-math-backslash` flags control this; `math = false` parses
+  `$` as ordinary text, exactly as before this existed.
 
 ### Fixed
+
+- A Mermaid diagram's degraded-code caption is no longer corrupted where the
+  line-number gutter's bottom-edge junction crosses it — "not a diagram type" no
+  longer comes out "no┴ a diagram type". This shipped in v0.2.0 for every caption long
+  enough to reach the junction column with line numbers on, and was invisible to the
+  existing test because that test renders without line numbers, the one configuration
+  the bug cannot appear in. A caption that collides with the junction is now
+  re-ellipsized against the room left after the shift, rather than hard-truncated a
+  second time.
 
 ## 0.2.0 - 2026-08-18
 

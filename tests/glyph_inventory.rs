@@ -24,7 +24,7 @@
 //! in `src/tui/` by inline literals with no central table, and nothing here
 //! renders them. Those entries in the manual are maintained by hand.
 
-use mdmost::doc::Doc;
+use mdmost::doc::{Doc, Node, NodeKind};
 use mdmost::render::{RenderOptions, render_document};
 use mdmost::theme::Theme;
 use std::collections::BTreeSet;
@@ -50,14 +50,47 @@ use std::collections::BTreeSet;
 /// attributed to the source and missed. That is the conservative direction —
 /// it can only under-report — and the ASCII-only corpus files reach those
 /// glyphs anyway.
+///
+/// Math extends the same principle rather than exempting itself from it (design
+/// spec §13): a formula's own commands resolve to characters too, and an author who
+/// writes `\alpha` asked for `α` just as surely as one who typed it. So the
+/// subtraction is not only "characters present verbatim in the source" but
+/// "characters a math node's own commands resolved to" — [`math_symbols`] walks the
+/// tree and adds those in as well. What is left after both subtractions is what
+/// mdmost itself drew: the raised and lowered script forms, the radical sign, and
+/// the rest of §5's structure.
 fn added(source: &str, width: u16, options: &RenderOptions) -> BTreeSet<char> {
     let doc = Doc::parse_auto(source);
     let canvas = render_document(&doc, width, None, &Theme::default_dark(), options);
-    let from_source: BTreeSet<char> = source.chars().filter(|c| !c.is_ascii()).collect();
+    let mut from_source: BTreeSet<char> = source.chars().filter(|c| !c.is_ascii()).collect();
+    from_source.extend(math_symbols(doc.root()));
     (0..canvas.height())
         .flat_map(|row| canvas.row_text(row).chars().collect::<Vec<_>>())
         .filter(|c| !c.is_ascii() && !from_source.contains(c))
         .collect()
+}
+
+/// The characters every math node in `node`'s subtree resolved to, via
+/// [`mdmost::math::symbols`].
+///
+/// A formula that does not parse contributes nothing, which is right: it draws no
+/// symbols either.
+fn math_symbols(node: &Node) -> BTreeSet<char> {
+    let mut out = BTreeSet::new();
+    collect_math_symbols(node, &mut out);
+    out
+}
+
+/// The walk behind [`math_symbols`].
+fn collect_math_symbols(node: &Node, out: &mut BTreeSet<char>) {
+    if let NodeKind::Math { literal, .. } = &node.kind
+        && let Ok(symbols) = mdmost::math::symbols(literal)
+    {
+        out.extend(symbols.chars());
+    }
+    for child in &node.children {
+        collect_math_symbols(child, out);
+    }
 }
 
 /// The seven Mermaid families.
@@ -81,14 +114,24 @@ const MERMAID_FIXTURES: &[&str] = &[
 /// Adding a glyph means adding it here AND to the manual's TERMINAL SETUP
 /// section. That is the whole point of this file.
 const INVENTORY: &[(&str, &str)] = &[
-    // Not chrome: these arrive by HTML entity decoding — `&nbsp;` and `&copy;`
-    // in the source become the characters themselves on the canvas, so they are
-    // "added" by the renderer even though they are really the author's content.
-    ("Latin-1 Supplement (U+0080-U+00FF)", "\u{a0}©"),
+    // `\u{a0}` and `©` arrive by HTML entity decoding — `&nbsp;` and `&copy;` in the
+    // source become the characters themselves on the canvas, so they are "added" by
+    // the renderer even though they are really the author's content. `¹` and `²` are
+    // math's raised `1` and `2` (design spec §5.1) — the two digits whose superscript
+    // form Unicode placed here instead of in Superscripts and Subscripts, below.
+    ("Latin-1 Supplement (U+0080-U+00FF)", "\u{a0}©¹²"),
     // The elision marker, and `&hellip;`.
     ("General Punctuation (U+2000-U+206F)", "…"),
-    // Class-diagram relation glyphs.
-    ("Mathematical Operators (U+2200-U+22FF)", "∧∨"),
+    // Class-diagram relation glyphs, and math's radical sign (`\sqrt`).
+    ("Mathematical Operators (U+2200-U+22FF)", "∧∨√"),
+    // Math's raised `n` and `+`, and lowered `=` and `1` (design spec §5.1) —
+    // `x^{n+1}` and `\sum_{i=1}^{n}`.
+    ("Superscripts and Subscripts (U+2070-U+209F)", "ⁿ⁺₌₁"),
+    // Math's subscript i — the one Latin subscript letter Unicode placed outside the
+    // Superscripts and Subscripts block, above.
+    ("Phonetic Extensions (U+1D00-U+1D7F)", "ᵢ"),
+    // Math's subscript j — the one Latin subscript letter Unicode placed here instead.
+    ("Latin Extended-C (U+2C60-U+2C7F)", "ⱼ"),
     // Every frame, rule, table border and diagram box.
     (
         "Box Drawing (U+2500-U+257F)",
