@@ -567,7 +567,7 @@ fn collect(node: &Node, text: &mut String, origins: &mut Vec<Option<usize>>) {
                 origins.push(faithful.then_some(node.source.start + offset));
             }
         }
-        NodeKind::Code { literal } => {
+        NodeKind::Code { literal } | NodeKind::Math { literal, .. } => {
             for ch in literal.chars() {
                 text.push(ch);
                 origins.push(None);

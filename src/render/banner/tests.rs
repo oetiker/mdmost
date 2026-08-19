@@ -261,3 +261,16 @@ fn an_escaped_title_keeps_the_offsets_of_its_other_letters() {
         );
     }
 }
+
+/// A `# Title` containing inline math must not drop the formula from the banner text,
+/// the same missing-arm defect `an_inline_image_stays_in_its_paragraph` fixed for
+/// `render::block::is_inline`. `collect` has an explicit `Code` arm but had no `Math`
+/// arm, so the LaTeX between the words vanished silently instead of falling through to
+/// the catch-all that drops presentation-only nodes on purpose.
+#[test]
+fn a_math_containing_title_keeps_the_formula_in_its_text() {
+    let doc = Doc::parse("# Einstein $E = mc^2$ said\n");
+    let heading = &doc.root().children[0];
+    let (text, _origins) = text_with_origins(heading);
+    assert_eq!(text, "Einstein E = mc^2 said");
+}

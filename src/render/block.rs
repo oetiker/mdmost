@@ -156,6 +156,12 @@ fn render_block_set_off(node: &Node, width: u16, ctx: Ctx<'_>) -> (Canvas, bool)
 /// them. An image that is a paragraph of its own still gets that box; [`paragraph`]
 /// is the one place that decides so, because it is the only place that can see the
 /// image is alone.
+///
+/// `NodeKind::Math` joined this list for the same reason, found the same way: an
+/// inline formula written mid-sentence was falling through to the block path and
+/// cutting the sentence in two around it. Display math (`display: true`) is written
+/// as, and belongs on, its own line — that distinction is Task 10's to draw, since it
+/// is the one that gives a formula anything to render at all.
 pub(crate) fn is_inline(node: &Node) -> bool {
     matches!(
         node.kind,
@@ -164,6 +170,7 @@ pub(crate) fn is_inline(node: &Node) -> bool {
             | NodeKind::SoftBreak
             | NodeKind::LineBreak
             | NodeKind::Code { .. }
+            | NodeKind::Math { .. }
             | NodeKind::Emph
             | NodeKind::Strong
             | NodeKind::Strikethrough

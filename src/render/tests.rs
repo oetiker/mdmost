@@ -956,6 +956,19 @@ fn an_image_alone_in_its_paragraph_still_gets_its_box() {
     assert!(out.iter().any(|row| row.contains("p.png")), "{out:?}");
 }
 
+/// Inline math must not tear the paragraph around it into three blocks, the same bug
+/// `an_inline_image_stays_in_its_paragraph` fixed for images (2026-08-09). Task 10
+/// draws the formula itself; until then it draws nothing, so this only pins the
+/// surrounding prose staying one block rather than the exact text between the words.
+#[test]
+fn inline_math_stays_in_its_paragraph() {
+    assert_eq!(
+        lines("Einstein wrote $E = mc^2$ here.\n", 40).len(),
+        1,
+        "an inline formula must not split its sentence into separate blocks"
+    );
+}
+
 #[test]
 fn an_inline_image_with_no_alt_text_names_itself() {
     assert_eq!(lines("see ![](p.png) here\n", 24), ["see ⟨image⟩ here"]);

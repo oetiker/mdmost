@@ -533,6 +533,7 @@ fn is_inline(node: &Node) -> bool {
             | NodeKind::SoftBreak
             | NodeKind::LineBreak
             | NodeKind::Code { .. }
+            | NodeKind::Math { .. }
             | NodeKind::Emph
             | NodeKind::Strong
             | NodeKind::Strikethrough
