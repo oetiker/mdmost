@@ -401,6 +401,12 @@ when `math_backslash = true`; off by default, because no other Markdown renderer
 of note accepts them. `math = false` turns parsing off: `$` is ordinary text, as
 if math did not exist.
 
+A `\(…\)` or `\[…\]` pair is found only when the opening and closing delimiter
+sit on the same line. A pair split across a line break — `\[` on one line, the
+formula and `\]` further down — is left as ordinary text, backslashes and all.
+This is the shape a pasted assistant answer commonly uses, so it is worth
+knowing about; `$…$` and `$$…$$` have no such restriction.
+
 Inline math (`$…$`) is laid out on the line: `$E = mc^2$` reads `E = mc²`. A
 script is written with a raised or lowered Unicode character only when every
 character in it has one; otherwise the whole script is written flat with `^` or

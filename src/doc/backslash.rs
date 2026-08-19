@@ -72,6 +72,31 @@
 //! unaffected either way; a `\[` run, or a `\(` run inside a table cell, now sees the
 //! byte comrak split away from it, and nothing else does.
 //!
+//! # What this pass does not see: a delimiter pair split across a line break
+//!
+//! The run-grouping above walks maximal runs of consecutive `NodeKind::Text`
+//! siblings, and a `SoftBreak` node — comrak's own node for a line break inside a
+//! paragraph — is not `Text`, so it ends a run the same way a `Link` or an `Emph`
+//! does. `\[a^2 + b^2\]` all on one line is found; `\[` on one line and `\]`
+//! several lines down is not, because the opener and the closer are never in the
+//! same run to begin with.
+//!
+//! This was assessed and deliberately not fixed here. Folding `SoftBreak` into a
+//! run would need `split_run`'s `text` reconstruction — which currently maps
+//! every non-`Text` sibling to `""` — to stand in a character for it (`"\n"`,
+//! matching the `\n` byte `align` would see in `raw`), and then `prose` would
+//! need to hand the corresponding output segment back out as a `NodeKind::SoftBreak`
+//! rather than as `NodeKind::Text("\n")`: every other part of this crate assumes
+//! a `Text` node never contains a raw newline (comrak itself never produces one,
+//! since it always splits at a soft break), and the wrapping code in `crate::text`
+//! is one consumer of that assumption. Making `align`'s flat `(String, SourceSpan)`
+//! output carry that distinction is a real change to a function three other
+//! passes in this module already lean on, not a two-line fix, so it is named here
+//! for whoever picks it up rather than attempted under this task. See also
+//! `docs/manual.md`'s Math section, which states the same limitation for a reader
+//! who never opens this file — worth knowing because a pasted assistant answer is
+//! exactly where this shape comes from (see this module's own opening paragraph).
+//!
 //! # No escape mechanism
 //!
 //! There is no way to write a literal `\(` in the source once `math_backslash` is on —
