@@ -403,9 +403,11 @@ if math did not exist.
 
 A `\(…\)` or `\[…\]` pair is found only when the opening and closing delimiter
 sit on the same line. A pair split across a line break — `\[` on one line, the
-formula and `\]` further down — is left as ordinary text, backslashes and all.
-This is the shape a pasted assistant answer commonly uses, so it is worth
-knowing about; `$…$` and `$$…$$` have no such restriction.
+formula and `\]` further down — is left as ordinary text, its delimiters drawn
+as plain brackets or parentheses: comrak's own escape handling drops the
+backslash before either reaches this parser. This is the shape a pasted
+assistant answer commonly uses, so it is worth knowing about; `$…$` and
+`$$…$$` have no such restriction.
 
 Inline math (`$…$`) is laid out on the line: `$E = mc^2$` reads `E = mc²`. A
 script is written with a raised or lowered Unicode character only when every
