@@ -113,14 +113,19 @@ fn write_content(content: &Content<'_>, out: &mut String, spacing: Spacing) {
 
 /// Writes `text` with one space either side, unless spacing is suppressed.
 ///
-/// Never a leading space at the head of a run and never two in a row, so a unary `-x`
-/// reads `-x` while `a - b` reads `a - b`.
+/// Never a leading space at the head of a run and never two in a row, so a unary `−x`
+/// reads `−x` while `a − b` reads `a − b`. `pulldown-latex` does not mark a leading `-`
+/// as unary the way TeX's own bin/ord reclassification would — it is `Content::BinaryOp`
+/// exactly like the one in `a-b` — so the head-of-run position (`out` still empty) is
+/// the only signal this walk has, and it is sufficient: nothing upstream of the first
+/// token can make this use binary. When that is where we are, the operator is glued to
+/// what follows with no space on either side, the same as `Spacing::Suppressed`.
 fn spaced(out: &mut String, text: &str, spacing: Spacing) {
-    if spacing == Spacing::Suppressed {
+    if spacing == Spacing::Suppressed || out.is_empty() {
         out.push_str(text);
         return;
     }
-    if !out.is_empty() && !out.ends_with(' ') {
+    if !out.ends_with(' ') {
         out.push(' ');
     }
     out.push_str(text);
