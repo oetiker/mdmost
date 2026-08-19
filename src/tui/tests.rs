@@ -7403,3 +7403,21 @@ fn a_code_fence_inside_a_popup_offers_no_copy_button() {
         "and the note's canvas records no control at all"
     );
 }
+
+#[test]
+fn a_drag_inside_inline_math_yields_the_whole_formula() {
+    // "A formula is atomic for selection" (design spec §10). Its cells are not a copy
+    // of its bytes, so there is no half of it to copy: a drag over two cells in the
+    // middle of `E = mc²` yields the LaTeX with its dollars. Inspecting the span alone
+    // would not catch this — `offset_at` is the code that has to know.
+    let doc = "Einstein wrote $E = mc^2$ in 1905.\n";
+    let canvas = render(doc, 60);
+    let (row, col, cols) = drawn(&canvas, "E = mc²");
+    let selection = drag(Pos::new(row, col + 2), Pos::new(row, col + cols - 2));
+    assert_eq!(
+        select::extract(&canvas, doc, selection)
+            .expect("the drag covered something")
+            .text,
+        "$E = mc^2$"
+    );
+}

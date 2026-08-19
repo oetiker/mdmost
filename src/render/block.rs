@@ -69,14 +69,25 @@ pub fn render_block(node: &Node, width: u16, theme: &Theme, options: &RenderOpti
 /// number in front of it. This is what a caller assembling the top level block by block
 /// — the pager's [`crate::render::render_document`] — needs: the numbering is a
 /// property of the whole document, so it is computed there, once, and handed down.
+///
+/// `source` is the whole document text, carried the same way `numbers` is: computed
+/// once by the caller that has the whole document in view, and handed to every block so
+/// a formula that will not draw can fall back to its own bytes of it (design spec §5.3).
 pub fn render_block_numbered(
     node: &Node,
     width: u16,
     theme: &Theme,
     options: &RenderOptions,
     numbers: &Numbering,
+    source: &str,
 ) -> Canvas {
-    render_block_ctx(node, width, Ctx::new(theme, options).numbered(numbers))
+    render_block_ctx(
+        node,
+        width,
+        Ctx::new(theme, options)
+            .numbered(numbers)
+            .with_source(source),
+    )
 }
 
 /// Renders a sequence of blocks at `width` columns, separated by blank rows.

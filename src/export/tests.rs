@@ -131,6 +131,32 @@ fn a_quote_inside_a_url_cannot_escape_the_attribute() {
 }
 
 #[test]
+fn inline_math_in_a_cell_is_drawn_the_way_the_screen_draws_it() {
+    // Rich-copy is what a sighted reader pastes after looking at the screen, so the
+    // formula is rendered the same way `render::inline` renders it — not left as raw
+    // LaTeX, which is what the catch-all serialised it as before this decision was made.
+    let html = html_of("| a |\n| --- |\n| $E = mc^2$ |\n");
+    assert!(html.contains("<td>E = mc²</td>"), "got {html}");
+}
+
+#[test]
+fn inline_math_that_will_not_draw_falls_back_to_its_literal() {
+    // No whole-document source reaches this module (unlike `render::inline`), so the
+    // fallback is the bare LaTeX rather than the delimited source — the one place this
+    // path and the terminal's fallback deliberately differ; see the comment on `inline`.
+    let html = html_of(
+        r"| a |
+| --- |
+| $\begin{pmatrix} 1 & 0 \end{pmatrix}$ |
+",
+    );
+    assert!(
+        html.contains(r"\begin{pmatrix}"),
+        "a formula that cannot be drawn keeps its literal: {html}"
+    );
+}
+
+#[test]
 fn a_line_break_in_a_cell_becomes_br() {
     let html = html_of("| a |\n| --- |\n| x<br>y |\n");
     assert!(html.contains("<br>"), "got {html}");

@@ -89,6 +89,16 @@ fn inline(node: &Node, out: &mut String) {
         }
         NodeKind::LineBreak => out.push_str("<br>"),
         NodeKind::SoftBreak => out.push(' '),
+        // Drawn the same way the screen draws it — "E = mc²" rather than the raw LaTeX
+        // — so a sighted reader pastes what they saw, not the source behind it. There is
+        // no whole-document source to fall back to here (unlike `render::inline`, this
+        // module never receives one), so a formula that will not draw falls back to its
+        // bare literal instead of its delimited source; that is the one place this
+        // rich-copy path and the terminal's fallback deliberately differ.
+        NodeKind::Math { literal, .. } => match crate::math::render_inline(literal) {
+            Ok(drawn) => escape_into(&drawn, out),
+            Err(_) => escape_into(literal, out),
+        },
         _ => escape_into(&node.plain_text(), out),
     }
 }

@@ -53,6 +53,20 @@ pub(crate) use super::code::OVERFLOW_MARKER;
 /// The other former copy; see [`OVERFLOW_MARKER`].
 pub(crate) use super::block::QUOTE_BAR;
 
+/// The whole-document inputs every block is rendered against, bundled so the functions
+/// that thread them down to [`render_block_numbered`] stay under clippy's argument limit.
+///
+/// `Copy` for the same reason [`super::Ctx`] is: every block in the loop takes its own
+/// copy rather than sharing a borrow that would have to outlive the loop body.
+#[derive(Debug, Clone, Copy)]
+struct DocCtx<'a> {
+    theme: &'a Theme,
+    options: &'a RenderOptions,
+    numbers: &'a Numbering,
+    /// The whole document text, for a formula that will not draw (design spec §5.3).
+    source: &'a str,
+}
+
 /// The widest a single block is ever grown to.
 ///
 /// A bound is needed because a pathological document — one enormous minified line —
@@ -102,10 +116,16 @@ pub fn render_document(
     // deeply enough to want numbers. Computed once here and handed to every block, so
     // the pager and the piped renderer number identically.
     let numbers = Numbering::enabled(doc, options.section_numbers);
+    let doc_ctx = DocCtx {
+        theme,
+        options,
+        numbers: &numbers,
+        source: doc.source(),
+    };
     for (index, node) in blocks.iter().enumerate() {
         let part = match banner.take() {
             Some(banner) if index == 0 => placed(banner, measure, fill),
-            _ => render_placed(node, measure, theme, options, &numbers, &clipped, fill),
+            _ => render_placed(node, measure, doc_ctx, &clipped, fill),
         };
         if part.is_empty() {
             continue;
@@ -209,28 +229,36 @@ fn is_exempt(node: &Node) -> bool {
 }
 
 /// Renders one block at the width its kind earns, and places it in the body.
+///
+/// `doc.source` is threaded down to [`render_block_numbered`] so a formula that will not
+/// draw can fall back to its own bytes of it — see [`super::Ctx::source`].
 fn render_placed(
     node: &Node,
     measure: Measure,
-    theme: &Theme,
-    options: &RenderOptions,
-    numbers: &Numbering,
+    doc: DocCtx<'_>,
     clip: &ClipTest,
     fill: crate::theme::Style,
 ) -> Canvas {
     // Nothing to place: with no cap the body is the full width, and every block was laid
     // out at it.
     if !measure.is_capped() {
-        return render_widened(node, measure.full, theme, options, numbers, clip);
+        return render_widened(node, measure.full, doc, clip);
     }
     let canvas = if is_exempt(node) {
-        render_widened(node, measure.full, theme, options, numbers, clip)
+        render_widened(node, measure.full, doc, clip)
     } else {
-        let capped = render_block_numbered(node, measure.prose, theme, options, numbers);
+        let capped = render_block_numbered(
+            node,
+            measure.prose,
+            doc.theme,
+            doc.options,
+            doc.numbers,
+            doc.source,
+        );
         if clip.is_clipped(&capped) {
             // The cap would cut this block short, so it takes the whole body — and
             // beyond it, if the whole body is not enough either.
-            render_widened(node, measure.full, theme, options, numbers, clip)
+            render_widened(node, measure.full, doc, clip)
         } else {
             capped
         }
@@ -308,29 +336,24 @@ const DIAGRAM_PROBES: u8 = 8;
 /// widened, only side-scrolled as raw text if some other line in it happened to be long.
 /// [`crate::render::diagram`] answers with the diagram itself, at the narrowest width
 /// that draws it, and that width is what the block is laid out at.
-fn render_widened(
-    node: &Node,
-    width: u16,
-    theme: &Theme,
-    options: &RenderOptions,
-    numbers: &Numbering,
-    clip: &ClipTest,
-) -> Canvas {
+fn render_widened(node: &Node, width: u16, doc: DocCtx<'_>, clip: &ClipTest) -> Canvas {
     let limits = Limits::new(
         MAX_BLOCK_WIDTH.min(width.saturating_mul(VIEWPORTS)),
         DIAGRAM_PROBES,
     );
-    if let Some((at, canvas)) = crate::render::diagram(node, width, limits, theme, options)
+    if let Some((at, canvas)) = crate::render::diagram(node, width, limits, doc.theme, doc.options)
         && (at == width || at - width >= MIN_SURPLUS)
     {
         return canvas;
     }
-    let narrow = render_block_numbered(node, width, theme, options, numbers);
+    let narrow =
+        render_block_numbered(node, width, doc.theme, doc.options, doc.numbers, doc.source);
     let is_clipped = |canvas: &Canvas| clip.is_clipped(canvas);
     if !is_clipped(&narrow) || width >= MAX_BLOCK_WIDTH {
         return narrow;
     }
-    let render = |at: u16| render_block_numbered(node, at, theme, options, numbers);
+    let render =
+        |at: u16| render_block_numbered(node, at, doc.theme, doc.options, doc.numbers, doc.source);
 
     // Double until the block fits, which bounds the search; then bisect for the
     // narrowest width that still fits, so the scrollable extent matches the content

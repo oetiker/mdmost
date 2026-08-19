@@ -3745,3 +3745,70 @@ fn a_link_in_a_nested_table_cell_records_a_hotspot() {
         2
     );
 }
+
+// Note: the brief for this task named a helper `options()` for the tests below. No such
+// helper exists in this file — `PLAIN` is the one every other test here is written
+// against, so that is what these use too.
+
+#[test]
+fn inline_math_is_drawn_as_one_row() {
+    let doc = Doc::parse("Einstein wrote $E = mc^2$ in 1905.\n");
+    let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+    assert!(
+        canvas.row_text(0).contains("E = mc²"),
+        "got {:?}",
+        canvas.row_text(0)
+    );
+    assert!(canvas.check_invariants().is_ok());
+}
+
+#[test]
+fn inline_math_off_shows_the_source_with_its_dollars() {
+    let doc = Doc::parse("Einstein wrote $E = mc^2$ in 1905.\n");
+    let canvas = render_document(
+        &doc,
+        60,
+        None,
+        &Theme::default_dark(),
+        &PLAIN.with_math_inline(false),
+    );
+    assert!(
+        canvas.row_text(0).contains("$E = mc^2$"),
+        "got {:?}",
+        canvas.row_text(0)
+    );
+}
+
+#[test]
+fn inline_math_that_cannot_be_drawn_falls_back_to_its_source() {
+    let doc = Doc::parse(r"A matrix $\begin{pmatrix} 1 & 0 \end{pmatrix}$ inline.");
+    let canvas = render_document(&doc, 80, None, &Theme::default_dark(), &PLAIN);
+    assert!(
+        canvas.row_text(0).contains(r"$\begin{pmatrix}"),
+        "a formula that cannot be drawn shows its source; got {:?}",
+        canvas.row_text(0)
+    );
+}
+
+#[test]
+fn the_formula_carries_one_atomic_span_over_all_its_cells() {
+    let doc = Doc::parse("Einstein wrote $E = mc^2$ in 1905.\n");
+    let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+    let atoms: Vec<_> = canvas.spans().iter().filter(|span| !span.copied).collect();
+    assert_eq!(
+        atoms.len(),
+        1,
+        "spec §10: one span for the formula, got {atoms:?}"
+    );
+    assert_eq!(
+        &doc.source()[atoms[0].source_start..atoms[0].source_end],
+        "$E = mc^2$"
+    );
+    // As many columns as the formula drew. A one-column span would leave every cell but
+    // the first unreachable to both search and select. Measured through `crate::text`,
+    // which is the only place in this project that counts display columns.
+    assert_eq!(
+        usize::from(atoms[0].cols),
+        crate::text::display_width("E = mc²")
+    );
+}

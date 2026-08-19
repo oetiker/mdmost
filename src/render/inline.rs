@@ -16,7 +16,7 @@ use crate::doc::{Node, NodeKind, SourceSpan};
 use crate::text::{Line, Span, display_width, graphemes, wrap_spans};
 use crate::theme::Style;
 
-use super::Ctx;
+use super::{Ctx, bridge};
 
 /// The marker shown in place of raw HTML, which `mdmost` never renders (spec §2).
 pub(crate) const HTML_MARKER: &str = "⟨html⟩";
@@ -49,10 +49,8 @@ enum Origin {
     /// may index inside it. It emits a span with `copied: false`, which is how `search`
     /// and `select` are told (design spec §10).
     ///
-    /// `flatten` and `reconcile` handle it starting now, and the unit tests below
-    /// build it directly; production code does not construct it yet — the formula
-    /// renderer that will is stage 1's Task 10.
-    #[allow(dead_code, reason = "constructed by Task 10's math wiring")]
+    /// `flatten` and `reconcile` handle it starting now; [`Piece::atom`] is what
+    /// constructs it, for the one thing in this crate with no interior — a formula.
     Atom(SourceSpan),
 }
 
@@ -145,6 +143,16 @@ impl Piece {
             text,
             style,
             origin,
+            control: None,
+        }
+    }
+
+    /// A run whose whole text stands for `source` and has no interior position.
+    fn atom(text: String, style: Style, source: SourceSpan) -> Self {
+        Self {
+            text,
+            style,
+            origin: (!source.is_empty()).then_some(Origin::Atom(source)),
             control: None,
         }
     }
@@ -456,10 +464,27 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, ids: &mut usize, out: &mu
                     node.source,
                 ));
             }
-            // Task 10 renders the formula; here it is deliberately silent rather than
-            // falling into the container wildcard below, which would be misleading —
-            // `Math` never has children to render.
-            NodeKind::Math { .. } => {}
+            NodeKind::Math { literal, display } => {
+                // Display math inside an inline run is a `$$…$$` that comrak kept in a
+                // paragraph. It is not laid out in this stage, and even when it is, it
+                // is a block: shown as its own source here.
+                let drawn = (!*display && ctx.options.math_inline)
+                    .then(|| bridge::math_inline(literal).ok())
+                    .flatten();
+                match drawn {
+                    // The drawn text is not a copy of the source it came from, so the
+                    // run is an atom: taken whole or not at all (design spec §10).
+                    Some(text) => out.push(Piece::atom(text, style, node.source)),
+                    // §5.3: the verbatim source, delimiters included. Reached for two
+                    // reasons — `math_inline = false`, and a formula that would not
+                    // draw — and it is deliberately the same rendering for both.
+                    None => out.push(Piece::transcribable(
+                        source_of(ctx, node.source),
+                        style,
+                        node.source,
+                    )),
+                }
+            }
             NodeKind::Emph => collect(
                 &node.children,
                 style.patch(theme.text.emphasis),
@@ -567,6 +592,23 @@ fn ends_with_space(pieces: &[Piece]) -> bool {
     pieces
         .last()
         .is_none_or(|piece| piece.text.ends_with(char::is_whitespace))
+}
+
+/// The verbatim document bytes `span` names, or an empty string if `ctx` was not given
+/// the whole source to draw from.
+///
+/// Every renderer reached through [`super::render_document`] or [`super::render_flat`]
+/// carries the whole document in `ctx.source`; a handful of standalone entry points — a
+/// block or a table rendered on its own, a footnote popup — do not, and `span`'s bytes
+/// are then unreachable rather than out of bounds. `get` degrades to nothing instead of
+/// indexing past the end of `ctx.source`, because nothing about a formula that will not
+/// draw may panic — a fallback with no source to fall back to is a documented gap
+/// (design spec §9), not a crash.
+fn source_of(ctx: Ctx<'_>, span: SourceSpan) -> String {
+    ctx.source
+        .get(span.start..span.end)
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// A code span, anchored past the opening backtick fence when that is unambiguous.
@@ -677,11 +719,10 @@ pub(crate) fn min_width(nodes: &[Node], ctx: Ctx<'_>) -> usize {
     crate::text::spans_min_width(&inline_spans(nodes, ctx))
 }
 
-// `Origin::Atom` is not constructed anywhere yet — Task 10 wires a real formula
-// renderer onto it — so `flatten` and `reconcile`'s handling of it has no exerciser
-// outside these tests. Built directly on the `Piece`/`Origin` machinery rather than
-// through `render_inline`, since there is no source document yet that produces an
-// atom to render.
+// `NodeKind::Math` (see `collect`) is production's own exerciser of `Origin::Atom` now,
+// but these tests still build one directly on the `Piece`/`Origin` machinery: they are
+// checking `flatten`/`reconcile`'s coalescing rules in isolation, not asking a formula
+// to actually draw.
 #[cfg(test)]
 mod tests {
     use super::*;
