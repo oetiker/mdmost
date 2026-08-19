@@ -1015,3 +1015,86 @@ fn arbitrary_source_around_backslash_math_never_panics() {
         });
     }
 }
+
+#[test]
+fn backslash_math_is_found_in_a_heading() {
+    // The `##` ATX marker is part of the Heading's own `source` span but not part of
+    // its first inline child's — a run with no preceding sibling must not fall back to
+    // the parent's full span, or it reads the marker as unaligned prose and fails
+    // closed over the whole run.
+    let doc = Doc::parse_with(
+        "## Solving \\(x^2+1=0\\)\n",
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    let math = doc.root().children[0]
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node in a heading");
+    let NodeKind::Math { literal, .. } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "x^2+1=0");
+}
+
+#[test]
+fn backslash_math_is_found_at_every_heading_level() {
+    for level in 1..=6 {
+        let hashes = "#".repeat(level);
+        let source = format!("{hashes} \\(x\\)\n");
+        let doc = Doc::parse_with(
+            &source,
+            MathSyntax {
+                dollars: true,
+                backslash: true,
+            },
+        );
+        assert!(
+            doc.root().children[0]
+                .children
+                .iter()
+                .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+            "level {level} heading: no math node found in {source:?}"
+        );
+    }
+}
+
+#[test]
+fn backslash_math_is_found_in_a_table_cell() {
+    // comrak's table-cell inline parsing drops the escaping backslash from a Text
+    // node's own sourcepos even for `\(`/`\)`, not only the `\[`/`\]` link-bracket
+    // case a plain paragraph shows — a second, independent instance of the same
+    // underlying mechanism (see the module doc).
+    let doc = Doc::parse_with(
+        "| a |\n|---|\n| \\(x\\) |\n",
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        find(doc.root(), &|n| matches!(n.kind, NodeKind::Math { .. })).is_some(),
+        "no math node in a table cell"
+    );
+}
+
+#[test]
+fn plain_paragraph_backslash_math_is_unaffected_by_the_boundary_fix() {
+    let doc = Doc::parse_with(
+        "Plain \\(x\\) here.\n",
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+        "regression: plain paragraph math stopped working"
+    );
+}

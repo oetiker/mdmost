@@ -163,8 +163,11 @@ pub(super) fn document<'a>(
     let offsets = LineOffsets::new(source);
     let mut doc = convert(root, &offsets, math, slugger, headings);
     number_footnotes(&mut doc);
-    // Before `split_transcriptions`: that pass cuts a node of its own around every
-    // backslash escape, and `\(` is one, so afterwards there is nothing left to find.
+    // The pass tolerates either order (`align` re-derives everything from the source
+    // regardless of how finely `split_transcriptions` has already cut the run) — moving
+    // this after it and rerunning every test here confirmed byte-identical trees. It
+    // stays first anyway: that was the original design intent, and there is no cost to
+    // keeping it.
     if math.backslash {
         super::backslash::split_backslash_math(&mut doc, source);
     }

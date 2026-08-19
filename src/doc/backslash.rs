@@ -21,14 +21,22 @@
 //! spans this produces are **subdivisions of the span it was given**, and no offset ever
 //! moves.
 //!
-//! # Why it runs before `split_transcriptions`
+//! # Why it runs before `split_transcriptions` — and why that stopped being required
 //!
-//! That pass cuts a node of its own around every backslash escape, and `\(` is one. After
-//! it, no text node's source holds the two bytes this scan is looking for. So this runs
-//! first, on the whole text node — and takes comrak's resolved text with it by reusing
-//! [`super::convert::align`], the very function `split_transcriptions` uses. Prose either
-//! side of a formula therefore renders exactly as it does with the flag off, escapes
-//! included.
+//! `split_transcriptions` cuts a node of its own around every backslash escape, and
+//! `\(` is one; a scan confined to *one text node's own source* run after it would find
+//! nothing, because by then no node's source holds the two bytes it is looking for. That
+//! was true of this pass's first version, and it is why the design required running
+//! first, on the whole text node, reusing [`super::convert::align`] — the very function
+//! `split_transcriptions` uses — to take comrak's resolved text along for the ride.
+//!
+//! The run-grouping this module settled on (below) re-derives everything from `align`
+//! over the raw source every time, regardless of how finely a prior pass has already
+//! cut the run apart — so it no longer actually depends on going first. Moving the call
+//! to *after* `split_transcriptions` and rerunning every test in this module produced
+//! byte-identical trees. It still runs first: that was the original intent, moving it
+//! would buy nothing, and leaving a comment claiming an ordering constraint the code no
+//! longer needs is exactly the kind of unverified claim this plan has shipped before.
 //!
 //! # Why a *run* of siblings, not one text node
 //!
@@ -41,12 +49,28 @@
 //! the opening backslash, is not in *either* span. A scan confined to one node's own
 //! span can never see it.
 //!
-//! So this groups every maximal run of consecutive `Text` siblings, extends the run's
-//! outer edges to the nearest boundary that *is* known — the previous non-text sibling's
-//! end, or the parent's own start, on the left; the next sibling's start, or the parent's
-//! end, on the right — and runs [`align`] once over the whole run. A `\(` run of one
-//! node behaves exactly as it did before; a `\[` run of several now sees the bytes comrak
-//! split away from it.
+//! So this groups every maximal run of consecutive `Text` siblings and, on the left,
+//! extends to the previous non-text sibling's end where there is one. Where there is
+//! not — the run is the parent's first children — it does **not** fall back to the
+//! parent's own span. A `Heading`'s span includes its `#`/`##` marker; a GFM
+//! `TableCell`'s inline parsing turns out to drop the escaping backslash the same way
+//! `\[…\]` does, even for `\(…\)` (confirmed against the real parser: `\(x\)` alone in a
+//! cell arrives as two siblings, `"(x"` and `")"`, same shape as the bracket case).
+//! Falling back to the parent's full span would have fixed the bracket case but broken
+//! both of these silently — `align` desyncs at byte zero against the marker or the
+//! surrounding cell syntax and fails closed over the *entire* run, so `math_backslash`
+//! would find nothing in any heading or any table cell, with no panic and no other
+//! symptom than the flag quietly doing nothing.
+//!
+//! The one thing ever actually missing is the *escaping backslash itself* — always
+//! exactly one byte, always immediately before the run's own natural edge, never after
+//! it (`CommonMark`'s escape is one backslash plus one punctuation character, and the
+//! punctuation is what the affected node's own `sourcepos` keeps). So a run with no
+//! preceding sibling recovers that one byte, and only that one byte, by checking whether
+//! it actually is a backslash — [`recover_dropped_backslash`] — rather than reaching for
+//! whatever boundary happens to be nearest. A `\(` run of one untouched node is
+//! unaffected either way; a `\[` run, or a `\(` run inside a table cell, now sees the
+//! byte comrak split away from it, and nothing else does.
 //!
 //! # No escape mechanism
 //!
@@ -68,34 +92,62 @@ pub(super) fn split_backslash_math(node: &mut Node, source: &str) {
     if node.children.is_empty() {
         return;
     }
-    let bounds = node.source;
+    // Only ever a *floor*: how far left `recover_dropped_backslash` is allowed to look,
+    // never a boundary it is expected to reach. See the module doc's "why it does not
+    // fall back to the parent's span" section.
+    let floor = node.source.start;
     let mut rebuilt: Vec<Node> = Vec::with_capacity(node.children.len());
     let mut children = std::mem::take(&mut node.children).into_iter().peekable();
-    let mut left = bounds.start;
+    // `None` until a non-text sibling has been seen; a run with no preceding sibling
+    // falls back to its own first child's start, not the parent's.
+    let mut prev_sibling_end: Option<usize> = None;
     while let Some(child) = children.next() {
         if matches!(child.kind, NodeKind::Text(_)) {
+            let natural_left = child.source.start;
             let mut run = vec![child];
             while matches!(children.peek(), Some(c) if matches!(c.kind, NodeKind::Text(_))) {
                 let Some(next) = children.next() else { break };
                 run.push(next);
             }
-            let right = children.peek().map_or(bounds.end, |c| c.source.start);
+            let natural_right = run.last().map_or(natural_left, |n| n.source.end);
+            let left = prev_sibling_end
+                .unwrap_or_else(|| recover_dropped_backslash(natural_left, floor, source));
+            let right = children.peek().map_or(natural_right, |c| c.source.start);
             rebuilt.extend(split_run(run, left, right, source));
         } else {
-            left = child.source.end;
+            prev_sibling_end = Some(child.source.end);
             rebuilt.push(child);
         }
     }
     node.children = rebuilt;
 }
 
+/// Extends `left` back by the one byte comrak's own escape handling can drop from a
+/// run's leading edge — never past `floor`, and never by more than that one byte.
+///
+/// The escaping backslash of `\(`, `\)`, `\[` or `\]` is always exactly one byte,
+/// always immediately before the character it escapes — never after it, so only a
+/// run's *left* edge is ever affected, and a run with a preceding sibling never needs
+/// this at all (the sibling's own end already sits past any backslash comrak kept
+/// there, or there was nothing to drop in the first place). `floor` keeps this from
+/// ever reading a byte that belongs to the parent's own markup — a `Heading`'s `#`
+/// marker, say — rather than to a dropped escape.
+fn recover_dropped_backslash(left: usize, floor: usize, source: &str) -> usize {
+    if left > floor && source.as_bytes().get(left - 1) == Some(&b'\\') {
+        left - 1
+    } else {
+        left
+    }
+}
+
 /// One run of consecutive text-node siblings, as the sequence of text and math nodes
 /// the source between `left` and `right` holds.
 ///
-/// `left` and `right` are the nearest known boundaries outside the run itself — the
-/// neighbouring sibling's edge, or the parent's own span where there is no sibling —
-/// so that a backslash comrak dropped from every sibling's own `sourcepos` (see the
-/// module doc's "why a run" section) is still inside the region this reads.
+/// `left` and `right` are the run's true outer edges: a neighbouring sibling's own
+/// edge where there is one, or the run's own natural boundary recovered by exactly one
+/// byte where there is not (see [`recover_dropped_backslash`]) — never the enclosing
+/// parent's full span, which can hold markup (a heading's `#`, a table cell's syntax)
+/// this pass must not read as prose.
 fn split_run(run: Vec<Node>, left: usize, right: usize, source: &str) -> Vec<Node> {
     let span = SourceSpan::new(left, right);
     let Some(raw) = source.get(span.start..span.end) else {
