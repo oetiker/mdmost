@@ -212,9 +212,15 @@ pub(crate) fn limits(base: MathBox, under: Option<MathBox>, over: Option<MathBox
 
 /// The stroke, the overline, and the radicand under them (design spec §6.2).
 ///
-/// Two columns go to the stroke and the space after it, and one row to the overline. An
-/// index — the `3` of a cube root — is drawn into the stroke's own columns where it fits
-/// and widens the box where it does not.
+/// Two columns go to the stroke and the space after it, and one row to the overline.
+///
+/// An index — the `3` of a cube root — is right-aligned into the *single* free column
+/// above the stroke glyph, so its last column sits over the root sign itself. Only that
+/// one column is free: the second stroke column is the gap before the radicand, and an
+/// index reaching into it would read as sitting over the radicand rather than over the
+/// root. An index wider than one column therefore overhangs to the left, one column at a
+/// time, which is what the `STROKE - 1` below counts. Spec §6.2 shows no index example;
+/// this is the owner's ruling, and `draw.rs` must place the index to match it.
 pub(crate) fn radical(radicand: MathBox, index: Option<MathBox>) -> MathBox {
     const STROKE: u16 = 2;
     let overhang = index
@@ -242,10 +248,14 @@ pub(crate) fn radical(radicand: MathBox, index: Option<MathBox>) -> MathBox {
 /// the padding is not cosmetic: `│1  0│` puts a vertical rule flush against a digit and
 /// reads as a table cell.
 pub(crate) fn fenced(left: Option<char>, right: Option<char>, body: MathBox) -> MathBox {
-    let sides = u16::from(left.is_some()) + u16::from(right.is_some());
-    let padding = if body.is_inline() { 0 } else { sides };
+    // Each delimiter that is present costs its own column, and against a tall body it
+    // costs the space between itself and the content as well. So the width is the body
+    // plus one *per-side cost* for each side that has a delimiter -- not the body plus a
+    // constant, which is what it collapses to only in the two-sided case.
+    let per_side = if body.is_inline() { 1 } else { 2 };
+    let sides = u16::from(left.is_some()).saturating_add(u16::from(right.is_some()));
     MathBox {
-        width: body.width.saturating_add(sides).saturating_add(padding),
+        width: body.width.saturating_add(sides.saturating_mul(per_side)),
         above: body.above,
         below: body.below,
         content: BoxContent::Fenced {
@@ -379,5 +389,169 @@ mod tests {
         };
         let b = row(vec![wide, text("x")]);
         assert_eq!(b.width, u16::MAX, "saturates, and must not panic");
+    }
+
+    #[test]
+    fn text_measures_display_columns_and_not_bytes_or_chars() {
+        // Two double-width cells: 4 columns, but 6 bytes and 2 chars. Measuring with
+        // `len()` gives 6 and with `chars().count()` gives 2 -- the defect that
+        // `src/text/mod.rs:2-17` makes `crate::text` the single home of width logic to
+        // prevent. Only the display width is 4, so this rejects both.
+        let cjk = text("日本");
+        assert_eq!(
+            cjk.width, 4,
+            "two double-width cells; len() is 6, chars() is 2"
+        );
+        assert_eq!(cjk.height(), 1, "a wide cell is still one row");
+
+        // The same claim from the other side: one grapheme cluster of one column, but 3
+        // bytes and 2 chars, so here the display width is the *smallest* of the three.
+        let combining = text("e\u{0301}");
+        assert_eq!(
+            combining.width, 1,
+            "e plus a combining acute is one cell; len() is 3, chars() is 2"
+        );
+    }
+
+    #[test]
+    fn a_tall_base_keeps_its_own_height_when_the_superscript_is_short() {
+        // Every other scripts test has a one-row base, which hides `base.above` behind
+        // the script's height. Here the base is 3 rows above its own baseline and the
+        // script is 1, so taking only the script loses the base entirely.
+        let base = fraction(fraction(text("a"), text("b")), text("c"));
+        assert_eq!(
+            (base.above, base.below),
+            (3, 1),
+            "the base before scripting"
+        );
+        let b = scripts(base, None, Some(text("2")));
+        assert_eq!(b.above, 3, "the taller base wins, not the one-row script");
+        assert_eq!(b.below, 1, "and the base's own descent survives");
+    }
+
+    #[test]
+    fn a_tall_base_keeps_its_own_depth_when_the_subscript_is_short() {
+        // The mirror of the above: 3 rows below the baseline, a one-row subscript.
+        let base = fraction(text("a"), fraction(text("b"), text("c")));
+        assert_eq!(
+            (base.above, base.below),
+            (1, 3),
+            "the base before scripting"
+        );
+        let b = scripts(base, Some(text("2")), None);
+        assert_eq!(b.below, 3, "the deeper base wins, not the one-row script");
+        assert_eq!(b.above, 1, "and the base's own ascent survives");
+    }
+
+    #[test]
+    fn a_root_index_takes_the_one_free_column_over_the_stroke() {
+        // The index is right-aligned into the single column above the stroke glyph, so a
+        // one-column index costs nothing beyond the stroke that is already there.
+        let cube = radical(text("x"), Some(text("3")));
+        assert_eq!(cube.width, 3, "1 radicand + 2 stroke, nothing overhanging");
+        assert_eq!(
+            radical(text("x"), None).width,
+            3,
+            "an index of one column is free"
+        );
+
+        // A wider index has nowhere to go but leftwards, one column per extra column.
+        assert_eq!(
+            radical(text("x"), Some(text("10"))).width,
+            4,
+            "the second index column overhangs the stroke"
+        );
+    }
+
+    #[test]
+    fn a_fraction_stores_its_parts_the_right_way_round() {
+        // Equal-height parts hide a num/den swap completely: the width is a max and both
+        // heights are 1. Only the stored content shows it.
+        let b = fraction(text("a"), text("bb"));
+        let BoxContent::Fraction { num, den } = &b.content else {
+            panic!("fraction built {:?}", b.content)
+        };
+        assert_eq!(
+            num.content,
+            BoxContent::Text("a".into()),
+            "the numerator is on top"
+        );
+        assert_eq!(den.content, BoxContent::Text("bb".into()));
+    }
+
+    #[test]
+    fn a_fraction_is_not_symmetric_between_its_parts() {
+        // The numbers do show a swap once the two parts differ in height, which is the
+        // case a drawing task will regress on.
+        let top_heavy = fraction(fraction(text("a"), text("b")), text("c"));
+        let bottom_heavy = fraction(text("c"), fraction(text("a"), text("b")));
+        assert_eq!((top_heavy.above, top_heavy.below), (3, 1));
+        assert_eq!((bottom_heavy.above, bottom_heavy.below), (1, 3));
+    }
+
+    #[test]
+    fn scripts_and_limits_store_each_operand_on_its_own_side() {
+        // A sub/sup or under/over swap is invisible in the numbers whenever the two are
+        // the same height, which is the common case.
+        let s = scripts(text("x"), Some(text("i")), Some(text("n")));
+        let BoxContent::Scripts { base, sub, sup } = &s.content else {
+            panic!("scripts built {:?}", s.content)
+        };
+        assert_eq!(base.content, BoxContent::Text("x".into()));
+        let sub = sub.as_ref().expect("a subscript was given");
+        let sup = sup.as_ref().expect("a superscript was given");
+        assert_eq!(sub.content, BoxContent::Text("i".into()), "sub stays below");
+        assert_eq!(sup.content, BoxContent::Text("n".into()), "sup stays above");
+
+        let l = limits(text("S"), Some(text("i=1")), Some(text("n")));
+        let BoxContent::Limits { base, under, over } = &l.content else {
+            panic!("limits built {:?}", l.content)
+        };
+        assert_eq!(base.content, BoxContent::Text("S".into()));
+        let under = under.as_ref().expect("an under was given");
+        let over = over.as_ref().expect("an over was given");
+        assert_eq!(under.content, BoxContent::Text("i=1".into()));
+        assert_eq!(over.content, BoxContent::Text("n".into()));
+    }
+
+    #[test]
+    fn a_row_keeps_its_parts_in_source_order() {
+        let b = row(vec![text("a"), text("b"), text("c")]);
+        let BoxContent::Row(parts) = &b.content else {
+            panic!("row built {:?}", b.content)
+        };
+        let contents: Vec<_> = parts.iter().map(|p| p.content.clone()).collect();
+        assert_eq!(
+            contents,
+            vec![
+                BoxContent::Text("a".into()),
+                BoxContent::Text("b".into()),
+                BoxContent::Text("c".into()),
+            ],
+            "a reordered row draws the formula in the wrong order"
+        );
+    }
+
+    #[test]
+    fn a_radical_and_a_fence_store_their_parts_distinguishably() {
+        let r = radical(text("x"), Some(text("3")));
+        let BoxContent::Radical { radicand, index } = &r.content else {
+            panic!("radical built {:?}", r.content)
+        };
+        assert_eq!(radicand.content, BoxContent::Text("x".into()));
+        let index = index.as_ref().expect("an index was given");
+        assert_eq!(index.content, BoxContent::Text("3".into()));
+
+        // Mismatched delimiters, so a left/right swap cannot hide in the symmetry.
+        let f = fenced(Some('['), Some(')'), text("x"));
+        let BoxContent::Fenced { left, right, body } = &f.content else {
+            panic!("fenced built {:?}", f.content)
+        };
+        assert_eq!(
+            (*left, *right),
+            (Some('['), Some(')')),
+            "the opener stays on the left"
+        );
+        assert_eq!(body.content, BoxContent::Text("x".into()));
     }
 }
