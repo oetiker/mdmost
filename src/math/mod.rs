@@ -11,6 +11,7 @@
 mod boxes;
 mod inline;
 pub(crate) mod scripts;
+mod spacing;
 
 #[cfg(test)]
 mod tests;
