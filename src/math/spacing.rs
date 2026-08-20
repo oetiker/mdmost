@@ -46,9 +46,8 @@ pub(crate) enum Class {
     Function,
     /// A binary operator with operands either side: `Content::BinaryOp`.
     Binary,
-    /// A sign with no left operand — the `-` of `-x`. `TeXbook`: a leading `Bin`
-    /// reclassifies to `Ord`, so this class answers exactly as [`Class::Ordinary`] does
-    /// (see [`TABLE`]) rather than carrying its own row.
+    /// A sign with no left operand — the `-` of `-x`. Binds tight to what follows: the
+    /// plan's decision, not TeX's ([`UNARY_ROW`]) — `-x` and `-\sin x` both stay tight.
     Unary,
     /// A relation: `Content::Relation`. Always spaced.
     Relation,
@@ -109,12 +108,23 @@ impl Class {
 /// hugs its contents on the inside exactly as the formula's own boundary hugs its ends.
 const ZERO_ROW: [u16; N] = [0; N];
 
-/// Touches whatever comes next, the way two adjacent atoms touch: [`Class::Ordinary`],
-/// [`Class::Unary`] (`TeXbook`'s Bin-to-Ord rule — a leading sign with no left operand
-/// reclassifies to `Ordinary`, so this is the same row, not a copy of it), and
-/// [`Class::Close`] (a closing delimiter's own trailing behaviour matches an ordinary
-/// atom's: `)y`, `)(` and `-x` all touch, but `)=` and `) sin` still space).
+/// Touches whatever comes next, the way two adjacent atoms touch: [`Class::Ordinary`]
+/// and [`Class::Close`] (a closing delimiter's own trailing behaviour matches an
+/// ordinary atom's: `)y` and `)(` both touch, but `)=` and `) sin` still space).
+/// [`Class::Unary`] is *not* this row — see [`UNARY_ROW`].
 const TOUCHES_ROW: [u16; N] = [0, 0, 1, 1, 0, 1, 1, 0, 0, 0];
+
+/// [`Class::Unary`]: binds tight to what follows, per the plan's decision that a sign
+/// with no left operand hugs its operand — `-x` -> `−x`, `-\sin x` -> `−sin x`
+/// (`src/math/tests.rs`'s `a_function_name_parts_from_its_argument` pins the second).
+/// Two cells break that pattern: `Binary` and `Relation`, because the owner's ruling —
+/// "one space either side of a relation always" — is not something a wildcard is
+/// entitled to override. Both are reachable only on degenerate input (`-=`, `-+`), in
+/// the same class as Ruling D's cells: correct if reached, not because a real formula
+/// hits them. This is *not* [`TOUCHES_ROW`] with two cells patched on top; it is its own
+/// row, because the two exceptions are a deliberate departure from the "binds tight"
+/// pattern, not a coincidence of it.
+const UNARY_ROW: [u16; N] = [0, 0, 0, 1, 0, 1, 0, 0, 0, 0];
 
 /// Parts from its operand, but hugs a delimited group that is already visibly its own
 /// thing: [`Class::Function`] and [`Class::Large`]. `\sin(x)` and `\sum(a_i + b_i)` are
@@ -140,7 +150,7 @@ const TABLE: [[u16; N]; N] = [
     TOUCHES_ROW,         // Ordinary
     OPERAND_SEEKING_ROW, // Function
     ALWAYS_SPACED_ROW,   // Binary
-    TOUCHES_ROW,         // Unary
+    UNARY_ROW,           // Unary
     ALWAYS_SPACED_ROW,   // Relation
     OPERAND_SEEKING_ROW, // Large
     ZERO_ROW,            // Open
@@ -250,36 +260,42 @@ mod tests {
     }
 
     #[test]
-    fn a_unary_sign_touches_an_ordinary_operand_but_spaces_before_a_word_or_a_large_operator() {
+    fn a_unary_sign_hugs_its_operand() {
         // This is the -x defect of stage 1, now a table entry rather than a
-        // head-of-run rule. `Unary` only touches what `Ordinary` would touch -- it does
-        // not hug everything indiscriminately.
+        // head-of-run rule. The plan's decision: a sign with no left operand binds
+        // tight to what follows -- including a function name or a large operator,
+        // unlike an `Ordinary` atom in the same position. `src/math/tests.rs`'s
+        // `a_function_name_parts_from_its_argument` pins `-\sin x` -> `"−sin x"`.
         assert_eq!(gap(Unary, Ordinary), 0, "-x, not - x");
-        // Ruling B: `Unary`'s row is `Ordinary`'s row, so `-\sin x` keeps its space the
-        // same way `2 sin x` does. `src/math/tests.rs`'s
-        // `a_leading_unary_minus_before_a_function_name_keeps_a_space` already pins
-        // `-\sin x` -> `"− sin x"`.
-        assert_eq!(
-            gap(Unary, Function),
-            1,
-            "-sin x keeps its space, like 2 sin x"
-        );
-        assert_eq!(gap(Unary, Large), 1, "-sum i keeps its space, like sum i");
+        assert_eq!(gap(Unary, Function), 0, "-sin x, not - sin x");
+        assert_eq!(gap(Unary, Large), 0);
     }
 
     #[test]
-    fn the_unary_row_is_structurally_the_ordinary_row() {
-        // Not a coincidence to keep in sync by hand: `TABLE` places the same
-        // `TOUCHES_ROW` constant at both `Unary`'s and `Ordinary`'s index, so this loop
-        // is provable from the source rather than merely observed here. Kept anyway as
-        // a readable statement of Ruling B that fails by name if the aliasing is ever
-        // broken.
+    fn a_unary_sign_still_spaces_before_a_relation_or_a_binary_operator() {
+        // Degenerate input (`-=`, `-+`) but the cell must say something, and the
+        // owner's ruling -- "one space either side of a relation always" -- is not
+        // something a wildcard is entitled to override. Correct if reached, not
+        // because a real formula hits it (same class as Ruling D's cells).
+        assert_eq!(
+            gap(Unary, Relation),
+            1,
+            "the owner's ruling has no exception here"
+        );
+        assert_eq!(gap(Unary, super::Class::Binary), 1);
+    }
+
+    #[test]
+    fn the_unary_row_is_zero_except_before_a_relation_or_a_binary_operator() {
+        // States `UNARY_ROW`'s shape precisely, over every column at once, rather than
+        // leaving it to a handful of individual assertions: `Unary` binds tight to
+        // everything except the two cells the owner's ruling claims.
         for right in Class::ALL {
-            assert_eq!(
-                gap(Unary, right),
-                gap(Ordinary, right),
-                "{right:?}: Unary must answer exactly as Ordinary does"
-            );
+            let expected = match right {
+                Relation | super::Class::Binary => 1,
+                _ => 0,
+            };
+            assert_eq!(gap(Unary, right), expected, "{right:?}");
         }
     }
 
@@ -329,6 +345,6 @@ mod tests {
         // exists in this module. Those two are Task 3's to prove.
         assert_eq!(gap(super::Class::Edge, Unary), 0, "-x at the head");
         assert_eq!(gap(Ordinary, Function), 1, "2 sin x");
-        assert_eq!(gap(Unary, Function), 1, "-sin x keeps its space (Ruling B)");
+        assert_eq!(gap(Unary, Function), 0, "-sin x");
     }
 }
