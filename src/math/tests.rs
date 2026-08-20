@@ -111,9 +111,15 @@ fn a_function_name_sits_tight_against_an_opening_delimiter() {
 
 #[test]
 fn a_two_character_relation_is_written_as_one_spaced_unit() {
-    // `RelationContent` can hold two characters (`\shortparallel` and its relatives);
-    // `\coloneq` is one, and its own doc comment names it as the reason
-    // `Content::Relation` cannot share an or-pattern with the other `char`-only arms.
+    // `RelationContent` can hold two characters, and that is why `Content::Relation`
+    // cannot share an or-pattern with the other `char`-only arms. The ones that do are
+    // the sixteen `multirelation` calls at
+    // `pulldown-latex-0.8.0/src/parser/primitives.rs:1157-1172`; `\coloneq` is `:` then
+    // `−`, which is what this asserts.
+    //
+    // This comment named `\shortparallel` as an example. It is not one: it is
+    // `RelationContent::single_char('∥')` at `primitives.rs:1066`, so the example
+    // contradicted the input on the next line.
     assert_eq!(rendered(r"a \coloneq b"), "a :− b");
 }
 

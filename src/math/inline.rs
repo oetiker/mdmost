@@ -462,10 +462,16 @@ fn write_content(
             spaced(out, content.encode_utf8(&mut [0u8; 4]), spacing);
         }
         // A relation is the one content that is not a `char`: `RelationContent` may hold
-        // two characters (`\shortparallel` and friends), and its only public accessor
-        // writes them into a caller's buffer, which the upstream doc comment requires be
-        // at least eight bytes. It therefore cannot share an or-pattern with the arm
-        // below, whose alternatives all bind a `char`.
+        // two characters, and its only public accessor writes them into a caller's
+        // buffer, which the upstream doc comment requires be at least eight bytes. It
+        // therefore cannot share an or-pattern with the arm below, whose alternatives all
+        // bind a `char`.
+        //
+        // The two-character relations are the sixteen `multirelation` calls at
+        // `pulldown-latex-0.8.0/src/parser/primitives.rs:1157-1172` -- `\coloneq` is `:`
+        // then `−`, and six of them are a base character plus U+FE00. This comment named
+        // `\shortparallel`, which is not one of them: it is
+        // `RelationContent::single_char('∥')` at `primitives.rs:1066`.
         Content::Relation { content, .. } => {
             let mut buf = [0u8; 8];
             let text =
