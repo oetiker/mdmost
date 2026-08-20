@@ -37,9 +37,14 @@ Kappa lambda mu. Needle again.
 
 /// Builds an app over `source` at a fixed size.
 fn pager(source: &str) -> App {
+    pager_with(source, Config::default())
+}
+
+/// Builds an app over `source` at a fixed size, with a given configuration.
+fn pager_with(source: &str, config: Config) -> App {
     let mut app = App::new(
         Doc::parse(source),
-        Config::default(),
+        config,
         AppOptions {
             config_path: None,
             title: "sample.md".to_string(),
@@ -52,6 +57,21 @@ fn pager(source: &str) -> App {
     app.resize(80, 12);
     let _ = app.canvas();
     app
+}
+
+#[test]
+fn the_pager_passes_math_inline_to_the_renderer() {
+    // The pager builds its own `RenderOptions` in `App::render_options`, so a key wired
+    // only into the `--render-once` path at `src/main.rs` would do nothing in the way
+    // mdmost is normally used. That is the failure this test exists to catch.
+    let source = "Einstein wrote $E = mc^2$ here.\n";
+    assert!(pager(source).render_options().math_inline, "on by default");
+
+    let config = Config {
+        math_inline: false,
+        ..Config::default()
+    };
+    assert!(!pager_with(source, config).render_options().math_inline);
 }
 
 #[test]
@@ -7381,5 +7401,40 @@ fn a_code_fence_inside_a_popup_offers_no_copy_button() {
     assert!(
         app.popup().expect("a popup").canvas().hotspots().is_empty(),
         "and the note's canvas records no control at all"
+    );
+}
+
+#[test]
+fn a_drag_inside_inline_math_yields_the_whole_formula() {
+    // "A formula is atomic for selection" (design spec §10). Its cells are not a copy
+    // of its bytes, so there is no half of it to copy: a drag over two cells in the
+    // middle of `E = mc²` yields the LaTeX with its dollars. Inspecting the span alone
+    // would not catch this — `offset_at` is the code that has to know.
+    let doc = "Einstein wrote $E = mc^2$ in 1905.\n";
+    let canvas = render(doc, 60);
+    let (row, col, cols) = drawn(&canvas, "E = mc²");
+    let selection = drag(Pos::new(row, col + 2), Pos::new(row, col + cols - 2));
+    assert_eq!(
+        select::extract(&canvas, doc, selection)
+            .expect("the drag covered something")
+            .text,
+        "$E = mc^2$"
+    );
+}
+
+#[test]
+fn a_popup_shows_the_source_of_math_that_will_not_draw() {
+    // Design spec §9's "the reader sees the verbatim source" does not stop at the
+    // popup's edge: `render_blocks` — the footnote popup's own renderer, entered
+    // through the real click path, not a synthetic canvas — used to build its `Ctx`
+    // with no document source at all, so a formula that failed to draw fell back to
+    // `source_of`'s bounds-checked empty string instead of its LaTeX. `\frac{1}` is
+    // missing its second argument, the same fixture `math::tests` uses for a parse
+    // failure, so `render_inline` is guaranteed to return `Err` here.
+    let mut app = open_footnote("a[^n]\n\n[^n]: bad math $\\frac{1}$ here\n", 80, 24);
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(
+        text.contains(r"$\frac{1}$"),
+        "a formula that will not draw shows its source, not a hole: {text:?}"
     );
 }

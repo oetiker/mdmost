@@ -107,6 +107,11 @@ pub struct RenderOptions {
     /// granted: a button nobody can click is worse than no button. `--render-once`
     /// leaves it off, because a dump is text in a pipe.
     pub copy_button: bool,
+    /// Whether inline `$…$` math is laid out rather than shown as its own source.
+    ///
+    /// On by default. Off is design spec §5.3's rendering, which is also where an
+    /// inline formula goes when it fails to lay out — one fallback, two reasons.
+    pub math_inline: bool,
 }
 
 impl RenderOptions {
@@ -118,6 +123,7 @@ impl RenderOptions {
             title_banner: false,
             section_numbers: true,
             copy_button: false,
+            math_inline: true,
         }
     }
 
@@ -144,6 +150,15 @@ impl RenderOptions {
     pub const fn with_copy_button(self, copy_button: bool) -> Self {
         Self {
             copy_button,
+            ..self
+        }
+    }
+
+    /// The same options with inline math laid out, or shown as its source, instead.
+    #[must_use]
+    pub const fn with_math_inline(self, math_inline: bool) -> Self {
+        Self {
+            math_inline,
             ..self
         }
     }
@@ -192,6 +207,17 @@ pub(crate) struct Ctx<'a> {
     /// own, a block handed to [`render_block`] — because "is this the only `#`" is a
     /// question only the whole document can answer (design spec §9.3).
     pub numbers: Option<&'a Numbering>,
+    /// The whole document source, for a node whose text is not carried in the AST — a
+    /// formula that will not draw falls back to its verbatim source, dollars included
+    /// (design spec §5.3), which is bytes `node.source` names in this, not in `literal`.
+    ///
+    /// Empty for a render not reached through the whole document — a table cell or a
+    /// block rendered on its own, a footnote popup — where `node.source` still names
+    /// real bytes but this has none of them: `inline::source_of` degrades to an empty
+    /// string rather than indexing out of bounds, so a formula there that cannot draw
+    /// shows a hole instead of its source. Nothing about math may panic; that is the
+    /// deliberate trade against widening every such entry point to carry a source too.
+    pub source: &'a str,
 }
 
 /// The deepest table nesting that is rendered; deeper tables degrade to their text.
@@ -212,6 +238,7 @@ impl<'a> Ctx<'a> {
             quote_depth: 0,
             table_depth: 0,
             numbers: None,
+            source: "",
         }
     }
 
@@ -221,6 +248,11 @@ impl<'a> Ctx<'a> {
             numbers: Some(numbers),
             ..self
         }
+    }
+
+    /// The same context, carrying the whole document source a formula falls back to.
+    pub(crate) fn with_source(self, source: &'a str) -> Self {
+        Self { source, ..self }
     }
 
     /// The context for content one list level deeper.
@@ -289,7 +321,9 @@ pub(crate) fn render_flat(doc: &Doc, width: u16, theme: &Theme, options: &Render
     // Computed once, here, from the whole document — never at parse time (design spec
     // §3), and never per block, which could not answer the question anyway.
     let numbers = Numbering::enabled(doc, options.section_numbers);
-    let ctx = Ctx::new(theme, options).numbered(&numbers);
+    let ctx = Ctx::new(theme, options)
+        .numbered(&numbers)
+        .with_source(doc.source());
     let margin = margins(width);
     let body_width = width - 2 * margin;
     let blocks = &doc.root().children;
@@ -337,7 +371,7 @@ pub(crate) fn title_banner(
     if !options.title_banner {
         return None;
     }
-    let ctx = Ctx::new(theme, options);
+    let ctx = Ctx::new(theme, options).with_source(doc.source());
     // The structural half of the question — "is this document titled?" — is
     // `Doc::lone_title`, shared with section numbering so the two can never disagree
     // about which heading is the title. What is left here is the banner's own half:

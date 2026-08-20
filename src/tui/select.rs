@@ -569,6 +569,18 @@ pub(crate) fn offset_at(canvas: &Canvas, source: &str, pos: Pos, bias: Bias) -> 
     for span in canvas.spans() {
         let end = span.col.saturating_add(span.cols);
         if span.row == pos.row && pos.col >= span.col && pos.col < end {
+            // A span with no interior position is taken whole or not at all. `body`
+            // here is `$E = mc^2$` while the cells say `E = mc²`, so counting columns
+            // into it lands at an arbitrary byte — the interior indexing design spec
+            // §10 rules out. The near end of a drag takes the formula's first byte and
+            // the far end its last, which is how a drag that starts or ends anywhere
+            // inside one yields all of it.
+            if !span.copied {
+                return Some(match bias {
+                    Bias::Start => span.source_start,
+                    Bias::End => span.source_end,
+                });
+            }
             let body = source
                 .get(span.source_start..span.source_end)
                 .unwrap_or_default();
@@ -771,7 +783,67 @@ fn rendered_text(canvas: &Canvas, selection: Selection) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::column_at_byte;
+    use super::{Bias, Pos, Selection, column_at_byte, offset_at, source_hull};
+    use crate::canvas::{Canvas, SearchSpan};
+    use crate::theme::Theme;
+
+    /// A one-row canvas carrying a single atomic span — the shape an inline formula
+    /// takes: its drawn cells (`E = mc²`, 6 columns at `col`) are not a copy of its
+    /// 11-byte source `$E = mc^2$` (design spec §10).
+    fn canvas_with_atom(col: u16) -> Canvas {
+        let mut canvas = Canvas::new(20, 1, Theme::default_dark().base());
+        canvas.add_span(SearchSpan {
+            source_start: 10,
+            source_end: 21,
+            unit: Some((10, 21)),
+            row: 0,
+            col,
+            cols: 6,
+            copied: false,
+        });
+        canvas
+    }
+
+    #[test]
+    fn offset_at_takes_an_atom_whole_regardless_of_which_column_was_hit() {
+        // Every column inside the span's six must answer the same two offsets: the
+        // near end always the formula's first byte, the far end always its last.
+        // Nothing about *where inside* the six columns the pointer landed may change
+        // the answer — that is what "no interior position" means.
+        let canvas = canvas_with_atom(4);
+        let source = "x".repeat(30);
+        for col in 4..10 {
+            let pos = Pos::new(0, col);
+            assert_eq!(
+                offset_at(&canvas, &source, pos, Bias::Start),
+                Some(10),
+                "column {col}: the near end takes the formula's first byte"
+            );
+            assert_eq!(
+                offset_at(&canvas, &source, pos, Bias::End),
+                Some(21),
+                "column {col}: the far end takes the formula's last byte"
+            );
+        }
+    }
+
+    #[test]
+    fn a_drag_that_starts_and_ends_inside_a_formula_selects_the_whole_formula() {
+        // The atom holds: press on column 5 (the formula's second cell), release on
+        // column 8 (its fifth) — a drag entirely inside the six columns the formula
+        // draws — and the hull is the formula's full source range, not the two or
+        // three bytes those columns would name if they were ordinary text.
+        let canvas = canvas_with_atom(4);
+        let source = "x".repeat(30);
+        let mut selection = Selection::started(Pos::new(0, 5));
+        selection.drag_to(Pos::new(0, 8));
+        let hull = source_hull(&canvas, &source, selection);
+        assert_eq!(
+            hull,
+            Some((10, 21)),
+            "a drag confined to the formula's own columns still yields all of it"
+        );
+    }
 
     #[test]
     fn column_at_byte_counts_display_width_not_bytes() {

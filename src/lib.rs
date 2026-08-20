@@ -23,6 +23,7 @@
 //! | [`render`] | Inline, block and table renderers |
 //! | [`export`] | A table `Node` as a clipboard payload: TSV, and an HTML upgrade |
 //! | [`highlight`] | Fenced code highlighting |
+//! | [`math`] | LaTeX math parsing and one-row layout |
 //! | [`mermaid`] | Mermaid parsing and Unicode-art layout |
 //! | [`numbering`] | Section numbers for a deeply nested document |
 //! | [`toc`] | Heading tree and current-position tracking |
@@ -51,6 +52,7 @@ pub mod doc;
 pub mod error;
 pub mod export;
 pub mod highlight;
+pub mod math;
 pub mod mermaid;
 pub mod nerdfont;
 pub mod numbering;

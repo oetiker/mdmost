@@ -1,0 +1,28 @@
+---
+source: tests/snapshot.rs
+expression: canvas.plain_text()
+---
+ Math                                   
+ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 
+                                        
+ Inline math sits on the line: E = mc², 
+ and α × β, and the subscripted aᵢⱼ     
+ beside the flat a_{bc} that Unicode    
+ cannot lower.                          
+                                        
+ Scripts that exist are raised: xⁿ⁺¹,   
+ and e⁻ˣ raises the minus sign too.     
+ Scripts that do not are written flat:  
+ x^q.                                   
+                                        
+ Structures are linearised inline: a/b, 
+ √x, and ∑ᵢ₌₁ⁿ i.                       
+                                        
+ Display math is not laid out yet:      
+                                        
+ ╭ math ──────────────────────────────╮ 
+ │ \frac{-b \pm \sqrt{b^2-4ac}}{2a}   │ 
+ ╰ display math is not laid out yet ──╯ 
+                                        
+ Currency is not math: it costs $5 and  
+ $10 in total.

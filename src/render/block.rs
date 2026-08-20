@@ -59,6 +59,11 @@ pub(crate) fn heading_rule(level: u8) -> Option<&'static str> {
 ///
 /// The result is exactly `width` columns wide, and empty for a node that renders to
 /// nothing.
+///
+/// This entry point has no whole-document source to give a formula that will not draw
+/// (unlike [`render_block_numbered`]), so such a formula falls back to its bare LaTeX
+/// with no surrounding `$…$` rather than to the verbatim bytes design spec §5.3
+/// describes. Use [`render_block_numbered`] when that matters.
 pub fn render_block(node: &Node, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
     render_block_ctx(node, width, Ctx::new(theme, options))
 }
@@ -69,19 +74,47 @@ pub fn render_block(node: &Node, width: u16, theme: &Theme, options: &RenderOpti
 /// number in front of it. This is what a caller assembling the top level block by block
 /// — the pager's [`crate::render::render_document`] — needs: the numbering is a
 /// property of the whole document, so it is computed there, once, and handed down.
+///
+/// `source` is the whole document text, carried the same way `numbers` is: computed
+/// once by the caller that has the whole document in view, and handed to every block so
+/// a formula that will not draw can fall back to its own bytes of it (design spec §5.3).
 pub fn render_block_numbered(
     node: &Node,
     width: u16,
     theme: &Theme,
     options: &RenderOptions,
     numbers: &Numbering,
+    source: &str,
 ) -> Canvas {
-    render_block_ctx(node, width, Ctx::new(theme, options).numbered(numbers))
+    render_block_ctx(
+        node,
+        width,
+        Ctx::new(theme, options)
+            .numbered(numbers)
+            .with_source(source),
+    )
 }
 
 /// Renders a sequence of blocks at `width` columns, separated by blank rows.
-pub fn render_blocks(nodes: &[Node], width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
-    render_sequence(nodes, width, Ctx::new(theme, options), true)
+///
+/// `source` is the whole document text, the same way [`render_block_numbered`] takes it:
+/// a footnote popup renders a node's children through this, and design spec §9's "the
+/// reader sees the verbatim source" promise does not stop at the popup's edge — a
+/// formula that will not draw there must show its source, dollars included, exactly as
+/// it does in the body, not a hole where the source used to be.
+pub fn render_blocks(
+    nodes: &[Node],
+    width: u16,
+    theme: &Theme,
+    options: &RenderOptions,
+    source: &str,
+) -> Canvas {
+    render_sequence(
+        nodes,
+        width,
+        Ctx::new(theme, options).with_source(source),
+        true,
+    )
 }
 
 /// Renders a sequence of sibling blocks.
@@ -156,6 +189,14 @@ fn render_block_set_off(node: &Node, width: u16, ctx: Ctx<'_>) -> (Canvas, bool)
 /// them. An image that is a paragraph of its own still gets that box; [`paragraph`]
 /// is the one place that decides so, because it is the only place that can see the
 /// image is alone.
+///
+/// `NodeKind::Math` joined this list for the same reason, found the same way: an
+/// inline formula written mid-sentence was falling through to the block path and
+/// cutting the sentence in two around it. Display math (`display: true`) is written
+/// as, and belongs on, its own line — the document layer hoists a lone one out of its
+/// paragraph so it reaches [`render_block_ctx`]'s own `NodeKind::Math` arm instead of
+/// this path; excluding `display: true` here is what keeps that hoisted node from
+/// being folded back into an inline run.
 pub(crate) fn is_inline(node: &Node) -> bool {
     matches!(
         node.kind,
@@ -164,6 +205,7 @@ pub(crate) fn is_inline(node: &Node) -> bool {
             | NodeKind::SoftBreak
             | NodeKind::LineBreak
             | NodeKind::Code { .. }
+            | NodeKind::Math { display: false, .. }
             | NodeKind::Emph
             | NodeKind::Strong
             | NodeKind::Strikethrough
@@ -212,6 +254,38 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         }
         NodeKind::Image { url, .. } => image(node, url, width, ctx),
         NodeKind::SkippedHtml { .. } => html_marker(width, ctx),
+        // Display math is not laid out in this stage. The framed source is not a
+        // placeholder: it is the permanent failure path (design spec §9), reached here
+        // for the temporary reason that nothing can lay it out yet — so the reader sees
+        // the same thing for "cannot be drawn yet" and "cannot be drawn", which is the
+        // truth in both cases.
+        //
+        // No line origins: spec §10 gives a formula one span over the whole construct,
+        // and stage 2 is what draws the cells that span can name. Recording per-line
+        // spans of the source dump would be a different, wrong answer.
+        //
+        // `trim_matches('\n')`: a `$$…$$` literal is everything between the two lines
+        // of dollars, so it opens with the newline right after the first `$$` and
+        // (usually) closes with the one right before the last — neither is content, and
+        // left in, the opening one draws as a blank first line with the number `1`
+        // against nothing. A fence's literal never carries the leading one (comrak
+        // starts a `CodeBlock` literal at the first content line), so this is a no-op
+        // there and the two forms read identically. Safe to trim here rather than in
+        // `code::fallback` itself: `origins` is `&[]` for this caller (see above), so
+        // there is no line-to-span mapping for a shifted row to desynchronise —
+        // `fallback`'s other caller, Mermaid, keeps its literal untouched and its
+        // `origins` valid.
+        NodeKind::Math {
+            literal,
+            display: true,
+        } => code::fallback(
+            literal.trim_matches('\n'),
+            Some("math"),
+            &"display math is not laid out yet",
+            &[],
+            width,
+            ctx,
+        ),
         // Anything else in a block position is inline content: a bare text run in a
         // table cell, for instance.
         _ => render_inline(std::slice::from_ref(node), width, ctx.base, ctx),
@@ -291,7 +365,16 @@ fn paragraph(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
     if let Some(image) = sole_image(node) {
         return render_block_ctx(image, width, ctx);
     }
-    render_sequence(&node.children, width, ctx, false)
+    // Not `render_sequence`: a paragraph's children are inline content by
+    // construction — comrak never puts a block inside one — so there is no run to
+    // find with `is_inline`. That matters now that `is_inline` says a display formula
+    // (`display: true`) is *not* inline: it is, everywhere except here. A paragraph
+    // with other content beside its `$$…$$` (`hoist_display_math` in `doc::convert`
+    // only lifts a paragraph whose *sole* child is display math) keeps that formula as
+    // prose, shown as its own source mid-sentence — going through `render_sequence`
+    // would instead have split it into a framed block followed by a second, orphaned
+    // inline run for the rest of the sentence.
+    render_inline(&node.children, width, ctx.base, ctx)
 }
 
 /// The image a paragraph consists of, if an image is all it consists of.

@@ -362,6 +362,7 @@ fn blit_translates_anchors_and_spans() {
         row: 1,
         col: 1,
         cols: 3,
+        copied: true,
     });
     let mut dst = Canvas::new(8, 1, base());
     dst.blit(3, 2, &src, base());

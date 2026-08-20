@@ -22,7 +22,7 @@ use std::path::Path;
 
 use mdmost::canvas::Canvas;
 use mdmost::config::DEFAULT_BODY_WIDTH;
-use mdmost::doc::{Doc, NodeKind};
+use mdmost::doc::{Doc, MathSyntax, NodeKind};
 use mdmost::render::{RenderOptions, render_document};
 use mdmost::theme::Theme;
 
@@ -51,7 +51,7 @@ const WIDTHS: [u16; 3] = [40, 80, 120];
 ///
 /// They are also meant to be paged through by a human — `mdmost tests/corpus/lists.md` —
 /// which is the other reason they are separate: one screenful per concern.
-const EXERCISER: [&str; 8] = [
+const EXERCISER: [&str; 9] = [
     "headings_text.md",
     "lists.md",
     "tables.md",
@@ -60,6 +60,7 @@ const EXERCISER: [&str; 8] = [
     "unicode.md",
     "title-only.md",
     "minimal.md",
+    "math.md",
 ];
 
 /// Every fixture under `tests/corpus`, exerciser and adversarial alike.
@@ -173,6 +174,39 @@ fn the_line_number_gutter_is_stable() {
         });
         insta::assert_snapshot!(format!("code.md@numbered@{width}"), canvas.plain_text());
     }
+}
+
+/// `math = false` renders a document with `$` in it exactly as it did before math
+/// existed (design spec §3 and §14).
+///
+/// Accepting this snapshot the first time is the moment the claim is checked: it must
+/// read as the fixture's own prose, every `$` still a `$`. After that the snapshot is
+/// what holds it — a change that made the parser recognise math the reader turned off
+/// shows up here as a diff, which is the only place it would show up at all.
+#[test]
+fn math_off_renders_the_dollars_as_text() {
+    let source = fixture("math.md");
+    let doc = Doc::parse_with(
+        &source,
+        MathSyntax {
+            dollars: false,
+            backslash: false,
+        },
+    );
+    assert!(
+        !has_math(doc.root()),
+        "with math off, nothing in the tree may be a formula"
+    );
+    let theme = Theme::default_dark();
+    for width in WIDTHS {
+        let canvas = render_at(&doc, width, &theme);
+        insta::assert_snapshot!(format!("math.md@off@{width}"), canvas.plain_text());
+    }
+}
+
+/// Whether any node in the subtree is a formula.
+fn has_math(node: &mdmost::doc::Node) -> bool {
+    matches!(node.kind, NodeKind::Math { .. }) || node.children.iter().any(has_math)
 }
 
 /// The light theme has to lay out identically to the dark one — only colours differ.

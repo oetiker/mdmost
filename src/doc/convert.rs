@@ -13,13 +13,20 @@ use super::{Heading, ListInfo, Node, NodeKind, SourceSpan, TableInfo};
 use crate::text::Align;
 
 /// The comrak options `mdmost` parses with.
-pub(super) fn options<'a>() -> Options<'a> {
+pub(super) fn options<'a>(math: crate::doc::MathSyntax) -> Options<'a> {
     let mut options = Options::default();
     options.extension.table = true;
     options.extension.strikethrough = true;
     options.extension.tasklist = true;
     options.extension.autolink = true;
     options.extension.footnotes = true;
+    // Both, or neither. `math_dollars` covers `$…$` and `$$…$$`; `math_code` covers the
+    // `` $`…`$ `` form. Turning one on without the other would accept a syntax GitHub
+    // writers do not distinguish between. A ```` ```math ```` fence is neither of them:
+    // comrak leaves it a `CodeBlock` for the whole parse and only its HTML renderer
+    // treats it as math, so `convert` recognises it below instead.
+    options.extension.math_dollars = math.dollars;
+    options.extension.math_code = math.dollars;
     options
 }
 
@@ -149,14 +156,58 @@ fn code_lines(offsets: &LineOffsets<'_>, span: SourceSpan, literal: &str) -> Vec
 pub(super) fn document<'a>(
     root: &'a AstNode<'a>,
     source: &str,
+    math: crate::doc::MathSyntax,
     slugger: &mut Slugger,
     headings: &mut Vec<Heading>,
 ) -> Node {
     let offsets = LineOffsets::new(source);
-    let mut doc = convert(root, &offsets, slugger, headings);
+    let mut doc = convert(root, &offsets, math, slugger, headings);
     number_footnotes(&mut doc);
+    hoist_display_math(&mut doc);
+    // The pass tolerates either order (`align` re-derives everything from the source
+    // regardless of how finely `split_transcriptions` has already cut the run) — moving
+    // this after it and rerunning every test here confirmed byte-identical trees. It
+    // stays first anyway: that was the original design intent, and there is no cost to
+    // keeping it.
+    if math.backslash {
+        super::backslash::split_backslash_math(&mut doc, source);
+        // `\[…\]` creates its own display-math node, which this first hoist ran
+        // before this pass existed and so never saw. Without a second pass, a
+        // paragraph containing only `\[a^2+b^2\]` never gets lifted into a block of
+        // its own, so it renders as bare escaped source while the equivalent
+        // `$$a^2+b^2$$` gets the framed block treatment -- two spellings of the same
+        // construct, rendered two different ways. Re-running the hoist is safe: a
+        // paragraph `$$…$$` already lifted has nothing left for it to do.
+        hoist_display_math(&mut doc);
+    }
     split_transcriptions(&mut doc, source);
     doc
+}
+
+/// Lifts a paragraph whose only child is display math into a block of its own.
+///
+/// comrak parses `$$…$$` with its *inline* code, so a display formula arrives as the
+/// single child of a Paragraph. It is a block — spec §6 lays it out in two dimensions and
+/// spec §7 centres it — so the block renderer has to be able to see it, and the document
+/// layer is where that belongs: stage 2 needs the same shape.
+///
+/// Only a paragraph with exactly one child moves. `text $$x$$ text` is prose with a
+/// formula in it and stays inline, where Task 10's arm shows it as its own source.
+fn hoist_display_math(node: &mut Node) {
+    for child in &mut node.children {
+        hoist_display_math(child);
+    }
+    for child in &mut node.children {
+        let hoist = matches!(child.kind, NodeKind::Paragraph)
+            && matches!(
+                child.children.as_slice(),
+                [only] if matches!(only.kind, NodeKind::Math { display: true, .. })
+            );
+        if hoist {
+            let inner = child.children.remove(0);
+            *child = inner;
+        }
+    }
 }
 
 /// The longest `&…;` treated as an entity: HTML5's longest name is 31 characters.
@@ -227,7 +278,7 @@ fn segments(node: &Node, source: &str) -> Option<Vec<(String, SourceSpan)>> {
 /// Returns `None` the moment the two stop re-synchronising: an entity that expands to
 /// more than one character (`&fjlig;` is `fj`), a tab comrak widened, anything unknown.
 /// The caller then keeps the node whole, which is exactly today's behaviour.
-fn align(src: &str, text: &str, start: usize) -> Option<Vec<(String, SourceSpan)>> {
+pub(super) fn align(src: &str, text: &str, start: usize) -> Option<Vec<(String, SourceSpan)>> {
     let mut out: Vec<(String, SourceSpan)> = Vec::new();
     let (mut s, mut t) = (0usize, 0usize);
     let (mut run_s, mut run_t) = (0usize, 0usize);
@@ -399,6 +450,7 @@ fn apply_footnote_numbers(node: &mut Node, numbers: &HashMap<String, u32>) {
 fn convert<'a>(
     node: &'a AstNode<'a>,
     offsets: &LineOffsets<'_>,
+    math: crate::doc::MathSyntax,
     slugger: &mut Slugger,
     headings: &mut Vec<Heading>,
 ) -> Node {
@@ -427,6 +479,27 @@ fn convert<'a>(
         NodeValue::TaskItem(task) => NodeKind::TaskItem {
             checked: task.symbol.is_some(),
         },
+        // A ```` ```math ```` fence. `math_code` does not cover it — in comrak 0.54 that
+        // extension is the `` $`…`$ `` form alone — and nothing in the parser sets
+        // `display_math` for a fence, so it arrives here as an ordinary code block and is
+        // recognised by its info string.
+        //
+        // The guard is not optional. Spec §3 requires that `math = false` parses a
+        // document exactly as it did before math existed, and without it a ```` ```math ````
+        // fence would stop being a code block whatever the reader configured.
+        NodeValue::CodeBlock(code)
+            if math.dollars
+                && code
+                    .info
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|word| word.eq_ignore_ascii_case("math")) =>
+        {
+            NodeKind::Math {
+                literal: code.literal.clone(),
+                display: true,
+            }
+        }
         NodeValue::CodeBlock(code) => {
             let info = code.info.clone();
             let language = info
@@ -493,9 +566,15 @@ fn convert<'a>(
             block: false,
             literal: html.clone(),
         },
-        NodeValue::Raw(text) | NodeValue::Math(comrak::nodes::NodeMath { literal: text, .. }) => {
-            NodeKind::Text(text.clone())
-        }
+        NodeValue::Math(comrak::nodes::NodeMath {
+            literal,
+            display_math,
+            ..
+        }) => NodeKind::Math {
+            literal: literal.clone(),
+            display: *display_math,
+        },
+        NodeValue::Raw(text) => NodeKind::Text(text.clone()),
         // Everything else is a container we do not style specially; treat it as a
         // paragraph-like wrapper so its children still render.
         _ => NodeKind::Paragraph,
@@ -507,7 +586,7 @@ fn convert<'a>(
     if !matches!(owned.kind, NodeKind::SkippedHtml { .. }) {
         owned.children = node
             .children()
-            .map(|child| convert(child, offsets, slugger, headings))
+            .map(|child| convert(child, offsets, math, slugger, headings))
             .collect();
     }
 

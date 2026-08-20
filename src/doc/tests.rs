@@ -608,3 +608,495 @@ fn a_crlf_code_blocks_literal_carries_no_carriage_return() {
         .collect();
     assert_eq!(located, vec!["let a = 1;", "", "let b = 2;"]);
 }
+
+#[test]
+fn dollar_math_becomes_a_math_node() {
+    let doc = Doc::parse("Einstein wrote $E = mc^2$ here.\n");
+    let para = &doc.root().children[0];
+    let math = para
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node");
+    let NodeKind::Math { literal, display } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "E = mc^2");
+    assert!(!display);
+    // The span covers the delimiters, which is what a copy of the formula needs.
+    assert_eq!(
+        &doc.source()[math.source.start..math.source.end],
+        "$E = mc^2$"
+    );
+}
+
+#[test]
+fn double_dollars_are_display_math() {
+    let doc = Doc::parse("$$x^2$$\n");
+    // A `$$…$$` that is the only content of its paragraph is hoisted (Task 11) into a
+    // block of its own, so the Math node sits at the top level directly rather than
+    // nested inside a Paragraph.
+    let math = &doc.root().children[0];
+    let NodeKind::Math { display, .. } = &math.kind else {
+        panic!("no math node, got {:?}", math.kind)
+    };
+    assert!(display);
+}
+
+#[test]
+fn a_math_fence_is_display_math() {
+    let doc = Doc::parse("```math\nx^2\n```\n");
+    assert!(
+        doc.root()
+            .children
+            .iter()
+            .any(|node| matches!(&node.kind, NodeKind::Math { display: true, .. })),
+        "a ```math fence must parse as display math"
+    );
+}
+
+#[test]
+fn currency_in_prose_is_not_math() {
+    // comrak applies Pandoc's heuristics: no space before a closing `$`. This test is
+    // here so that a later change to `options()` cannot silently start eating prose.
+    let doc = Doc::parse("It costs $5 and $10 in total.\n");
+    assert!(
+        !doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+        "currency must not parse as math"
+    );
+}
+
+#[test]
+fn math_off_leaves_dollars_as_text() {
+    let doc = Doc::parse_with(
+        "Einstein wrote $E = mc^2$ here.\n",
+        MathSyntax {
+            dollars: false,
+            backslash: false,
+        },
+    );
+    assert!(
+        !doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+        "with math off, nothing may parse as math"
+    );
+}
+
+#[test]
+fn math_off_leaves_a_math_fence_as_a_code_block() {
+    // The fence arm's `math.dollars` guard is what spec §3 relies on: without it, a
+    // reader who turned math off would still see a ```math fence stop being a code
+    // block. This is a gate, and a gate is tested by the case where it does not fire.
+    let doc = Doc::parse_with(
+        "```math\nx^2\n```\n",
+        MathSyntax {
+            dollars: false,
+            backslash: false,
+        },
+    );
+    let block = &doc.root().children[0];
+    assert!(
+        matches!(block.kind, NodeKind::CodeBlock { .. }),
+        "with math off, a ```math fence must stay a code block, not become NodeKind::Math"
+    );
+}
+
+#[test]
+fn backtick_dollar_math_becomes_a_math_node() {
+    let doc = Doc::parse("Einstein wrote $`E = mc^2`$ here.\n");
+    let math =
+        find(doc.root(), &|n| matches!(n.kind, NodeKind::Math { .. })).expect("no math node");
+    let NodeKind::Math { literal, display } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "E = mc^2");
+    assert!(!display);
+}
+
+#[test]
+fn a_fence_only_document_counts_as_markup_for_auto() {
+    // Before this task a ```math fence was `NodeKind::CodeBlock { fenced: true }`,
+    // which `has_markup` counts as markup. It must still count now that it is
+    // `NodeKind::Math`, or `parse_auto` would silently reflow a formula as plain text.
+    let doc = Doc::parse_auto("```math\nx^2\n```\n");
+    assert!(
+        find(doc.root(), &|n| matches!(
+            &n.kind,
+            NodeKind::Math { display: true, .. }
+        ))
+        .is_some(),
+        "a lone math fence must not fall back to the plain-text path"
+    );
+}
+
+#[test]
+fn an_inline_formula_alone_counts_as_markup_for_auto() {
+    let doc = Doc::parse_auto("$E = mc^2$\n");
+    assert!(
+        find(doc.root(), &|n| matches!(n.kind, NodeKind::Math { .. })).is_some(),
+        "a lone inline formula must not fall back to the plain-text path"
+    );
+}
+
+#[test]
+fn backslash_parens_are_ignored_by_default() {
+    let doc = Doc::parse(r"The area is \(\pi r^2\) here.");
+    assert!(
+        !doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+        "backslash delimiters are off unless asked for"
+    );
+}
+
+#[test]
+fn backslash_parens_become_inline_math_when_enabled() {
+    let source = r"The area is \(\pi r^2\) here.";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    let math = doc.root().children[0]
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node");
+    let NodeKind::Math { literal, display } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, r"\pi r^2");
+    assert!(!display);
+    // The span covers the delimiters, exactly as a dollar formula's does.
+    assert_eq!(
+        &doc.source()[math.source.start..math.source.end],
+        r"\(\pi r^2\)"
+    );
+}
+
+#[test]
+fn backslash_brackets_are_display_math() {
+    let doc = Doc::parse_with(
+        r"\[ E = mc^2 \]",
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    // A paragraph containing only display math is hoisted into a block of its own
+    // (`hoist_display_math`), the same as `$$…$$` -- so the Math node itself is the
+    // document's first child, not nested inside a Paragraph beneath it.
+    assert!(
+        matches!(
+            &doc.root().children[0].kind,
+            NodeKind::Math { display: true, .. }
+        ),
+        "\\[ ... \\] must be display math, hoisted to a block of its own"
+    );
+}
+
+#[test]
+fn every_span_still_indexes_the_unmodified_source() {
+    // §3.1's whole claim: spans are subdivided, never shifted. The text after the
+    // formula must still name its own bytes.
+    let source = r"The area is \(\pi r^2\) here.";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+        "the scan must actually have produced a formula, or this asserts nothing"
+    );
+    for child in &doc.root().children[0].children {
+        if let NodeKind::Text(text) = &child.kind {
+            assert_eq!(
+                &doc.source()[child.source.start..child.source.end],
+                text,
+                "a text node's span must still be a copy of its own bytes"
+            );
+        }
+    }
+}
+
+#[test]
+fn turning_backslash_math_on_shifts_nothing_and_changes_no_prose() {
+    // Spec §14 asks for the on/off comparison, and this is the whole of §3.1's claim:
+    // the rendering differs, and the spans are subdivided rather than moved. The `\*`
+    // is in the fixture because a math flag must not change how ordinary prose renders.
+    let source = "The area is \\(\\pi r^2\\) here, and a \\* star.\n";
+    let off = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: false,
+        },
+    );
+    let on = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+
+    let kids = |doc: &Doc| doc.root().children[0].children.len();
+    assert_ne!(kids(&off), kids(&on), "the two trees must actually differ");
+
+    let hull = |doc: &Doc| {
+        let kids = &doc.root().children[0].children;
+        (
+            kids.first().expect("a child").source.start,
+            kids.last().expect("a child").source.end,
+        )
+    };
+    assert_eq!(hull(&off), hull(&on), "subdivided, never shifted");
+
+    let text: String = on.root().children[0]
+        .children
+        .iter()
+        .filter_map(|node| match &node.kind {
+            NodeKind::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        text.contains("a * star"),
+        "the escape still draws a star: {text:?}"
+    );
+}
+
+#[test]
+fn backslash_brackets_are_found_when_comrak_splits_them_from_surrounding_prose() {
+    // Regression for the run-boundary fix: comrak's own parser splits `\[…\]` into
+    // separate `Text` AST nodes at parse time (`[` and `]` also open its link-bracket
+    // matching), leaving the escaping backslash in neither sibling's own `sourcepos`.
+    // A scan confined to one node's span can never see it; grouping the run of `Text`
+    // siblings and extending to the neighbouring boundary is what finds it.
+    let source = "The formula is \\[ E = mc^2 \\] here.\n";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    let math = doc.root().children[0]
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node: the run-boundary fix regressed");
+    let NodeKind::Math { literal, display } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "E = mc^2");
+    assert!(display);
+    assert_eq!(
+        &doc.source()[math.source.start..math.source.end],
+        "\\[ E = mc^2 \\]"
+    );
+    // And the prose before and after must still be byte-for-byte copies of their spans.
+    for child in &doc.root().children[0].children {
+        if let NodeKind::Text(text) = &child.kind {
+            assert_eq!(&doc.source()[child.source.start..child.source.end], text);
+        }
+    }
+}
+
+#[test]
+fn an_unterminated_backslash_paren_does_not_panic_and_produces_no_formula() {
+    let source = "Text with \\(no closer here.\n";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        !doc.root().children[0]
+            .children
+            .iter()
+            .any(|n| matches!(n.kind, NodeKind::Math { .. })),
+        "an unterminated opener must not produce a formula"
+    );
+}
+
+#[test]
+fn nested_backslash_parens_do_not_panic() {
+    // Not a nesting-aware parser: the first `\)` closes the formula, so the inner `\(`
+    // becomes literal content of the outer one's LaTeX rather than a formula of its own.
+    let source = "\\(\\(inner\\)\\) after\n";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    let math = doc.root().children[0]
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node");
+    let NodeKind::Math { literal, .. } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "\\(inner");
+}
+
+#[test]
+fn a_doubled_backslash_before_a_paren_is_a_known_false_positive() {
+    // No escape mechanism exists for `\(` (see the module doc): the raw scan cannot
+    // distinguish a genuine opener from the second backslash of `\\(`, which draws a
+    // literal `\` followed by `(` and still spells the two-byte pattern this scan looks
+    // for. Recorded so a future change to this behaviour is a deliberate one, not a
+    // silent regression.
+    let source = r"\\(not really math\) done";
+    let doc = Doc::parse_with(
+        source,
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        doc.root().children[0]
+            .children
+            .iter()
+            .any(|n| matches!(n.kind, NodeKind::Math { .. })),
+        "current, documented behaviour: the doubled backslash is still read as an opener"
+    );
+}
+
+#[test]
+fn arbitrary_source_around_backslash_math_never_panics() {
+    let cases = [
+        "日本語 \\(x^2\\) 文字",
+        "emoji \u{1F389} \\(a+b\\) \u{1F38A} more",
+        "\\(unterminated",
+        "\\[unterminated",
+        "\\(\\[mixed\\]\\)",
+        "\\)\\] stray closers only",
+        "",
+        "\\(\\)",
+        "\\[\\]",
+        "\\",
+        "\\(",
+    ];
+    for source in cases {
+        let doc = Doc::parse_with(
+            source,
+            MathSyntax {
+                dollars: true,
+                backslash: true,
+            },
+        );
+        // Must not panic; walking touches every span, so a bad offset would too.
+        doc.root().walk(&mut |node| {
+            if let NodeKind::Text(text) = &node.kind {
+                let _ = doc
+                    .source()
+                    .get(node.source.start..node.source.end)
+                    .map(|s| s == text);
+            }
+        });
+    }
+}
+
+#[test]
+fn backslash_math_is_found_in_a_heading() {
+    // The `##` ATX marker is part of the Heading's own `source` span but not part of
+    // its first inline child's — a run with no preceding sibling must not fall back to
+    // the parent's full span, or it reads the marker as unaligned prose and fails
+    // closed over the whole run.
+    let doc = Doc::parse_with(
+        "## Solving \\(x^2+1=0\\)\n",
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    let math = doc.root().children[0]
+        .children
+        .iter()
+        .find(|node| matches!(node.kind, NodeKind::Math { .. }))
+        .expect("no math node in a heading");
+    let NodeKind::Math { literal, .. } = &math.kind else {
+        unreachable!()
+    };
+    assert_eq!(literal, "x^2+1=0");
+}
+
+#[test]
+fn backslash_math_is_found_at_every_heading_level() {
+    for level in 1..=6 {
+        let hashes = "#".repeat(level);
+        let source = format!("{hashes} \\(x\\)\n");
+        let doc = Doc::parse_with(
+            &source,
+            MathSyntax {
+                dollars: true,
+                backslash: true,
+            },
+        );
+        assert!(
+            doc.root().children[0]
+                .children
+                .iter()
+                .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+            "level {level} heading: no math node found in {source:?}"
+        );
+    }
+}
+
+#[test]
+fn backslash_math_is_found_in_a_table_cell() {
+    // comrak's table-cell inline parsing drops the escaping backslash from a Text
+    // node's own sourcepos even for `\(`/`\)`, not only the `\[`/`\]` link-bracket
+    // case a plain paragraph shows — a second, independent instance of the same
+    // underlying mechanism (see the module doc).
+    let doc = Doc::parse_with(
+        "| a |\n|---|\n| \\(x\\) |\n",
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        find(doc.root(), &|n| matches!(n.kind, NodeKind::Math { .. })).is_some(),
+        "no math node in a table cell"
+    );
+}
+
+#[test]
+fn plain_paragraph_backslash_math_is_unaffected_by_the_boundary_fix() {
+    let doc = Doc::parse_with(
+        "Plain \\(x\\) here.\n",
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert!(
+        doc.root().children[0]
+            .children
+            .iter()
+            .any(|node| matches!(node.kind, NodeKind::Math { .. })),
+        "regression: plain paragraph math stopped working"
+    );
+}

@@ -523,6 +523,7 @@ pub(crate) fn render_title(node: &Node, id: &str, width: u16, ctx: Ctx<'_>) -> O
                 row,
                 col: letter.col,
                 cols: letter.cols,
+                copied: true,
             });
         }
     }
@@ -567,7 +568,7 @@ fn collect(node: &Node, text: &mut String, origins: &mut Vec<Option<usize>>) {
                 origins.push(faithful.then_some(node.source.start + offset));
             }
         }
-        NodeKind::Code { literal } => {
+        NodeKind::Code { literal } | NodeKind::Math { literal, .. } => {
             for ch in literal.chars() {
                 text.push(ch);
                 origins.push(None);

@@ -51,6 +51,19 @@ writes plain text rather than escape sequences.
 - **`--no-icons`** — Use plain Unicode instead of Nerd Font glyphs, at the same display
   width.
 
+- **`--math`** — Parse math even if the configuration file turns it off.
+
+- **`--no-math`** — Do not parse math at all: `$` stays ordinary text.
+
+- **`--math-inline`** — Lay out inline math even if the configuration file turns it off.
+
+- **`--no-math-inline`** — Show inline `$…$` math as its source rather than laying it out.
+
+- **`--math-backslash`** — Also read `\(…\)` and `\[…\]` as math.
+
+- **`--no-math-backslash`** — Do not read `\(…\)` and `\[…\]`, even if the configuration
+  file does.
+
 - **`--mouse`** — Capture the mouse: the wheel scrolls, the scrollbar drags, a click in
   the contents pane jumps, and a drag over the document copies the Markdown source
   behind it.
@@ -254,6 +267,9 @@ mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag
                          # source, and code frames and tables get a [copy] button
 scroll_step  = 3         # document lines per mouse-wheel notch
 body_width   = 72        # widest the prose body is laid out; 0 for no cap
+math         = true      # parse $...$, $$...$$, $`...`$ and ```math fences
+math_inline  = true      # lay out inline $...$; false shows its source instead
+math_backslash = false   # also read \(...\) and \[...\] as math
 
 [toc]
 open  = false            # start with the contents pane open
@@ -377,6 +393,42 @@ The cap is about text that can be reflowed, so it does not apply to everything:
 width the whole document is rendered at, including tables and code.
 `--body-width` caps the prose within that width.
 
+## Math
+
+`$…$`, `$$…$$`, `` $`…`$ `` and ```` ```math ```` fences are recognised as LaTeX
+math when `math = true`, the default. `\(…\)` and `\[…\]` are recognised as well
+when `math_backslash = true`; off by default, because no other Markdown renderer
+of note accepts them. `math = false` turns parsing off: `$` is ordinary text, as
+if math did not exist.
+
+A `\(…\)` or `\[…\]` pair is found only when the opening and closing delimiter
+sit on the same line. A pair split across a line break — `\[` on one line, the
+formula and `\]` further down — is left as ordinary text, its delimiters drawn
+as plain brackets or parentheses: comrak's own escape handling drops the
+backslash before either reaches this parser. This is the shape a pasted
+assistant answer commonly uses, so it is worth knowing about; `$…$` and
+`$$…$$` have no such restriction.
+
+Inline math (`$…$`) is laid out on the line: `$E = mc^2$` reads `E = mc²`. A
+script is written with a raised or lowered Unicode character only when every
+character in it has one; otherwise the whole script is written flat with `^` or
+`_`, braces kept where they disambiguate — `$x^{n+1}$` reads `xⁿ⁺¹`, `$x^q$`
+reads `x^q`, because there is no superscript `q`. `\frac{a}{b}` reads `a/b`,
+parenthesised unless both parts are a single character. `\sqrt{x}` reads `√x`,
+parenthesised the same way. A big operator (`\sum`, `\prod`, `\int` and similar)
+is a single character with its limits written as a subscript and superscript on
+it — `\sum_{i=1}^{n} i` reads `∑ᵢ₌₁ⁿ i`. `math_inline = false` shows the node's
+source instead, dollars included; the content was still parsed as math, so
+`$a *b* c$` shows a literal `*b*` rather than an italic `b`.
+
+A formula that fails to parse, or that needs more than one row to lay out — a
+matrix, for instance — falls back to the same verbatim-source rendering as
+`math_inline = false`.
+
+`$$…$$` and ```` ```math ```` blocks are display math. They are not laid out in
+this version: shown as a framed, syntax-highlighted code block with the reason
+in its bottom edge, the same as an unsupported Mermaid diagram.
+
 ## Mermaid
 
 Fenced `mermaid` blocks are parsed and drawn as Unicode box art. All seven
@@ -460,14 +512,30 @@ coverage will do.
 
 - **General Punctuation (U+2000-U+206F)** — The elision marker.
 
-- **Mathematical Operators (U+2200-U+22FF)** — Class-diagram relations.
+- **Mathematical Operators (U+2200-U+22FF)** — Class-diagram relations, and math's
+  radical sign (`\sqrt`).
 
 - **Misc Mathematical Symbols-A (U+27C0-U+27EF)** — Class-diagram generics.
 
 - **Dingbats (U+2700-U+27BF)** — The marker on a degraded diagram's caption.
 
-- **Latin-1 Supplement (U+0080-U+00FF)** — The scrollbar track, and whatever HTML
-  entities the document decodes to.
+- **Superscripts and Subscripts (U+2070-U+209F)** — Math's raised and lowered digits,
+  operators and parentheses.
+
+- **Phonetic Extensions (U+1D00-U+1D7F)** — Math's subscript `i`, the one Latin
+  subscript letter outside the block above.
+
+- **Latin Extended-C (U+2C60-U+2C7F)** — Math's subscript `j`, the other one.
+
+- **Spacing Modifier Letters (U+02B0-U+02FF)** — Math's raised `h j l r s w x y`, the
+  superscript letters Unicode placed here instead of in Superscripts and Subscripts,
+  above.
+
+- **Phonetic Extensions Supplement (U+1D80-U+1DBF)** — Math's raised `c f z`, the
+  superscript letters Unicode placed here instead.
+
+- **Latin-1 Supplement (U+0080-U+00FF)** — The scrollbar track, whatever HTML entities
+  the document decodes to, and math's raised `1`, `2` and `3`.
 
 - **Specials (U+FFF0-U+FFFF)** — The replacement character, drawn in place of one that
   cannot be represented.

@@ -17,12 +17,99 @@ const MANUAL: &str = include_str!("../../docs/manual.md");
 ///
 /// Both documents show a starting configuration, and a reader copies whichever one they
 /// are looking at, so both are checked.
+///
+/// The closing fence must open its own line, indented at most three spaces, with
+/// nothing but the backticks and trailing whitespace on it — the same rule
+/// `CommonMark` itself closes a fenced code block with — rather than merely contain
+/// three backticks anywhere in the text that follows. A naive "next fence marker
+/// anywhere" reading once truncated the manual's own example: a config comment named
+/// math's fenced `math` syntax mid-line, and that mid-line occurrence closed the block
+/// early, silently dropping every key after it (`toc_width` included) from what this
+/// test checked. The trailing-whitespace clause matters too: a line like `` ``` this
+/// is not really a close `` carries content after its backticks and must not close
+/// the block either, even though it starts with three of them.
 fn first_toml_example(document: &'static str, which: &str) -> &'static str {
-    document
+    let rest = document
         .split("```toml")
         .nth(1)
-        .and_then(|rest| rest.split("```").next())
-        .unwrap_or_else(|| panic!("{which} must contain a toml example"))
+        .unwrap_or_else(|| panic!("{which} must contain a toml example"));
+    let mut offset = 0usize;
+    for line in rest.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let trimmed = content.trim_start_matches(' ');
+        let indent = content.len() - trimmed.len();
+        let backticks = trimmed.chars().take_while(|&c| c == '`').count();
+        if indent <= 3 && backticks >= 3 && trimmed[backticks..].trim().is_empty() {
+            return &rest[..offset];
+        }
+        offset += line.len();
+    }
+    panic!("{which}'s toml example has no closing fence");
+}
+
+/// A fence marker appearing mid-line, inside a comment naming a fenced syntax, must
+/// not close the block early — this is what caught the manual's own `math` key
+/// comment.
+const MID_LINE_FENCE_DOCUMENT: &str = "\
+Some prose.
+
+```toml
+theme = \"dark\"   # a comment that mentions ```math fences mid-line
+icons = true
+```
+
+More prose.
+";
+
+/// A line that opens with three backticks but carries content after them is not a
+/// closing fence either — `CommonMark`'s closing-fence line may hold only the fence
+/// characters and trailing whitespace. This line is not valid TOML on its own, so
+/// unlike the fixtures above, the point here is the boundary `first_toml_example`
+/// draws, not that the extracted text parses cleanly: a real closing fence line
+/// contains only backticks, so this line, which does not, must be skipped over as
+/// content rather than mistaken for the close.
+const FALSE_CLOSE_DOCUMENT: &str = "\
+Some prose.
+
+```toml
+theme = \"dark\"
+``` this is not really a close
+icons = true
+```
+
+More prose.
+";
+
+#[test]
+fn a_closing_fence_line_with_trailing_content_does_not_close_the_example() {
+    let example = first_toml_example(FALSE_CLOSE_DOCUMENT, "the fixture");
+    assert!(
+        example.contains("this is not really a close"),
+        "the false close is content, and must stay inside the example: {example:?}"
+    );
+    assert!(
+        example.contains("icons"),
+        "the false close must be skipped, so `icons` must still be inside the \
+         example, found only after the real close: {example:?}"
+    );
+    assert!(
+        !example.contains("More prose"),
+        "the example must stop at the real closing fence: {example:?}"
+    );
+}
+
+#[test]
+fn a_mid_line_triple_backtick_does_not_close_the_toml_example_early() {
+    let example = first_toml_example(MID_LINE_FENCE_DOCUMENT, "the fixture");
+    assert!(
+        example.contains("icons"),
+        "the real closing fence is the standalone ``` two lines later, so `icons` \
+         must still be inside the example: {example:?}"
+    );
+    let loaded = Config::parse_str(example, path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.theme, "dark");
+    assert_eq!(loaded.config.icons, Some(true));
 }
 
 /// A throwaway path, used only in error messages.
@@ -417,4 +504,33 @@ fn a_config_theme_shadowing_a_builtin_does_not_stall_the_cycle() {
     assert_eq!(config.theme_names(), vec!["dark", "light"]);
     assert_eq!(config.next_theme_name("dark"), "light");
     assert_eq!(config.next_theme_name("light"), "dark");
+}
+
+#[test]
+fn math_keys_have_the_documented_defaults() {
+    let config = Config::default();
+    assert!(config.math, "math is on by default");
+    assert!(config.math_inline, "inline math is on by default");
+    assert!(
+        !config.math_backslash,
+        "backslash delimiters are off by default: no other renderer accepts them"
+    );
+}
+
+#[test]
+fn math_keys_are_read_from_the_file() {
+    let loaded = Config::parse_str(
+        "math = false\nmath_inline = false\nmath_backslash = true\n",
+        path(),
+    );
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert!(!loaded.config.math);
+    assert!(!loaded.config.math_inline);
+    assert!(loaded.config.math_backslash);
+}
+
+#[test]
+fn a_misspelt_math_key_is_reported_and_dropped() {
+    let loaded = Config::parse_str("mathinline = true\n", path());
+    assert_eq!(loaded.problems.len(), 1, "{:?}", loaded.problems);
 }

@@ -1,20 +1,21 @@
 // SPDX-License-Identifier: MIT
-//! Calls out to the two renderer collaborators owned by other workstreams.
+//! Calls out to the renderer collaborators owned by other workstreams.
 //!
-//! The block renderer depends on two functions it does not own:
+//! The renderer depends on functions it does not own:
 //!
 //! * `crate::highlight::highlight(lang, src, &Theme) -> Vec<Line>`
 //! * `crate::mermaid::render_mermaid_with(src, width, &Theme, Fit) -> Result<Canvas, MermaidError>`
+//! * `crate::math::render_inline(src) -> Result<String, MathError>`
 //!
-//! Routing both through this module keeps the dependency in one place, so a change on
-//! either side is a change to one function here rather than to every call site.
+//! Routing all three through this module keeps the dependency in one place, so a change
+//! on any side is a change to one function here rather than to every call site.
 //!
 //! A Mermaid failure is never fatal: [`render_code_block`](super::code::render_code_block)
 //! turns the error into a syntax-highlighted code block with a dim caption naming the
 //! reason (design spec §6).
 
 use crate::canvas::Canvas;
-use crate::error::MermaidError;
+use crate::error::{MathError, MermaidError};
 use crate::mermaid::Fit;
 use crate::text::Line;
 use crate::theme::Theme;
@@ -46,6 +47,18 @@ pub(crate) fn mermaid(
     #[cfg(test)]
     MERMAID_LAYOUTS.with(|count| count.set(count.get() + 1));
     crate::mermaid::render_mermaid_with(src, width, theme, fit)
+}
+
+/// Draws a formula as one row of text.
+///
+/// Named for what it returns, like [`mermaid`] beside it. Routing it through this
+/// module is what keeps `render`'s dependency on `math` in one place.
+///
+/// # Errors
+///
+/// Propagates the [`MathError`] so the caller can degrade to the source (design spec §9).
+pub(crate) fn math_inline(src: &str) -> Result<String, MathError> {
+    crate::math::render_inline(src)
 }
 
 // How many diagram layouts this thread has asked for. A counter rather than an

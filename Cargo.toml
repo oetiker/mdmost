@@ -56,6 +56,14 @@ directories = "6.0.0"
 # `arboard`, which picks between `eprintln!` and `log::warn!` at run time and so has to
 # be caught on both.
 log = "0.4.33"
+# The LaTeX front end: lexer, macro expander, symbol tables, environments and error
+# recovery, as a pull parser. Its only dependency is `bumpalo`, a pure-Rust bump
+# allocator with no build script; its one optional feature is `regex`, which stays
+# off — so this adds no C toolchain, which is the same constraint recorded against
+# `syntect` above. Writing the parser here instead would mean a TeX macro expander and
+# some two thousand symbol definitions, for no gain: what this crate cannot supply is
+# layout onto integer cells, and that is the part `src/math/` keeps.
+pulldown-latex = { version = "0.8.0", default-features = false }
 ratatui = "0.30.2"
 regex = "1.13.1"
 serde = { version = "1.0.229", features = ["derive"] }

@@ -32,6 +32,10 @@ pub enum Error {
     #[error(transparent)]
     Mermaid(#[from] MermaidError),
 
+    /// A formula could not be parsed or drawn.
+    #[error(transparent)]
+    Math(#[from] MathError),
+
     /// A canvas operation violated the canvas contract.
     #[error(transparent)]
     Canvas(#[from] CanvasError),
@@ -187,6 +191,39 @@ impl MermaidError {
     }
 }
 
+/// A formula could not be parsed, or could not be drawn in the space available.
+///
+/// Nothing here is fatal. `render::code` turns a display failure into the source shown
+/// as a framed code block with the reason in its bottom edge — the same treatment a
+/// broken diagram gets — and `render::inline` turns an inline failure into the verbatim
+/// source, dollars included, which is also what `math_inline = false` draws (design spec
+/// §9). One fallback, reached for two different reasons.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum MathError {
+    /// The LaTeX did not parse.
+    ///
+    /// There is no position here, and design spec §9 says there should be. `pulldown-latex`
+    /// 0.8.0's `ParserError` holds one private `Box<Inner>` and exposes no accessor at
+    /// all: the position exists only baked into the rendered `Display` string, together
+    /// with three lines of box-drawing context. A `column` field would therefore be a
+    /// field that is always zero, and a caption drawn from it would be a caret pointing
+    /// at nothing. Recorded here rather than re-derived by the next reader.
+    #[error("{message}")]
+    Parse {
+        /// What the parser objected to: the first line of `ParserError`'s own message.
+        message: String,
+    },
+
+    /// Well-formed, but it needs more than one row and the caller had one.
+    ///
+    /// This blames neither the author nor the parser: a matrix inline is a perfectly
+    /// good formula in the wrong place, and the reader is shown its source rather than
+    /// an error. The payload names the construct so the caption can be specific.
+    #[error("{0} cannot be drawn on one row")]
+    NotInline(&'static str),
+}
+
 /// Failures raised by canvas operations that would break the canvas contract.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -199,4 +236,23 @@ pub enum CanvasError {
         /// The requested (smaller) width.
         requested: u16,
     },
+}
+
+#[cfg(test)]
+mod math_error_tests {
+    use super::*;
+
+    #[test]
+    fn a_parse_failure_names_what_went_wrong() {
+        let err = MathError::Parse {
+            message: "unknown command \\foo".to_string(),
+        };
+        assert_eq!(err.to_string(), "unknown command \\foo");
+    }
+
+    #[test]
+    fn a_construct_that_needs_two_rows_says_so_without_blaming_the_author() {
+        let err = MathError::NotInline("a matrix");
+        assert_eq!(err.to_string(), "a matrix cannot be drawn on one row");
+    }
 }

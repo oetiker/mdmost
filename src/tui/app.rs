@@ -425,6 +425,7 @@ impl App {
             .with_title_banner(self.config.title_banner)
             .with_section_numbers(self.config.section_numbers)
             .with_copy_button(self.copy_button)
+            .with_math_inline(self.config.math_inline)
     }
 
     /// Turns the copy buttons on or off.
@@ -1610,7 +1611,13 @@ impl App {
                 _ => id.to_string(),
             };
             (
-                crate::render::render_blocks(&node.children, width, &self.theme, &options),
+                crate::render::render_blocks(
+                    &node.children,
+                    width,
+                    &self.theme,
+                    &options,
+                    self.doc.source(),
+                ),
                 label,
             )
         };

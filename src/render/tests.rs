@@ -956,6 +956,19 @@ fn an_image_alone_in_its_paragraph_still_gets_its_box() {
     assert!(out.iter().any(|row| row.contains("p.png")), "{out:?}");
 }
 
+/// Inline math must not tear the paragraph around it into three blocks, the same bug
+/// `an_inline_image_stays_in_its_paragraph` fixed for images (2026-08-09). Task 10
+/// draws the formula itself; until then it draws nothing, so this only pins the
+/// surrounding prose staying one block rather than the exact text between the words.
+#[test]
+fn inline_math_stays_in_its_paragraph() {
+    assert_eq!(
+        lines("Einstein wrote $E = mc^2$ here.\n", 40).len(),
+        1,
+        "an inline formula must not split its sentence into separate blocks"
+    );
+}
+
 #[test]
 fn an_inline_image_with_no_alt_text_names_itself() {
     assert_eq!(lines("see ![](p.png) here\n", 24), ["see ⟨image⟩ here"]);
@@ -1579,7 +1592,7 @@ fn render_block_and_render_blocks_agree_with_the_document_renderer() {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     let whole = render_flat(&doc, 30 + 2 * DOCUMENT_MARGIN, &theme, &PLAIN);
-    let parts = render_blocks(&doc.root().children, 30, &theme, &PLAIN);
+    let parts = render_blocks(&doc.root().children, 30, &theme, &PLAIN, doc.source());
     assert_eq!(
         body_rows(&whole),
         body_rows(&parts.indent(DOCUMENT_MARGIN, DOCUMENT_MARGIN, theme.base()))
@@ -3730,5 +3743,291 @@ fn a_link_in_a_nested_table_cell_records_a_hotspot() {
         drawn, "go",
         "the claim has to land on the cells the link was drawn into, {} blits later",
         2
+    );
+}
+
+// Note: the brief for this task named a helper `options()` for the tests below. No such
+// helper exists in this file — `PLAIN` is the one every other test here is written
+// against, so that is what these use too.
+
+#[test]
+fn inline_math_is_drawn_as_one_row() {
+    let doc = Doc::parse("Einstein wrote $E = mc^2$ in 1905.\n");
+    let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+    assert!(
+        canvas.row_text(0).contains("E = mc²"),
+        "got {:?}",
+        canvas.row_text(0)
+    );
+    assert!(canvas.check_invariants().is_ok());
+}
+
+#[test]
+fn inline_math_off_shows_the_source_with_its_dollars() {
+    let doc = Doc::parse("Einstein wrote $E = mc^2$ in 1905.\n");
+    let canvas = render_document(
+        &doc,
+        60,
+        None,
+        &Theme::default_dark(),
+        &PLAIN.with_math_inline(false),
+    );
+    assert!(
+        canvas.row_text(0).contains("$E = mc^2$"),
+        "got {:?}",
+        canvas.row_text(0)
+    );
+}
+
+#[test]
+fn inline_math_that_cannot_be_drawn_falls_back_to_its_source() {
+    let doc = Doc::parse(r"A matrix $\begin{pmatrix} 1 & 0 \end{pmatrix}$ inline.");
+    let canvas = render_document(&doc, 80, None, &Theme::default_dark(), &PLAIN);
+    assert!(
+        canvas.row_text(0).contains(r"$\begin{pmatrix}"),
+        "a formula that cannot be drawn shows its source; got {:?}",
+        canvas.row_text(0)
+    );
+}
+
+#[test]
+fn the_formula_carries_one_atomic_span_over_all_its_cells() {
+    let doc = Doc::parse("Einstein wrote $E = mc^2$ in 1905.\n");
+    let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+    let atoms: Vec<_> = canvas.spans().iter().filter(|span| !span.copied).collect();
+    assert_eq!(
+        atoms.len(),
+        1,
+        "spec §10: one span for the formula, got {atoms:?}"
+    );
+    assert_eq!(
+        &doc.source()[atoms[0].source_start..atoms[0].source_end],
+        "$E = mc^2$"
+    );
+    // As many columns as the formula drew. A one-column span would leave every cell but
+    // the first unreachable to both search and select. Measured through `crate::text`,
+    // which is the only place in this project that counts display columns.
+    assert_eq!(
+        usize::from(atoms[0].cols),
+        crate::text::display_width("E = mc²")
+    );
+}
+
+#[test]
+fn render_block_with_no_source_falls_back_to_the_bare_formula_instead_of_dropping_it() {
+    // `render_block` (unlike `render_block_numbered`) has no whole-document source to
+    // slice a formula's verbatim bytes from. Before this fix, `source_of` degraded to
+    // `""` and the formula's content simply disappeared -- a gap with no signal at all,
+    // not the "caller's own text" CHANGES.md used to claim. It now falls back to the
+    // bare LaTeX, with no surrounding `$…$` since there is nothing to take them from.
+    let doc = Doc::parse(r"A matrix $\begin{pmatrix} 1 & 0 \end{pmatrix}$ inline.");
+    let paragraph = &doc.root().children[0];
+    let canvas = render_block(paragraph, 80, &Theme::default_dark(), &PLAIN);
+    assert!(
+        canvas
+            .row_text(0)
+            .contains(r"\begin{pmatrix} 1 & 0 \end{pmatrix}"),
+        "expected the bare formula, got {:?}",
+        canvas.row_text(0)
+    );
+}
+
+#[test]
+fn display_math_shows_its_source_in_a_captioned_frame_for_now() {
+    let doc = Doc::parse("$$\n\\frac{a}{b}\n$$\n");
+    let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+    let text: String = (0..canvas.height())
+        .map(|row| canvas.row_text(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        text.contains(r"\frac{a}{b}"),
+        "display math must show its source until it is laid out; got {text:?}"
+    );
+    // The frame is the whole of this task. Asserting only that the literal appears
+    // somewhere would pass with the implementation deleted: Task 10's inline arm already
+    // draws the verbatim source of a `$$` block it will not lay out.
+    assert!(
+        text.contains('╭') && text.contains('╯'),
+        "the source is framed, not dumped; got {text:?}"
+    );
+    assert!(
+        text.contains("display math is not laid out yet"),
+        "the bottom edge names the reason; got {text:?}"
+    );
+    assert!(canvas.check_invariants().is_ok());
+}
+
+#[test]
+fn a_math_fence_shows_its_source_in_a_captioned_frame_for_now() {
+    let doc = Doc::parse("```math\n\\frac{a}{b}\n```\n");
+    let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+    let text: String = (0..canvas.height())
+        .map(|row| canvas.row_text(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains(r"\frac{a}{b}"), "got {text:?}");
+    assert!(text.contains('╭') && text.contains('╯'), "got {text:?}");
+    assert!(
+        text.contains("display math is not laid out yet"),
+        "got {text:?}"
+    );
+    assert!(canvas.check_invariants().is_ok());
+}
+
+/// The formula is line 1 of the frame, for both `$$…$$` and a fence — not a blank line
+/// followed by the formula.
+///
+/// `$$\n…\n$$` and ` ```math\n…\n``` ` differ in whether comrak's literal keeps the
+/// newline right after the opener: the dollar form does, the fence does not. Left
+/// untrimmed, the dollar form drew a blank first line inside the frame — worse with line
+/// numbers on, where it is a numbered blank row above the formula, for content that
+/// never had one. Found by rendering the actual output rather than only checking that
+/// the literal appears somewhere in the canvas (2026-08-19 review).
+#[test]
+fn the_formula_is_the_first_row_inside_the_frame_for_both_dollars_and_a_fence() {
+    for markdown in ["$$\n\\frac{a}{b}\n$$\n", "```math\n\\frac{a}{b}\n```\n"] {
+        let doc = Doc::parse(markdown);
+        let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+        let rows: Vec<String> = (0..canvas.height())
+            .map(|row| canvas.row_text(row))
+            .collect();
+        let top = rows
+            .iter()
+            .position(|row| row.contains('╭'))
+            .unwrap_or_else(|| panic!("no top frame edge in {rows:?}"));
+        assert!(
+            rows[top + 1].contains(r"\frac{a}{b}"),
+            "row right under the top edge must be the formula, not a blank line; \
+             markdown {markdown:?}, rows {rows:?}"
+        );
+    }
+}
+
+/// With line numbers on, the gutter's `┬`/`┴` junction must never land on top of a
+/// character of the caption — for a Mermaid failure and for a display-math fallback
+/// alike, since both go through `code::fallback`'s shared frame.
+///
+/// This was a real, shipped bug in v0.2.0 (pre-existing, not introduced by Task 11):
+/// `join_gutter` only checked the *top* edge for a collision between the junction column
+/// and the title before drawing `┬`; the bottom edge just wrote `┴` unconditionally,
+/// with no equivalent check against the caption. With line numbers on and a caption long
+/// enough to reach the gutter's column (which "display math is not laid out yet" and
+/// "not a diagram type — mdmost draws …" both are), a character of the caption's own
+/// text was silently overwritten — `display` came out `di┴play`, `not` came out `no┴`.
+/// `a_mermaid_fence_degrades_to_a_captioned_code_block` never caught this because its
+/// `lines()` helper renders without line numbers, the one configuration the bug cannot
+/// appear in.
+/// A caption long enough to need ellipsizing keeps its `…` and the space before the
+/// corner even after it is shifted right of the gutter's junction column.
+///
+/// Regression test for a defect introduced, found, and fixed within this same review
+/// round: fixing the junction corruption above (see that test) by re-drawing the
+/// caption after the junction column initially truncated it with `Line::truncated` —
+/// a hard clip, chosen because it is what the *title* edge already used and titles
+/// never need ellipsizing in practice. A caption does. The result was a caption cut
+/// straight into `╯` with no `…` and no trailing space — `sequence… ╯` became
+/// `sequen╯` — which reads as a rendering fault rather than a deliberate shortening.
+/// `join_edge` now re-ellipsizes the label's own text against the room actually left
+/// after the shift, the same "shorten and mark it" every other truncated label in the
+/// program uses.
+#[test]
+fn an_overlong_caption_still_ellipsizes_after_the_gutter_shifts_it() {
+    let numbered = RenderOptions::new(false, true);
+    for width in [60u16, 100] {
+        let out = lines_with("```mermaid\nnot a diagram at all\n```\n", width, &numbered);
+        let last = out
+            .last()
+            .unwrap_or_else(|| panic!("no rows at width {width}"));
+        assert!(
+            last.contains('…'),
+            "an over-long caption must still be marked as shortened at width {width}; got {last:?}"
+        );
+        assert!(
+            last.ends_with(&format!("{} ╯", crate::text::ELLIPSIS)),
+            "a space must separate the ellipsis from the corner, matching the \
+             un-shifted case, at width {width}; got {last:?}"
+        );
+    }
+}
+
+#[test]
+fn the_caption_is_not_corrupted_by_the_gutter_junction_with_line_numbers_on() {
+    let numbered = RenderOptions::new(false, true);
+
+    let math_doc = Doc::parse("$$\n\\frac{a}{b}\n$$\n");
+    let math_canvas = render_document(&math_doc, 60, None, &Theme::default_dark(), &numbered);
+    let math_text = (0..math_canvas.height())
+        .map(|row| math_canvas.row_text(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        math_text.contains("display math is not laid out yet"),
+        "the math fallback's caption must survive intact with line numbers on; got {math_text:?}"
+    );
+
+    let mermaid_out = lines_with("```mermaid\nnot a diagram at all\n```\n", 60, &numbered);
+    let mermaid_text = mermaid_out.join("\n");
+    assert!(
+        mermaid_text.contains("not a diagram type — mdmost draws "),
+        "the pre-existing mermaid caption must survive intact with line numbers on \
+         too — this bug shipped in v0.2.0, not introduced by this task; got {mermaid_text:?}"
+    );
+}
+
+/// A lone `$$…$$` inside a table cell also reaches the framed-fallback block arm, and
+/// the table's own width negotiation and row-height measurement handle it exactly as
+/// they handle any other block-shaped cell content — checked at a spread of widths
+/// rather than assumed, since this is a case Task 11's brief never mentions.
+///
+/// Unlike a `Paragraph`, GFM table cells hold inline content directly with no wrapper
+/// (comrak never puts a `Paragraph` inside a `TableCell`), so `hoist_display_math`'s
+/// "only child of a Paragraph" guard never applies here — a lone display formula was
+/// already a bare `Math{display:true}` child of the cell before this task, and after
+/// `is_inline`'s `display: false` narrowing it now reaches the block arm the same way a
+/// top-level one does. Nothing about that combination needed a fix: `render_table_node`
+/// measures a cell's content by rendering it, the same as it would a nested list or code
+/// fence, so the column widens and the row grows tall enough to hold the frame — no
+/// overflow, no clipped table rule, no panic at any width tried.
+#[test]
+fn a_table_cell_with_a_lone_display_formula_widens_its_cell_without_breaking_the_table() {
+    let markdown = "| a | b |\n|---|---|\n| $$\\frac{alpha}{beta}\\text{longer}$$ | text |\n";
+    for width in [8u16, 10, 20, 40, 80] {
+        let doc = Doc::parse(markdown);
+        let canvas = render_document(&doc, width, None, &Theme::default_dark(), &PLAIN);
+        canvas
+            .check_invariants()
+            .unwrap_or_else(|e| panic!("width {width}: {e}"));
+    }
+    let doc = Doc::parse(markdown);
+    let canvas = render_document(&doc, 40, None, &Theme::default_dark(), &PLAIN);
+    let text: String = (0..canvas.height())
+        .map(|row| canvas.row_text(row))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // The frame sits fully inside the table's own borders — a `┬`/`┴` from the table
+    // and a `╭`/`╯` from the formula's frame on the same rows, never past the table's
+    // right rule.
+    assert!(text.contains('╭') && text.contains("┬─"), "got {text:?}");
+    assert!(
+        text.contains(r"\frac{alpha}{beta}"),
+        "the cell still shows the source; got {text:?}"
+    );
+}
+
+#[test]
+fn a_paragraph_with_display_math_and_other_content_is_not_hoisted() {
+    // `$$x$$ and text` is prose with a formula in it, not a lone display block, so it
+    // must stay inline (Task 10's arm) rather than being pulled out as a block.
+    let doc = Doc::parse("$$x$$ and text\n");
+    let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
+    let text = canvas.row_text(0);
+    assert!(
+        text.contains("$$x$$") && text.contains("and text"),
+        "prose containing a formula stays one paragraph; got {text:?}"
+    );
+    assert!(
+        !text.contains('╭'),
+        "a paragraph with other content must not gain a frame; got {text:?}"
     );
 }
