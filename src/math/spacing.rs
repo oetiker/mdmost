@@ -115,15 +115,25 @@ const ZERO_ROW: [u16; N] = [0; N];
 const TOUCHES_ROW: [u16; N] = [0, 0, 1, 1, 0, 1, 1, 0, 0, 0];
 
 /// [`Class::Unary`]: binds tight to what follows, per the plan's decision that a sign
-/// with no left operand hugs its operand — `-x` -> `−x`, `-\sin x` -> `−sin x`
-/// (`src/math/tests.rs`'s `a_function_name_parts_from_its_argument` pins the second).
+/// with no left operand hugs its operand — `-x` -> `−x`, `-\sin x` -> `−sin x`. Not yet
+/// pinned by a passing test: `src/math/tests.rs`'s
+/// `a_leading_unary_minus_before_a_function_name_keeps_a_space` still asserts the
+/// stage-1 defect (`"− sin x"`, loose) on purpose, until Task 5 renames it to
+/// `a_leading_unary_minus_binds_tight_to_a_function_name` and flips the expectation.
+///
 /// Two cells break that pattern: `Binary` and `Relation`, because the owner's ruling —
 /// "one space either side of a relation always" — is not something a wildcard is
-/// entitled to override. Both are reachable only on degenerate input (`-=`, `-+`), in
-/// the same class as Ruling D's cells: correct if reached, not because a real formula
-/// hits them. This is *not* [`TOUCHES_ROW`] with two cells patched on top; it is its own
-/// row, because the two exceptions are a deliberate departure from the "binds tight"
-/// pattern, not a coincidence of it.
+/// entitled to override *here*. That is not a global precedence, though: `(Open,
+/// Relation)` is 0 ([`ZERO_ROW`]) and `(Relation, Close)` is 0 (the `Close` column of
+/// [`ALWAYS_SPACED_ROW`]), so the relation ruling loses to the delimiter-hugging rule at
+/// a delimiter boundary. The actual precedence: the delimiter-hugs rule wins at a
+/// delimiter boundary; the relation rule wins everywhere else, including here, where
+/// neither side is a delimiter. All four of these cells are reachable only on
+/// degenerate input (`-=`, `-+`, `(=`, `=)`), in the same class as Ruling D's cells:
+/// correct if reached, not because a real formula hits them. This row is *not*
+/// [`TOUCHES_ROW`] with two cells patched on top; it is its own row, because the two
+/// exceptions are a deliberate departure from the "binds tight" pattern, not a
+/// coincidence of it.
 const UNARY_ROW: [u16; N] = [0, 0, 0, 1, 0, 1, 0, 0, 0, 0];
 
 /// Parts from its operand, but hugs a delimited group that is already visibly its own
@@ -264,11 +274,14 @@ mod tests {
         // This is the -x defect of stage 1, now a table entry rather than a
         // head-of-run rule. The plan's decision: a sign with no left operand binds
         // tight to what follows -- including a function name or a large operator,
-        // unlike an `Ordinary` atom in the same position. `src/math/tests.rs`'s
-        // `a_function_name_parts_from_its_argument` pins `-\sin x` -> `"−sin x"`.
+        // unlike an `Ordinary` atom in the same position. Not yet pinned by a passing
+        // test: `src/math/tests.rs`'s
+        // `a_leading_unary_minus_before_a_function_name_keeps_a_space` still asserts
+        // the loose stage-1 output on purpose, until Task 5 renames it and flips the
+        // expectation to `"−sin x"`.
         assert_eq!(gap(Unary, Ordinary), 0, "-x, not - x");
         assert_eq!(gap(Unary, Function), 0, "-sin x, not - sin x");
-        assert_eq!(gap(Unary, Large), 0);
+        assert_eq!(gap(Unary, Large), 0, "-sum i, not - sum i");
     }
 
     #[test]
@@ -282,7 +295,11 @@ mod tests {
             1,
             "the owner's ruling has no exception here"
         );
-        assert_eq!(gap(Unary, super::Class::Binary), 1);
+        assert_eq!(
+            gap(Unary, super::Class::Binary),
+            1,
+            "same ruling, same reason"
+        );
     }
 
     #[test]
