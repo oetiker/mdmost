@@ -358,6 +358,31 @@ mod tests {
     }
 
     #[test]
+    fn a_one_sided_fence_pays_only_for_the_side_it_has() {
+        // `\left(` with no closer: one column for the opener and nothing for the side
+        // that is absent. A width computed as a constant rather than per present side
+        // charges for both here.
+        assert_eq!(
+            fenced(Some('('), None, text("x")).width,
+            2,
+            "one column for the opener, none for the absent closer"
+        );
+
+        // The mirror, and tall, so the present side costs its column and its space:
+        // body 1 + 1 side x 2 columns.
+        assert_eq!(
+            fenced(None, Some(')'), fraction(text("a"), text("b"))).width,
+            3,
+            "a tall one-sided fence pays a column and a space, once"
+        );
+
+        // `\left. ... \right.` -- both sides dropped, so the fence costs nothing.
+        let bare = fenced(None, None, text("x"));
+        assert_eq!(bare.width, 1, "no delimiters, no columns");
+        assert!(bare.is_inline(), "and it stays on the prose row");
+    }
+
+    #[test]
     fn a_tall_fence_is_padded_so_the_box_art_does_not_touch_the_content() {
         let b = fenced(Some('('), Some(')'), fraction(text("a"), text("b")));
         assert_eq!(b.width, 5, "1 + space + 1 + space + 1");
