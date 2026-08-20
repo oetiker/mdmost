@@ -10,6 +10,7 @@
 
 mod boxes;
 mod build;
+mod draw;
 mod inline;
 pub(crate) mod scripts;
 mod spacing;
