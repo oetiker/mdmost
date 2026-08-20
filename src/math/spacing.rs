@@ -369,22 +369,42 @@ mod tests {
     }
 
     #[test]
-    fn unary_and_ordinary_are_still_indistinguishable_as_a_right_operand() {
-        // A canary, not a rule. Nothing here requires these two columns to agree, and if
-        // a future ruling separates them that is allowed -- but `build.rs`'s `assemble`
-        // relies on them agreeing today. Its second bin-to-ord condition demotes an
-        // operator with no right operand to `Ordinary` rather than `Unary`, and the
-        // comment defending that choice says the two are unobservable apart. It says so
-        // in `build.rs`, which nobody editing `UNARY_ROW` will read.
+    fn unary_and_ordinary_are_still_indistinguishable_where_condition_two_puts_them() {
+        // A canary, not a rule. Nothing here requires these two to agree, and if a future
+        // ruling separates them that is allowed -- but `build.rs`'s `assemble` relies on
+        // them agreeing today. Its second bin-to-ord condition demotes an operator with no
+        // right operand to `Ordinary` rather than `Unary`, and the comment defending that
+        // choice says the two are unobservable apart. It says so in `build.rs`, which
+        // nobody editing `UNARY_ROW` will read.
         //
-        // So: **if this fails, that choice just became observable.** Go and read
-        // `assemble`'s doc comment and decide which class condition 2 should produce,
+        // So: **if either half below fails, that choice just became observable.** Go and
+        // read `assemble`'s doc comment and decide which class condition 2 should produce,
         // rather than changing this test to match the grid.
+        //
+        // The doc makes *two* claims and unobservability needs both of them.
+
+        // One: as a right operand the two are identical everywhere, so whatever precedes
+        // the demoted piece cannot tell which class it got.
         for left in Class::ALL {
             assert_eq!(
                 gap(left, Ordinary),
                 gap(left, Unary),
                 "{left:?} now distinguishes Ordinary from Unary on its right"
+            );
+        }
+
+        // Two: as a *left* operand they are identical only where condition 2 can actually
+        // put them. The two rows genuinely differ at `Function` and `Large` -- an operator
+        // name and a large operator part from an `Ordinary` and hug a `Unary` -- and that
+        // is fine precisely because condition 2 fires only when the right neighbour is one
+        // of these four. Iterating `Class::ALL` here would assert something false; this
+        // list is the rule's own reach, and it has to be kept in step with the
+        // right-context set in `assemble`.
+        for right in [Class::Edge, Relation, Close, Punct] {
+            assert_eq!(
+                gap(Ordinary, right),
+                gap(Unary, right),
+                "{right:?} now distinguishes Ordinary from Unary on its left"
             );
         }
     }
