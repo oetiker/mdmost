@@ -19,13 +19,6 @@
 //! always; one either side of a binary operator except inside a script operand.** The
 //! exception is deliberately *not* in this table — see [`gap`].
 
-// Nothing outside this module's own tests calls these yet: `build.rs` is the first caller
-// and arrives in task 3, so the lib target sees the whole surface as dead while the test
-// target sees all of it live. `expect` cannot express that -- it fires
-// `unfulfilled_lint_expectations` on the test target -- so this is `allow`, and it comes
-// out once the builder lands.
-#![allow(dead_code)]
-
 /// Rows and columns in [`TABLE`].
 const N: usize = 10;
 
@@ -66,6 +59,14 @@ impl Class {
     /// whole-grid snapshot. Kept in step with [`Class::index`] by hand; adding an
     /// eleventh class without extending both leaves [`Class::index`] non-exhaustive,
     /// which fails to compile rather than leaving the new class silently uncovered here.
+    ///
+    /// The one item in this module with no caller outside its own tests, which is why the
+    /// suppression sits here rather than over the module: measured with `build.rs` in the
+    /// tree, [`gap`], [`Class`] and all ten variants are live, and only this is not. A
+    /// module-wide `allow` would now be broad enough to hide the *next* dead item. It is
+    /// `cfg_attr` rather than `expect` because `expect` fires
+    /// `unfulfilled_lint_expectations` on the test target, where this is used.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) const ALL: [Self; N] = [
         Self::Edge,
         Self::Ordinary,

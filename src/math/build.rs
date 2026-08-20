@@ -164,6 +164,20 @@ fn build_run(
 ///
 /// The unary pass runs first and separately: a binary operator with nothing to bind to on
 /// its left is a sign, and that is a fact about the sequence, not about any one pair.
+///
+/// The condition below **is TeX's bin-to-ord rule, complete** — not a list of classes
+/// collected as cases turned up. TeX reclassifies a `Bin` atom as `Ord` when it is first in
+/// the list, or follows `Bin`, `Op`, `Rel`, `Open` or `Punct` (`TeXbook` §18, the same
+/// chapter `spacing.rs` takes its table from). Those six map onto this crate's classes as
+/// [`Class::Edge`] for "first in the list", [`Class::Binary`], [`Class::Relation`],
+/// [`Class::Open`], [`Class::Punct`], and TeX's single `Op` as **both**
+/// [`Class::Function`] and [`Class::Large`] — an operator name and a large operator are one
+/// atom class in TeX and two here.
+///
+/// Saying which list this is matters more than the cells: five classes with no source read
+/// as arbitrary and invite a sixth to be added ad hoc, which is how stage 1's spacing grew
+/// its seams. This list is closed. A case that seems to want another entry is a case where
+/// the *class* is wrong, not this rule.
 fn assemble(mut pieces: Vec<(Class, MathBox)>, spacing: Spacing) -> MathBox {
     for i in 0..pieces.len() {
         if pieces[i].0 != Class::Binary {
@@ -172,7 +186,13 @@ fn assemble(mut pieces: Vec<(Class, MathBox)>, spacing: Spacing) -> MathBox {
         let left = if i == 0 { Class::Edge } else { pieces[i - 1].0 };
         if matches!(
             left,
-            Class::Edge | Class::Open | Class::Relation | Class::Binary | Class::Punct
+            Class::Edge
+                | Class::Open
+                | Class::Relation
+                | Class::Binary
+                | Class::Punct
+                | Class::Function
+                | Class::Large
         ) {
             pieces[i].0 = Class::Unary;
         }
@@ -384,6 +404,21 @@ mod tests {
         // `f(x, − y)` and `a + − b`.
         assert_eq!(inline("f(x,-y)"), "f(x, −y)", "and after a comma");
         assert_eq!(inline("a+-b"), "a + −b", "and after another operator");
+    }
+
+    #[test]
+    fn a_sign_after_an_operator_name_binds_to_its_own_operand() {
+        // TeX's `Op` is one atom class covering both an operator name and a large
+        // operator; this crate splits it into `Function` and `Large`, so the bin-to-ord
+        // rule needs both. Without them the `-` stays `Binary` and takes a space on its
+        // right that it has no operand for: `sin − x` and `∑ − x`, which read as `\sin`
+        // minus `x` rather than as the sine of `−x`.
+        assert_eq!(inline(r"\sin -x"), "sin −x");
+        assert_eq!(inline(r"\sum -x"), "∑ −x", "the same for a large operator");
+
+        // The space before the sign is the operator's own, and stays: an operator name
+        // parts from its operand whatever that operand starts with.
+        assert_eq!(inline(r"2\sin -x"), "2 sin −x");
     }
 
     #[test]
