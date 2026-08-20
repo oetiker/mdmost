@@ -8,6 +8,7 @@
 //! Stage 1 draws inline math only. Display math is laid out in two dimensions by a
 //! later stage; until then `render::document` shows it as its own source.
 
+mod boxes;
 mod inline;
 pub(crate) mod scripts;
 
