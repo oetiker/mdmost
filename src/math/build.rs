@@ -8,9 +8,16 @@
 //! form exists, fails with [`MathError::NotInline`] so the caller can show the source.
 //!
 //! Spacing is not decided here. Every adjacent pair goes through `spacing::gap`, and the
-//! one exception the owner ruled — no spaces inside a script operand — is applied by
-//! multiplying that answer by zero, because *where an operand sits* is knowledge this file
-//! has and the table does not.
+//! one exception the owner ruled — no spaces inside a script operand — is applied *here*
+//! rather than in the table, because *where an operand sits* is knowledge this file has
+//! and the table does not.
+//!
+//! That exception needs two arms, because a space reaches the row by two routes and both
+//! have to answer to it. [`Spacing::between`] multiplies a looked-up gap by zero;
+//! [`Spacing::writes_source_spaces`] drops a space the *source* asked for — `\,`, `\quad`,
+//! `\kern` — which never passed through the table at all and so has no gap to multiply.
+//! Only the first is a multiply, and calling the whole policy "multiplying by zero" named
+//! one arm while leaving the other sounding covered, which is how it came to have a hole.
 
 // Nothing outside this module's own tests calls these yet: `render_inline` is rewired onto
 // this builder in a later task, so the lib target sees the whole surface as dead while the
@@ -140,6 +147,15 @@ impl Spacing {
 /// same recursion and will spend some of it.
 const MAX_NESTING: usize = 64;
 
+// The tests pin the *behaviour* — one past the cap refuses, well inside it builds — but
+// they hold for any cap between 33 and 4999, so a cap raised to 4096 passes both while
+// sitting inside the unmeasured band between "500 builds" and "5000 aborts". This pins the
+// safety property the number exists for, at compile time, where the number is.
+const _: () = assert!(
+    MAX_NESTING <= 256,
+    "MAX_NESTING must stay far below the measured overflow: 500 levels build, 5000 abort"
+);
+
 /// One horizontal run of events, from `events[0]` until the run's end.
 ///
 /// Returns the box and how many events it consumed, so a caller inside a group knows
@@ -197,6 +213,8 @@ fn build_run(
             // them, so testing only that drew `a\!b` as `a b` — wider than `ab`, where
             // the author asked for tighter — and gave `\int\!\!\!\int` three visible gaps.
             // A terminal cannot set a negative width, so the honest answer is no column.
+            // The comparison is `> 0.0` and not `>= 0.0`: `\kern` takes an arbitrary
+            // dimension, and a zero-width one asked for nothing, so it gets nothing.
             Event::Space { width, .. } => {
                 let widens = matches!(width, Some(dimension) if dimension.value > 0.0);
                 if widens && spacing.writes_source_spaces() {
@@ -230,6 +248,17 @@ fn build_run(
 /// two here. Condition 2 is written as a right-neighbour test rather than TeX's
 /// look-back-from-the-next-atom so that `Edge` covers the end of the list, which is the
 /// exact mirror of "first in the list" in condition 1: `a+` sets `a+`, not `a +`.
+///
+/// **That trailing-`Bin` half of condition 2 is held at high confidence, not certainty.**
+/// Its supports are the mirror argument above and a recollection of TeX's own end-of-list
+/// handling that could not be opened from here — the same unverifiable source as the
+/// missing chapter, and it is recorded rather than smoothed away for the same reason. What
+/// raised it above a guess is a structural check: `Class::Edge` here bounds a **run**, not
+/// the formula, so condition 2 already fires at every brace boundary — `{a+}b` sets `a+b`,
+/// because `{a+}` is its own list and its trailing `Bin` is demoted inside it. An
+/// over-eager extension would have shown first at that boundary and it does not. If the
+/// reference is ever checked and says otherwise, `Class::Edge` is one entry to remove from
+/// the right-context set and one assertion to drop.
 ///
 /// The demotion in condition 2 is to [`Class::Ordinary`], which is what TeX says. It is
 /// *not* [`Class::Unary`], even though the two are indistinguishable here — column `Unary`
@@ -419,7 +448,7 @@ const fn visual_name(visual: &Visual) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{Mode, Spacing, build, build_run, parse};
+    use super::{MAX_NESTING, Mode, Spacing, build, build_run, parse};
     use crate::math::boxes::BoxContent;
     use pulldown_latex::Storage;
 
@@ -518,6 +547,13 @@ mod tests {
         // `Edge` bounds the run on both sides, so a trailing operator is demoted exactly
         // as a leading one is.
         assert_eq!(inline("a+"), "a+", "not a +");
+
+        // `Class::Edge` bounds a *run*, not the formula, so condition 2 fires at a brace
+        // boundary as well: `{a+}` is its own list and its trailing operator is demoted
+        // inside it. This is where an over-eager extension of the rule would show first,
+        // which is what makes it worth asserting rather than merely true.
+        assert_eq!(inline("{a+}b"), "a+b", "a run ends at a brace, too");
+        assert_eq!(inline("{a+}{+b}"), "a++b", "both boundaries, both halves");
     }
 
     #[test]
@@ -536,15 +572,29 @@ mod tests {
             "a b",
             "a positive one still writes its column"
         );
+        // A zero-width `\kern` asked for nothing and gets nothing. This is the boundary
+        // the `> 0.0` comparison sits on: with `>= 0.0` every assertion in this module
+        // still passes and only this line fails.
+        assert_eq!(inline(r"a\kern0pt b"), "ab", "zero is not a column");
+        assert_eq!(
+            inline(r"a\kern1pt b"),
+            "a b",
+            "and a positive kern still is"
+        );
+
         // The idiom that exists to *close* a gap must not open three. What is left is one
         // space, and it is the table's `(Large, Large)` cell rather than anything the
-        // `\!`s did -- which is exactly what the comparison below says, and the reason to
-        // write it as a comparison instead of a literal.
+        // `\!`s did -- which is what the comparison says, and the reason to write it as a
+        // comparison instead of a literal.
         assert_eq!(
             inline(r"\int\!\!\!\int"),
             inline(r"\int\int"),
             "three negative spaces changed nothing, which is all a cell grid can honour"
         );
+        // The literal is the canary, not the invariant. It records what that one space is
+        // *today*; a ruling on `spacing`'s `(Large, Large)` cell would change it, and the
+        // next reader should update this line rather than investigate it. The comparison
+        // above is what must never change, and the two fail for opposite reasons.
         assert_eq!(inline(r"\int\!\!\!\int"), "∫ ∫");
     }
 
@@ -555,15 +605,36 @@ mod tests {
         // and `catch_unwind` are both powerless against. The parser itself is iterative
         // and hands back all 10001 events happily, so the recursion here is the only
         // thing standing between a formula and the process.
-        let deep = "{".repeat(5000) + "x" + &"}".repeat(5000);
+        let nest = |depth: usize| "{".repeat(depth) + "x" + &"}".repeat(depth);
+
+        // One past the cap, asserted FIRST and deliberately so. Without the guard, 65
+        // levels recurse perfectly well, `build` returns `Ok`, and this line fails as a
+        // named test in microseconds. The deep case below would instead take the whole
+        // binary down with `SIGABRT`, which no test can report and `catch_unwind` cannot
+        // reach -- so the order here is what turns "the suite went red somehow" into a
+        // diagnosis. It also catches `group` passing `depth` instead of `depth + 1`.
+        //
+        // Written against `MAX_NESTING` rather than a literal so it follows the cap.
         assert_eq!(
-            refusal(&deep),
+            refusal(&nest(MAX_NESTING + 1)),
             "a formula nested too deeply cannot be drawn on one row"
         );
 
-        // And the cap is not so tight that ordinary nesting trips it.
-        let modest = "{".repeat(32) + "x" + &"}".repeat(32);
-        assert_eq!(inline(&modest), "x");
+        // Far past it: this is the one that documents the real hazard, and it is only
+        // reached when the guard is present, because the assertion above panics first.
+        assert_eq!(
+            refusal(&nest(5000)),
+            "a formula nested too deeply cannot be drawn on one row"
+        );
+
+        // And the cap is not so tight that ordinary nesting trips it -- including at the
+        // cap exactly, which is the other side of the boundary above.
+        assert_eq!(inline(&nest(32)), "x");
+        assert_eq!(
+            inline(&nest(MAX_NESTING)),
+            "x",
+            "the cap itself still builds"
+        );
     }
 
     #[test]
