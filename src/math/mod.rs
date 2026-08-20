@@ -9,6 +9,7 @@
 //! later stage; until then `render::document` shows it as its own source.
 
 mod boxes;
+mod build;
 mod inline;
 pub(crate) mod scripts;
 mod spacing;
