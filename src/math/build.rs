@@ -165,19 +165,24 @@ fn build_run(
 /// The unary pass runs first and separately: a binary operator with nothing to bind to on
 /// its left is a sign, and that is a fact about the sequence, not about any one pair.
 ///
-/// The condition below **is TeX's bin-to-ord rule, complete** — not a list of classes
-/// collected as cases turned up. TeX reclassifies a `Bin` atom as `Ord` when it is first in
-/// the list, or follows `Bin`, `Op`, `Rel`, `Open` or `Punct` (`TeXbook` §18, the same
-/// chapter `spacing.rs` takes its table from). Those six map onto this crate's classes as
-/// [`Class::Edge`] for "first in the list", [`Class::Binary`], [`Class::Relation`],
-/// [`Class::Open`], [`Class::Punct`], and TeX's single `Op` as **both**
-/// [`Class::Function`] and [`Class::Large`] — an operator name and a large operator are one
-/// atom class in TeX and two here.
+/// The condition below **is the `TeXbook`'s bin-to-ord rule, complete** — not a list of
+/// classes collected as cases turned up. TeX reclassifies a `Bin` atom as `Ord` when it is
+/// first in the list, or follows `Bin`, `Op`, `Rel`, `Open` or `Punct`. Those six map onto
+/// this crate's classes as [`Class::Edge`] for "first in the list", [`Class::Binary`],
+/// [`Class::Relation`], [`Class::Open`], [`Class::Punct`], and TeX's single `Op` as
+/// **both** [`Class::Function`] and [`Class::Large`] — an operator name and a large
+/// operator are one atom class in TeX and two here.
 ///
-/// Saying which list this is matters more than the cells: five classes with no source read
-/// as arbitrary and invite a sixth to be added ad hoc, which is how stage 1's spacing grew
-/// its seams. This list is closed. A case that seems to want another entry is a case where
-/// the *class* is wrong, not this rule.
+/// No chapter is cited on purpose. The rule's *content* is well established and is what
+/// the list above is checked against; its exact location in the book was not verifiable
+/// when this was written, and a chapter number that might be wrong is worse than none —
+/// every defect found in this module so far has been a confidently-stated wrong value. If
+/// you have the book to hand, add the reference.
+///
+/// Saying which list this is matters more than the cells: six classes with no source read
+/// as arbitrary and invite a seventh to be added ad hoc, which is how stage 1's spacing
+/// grew its seams. This list is closed. A case that seems to want another entry is a case
+/// where the *class* is wrong, not this rule.
 fn assemble(mut pieces: Vec<(Class, MathBox)>, spacing: Spacing) -> MathBox {
     for i in 0..pieces.len() {
         if pieces[i].0 != Class::Binary {

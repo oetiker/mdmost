@@ -139,8 +139,10 @@ const UNARY_ROW: [u16; N] = [0, 0, 0, 1, 0, 1, 0, 0, 0, 0];
 
 /// Parts from its operand, but hugs a delimited group that is already visibly its own
 /// thing: [`Class::Function`] and [`Class::Large`]. `\sin(x)` and `\sum(a_i + b_i)` are
-/// both tight before `(` — `TeXbook` §18's Op-Open pair, and `src/math/tests.rs`'s
-/// `a_function_name_sits_tight_against_an_opening_delimiter` pins the first.
+/// both tight before `(` — the `TeXbook`'s spacing table sets the Op-Open pair tight, and
+/// `src/math/tests.rs`'s `a_function_name_sits_tight_against_an_opening_delimiter` pins
+/// the first. The chapter is deliberately not cited; see the note on `build.rs`'s
+/// `assemble`, which drops the same unverified reference.
 const OPERAND_SEEKING_ROW: [u16; N] = [0, 1, 1, 1, 1, 1, 1, 0, 0, 0];
 
 /// Always spaced, with no exception for a following delimiter: [`Class::Binary`] and
