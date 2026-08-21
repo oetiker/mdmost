@@ -718,9 +718,19 @@ fn script_box(
 /// A test for "already parenthesised" would be the wrong rule: `\frac{(a)+(b)}{c}` has
 /// parentheses at both ends and is still three atoms, which is the exact misreading the
 /// bracket exists to prevent.
+///
+/// A `Fenced` box is the one content that answers on its own fields rather than on being
+/// a single piece. With both delimiters present it draws its own brackets around whatever
+/// it encloses, so it cannot be misread and `\frac{\left(a+b\right)}{c}` needs no second
+/// pair. With either one absent — `\left.` and `\right.` are invisible, and a fence may be
+/// one-sided — the body reaches the page naked at that end, so the answer is the body's:
+/// `\frac{\left.a+b\right.}{c}` is `(a + b)/c`, not `a + b/c`.
 fn is_one_atom(b: &MathBox) -> bool {
     match &b.content {
         BoxContent::Row(parts) => matches!(parts.as_slice(), [only] if is_one_atom(only)),
+        BoxContent::Fenced { left, right, body } => {
+            (left.is_some() && right.is_some()) || is_one_atom(body)
+        }
         _ => true,
     }
 }
@@ -1036,10 +1046,17 @@ mod tests {
         // `\left.` and `\right.` are deliberately invisible delimiters, not missing ones.
         assert_eq!(drawn(r"\left.x\right)"), "x)");
         assert_eq!(drawn(r"\left(x\right."), "(x");
-        // A fence is one atom, so it takes a script without a second pair of brackets,
-        // and it is `Ordinary`, so a binary operator to its left keeps its gap.
+        // A two-sided fence is one atom, so it takes a script without a second pair of
+        // brackets, and a binary operator to its left keeps its gap.
         assert_eq!(drawn(r"a + \left(b\right)"), "a + (b)");
         assert_eq!(drawn(r"\left(x\right)_0"), "(x)₀");
+        // Neither of those two shows the group's *class*, though: `gap(Binary, Open)` and
+        // `gap(Binary, Ordinary)` are both 1, so `a + (b)` reads the same whichever the
+        // group carries. A relation on the right is the neighbour that separates them --
+        // `gap(Open, Relation)` is 0 (`ZERO_ROW`) while `gap(Ordinary, Relation)` is 1 --
+        // so this line is what holds the group at `Class::Ordinary`. Class it `Open` and
+        // it sets `(x)= y`.
+        assert_eq!(drawn(r"\left(x\right) = y"), "(x) = y");
 
         // Every case above puts the fence last or leaves nothing after it but a script,
         // where miscounting the events the group spans would not show. Only ordinary
@@ -1050,6 +1067,33 @@ mod tests {
             "(x)y",
             "the walk resumes after it"
         );
+    }
+
+    #[test]
+    fn a_fence_is_one_atom_only_where_it_actually_brackets_its_body() {
+        // §5.2's brackets exist so that `a + b/c` cannot be read for `(a + b)/c`. A fence
+        // with both delimiters draws its own, so it needs no second pair -- but `\left.`
+        // and `\right.` draw nothing, and a fence may be one-sided, and then the body is
+        // naked at that end and §5.2 has to see through the box to it.
+        //
+        // None of these formulas is in `src/math/tests.rs`, so nothing else in the tree
+        // measures them from either engine. All but the last two are stage 1's shipped
+        // rendering, verified against `inline::render_inline`.
+        assert_eq!(drawn(r"\frac{\left.a+b\right.}{c}"), "(a + b)/c");
+        assert_eq!(drawn(r"\frac{\left.ab\right.}{c}"), "(ab)/c");
+        assert_eq!(drawn(r"\sqrt{\left.a+b\right.}"), "√(a + b)");
+        // One-sided: the `\right.` end is open, so the numerator is bracketed even though
+        // the reading is already spoiled by the unmatched `(` the source itself asked for.
+        assert_eq!(drawn(r"\frac{\left(a+b\right.}{c}"), "((a + b)/c");
+        // An empty body is not one atom, the same as `\frac{}{b}`.
+        assert_eq!(drawn(r"\frac{\left.\right.}{c}"), "()/c");
+
+        // The other side of the rule, and the reason it is not simply "bracket anything
+        // that is not a `Row`": a two-sided fence must keep setting one pair, not two.
+        // Stage 1 sets `((a + b))/c` here, so this is a Task 6 improvement to protect.
+        assert_eq!(drawn(r"\frac{\left(a+b\right)}{c}"), "(a + b)/c");
+        // Scripts take the same rule, and here it corrects stage 1, which sets `a + b²`.
+        assert_eq!(drawn(r"\left.a+b\right.^2"), "(a + b)²");
     }
 
     #[test]
