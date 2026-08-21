@@ -51,6 +51,147 @@ pub(crate) enum Mode {
     Display,
 }
 
+/// The longest run of consecutive control-sequence tokens a formula's source may contain.
+///
+/// `pulldown-latex`'s parser recurses once per control sequence when a command's argument
+/// is itself an **unbraced** control sequence — `\sqrt\sqrt…x` — and stops the moment the
+/// argument is a group or a character. `\sqrt{\sqrt{…}}` 20 000 deep is fine; the unbraced
+/// chain is not. So the reachable recursion depth is bounded by the longest run of
+/// consecutive control sequences in the *source*, which is what [`longest_command_run`]
+/// counts, before [`Parser::new`] ever sees the text.
+///
+/// It has to be counted before parsing because the failure is a **stack overflow**, and a
+/// stack overflow aborts the process: it is not a panic, `catch_unwind` cannot see it, and
+/// design spec §9 forbids anything worse than an error. [`MAX_NESTING`] cannot stand in for
+/// this one — it counts box-tree levels *after* the parse that would already have aborted.
+///
+/// Measured, one subprocess per depth, on the worst profile (debug build, 2 MiB thread —
+/// which is exactly what libtest gives a `#[test]`): an `\overline` chain parses at 133
+/// links and aborts at 134. `\sqrt`, `\not` and `\overset` abort at 137, `\mathbb`,
+/// `\mathrm` and `\boldsymbol` at 136. 134 / 32 = 4.2× margin.
+///
+/// What 32 rejects is a formula with 33 or more commands back to back and no brace, letter
+/// or digit anywhere between them. Real chains are two or three long — `\not\in`,
+/// `\hat\vec x`, `\sqrt\pi` — and bracing one argument makes any such input legal again.
+const MAX_COMMAND_RUN: usize = 32;
+
+/// The largest formula source, in bytes.
+///
+/// A second, independent way to the same stack overflow, and **neither cap catches the
+/// other** — both halves of that are measured, not argued. Frames also accumulate on tokens
+/// that emit *no event*, through `Parser::next`'s tail call and `lex::token`'s recursion on
+/// a comment. The cheapest such token is `\relax` at 6 source bytes per frame, and that is
+/// exhaustive rather than a sample — it is the only event-less primitive among all 838
+/// command names the crate knows; `\relax` × 1 457 is 8 742 bytes and aborts a 2 MiB debug
+/// thread. The case [`MAX_COMMAND_RUN`] provably cannot see is the comment path: `%\n`
+/// × 5 930 is 11 860 bytes containing **no control sequence at all**, so its longest run is
+/// zero at any setting of that cap, and it aborts the same thread.
+///
+/// Which profile binds was measured rather than assumed: the shipped binary parses on the
+/// main thread (release, 8 MiB) and survives to 112 128 bytes, while our own test suite runs
+/// on libtest's 2 MiB threads in debug and aborts at 8 742. The test profile is 12.8×
+/// tighter, so it sets the cap: 8 742 / 2 048 = 4.27×, matching the run cap's margin by
+/// construction.
+///
+/// The other direction is measured too: `\overline` × 227 + `" x"` is 2 045 bytes — inside
+/// this cap — and needs 3 555 328 B of stack, 1.7× a 2 MiB thread. A byte cap alone would
+/// let it through. Both caps are needed.
+///
+/// What 2 048 rejects: a single formula over two kilobytes of source. That is 5.7× the
+/// largest formula in `pulldown-latex`'s own 385 fixtures (median 38 B, max 361 B —
+/// Maxwell's equations), and a pager renders one formula at a time, so the cap is per
+/// formula and not per document.
+const MAX_SOURCE_BYTES: usize = 2048;
+
+// The safety property each number exists for, pinned at compile time where the number is,
+// as `MAX_NESTING` does. The tests below pin the *behaviour* — one past the cap refuses —
+// and would go on passing at any cap, including one raised past the abort.
+const _: () = assert!(
+    MAX_COMMAND_RUN <= 33,
+    "MAX_COMMAND_RUN must keep a 4x margin under the measured abort: an \\overline chain \
+     parses at 133 links and aborts at 134 on a 2 MiB debug thread"
+);
+const _: () = assert!(
+    MAX_SOURCE_BYTES <= 2185,
+    "MAX_SOURCE_BYTES must keep a 4x margin under the measured abort: \\relax repeated to \
+     8 742 bytes aborts a 2 MiB debug thread"
+);
+// The refusal messages spell both numbers out, and a stale message is worse than no
+// message. Change the text with the number.
+const _: () = assert!(
+    MAX_COMMAND_RUN == 32 && MAX_SOURCE_BYTES == 2048,
+    "the refusal messages in `refuse_pathological_source` name these two numbers"
+);
+
+/// The longest run of consecutive control-sequence tokens in `src`.
+///
+/// The run is what [`MAX_COMMAND_RUN`] caps; see there for why it is the right thing to
+/// count. Whitespace does **not** break a run — the parser skips it between a command and
+/// its argument — and any other character does: `{`, `}`, a letter, a digit, an `α`.
+/// `^` and `_` count as members of a run; they measured as costing no stack, and counting
+/// them is free safety.
+///
+/// A control sequence is `\` plus a run of letters (`\sqrt`) **or** `\` plus exactly one
+/// non-letter (`\,`, `\!`, `\\`). Both cases matter to the count: read `\\` as two
+/// sequences and this over-counts, read `\,` as an unterminated word and it under-counts.
+///
+/// Macros cannot smuggle a chain past this. Expansion in 0.8.0 is body-local, so a chain
+/// cannot cross an expansion boundary, and the only macro source that does abort is one
+/// whose *body* holds a long literal run — which is literal source text, so this scan sees
+/// it.
+fn longest_command_run(src: &str) -> usize {
+    let mut longest = 0;
+    let mut run = 0;
+    let mut chars = src.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                if chars.peek().is_some_and(char::is_ascii_alphabetic) {
+                    while chars.peek().is_some_and(char::is_ascii_alphabetic) {
+                        chars.next();
+                    }
+                } else {
+                    // `\,`, `\!`, `\\` — one non-letter, and `None` at end of source, where
+                    // a trailing lone `\` still counts as a token. Conservative either way.
+                    chars.next();
+                }
+                run += 1;
+                longest = longest.max(run);
+            }
+            '^' | '_' => {
+                run += 1;
+                longest = longest.max(run);
+            }
+            c if c.is_whitespace() => {}
+            _ => run = 0,
+        }
+    }
+    longest
+}
+
+/// Refuses a source that could overflow the parser's stack.
+///
+/// Both caps are checked here, before [`Parser::new`], because the thing they prevent
+/// aborts the process from inside the parser and nothing downstream ever runs. The scan
+/// never rewrites `src`: an input past either cap is refused whole, and the caller shows
+/// the source.
+///
+/// # Errors
+///
+/// [`MathError::NotInline`] with a message naming which cap fired.
+fn refuse_pathological_source(src: &str) -> Result<(), MathError> {
+    // Length first: it is the cheaper test, and it bounds the scan below.
+    if src.len() > MAX_SOURCE_BYTES {
+        return Err(MathError::NotInline("a formula longer than 2048 bytes"));
+    }
+    if longest_command_run(src) > MAX_COMMAND_RUN {
+        return Err(MathError::NotInline(
+            "a formula with more than 32 chained commands",
+        ));
+    }
+    Ok(())
+}
+
 /// Parses `src` into an event stream borrowed from `storage`.
 ///
 /// The arena is the caller's because the events borrow from it: `Storage` is
@@ -62,10 +203,17 @@ pub(crate) enum Mode {
 /// caption and would put box drawing into `tests/glyph_inventory.rs` that the manual does
 /// not claim.
 ///
+/// [`refuse_pathological_source`] runs first, and it is the only guard against the parser
+/// overflowing its stack; see [`MAX_COMMAND_RUN`] and [`MAX_SOURCE_BYTES`]. It sits here
+/// rather than in the two callers so that `render_inline` and `symbols` are covered by one
+/// check and one test.
+///
 /// # Errors
 ///
-/// [`MathError::Parse`] if the LaTeX does not parse.
+/// [`MathError::NotInline`] if the source is past either cap, [`MathError::Parse`] if the
+/// LaTeX does not parse.
 pub(crate) fn parse<'a>(src: &'a str, storage: &'a Storage) -> Result<Vec<Event<'a>>, MathError> {
+    refuse_pathological_source(src)?;
     let mut events = Vec::new();
     for event in Parser::new(src, storage) {
         events.push(event.map_err(|err| {
@@ -142,19 +290,22 @@ impl Spacing {
 /// **A level is not always a brace.** `\sqrt\sqrt…x` opens no group at all and still
 /// recurses, through [`element`] and [`visual_box`], which is why the cap is counted in
 /// [`element`] as well as here — a cap that only counted [`Event::Begin`] would not see
-/// that chain.
+/// that chain. [`MAX_COMMAND_RUN`] now refuses that particular chain earlier and tighter,
+/// so [`element`]'s copy of this cap is unreached by it; it stays because the two count
+/// different things.
 ///
 /// 64 sits far below where it breaks rather than just below it. No formula a person
 /// writes comes close — a deep continued fraction is a dozen — and the margin is
 /// deliberate: the two-dimensional constructs of later tasks add their own frames to this
 /// same recursion and will spend some of it.
 ///
-/// The margin is not the same on every construct, and the tighter one is upstream. On the
-/// brace chain the parser is iterative and hands back all 10001 events; on a `\sqrt` chain
-/// **the parser itself recurses**, and `parse` aborts the process somewhere between 129
-/// and 144 repeats — measured on this branch. So a `\sqrt` chain never reaches the numbers
-/// the brace chain does, and this cap has to stay well under the parser's, which it does
-/// by rather less than the braces suggest.
+/// **This cap does not protect the parser.** On the brace chain the parser is iterative and
+/// hands back all 10001 events, so the recursion here is the only thing between that input
+/// and the process. On a `\sqrt\sqrt…x` chain the parser itself recurses and aborts at 137
+/// links (134 for `\overline`) on a 2 MiB debug thread — and that chain opens no group, so
+/// `depth` never increments and this cap never fires. The guard for that path is
+/// [`MAX_COMMAND_RUN`], counted on the source before `parse`; this one counts box-tree
+/// levels after it.
 const MAX_NESTING: usize = 64;
 
 // The tests pin the *behaviour* — one past the cap refuses, well inside it builds — but
@@ -500,9 +651,13 @@ fn element(
     spacing: Spacing,
     depth: usize,
 ) -> Result<(Class, MathBox, usize), MathError> {
-    // The second of the two places the recursion is capped; see [`MAX_NESTING`]. This one
-    // catches the chains that open no group -- `\sqrt\sqrt…x` -- which the check in
-    // [`build_run`] never sees because they never re-enter it.
+    // The second of the two places the recursion is capped; see [`MAX_NESTING`]. It is for
+    // the chains that open no group -- `\sqrt\sqrt…x` -- which the check in [`build_run`]
+    // never sees because they never re-enter it. Since [`MAX_COMMAND_RUN`] that shape is
+    // refused in `parse` at 32 links, half this cap, so nothing reaches here by that route
+    // today. Kept because the two caps count different things and only one of them is
+    // about *our* stack: a construct that recurses here without a control sequence per
+    // level would be invisible to the source scan.
     if depth > MAX_NESTING {
         return Err(MathError::NotInline("a formula nested too deeply"));
     }
@@ -809,9 +964,12 @@ fn bracketed(b: MathBox) -> MathBox {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_NESTING, Mode, Spacing, build, build_run, draw, parse};
+    use super::{
+        MAX_COMMAND_RUN, MAX_NESTING, MAX_SOURCE_BYTES, Mode, Spacing, build, build_run, draw,
+        longest_command_run, parse,
+    };
     use crate::math::boxes::BoxContent;
-    use pulldown_latex::Storage;
+    use pulldown_latex::{Parser, Storage};
 
     /// Builds and flattens to the one row it must be, for the inline cases.
     fn inline(src: &str) -> String {
@@ -1023,9 +1181,21 @@ mod tests {
 
         // Far past it: this is the one that documents the real hazard, and it is only
         // reached when the guard is present, because the assertion above panics first.
+        //
+        // 1023 and not the 5000 that used to stand here, because `nest(5000)` is 10 001
+        // bytes of source and `MAX_SOURCE_BYTES` now refuses it in `parse` -- it would have
+        // pinned that cap over again instead of this one. 1023 is the deepest brace nest
+        // that fits inside 2 048 bytes, and it is still 16x this cap.
+        assert_eq!(nest(1023).len(), MAX_SOURCE_BYTES - 1);
         assert_eq!(
-            refusal(&nest(5000)),
+            refusal(&nest(1023)),
             "a formula nested too deeply cannot be drawn on one row"
+        );
+        // And past the byte cap the other guard answers instead, which is the interaction
+        // between the two and the reason the line above stops at 1023.
+        assert_eq!(
+            scan_refusal(&nest(5000)),
+            "a formula longer than 2048 bytes cannot be drawn on one row"
         );
 
         // And the cap is not so tight that ordinary nesting trips it -- including at the
@@ -1036,6 +1206,194 @@ mod tests {
             "x",
             "the cap itself still builds"
         );
+    }
+
+    /// The caption the reader sees when the source scan refuses a formula.
+    ///
+    /// Separate from [`refusal`] because this failure happens in `parse`, before there are
+    /// any events to build from.
+    fn scan_refusal(src: &str) -> String {
+        let storage = Storage::new();
+        let err = parse(src, &storage).expect_err("the source scan refuses this");
+        format!("{err}")
+    }
+
+    /// Asserts the *parser* accepts `src`, so that a refusal of it can only be ours.
+    ///
+    /// This is the guard against a test that passes for the wrong reason. `mdmost` builds
+    /// against a fork of `pulldown-latex` in which the parser returns an error rather than
+    /// aborting the process, so an assertion of the form "a deep chain produces an error"
+    /// would go on passing with our scan deleted — the fork's error would answer for it.
+    /// The two inputs this is called on are legitimate LaTeX that parses cleanly and that
+    /// we refuse anyway, and this runs the unwrapped parser over them to say so.
+    ///
+    /// Safe to run: both sit far inside the stack budget — `\relax` does not abort a 2 MiB
+    /// debug thread until 1 457 repeats. Never call it on an input that is past a cap in
+    /// *stack* terms rather than in scan terms; that one aborts the test binary.
+    fn parser_accepts(src: &str) {
+        let storage = Storage::new();
+        for event in Parser::new(src, &storage) {
+            assert!(
+                event.is_ok(),
+                "the parser rejected a {}-byte source: {:?}",
+                src.len(),
+                event.err()
+            );
+        }
+    }
+
+    #[test]
+    fn a_run_of_commands_past_the_cap_is_refused_before_the_parser_recurses() {
+        // `\relax` takes no argument, so the parser never recurses on a chain of them: 33
+        // in a row is good LaTeX that parses to nothing at all, and we refuse it anyway.
+        // That is what makes this line prove *our* scan ran, rather than some limit of the
+        // parser's answering for it.
+        let relaxes = |n: usize| r"\relax ".repeat(n) + "x";
+        parser_accepts(&relaxes(MAX_COMMAND_RUN + 1));
+        assert_eq!(
+            scan_refusal(&relaxes(MAX_COMMAND_RUN + 1)),
+            "a formula with more than 32 chained commands cannot be drawn on one row"
+        );
+
+        // The cap exactly still builds, and the run really did reach it -- asserted, not
+        // assumed, because whitespace between the commands does not break a run and a
+        // scanner that thought it did would make the line above pass for the wrong reason.
+        assert_eq!(
+            longest_command_run(&relaxes(MAX_COMMAND_RUN)),
+            MAX_COMMAND_RUN
+        );
+        assert_eq!(inline(&relaxes(MAX_COMMAND_RUN)), "x");
+
+        // The construct the cap exists for, and asserted last on purpose. An `\overline`
+        // chain aborts a 2 MiB debug thread -- which is what libtest gives this test -- at
+        // 134 links, with `SIGABRT`, which no `#[should_panic]` and no `catch_unwind` can
+        // report. 200 is past that, so this line is only ever reached with the guard in
+        // place; the assertions above fail as a named test first if it is gone.
+        let chain = r"\overline".repeat(200) + " x";
+        assert!(
+            chain.len() <= MAX_SOURCE_BYTES,
+            "the byte cap must not be what catches this"
+        );
+        assert_eq!(
+            scan_refusal(&chain),
+            "a formula with more than 32 chained commands cannot be drawn on one row"
+        );
+    }
+
+    #[test]
+    fn a_source_past_the_byte_cap_is_refused_before_the_parser_recurses() {
+        // The other overflow. Frames accumulate on every token that emits no event, through
+        // `Parser::next`'s tail call and `lex::token`'s recursion on a comment -- and a
+        // bare comment holds no control sequence at all, so its longest run is ZERO. That
+        // is what says the byte cap is not redundant: no run cap at any setting can see
+        // this input. 5 930 comments abort a 2 MiB debug thread; 1 025 is good LaTeX that
+        // parses to nothing, and we refuse it anyway.
+        let comments = "%\n".repeat(1025);
+        assert!(comments.len() > MAX_SOURCE_BYTES);
+        assert_eq!(
+            longest_command_run(&comments),
+            0,
+            "the run cap cannot see this at all"
+        );
+        parser_accepts(&comments);
+        assert_eq!(
+            scan_refusal(&comments),
+            "a formula longer than 2048 bytes cannot be drawn on one row"
+        );
+
+        // The cheapest event-less *token* of the 838 the parser knows, at 6 source bytes a
+        // frame, which is what sized the cap: `\relax` × 1 457 aborts the same thread. 342
+        // is far inside the stack budget and far outside the byte cap, and the parser is
+        // happy with it. A bare `\relax` chain is also one long run, so the run cap would
+        // have caught this one as well; the byte cap answers because it is checked first,
+        // and the comment case above is the one that isolates it.
+        let relaxes = r"\relax".repeat(342);
+        assert!(relaxes.len() > MAX_SOURCE_BYTES);
+        parser_accepts(&relaxes);
+        assert_eq!(
+            scan_refusal(&relaxes),
+            "a formula longer than 2048 bytes cannot be drawn on one row"
+        );
+
+        // The boundary, from both sides, on a source with no commands in it at all.
+        assert_eq!(
+            scan_refusal(&"x".repeat(MAX_SOURCE_BYTES + 1)),
+            "a formula longer than 2048 bytes cannot be drawn on one row"
+        );
+        assert_eq!(
+            inline(&"x".repeat(MAX_SOURCE_BYTES)).len(),
+            MAX_SOURCE_BYTES,
+            "the cap itself still builds"
+        );
+
+        // The hazard itself, asserted last for the same reason the run test's is: 8 000
+        // bare comments is 16 000 bytes, past the 11 860 at which `lex::token`'s recursion
+        // aborts a 2 MiB debug thread with SIGABRT -- which libtest cannot report and
+        // `catch_unwind` cannot reach. Its longest run is still zero, so this line is only
+        // ever reached with the byte cap in place.
+        let hazard = "%\n".repeat(8000);
+        assert_eq!(longest_command_run(&hazard), 0);
+        assert_eq!(
+            scan_refusal(&hazard),
+            "a formula longer than 2048 bytes cannot be drawn on one row"
+        );
+    }
+
+    #[test]
+    fn a_control_sequence_is_counted_the_way_the_lexer_reads_one() {
+        // Nothing to count.
+        assert_eq!(longest_command_run(""), 0);
+        assert_eq!(longest_command_run("x + 1"), 0);
+
+        // A control word is `\` plus a run of letters; the count is how many sit back to
+        // back, which is one parser frame each.
+        assert_eq!(longest_command_run(r"\sqrt x"), 1);
+        assert_eq!(longest_command_run(r"\sqrt\sqrt x"), 2);
+        assert_eq!(longest_command_run(r"\sqrt\overline\hat x"), 3);
+
+        // Whitespace does not break a run: the parser skips it between a command and its
+        // argument, so `\sqrt \sqrt x` recurses exactly as `\sqrt\sqrt x` does.
+        assert_eq!(longest_command_run("\\sqrt \t\n\\sqrt x"), 2);
+
+        // Everything else breaks one, and the brace is the whole point: `\sqrt{\sqrt{x}}`
+        // is iterative in the parser -- 20 000 deep parses fine -- so counting it as a
+        // chain would reject formulas that are in no danger.
+        assert_eq!(longest_command_run(r"\sqrt{\sqrt{x}}"), 1);
+        assert_eq!(
+            longest_command_run(r"\sqrt1\sqrt2"),
+            1,
+            "a digit breaks a run"
+        );
+        assert_eq!(
+            longest_command_run(r"a\alpha b\beta"),
+            1,
+            "a letter breaks a run"
+        );
+        assert_eq!(
+            longest_command_run("\\alpha α \\beta"),
+            1,
+            "so does a character that is not ASCII"
+        );
+
+        // A control symbol is `\` plus exactly ONE non-letter. Read `\\` as two tokens and
+        // the count is double; read `\,` as an unterminated word and it swallows what
+        // follows and the count is short. Both directions are pinned.
+        assert_eq!(longest_command_run(r"\\"), 1);
+        assert_eq!(longest_command_run(r"\\\\"), 2);
+        assert_eq!(longest_command_run(r"\,\!\;"), 3);
+        assert_eq!(longest_command_run(r"\,x\,"), 1);
+        assert_eq!(longest_command_run(r"\sqrt\\\sqrt"), 3);
+
+        // `^` and `_` count as members of a run. They measured as costing no stack of their
+        // own, so this is margin bought for free rather than a correction.
+        assert_eq!(longest_command_run(r"x^\sqrt y"), 2);
+        assert_eq!(longest_command_run(r"x^_\sqrt y"), 3);
+        assert_eq!(longest_command_run("x^2"), 1, "the digit ends that run");
+
+        // A trailing lone backslash still counts. Over-counting by one is the safe way to
+        // be wrong about the last byte of a source.
+        assert_eq!(longest_command_run("\\"), 1);
+        assert_eq!(longest_command_run(r"\sqrt\"), 2);
     }
 
     #[test]
@@ -1617,32 +1975,36 @@ mod tests {
     }
 
     #[test]
-    fn a_chain_of_rewrites_is_capped_even_though_it_opens_no_group() {
-        // `\sqrt\sqrt…x` recurses `element` -> `visual_box` -> `element` and never opens
-        // a brace, so the cap in `build_run` alone does not see it: without the one in
-        // `element` this aborts the process rather than refusing. The boundary is pinned
-        // on both sides, one repeat apart.
+    fn a_chain_of_rewrites_that_opens_no_group_is_capped_by_the_source_scan() {
+        // `\sqrt\sqrt…x` recurses `element` -> `visual_box` -> `element` and never opens a
+        // brace, so `build_run`'s cap does not see it. Neither does `element`'s any more,
+        // and that is the change rather than a regression: `pulldown-latex` recurses on the
+        // very same chain and aborts the process at 137 links, before `build` is ever
+        // called. `MAX_COMMAND_RUN` is what now answers for this shape, in `parse`, and at
+        // 32 it is tighter than `MAX_NESTING`, so `element`'s check has become the second
+        // line of defence rather than the first.
         let chain = |n: usize| r"\sqrt".repeat(n) + " x";
         assert_eq!(
-            refusal(&chain(MAX_NESTING + 1)),
-            "a formula nested too deeply cannot be drawn on one row"
+            scan_refusal(&chain(MAX_COMMAND_RUN + 1)),
+            "a formula with more than 32 chained commands cannot be drawn on one row"
         );
+
+        // The other side of the boundary, one repeat apart: 32 links of rewrite parse and
+        // build, so the walk still has to survive a chain rather than the scan hiding it.
         let storage = Storage::new();
-        let at_the_cap = chain(MAX_NESTING);
+        let at_the_cap = chain(MAX_COMMAND_RUN);
         let events = parse(&at_the_cap, &storage).expect("parses");
         assert!(
             build(&events, Mode::Inline).is_ok(),
             "the cap itself still builds"
         );
 
-        // No `nest(5000)` counterpart exists for this chain, and that is a fact about the
-        // parser rather than an omission: `pulldown-latex` recurses on `\sqrt` and `parse`
-        // aborts the process between 129 and 144 repeats, measured on this branch. The
-        // brace chain reaches 5000 only because the parser handles braces iteratively.
-        let near_the_parsers_own_cap = chain(129);
-        assert!(
-            parse(&near_the_parsers_own_cap, &storage).is_ok(),
-            "129 still parses, which is the margin this cap has"
+        // 129 links used to be asserted here as "still parses, which is the margin this cap
+        // has". It does not parse any more, and the earlier reading of the margin was the
+        // wrong way round: 129 was never a margin, it was two repeats below the abort.
+        assert_eq!(
+            scan_refusal(&chain(129)),
+            "a formula with more than 32 chained commands cannot be drawn on one row"
         );
     }
 
