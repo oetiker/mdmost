@@ -163,3 +163,24 @@ assets = [
     { source = "integrations/wezterm/md-open.lua", dest = "/usr/share/doc/mdmost/examples/wezterm/md-open.lua", mode = "644", doc = true },
     { source = "integrations/kitty/open-actions.conf", dest = "/usr/share/doc/mdmost/examples/kitty/open-actions.conf", mode = "644", doc = true },
 ]
+
+# DEVELOPMENT ONLY. THIS MUST BE REMOVED BEFORE A RELEASE.
+#
+# `pulldown-latex` 0.8.0 can abort the whole process with a stack overflow -- not a
+# panic, so `catch_unwind` never sees it -- on two unbounded recursions in its parser:
+# an unbraced control-sequence argument chain (`\sqrt\sqrt...x`), and a run of tokens
+# that emit no event (`\relax`, `%` comments). `src/math/build.rs`'s `MAX_COMMAND_RUN`
+# and `MAX_SOURCE_BYTES` refuse such formulas before the parser ever sees them, and
+# that guard is what protects a released build; this patch is the upstream fix, so we
+# develop against a parser that does not abort.
+#
+# `[patch.crates-io]` applies to local builds only: the published manifest still says
+# `pulldown-latex = "0.8.0"` and anyone installing from crates.io gets the unpatched
+# parser. So the guard is NOT redundant with this patch and must not be removed with
+# it. `cargo publish --locked` will refuse a lockfile pinned to a git source, which is
+# the loud failure this comment exists to explain rather than to prevent.
+#
+# The rev is `mdmost-integration` on the fork, merging both fixes. Retire this whole
+# block -- and the `rev` -- as soon as an upstream release carries them.
+[patch.crates-io]
+pulldown-latex = { git = "https://github.com/oetiker/pulldown-latex", rev = "c3582a034bd995e9f4322f2a55397ac6cbe69bd1" }
