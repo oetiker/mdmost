@@ -25,19 +25,23 @@
 // and for the same reason. `expect` cannot express that -- it fires
 // `unfulfilled_lint_expectations` on the test target -- so this is `allow`.
 //
-// Measured, not assumed: with this line removed and the module wired into `mod.rs`, clippy
-// reports all eleven items here as never used. `dead_code` is transitive, so this module
+// Measured, not assumed: with this line removed, clippy reports every item in this file as
+// never used -- sixteen warnings, `between` and `writes_source_spaces` sharing one.
+// `dead_code` is transitive, so this module
 // being dead is also why `boxes.rs` and `spacing.rs` keep theirs -- their first caller is
 // this file, and a dead caller does not make a callee live. All three come out together
 // when the renderer calls in.
 #![allow(dead_code)]
 
-use pulldown_latex::event::{Content, DelimiterType, Event, Grouping, Visual};
+use pulldown_latex::event::{
+    Content, DelimiterType, Dimension, Event, Grouping, ScriptPosition, ScriptType, Visual,
+};
 use pulldown_latex::{Parser, Storage};
 
 use crate::error::MathError;
-use crate::math::boxes::{MathBox, row, text};
+use crate::math::boxes::{self, BoxContent, MathBox, row, text};
 use crate::math::spacing::{Class, gap};
+use crate::math::{draw, scripts};
 
 /// Whether the formula may use more than the row the prose sits on.
 ///
@@ -135,16 +139,29 @@ impl Spacing {
 
 /// How deep a formula may nest before it is refused.
 ///
-/// [`build_run`] and [`group`] are mutually recursive, one round trip per `{`, and a
-/// formula is attacker-supplied text. Unbounded, `$` followed by a few thousand `{`
-/// overflows the stack, and a stack overflow **aborts the process** — it is not a panic,
-/// it cannot be caught, and it is therefore strictly worse than the panic design spec §9
-/// forbids. Measured on this branch: 500 levels build, 5000 abort with `SIGABRT`.
+/// [`build_run`], [`element`], [`group`], [`visual_box`] and [`script_box`] are mutually
+/// recursive, one round trip per nesting level, and a formula is attacker-supplied text.
+/// Unbounded, `$` followed by a few thousand `{` overflows the stack, and a stack overflow
+/// **aborts the process** — it is not a panic, it cannot be caught, and it is therefore
+/// strictly worse than the panic design spec §9 forbids. Measured on this branch: 500
+/// levels of braces build, 5000 abort with `SIGABRT`.
+///
+/// **A level is not always a brace.** `\sqrt\sqrt…x` opens no group at all and still
+/// recurses, through [`element`] and [`visual_box`], which is why the cap is counted in
+/// [`element`] as well as here — a cap that only counted [`Event::Begin`] would not see
+/// that chain.
 ///
 /// 64 sits far below where it breaks rather than just below it. No formula a person
 /// writes comes close — a deep continued fraction is a dozen — and the margin is
 /// deliberate: the two-dimensional constructs of later tasks add their own frames to this
 /// same recursion and will spend some of it.
+///
+/// The margin is not the same on every construct, and the tighter one is upstream. On the
+/// brace chain the parser is iterative and hands back all 10001 events; on a `\sqrt` chain
+/// **the parser itself recurses**, and `parse` aborts the process somewhere between 129
+/// and 144 repeats — measured on this branch. So a `\sqrt` chain never reaches the numbers
+/// the brace chain does, and this cap has to stay well under the parser's, which it does
+/// by rather less than the braces suggest.
 const MAX_NESTING: usize = 64;
 
 // The tests pin the *behaviour* — one past the cap refuses, well inside it builds — but
@@ -179,54 +196,50 @@ fn build_run(
     while index < events.len() {
         match &events[index] {
             Event::End => break,
-            Event::Content(content) => {
-                pieces.push(atom(content));
-                index += 1;
-            }
-            Event::Begin(grouping) => {
-                let (inner, used) = group(events, index, grouping, mode, spacing, depth)?;
-                // A braced group is an atom of the enclosing run: `2{ab}` sets the same
-                // cells as `2ab`, which is what makes a group transparent to spacing.
-                pieces.push((Class::Ordinary, inner));
-                index = index.saturating_add(used);
-            }
-            // Tasks 6 to 11 replace each of these in turn. Until then a construct that
-            // needs a second row says so by name rather than drawing something wrong.
-            Event::Visual(visual) => return Err(MathError::NotInline(visual_name(visual))),
-            Event::Script { .. } => return Err(MathError::NotInline("a script")),
-            Event::EnvironmentFlow(_) => {
-                return Err(MathError::NotInline("a multi-row environment"));
-            }
-            // `\,`, `\quad`, `\kern`: a horizontal space we honour as one column, and a
-            // vertical one we ignore. Neither can fail.
-            //
-            // This is the only cell the walk writes that no table lookup produced, so it
-            // answers to both of the constraints a looked-up gap answers to.
-            //
-            // *Suppressed* — a script operand takes no spaces at all, and one that came
-            // from `\,` is no more substitutable than one that came from the table.
-            //
-            // *Positive* — `\!`, `\negthinspace`, `\negmedspace` and `\negthickspace` are
-            // `Space { width: Some(Dimension { value: -3.0/18.0, .. }) }` and friends;
-            // `pulldown-latex` labels them "Negative spacing" at
-            // `parser/primitives.rs:827-841`. `width.is_some()` is true for every one of
-            // them, so testing only that drew `a\!b` as `a b` — wider than `ab`, where
-            // the author asked for tighter — and gave `\int\!\!\!\int` three visible gaps.
-            // A terminal cannot set a negative width, so the honest answer is no column.
-            // The comparison is `> 0.0` and not `>= 0.0`: `\kern` takes an arbitrary
-            // dimension, and a zero-width one asked for nothing, so it gets nothing.
+            // Neither of these is an atom of the run, so neither goes through [`element`]
+            // here: a piece that draws nothing is not the same as no piece at all. A
+            // zero-width `Ordinary` between `\!` and `-x` would give the `−` a left
+            // operand it has not got and set `\!-x` as `− x`.
             Event::Space { width, .. } => {
-                let widens = matches!(width, Some(dimension) if dimension.value > 0.0);
-                if widens && spacing.writes_source_spaces() {
-                    pieces.push((Class::Ordinary, text(" ")));
+                if let Some(cells) = source_space(*width, spacing) {
+                    pieces.push((Class::Ordinary, cells));
                 }
                 index += 1;
             }
             // Font and style changes carry no cells of their own.
             Event::StateChange(_) => index += 1,
+            _ => {
+                let (class, piece, used) = element(events, index, mode, spacing, depth)?;
+                pieces.push((class, piece));
+                index = index.saturating_add(used);
+            }
         }
     }
     Ok((assemble(pieces, spacing), index))
+}
+
+/// The cells a `Space` event contributes, or `None` for the ones that contribute none.
+///
+/// `\,`, `\quad`, `\kern`: a horizontal space we honour as one column, and a vertical one
+/// we ignore. Neither can fail.
+///
+/// This is the only cell the walk writes that no table lookup produced, so it answers to
+/// both of the constraints a looked-up gap answers to.
+///
+/// *Suppressed* — a script operand takes no spaces at all, and one that came from `\,` is
+/// no more substitutable than one that came from the table.
+///
+/// *Positive* — `\!`, `\negthinspace`, `\negmedspace` and `\negthickspace` are
+/// `Space { width: Some(Dimension { value: -3.0/18.0, .. }) }` and friends;
+/// `pulldown-latex` labels them "Negative spacing" at `parser/primitives.rs:827-841`.
+/// `width.is_some()` is true for every one of them, so testing only that drew `a\!b` as
+/// `a b` — wider than `ab`, where the author asked for tighter — and gave
+/// `\int\!\!\!\int` three visible gaps. A terminal cannot set a negative width, so the
+/// honest answer is no column. The comparison is `> 0.0` and not `>= 0.0`: `\kern` takes
+/// an arbitrary dimension, and a zero-width one asked for nothing, so it gets nothing.
+fn source_space(width: Option<Dimension>, spacing: Spacing) -> Option<MathBox> {
+    let widens = matches!(width, Some(dimension) if dimension.value > 0.0);
+    (widens && spacing.writes_source_spaces()).then(|| text(" "))
 }
 
 /// Applies the spacing table to a classified sequence and returns the row.
@@ -433,22 +446,265 @@ fn grouping_name(grouping: &Grouping) -> &'static str {
     }
 }
 
-/// What a `Visual` is, for the caption a formula shows when it cannot be drawn.
+/// One element, and the class it takes in the run around it.
 ///
-/// Temporary: a later task gives every one of these an inline form or a named refusal of
-/// its own, and this function goes with the arm that calls it.
-const fn visual_name(visual: &Visual) -> &'static str {
+/// "Element" is the crate's own word for what a `Visual` or a `Script` governs, and the
+/// counts are given per variant (`$PL/src/event.rs:157-172,178-188`). A whole
+/// `Begin…End` group counts as one, and so does a construct that governs elements of its
+/// own — which is why this dispatches rather than deferring to [`build_run`] over a
+/// one-event slice. `x^\frac{a}{b}` and `\sqrt{x}^2` are both a construct whose element
+/// begins with the event that *introduces* another construct, and a one-event slice cuts
+/// that construct off from the elements it governs.
+///
+/// The returned class is the base's own, so that a scripted piece is spaced by what it is
+/// rather than by what happened to it: `\sum_{i=1}^{n} i` sets `∑ᵢ₌₁ⁿ i` because `∑` is
+/// still a [`Class::Large`] after its limits are folded into it, and `x^2 + 1` sets
+/// `x² + 1` because `x` is still ordinary after its.
+fn element(
+    events: &[Event<'_>],
+    at: usize,
+    mode: Mode,
+    spacing: Spacing,
+    depth: usize,
+) -> Result<(Class, MathBox, usize), MathError> {
+    // The second of the two places the recursion is capped; see [`MAX_NESTING`]. This one
+    // catches the chains that open no group -- `\sqrt\sqrt…x` -- which the check in
+    // [`build_run`] never sees because they never re-enter it.
+    if depth > MAX_NESTING {
+        return Err(MathError::NotInline("a formula nested too deeply"));
+    }
+    let deeper = depth.saturating_add(1);
+    match events.get(at) {
+        // A construct whose element is missing. No input reaches this: `pulldown-latex`
+        // answers `{\sqrt}`, `{x^}`, `\sqrt`, `x^` and `\frac{a}{\sqrt}` alike with
+        // "expected a token" and never returns a stream -- measured, not assumed. It is
+        // written all the same, because the alternative is not a wrong rendering but a
+        // hang: an element of zero events leaves the caller's walk exactly where it
+        // started. An *empty group* is a different thing and does arrive -- `\sqrt{}` is
+        // `Begin`, `End` -- and it is an element, of two events, that draws nothing.
+        None | Some(Event::End) => Err(MathError::NotInline("an unfinished construct")),
+        Some(Event::Content(content)) => {
+            let (class, cells) = atom(content);
+            Ok((class, cells, 1))
+        }
+        // A braced group is an atom of the enclosing run: `2{ab}` sets the same cells as
+        // `2ab`, which is what makes a group transparent to spacing. `group` accounts for
+        // the depth of what is inside it, so it is passed `depth` and not `deeper`.
+        Some(Event::Begin(grouping)) => {
+            let (inner, used) = group(events, at, grouping, mode, spacing, depth)?;
+            Ok((Class::Ordinary, inner, used))
+        }
+        Some(Event::Visual(visual)) => visual_box(events, at, *visual, mode, spacing, deeper),
+        Some(Event::Script { ty, position }) => {
+            script_box(events, at, *ty, *position, mode, spacing, deeper)
+        }
+        Some(Event::EnvironmentFlow(_)) => Err(MathError::NotInline("a multi-row environment")),
+        // Neither carries an atom of its own, so as an element each draws nothing —
+        // `x^\,` and `x^\bf` ask for an empty script, and an empty script declines
+        // (`scripts::substitute`). They are elements all the same: a construct that
+        // skipped them would take the event *after* as its element and lose count.
+        Some(Event::Space { width, .. }) => Ok((
+            Class::Ordinary,
+            source_space(*width, spacing).unwrap_or_else(|| row(Vec::new())),
+            1,
+        )),
+        Some(Event::StateChange(_)) => Ok((Class::Ordinary, row(Vec::new()), 1)),
+    }
+}
+
+/// A `Visual` and the elements it governs.
+///
+/// The counts are the crate's, documented per variant at `$PL/src/event.rs:157-172`:
+/// `SquareRoot` takes one following element, `Root` and `Fraction` take two — radicand
+/// first, then index — and `Negation` applies to the next event whatever it is.
+///
+/// In [`Mode::Display`] each becomes the two-dimensional box `boxes` builds for it. In
+/// [`Mode::Inline`] it rewrites itself onto one row, per design spec §5.2, or says why it
+/// cannot.
+fn visual_box(
+    events: &[Event<'_>],
+    at: usize,
+    visual: Visual,
+    mode: Mode,
+    spacing: Spacing,
+    depth: usize,
+) -> Result<(Class, MathBox, usize), MathError> {
+    let after = at.saturating_add(1);
     match visual {
-        Visual::Fraction(_) => "a fraction",
-        Visual::SquareRoot => "a square root",
-        Visual::Root => "a root with an index",
-        Visual::Negation => "a negation",
+        Visual::Fraction(_) => {
+            let (_, num, a) = element(events, after, mode, spacing, depth)?;
+            let (_, den, b) = element(events, after.saturating_add(a), mode, spacing, depth)?;
+            let used = 1usize.saturating_add(a).saturating_add(b);
+            let cells = match mode {
+                Mode::Display => boxes::fraction(num, den),
+                // The one-row rewrite. The slash carries no class and no gap of its own:
+                // `a/b` is set tight, and what keeps `\frac{a+b}{c}` from reading as the
+                // different expression `a + b/c` is the parentheses, not a space.
+                Mode::Inline => row(vec![bracketed(num), text("/"), bracketed(den)]),
+            };
+            Ok((Class::Ordinary, cells, used))
+        }
+        Visual::SquareRoot => {
+            let (_, radicand, a) = element(events, after, mode, spacing, depth)?;
+            let cells = match mode {
+                Mode::Display => boxes::radical(radicand, None),
+                Mode::Inline => row(vec![text("√"), bracketed(radicand)]),
+            };
+            Ok((Class::Ordinary, cells, 1usize.saturating_add(a)))
+        }
+        Visual::Root => {
+            // Declined before the operands are built, so the caption names the root and
+            // not whatever the radicand happens to contain.
+            //
+            // `3√x` reads as three times a square root, which is a different number.
+            // Declining shows the source instead, which is design spec §9's whole point:
+            // a formula in the wrong place, not an error.
+            if matches!(mode, Mode::Inline) {
+                return Err(MathError::NotInline("a root with an index"));
+            }
+            let (_, radicand, a) = element(events, after, mode, spacing, depth)?;
+            let (_, index, b) = element(events, after.saturating_add(a), mode, spacing, depth)?;
+            let used = 1usize.saturating_add(a).saturating_add(b);
+            Ok((Class::Ordinary, boxes::radical(radicand, Some(index)), used))
+        }
+        Visual::Negation => {
+            let (class, inner, a) = element(events, after, mode, spacing, depth)?;
+            // U+0338 COMBINING LONG SOLIDUS OVERLAY. The crate leaves the rendering to us
+            // (`$PL/src/event.rs:166-171`) and this is what a terminal can do: the
+            // overlay follows the character it strikes, and measures no column of its own.
+            //
+            // The negated thing keeps its class, so `a \not= b` is still a relation and
+            // still takes a space either side. Classing it `Ordinary` would set `a≠b`.
+            Ok((
+                class,
+                row(vec![inner, text("\u{338}")]),
+                1usize.saturating_add(a),
+            ))
+        }
+    }
+}
+
+/// A base and its scripts.
+///
+/// `ScriptPosition::Movable` is the crate's "above and below by preference, to the right
+/// when inline" (`$PL/src/event.rs:193-201`), so [`Mode`] resolves it. This is the third
+/// and last place in this file that reads the flag.
+fn script_box(
+    events: &[Event<'_>],
+    at: usize,
+    ty: ScriptType,
+    position: ScriptPosition,
+    mode: Mode,
+    spacing: Spacing,
+    depth: usize,
+) -> Result<(Class, MathBox, usize), MathError> {
+    let after = at.saturating_add(1);
+    let (class, base, a) = element(events, after, mode, spacing, depth)?;
+    // Operands of a script are built with spacing suppressed: there is no raised space in
+    // Unicode, so `scripts::superscript` declines on one and `x^{a+b}` would fall back to
+    // its source. The owner ruled this exception; it lives here rather than in the table
+    // because it is a fact about position, not about a pair. Display keeps the enclosing
+    // policy, because a script drawn on its own row can hold a space like any other row.
+    let operand_spacing = match mode {
+        Mode::Inline => Spacing::Suppressed,
+        Mode::Display => spacing,
+    };
+    let first = after.saturating_add(a);
+    let (sub, sup, used) = match ty {
+        ScriptType::Subscript => {
+            let (_, s, b) = element(events, first, mode, operand_spacing, depth)?;
+            (Some(s), None, 1usize.saturating_add(a).saturating_add(b))
+        }
+        ScriptType::Superscript => {
+            let (_, s, b) = element(events, first, mode, operand_spacing, depth)?;
+            (None, Some(s), 1usize.saturating_add(a).saturating_add(b))
+        }
+        // Base, then subscript, then superscript, whichever order the source wrote them.
+        ScriptType::SubSuperscript => {
+            let (_, lo, b) = element(events, first, mode, operand_spacing, depth)?;
+            let (_, hi, c) = element(
+                events,
+                first.saturating_add(b),
+                mode,
+                operand_spacing,
+                depth,
+            )?;
+            (
+                Some(lo),
+                Some(hi),
+                1usize.saturating_add(a).saturating_add(b).saturating_add(c),
+            )
+        }
+    };
+
+    let stacked = matches!(position, ScriptPosition::AboveBelow)
+        || (matches!(position, ScriptPosition::Movable) && matches!(mode, Mode::Display));
+
+    let cells = match (mode, stacked) {
+        (Mode::Display, true) => boxes::limits(base, sub, sup),
+        (Mode::Display, false) => boxes::scripts(base, sub, sup),
+        (Mode::Inline, _) => {
+            // The base is bracketed for the same reason a fraction's part is: `2{ab}^2`
+            // is `2(ab)²`, and `2ab²` reads as `2·a·b²`. The *operands* are not — a
+            // raised group delimits itself, and Unicode has `⁽⁾`, so bracketing them
+            // would set `x⁽ᵃ⁺ᵇ⁾` where `xᵃ⁺ᵇ` is what was written.
+            let mut out = draw::to_row(&bracketed(base))?;
+            // All-or-nothing per group: substitute the whole operand or none of it. A
+            // partial substitution renders `a_{bc}` as `a_b c`, a different expression.
+            if let Some(sub) = &sub {
+                let cells = draw::to_row(sub)?;
+                out.push_str(
+                    &scripts::subscript(&cells)
+                        .ok_or(MathError::NotInline("a subscript with no lowered form"))?,
+                );
+            }
+            if let Some(sup) = &sup {
+                let cells = draw::to_row(sup)?;
+                out.push_str(
+                    &scripts::superscript(&cells)
+                        .ok_or(MathError::NotInline("a superscript with no raised form"))?,
+                );
+            }
+            text(out)
+        }
+    };
+    Ok((class, cells, used))
+}
+
+/// Whether a box draws a single atom, and so cannot be misread when something is set
+/// against it.
+///
+/// Design spec §5.2 asks for parentheses "when either part is not a single atom".
+/// *Atom* is this engine's own word — one piece of a run — so this counts pieces and not
+/// characters: `x²` is one piece and as unmisreadable as `x`, while `ab` is two, and two
+/// is what `\frac{1}{2a}` and `2{ab}^2` have to bracket. An empty box is not one atom, so
+/// `\frac{}{b}` sets `()/b` rather than `/b`.
+///
+/// A test for "already parenthesised" would be the wrong rule: `\frac{(a)+(b)}{c}` has
+/// parentheses at both ends and is still three atoms, which is the exact misreading the
+/// bracket exists to prevent.
+fn is_one_atom(b: &MathBox) -> bool {
+    match &b.content {
+        BoxContent::Row(parts) => matches!(parts.as_slice(), [only] if is_one_atom(only)),
+        _ => true,
+    }
+}
+
+/// `b` in parentheses unless it is one atom (design spec §5.2).
+///
+/// `a/b` needs none and `√x` needs none; `a + b/c` is a different expression from
+/// `(a + b)/c`, and this is the only thing standing between the two.
+fn bracketed(b: MathBox) -> MathBox {
+    if is_one_atom(&b) {
+        b
+    } else {
+        row(vec![text("("), b, text(")")])
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_NESTING, Mode, Spacing, build, build_run, parse};
+    use super::{MAX_NESTING, Mode, Spacing, build, build_run, draw, parse};
     use crate::math::boxes::BoxContent;
     use pulldown_latex::Storage;
 
@@ -502,15 +758,20 @@ mod tests {
     }
 
     #[test]
-    fn a_negation_is_named_rather_than_silently_dropped() {
+    fn a_negation_strikes_the_element_it_applies_to_and_keeps_its_class() {
         // `\not=` is `Visual(Negation)` followed by the `=` relation, not a two-character
         // relation. A walk that ignored `Visual` would set `a = b` for `a \not= b` --
-        // wrong mathematics, silently -- so it refuses by name until a later task draws
-        // it.
+        // wrong mathematics, silently.
+        //
+        // The overlay follows the character it strikes and measures no column, so the
+        // whole thing is one cell wide. And it is still a relation: classing the negated
+        // box `Ordinary` would set `a≠b`, which is why the spacing is asserted here and
+        // not just the characters.
+        assert_eq!(inline(r"a \not= b"), "a =\u{338} b");
         let storage = Storage::new();
         let events = parse(r"a \not= b", &storage).expect("parses");
-        let err = build(&events, Mode::Inline).expect_err("no negation yet");
-        assert_eq!(format!("{err}"), "a negation cannot be drawn on one row");
+        let b = build(&events, Mode::Inline).expect("builds");
+        assert_eq!(b.width, 5, "a, space, the struck =, space, b");
     }
 
     #[test]
@@ -742,34 +1003,42 @@ mod tests {
     }
 
     #[test]
-    fn every_visual_is_named_by_what_it_is() {
-        // `visual_name`'s arms are otherwise unreached: swapping two of these names, or
-        // collapsing all four to one string, passes every other test in this module.
-        assert_eq!(
-            refusal(r"\frac{a}{b}"),
-            "a fraction cannot be drawn on one row"
-        );
-        assert_eq!(
-            refusal(r"\sqrt{x}"),
-            "a square root cannot be drawn on one row"
-        );
+    fn an_indexed_root_has_no_honest_one_row_form() {
+        // The one `Visual` with no inline rewrite. It is named, and named for what it is:
+        // the other three all draw now, so a caption saying anything else here would be
+        // reporting the wrong construct.
         assert_eq!(
             refusal(r"\sqrt[3]{x}"),
             "a root with an index cannot be drawn on one row"
         );
+
+        // Declined before its operands are built. With the check placed after them,
+        // `\sqrt[3]{\begin{matrix} a \end{matrix}}` reports the matrix -- true of
+        // something inside it, but not the reason this formula cannot be drawn.
         assert_eq!(
-            refusal(r"a \not= b"),
-            "a negation cannot be drawn on one row"
+            refusal(r"\sqrt[3]{\begin{matrix} a \end{matrix}}"),
+            "a root with an index cannot be drawn on one row"
         );
     }
 
     #[test]
-    fn a_script_is_refused_rather_than_flattened() {
-        // Change the `Event::Script` arm to `index += 1` and every other test in this
-        // module still passes, while `x^2` draws as `x2` -- a different number, silently.
-        // One arm away from the `\not=` case, and the same failure.
-        assert_eq!(refusal("x^2"), "a script cannot be drawn on one row");
-        assert_eq!(refusal("x_i"), "a script cannot be drawn on one row");
+    fn a_script_group_with_no_form_is_named_by_which_side_it_is_on() {
+        // Unicode has no superscript `q` and no subscript `b`, so each side declines --
+        // and says which side, because the reader can act on that (`x^{2q}` can be
+        // rewritten, `x_{b}` cannot).
+        assert_eq!(
+            refusal("x^{2q}"),
+            "a superscript with no raised form cannot be drawn on one row"
+        );
+        assert_eq!(
+            refusal("x_b"),
+            "a subscript with no lowered form cannot be drawn on one row"
+        );
+        // Both sides at once: the subscript is written first, so it is the one reported.
+        assert_eq!(
+            refusal("x_b^q"),
+            "a subscript with no lowered form cannot be drawn on one row"
+        );
     }
 
     #[test]
@@ -836,5 +1105,263 @@ mod tests {
             "ab",
             "and inside an operand it is dropped like any other space"
         );
+    }
+
+    #[test]
+    fn an_inline_fraction_becomes_a_slash() {
+        assert_eq!(inline(r"\frac{a}{b}"), "a/b");
+        // Both parts are more than one atom, so both are parenthesised, and each part
+        // keeps the spacing the table gives it inside its own brackets.
+        assert_eq!(inline(r"\frac{-b}{2a}"), "(−b)/(2a)");
+        assert_eq!(inline(r"\frac{a+b}{c}"), "(a + b)/c");
+        // Swapping the two parts is invisible whenever they are the same shape, so this
+        // is the assertion that pins which is which.
+        assert_eq!(inline(r"\frac{a}{bb}"), "a/(bb)");
+        // The walk resumes after the fraction. With the element count short by one, `c`
+        // is swallowed; long by one, it is dropped.
+        assert_eq!(inline(r"\frac{a}{b}c"), "a/bc");
+    }
+
+    #[test]
+    fn an_inline_square_root_takes_the_radical_sign() {
+        assert_eq!(inline(r"\sqrt{x}"), "√x");
+        assert_eq!(inline(r"\sqrt{b+4}"), "√(b + 4)");
+        assert_eq!(inline(r"\sqrt{x}y"), "√xy", "and the walk resumes after it");
+    }
+
+    #[test]
+    fn an_operand_of_more_than_one_atom_is_parenthesised() {
+        // Design spec 5.2. This is the boundary itself, not the two sides of it: one atom
+        // is bare, two atoms are bracketed, and the second atom is the whole difference.
+        assert_eq!(inline(r"\sqrt{a}"), "√a", "one atom");
+        assert_eq!(inline(r"\sqrt{ab}"), "√(ab)", "two");
+        assert_eq!(inline(r"\frac{1}{2a}"), "1/(2a)");
+
+        // A nested group is still whatever is inside it. `{{ab}}` is one *piece* holding
+        // one piece holding two, so a check that stopped at the first level would call it
+        // a single atom and set `ab/c`, which reads as `a·b/c`.
+        assert_eq!(inline(r"\frac{{ab}}{c}"), "(ab)/c");
+
+        // A construct that draws several characters is still one atom: `x²` cannot be
+        // misread, so bracketing it would only add noise.
+        assert_eq!(inline(r"\frac{x^2}{c}"), "x²/c");
+
+        // An empty group is not one atom either, so it keeps its brackets and the reader
+        // can see that the author wrote nothing there. Dropping them sets `√` and `/b`,
+        // which look like a typo in this crate rather than one in the document.
+        assert_eq!(inline(r"\sqrt{}"), "√()");
+        assert_eq!(inline(r"\frac{}{b}"), "()/b");
+    }
+
+    #[test]
+    fn an_inline_script_is_substituted_when_every_character_has_a_form() {
+        assert_eq!(inline("x^2"), "x²");
+        assert_eq!(inline("x^{-1}"), "x⁻¹", "the U+2212 minus, not ASCII");
+        assert_eq!(inline("e^{2n}"), "e²ⁿ");
+        assert_eq!(inline("a_1"), "a₁");
+        assert_eq!(inline("a_i"), "aᵢ");
+        assert_eq!(
+            inline("x^2y"),
+            "x²y",
+            "and the walk resumes after the script"
+        );
+        // Subscript then superscript, whichever order the source wrote them in.
+        assert_eq!(inline("a_i^n"), "aᵢⁿ");
+        assert_eq!(
+            inline("a^n_i"),
+            "aᵢⁿ",
+            "the same, written the other way round"
+        );
+    }
+
+    #[test]
+    fn no_spaces_are_set_inside_a_script_operand() {
+        // There is no raised space, so the substitution would decline on one and the
+        // whole formula would fall back to its source.
+        assert_eq!(inline("x^{a+b}"), "xᵃ⁺ᵇ");
+        assert_eq!(
+            inline(r"x^{a\,b}"),
+            "xᵃᵇ",
+            "including one the source asked for"
+        );
+        // The base is *not* an operand and keeps the enclosing spacing: `\sin` still
+        // parts from the `2` before it.
+        assert_eq!(inline(r"2\sin^2 x"), "2 sin² x");
+    }
+
+    #[test]
+    fn a_scripted_piece_is_spaced_by_what_its_base_is() {
+        // A big operator is still a big operator once its limits are folded into it, so
+        // it still parts from what follows: `∑ᵢ₌₁ⁿ i`, not `∑ᵢ₌₁ⁿi`. Classing the
+        // scripted piece `Ordinary` loses the space, and no other assertion here sees it.
+        assert_eq!(inline(r"\sum_{i=1}^{n} i"), "∑ᵢ₌₁ⁿ i");
+        assert_eq!(inline(r"\int_0^1 f"), "∫₀¹ f");
+        // A function name likewise. The third carried stage-1 defect: stage 1 set
+        // `sin²x`, because its trailing space was suppressed by the script rather than
+        // decided by the pair. `gap(Function, Ordinary)` is 1 and says so once.
+        assert_eq!(inline(r"\sin^2 x"), "sin² x");
+        // And an ordinary base stays ordinary, so nothing is gained everywhere.
+        assert_eq!(inline("x^2 y"), "x²y");
+    }
+
+    #[test]
+    fn a_script_base_of_more_than_one_atom_is_parenthesised() {
+        // `2{ab}^2` is `2·(ab)²`. Unbracketed it sets `2ab²`, which reads as `2·a·b²`.
+        assert_eq!(inline(r"2{ab}^2"), "2(ab)²");
+        assert_eq!(inline(r"2{ab}_2"), "2(ab)₂");
+        // The operand is *not* bracketed, even though Unicode has `⁽` and `⁾`: a raised
+        // group already delimits itself, and `x⁽ᵃ⁺ᵇ⁾` is not what was written.
+        assert_eq!(inline("x^{a+b}"), "xᵃ⁺ᵇ");
+    }
+
+    #[test]
+    fn a_construct_may_be_the_element_of_another_construct() {
+        // Stage 1 declined both of these by name: its one-row walk took a single event or
+        // a `{…}` group as an element, and a bare `Visual` or `Script` is neither. In one
+        // engine an element is just a box, so the only question left is whether the
+        // *substitution* succeeds.
+        assert_eq!(inline(r"\sqrt{x}^2"), "(√x)²");
+        assert_eq!(inline(r"\frac{a}{b}^2"), "(a/b)²");
+        // The other way round: a construct as the element of a `Visual`.
+        assert_eq!(inline(r"\sqrt\sqrt x"), "√(√x)");
+        // The substitution is still the only question, and a raised slash is one of the
+        // characters Unicode has not got.
+        assert_eq!(
+            refusal(r"x^\frac{a}{b}"),
+            "a superscript with no raised form cannot be drawn on one row"
+        );
+    }
+
+    #[test]
+    fn a_script_whose_operand_draws_nothing_declines() {
+        // `\,` and `\bf` are elements that carry no atom. As a script operand each gives
+        // an empty group, and an empty group declines (`scripts::substitute`) rather than
+        // raising nothing at all. Without an arm for them the element count slips and the
+        // walk reads the *next* event as the operand.
+        assert_eq!(
+            refusal(r"x^\,"),
+            "a superscript with no raised form cannot be drawn on one row"
+        );
+        assert_eq!(
+            refusal(r"x^\bf"),
+            "a superscript with no raised form cannot be drawn on one row"
+        );
+    }
+
+    #[test]
+    fn a_chain_of_rewrites_is_capped_even_though_it_opens_no_group() {
+        // `\sqrt\sqrt…x` recurses `element` -> `visual_box` -> `element` and never opens
+        // a brace, so the cap in `build_run` alone does not see it: without the one in
+        // `element` this aborts the process rather than refusing. The boundary is pinned
+        // on both sides, one repeat apart.
+        let chain = |n: usize| r"\sqrt".repeat(n) + " x";
+        assert_eq!(
+            refusal(&chain(MAX_NESTING + 1)),
+            "a formula nested too deeply cannot be drawn on one row"
+        );
+        let storage = Storage::new();
+        let at_the_cap = chain(MAX_NESTING);
+        let events = parse(&at_the_cap, &storage).expect("parses");
+        assert!(
+            build(&events, Mode::Inline).is_ok(),
+            "the cap itself still builds"
+        );
+
+        // No `nest(5000)` counterpart exists for this chain, and that is a fact about the
+        // parser rather than an omission: `pulldown-latex` recurses on `\sqrt` and `parse`
+        // aborts the process between 129 and 144 repeats, measured on this branch. The
+        // brace chain reaches 5000 only because the parser handles braces iteratively.
+        let near_the_parsers_own_cap = chain(129);
+        assert!(
+            parse(&near_the_parsers_own_cap, &storage).is_ok(),
+            "129 still parses, which is the margin this cap has"
+        );
+    }
+
+    #[test]
+    fn display_mode_keeps_the_two_dimensional_form_of_all_four() {
+        use crate::math::boxes::BoxContent;
+
+        /// The one piece of a display formula that is a single construct.
+        fn only_part(src: &str) -> BoxContent {
+            let storage = Storage::new();
+            let events = parse(src, &storage).expect("parses");
+            let b = build(&events, Mode::Display).expect("builds");
+            let BoxContent::Row(parts) = &b.content else {
+                panic!("expected a row, got {:?}", b.content)
+            };
+            assert_eq!(parts.len(), 1, "one construct, one piece: {src}");
+            parts[0].content.clone()
+        }
+
+        // Parts of different widths, so a numerator/denominator swap cannot hide behind
+        // a width that is a max and two heights that are both 1.
+        let BoxContent::Fraction { num, den } = only_part(r"\frac{a}{bb}") else {
+            panic!("display mode must not rewrite a fraction to a slash")
+        };
+        assert_eq!(
+            draw::to_row(&num).expect("flat"),
+            "a",
+            "the numerator is on top"
+        );
+        assert_eq!(draw::to_row(&den).expect("flat"), "bb");
+        assert!(
+            matches!(
+                only_part(r"\sqrt{x}"),
+                BoxContent::Radical { index: None, .. }
+            ),
+            "nor a square root to the radical sign"
+        );
+        // The indexed root, which has no inline form at all, and which is also where a
+        // radicand/index swap hides: `pulldown-latex` gives the radicand first.
+        let BoxContent::Radical { radicand, index } = only_part(r"\sqrt[3]{x}") else {
+            panic!("expected a radical")
+        };
+        assert_eq!(draw::to_row(&radicand).expect("flat"), "x");
+        let index = index.expect("an index was written");
+        assert_eq!(draw::to_row(&index).expect("flat"), "3");
+
+        // `Right` stays to the right; `Movable` stacks, because display mode is exactly
+        // the condition the crate documents for it.
+        let BoxContent::Scripts { sub, sup, .. } = only_part(r"\int_0^1") else {
+            panic!("a Right script must not stack")
+        };
+        assert_eq!(
+            draw::to_row(&sub.expect("a subscript")).expect("flat"),
+            "0",
+            "the lower limit stays below"
+        );
+        assert_eq!(
+            draw::to_row(&sup.expect("a superscript")).expect("flat"),
+            "1"
+        );
+
+        let BoxContent::Limits { under, over, .. } = only_part(r"\sum_{i=1}^{n}") else {
+            panic!("a Movable script stacks in display mode")
+        };
+        assert_eq!(
+            draw::to_row(&under.expect("an under")).expect("flat"),
+            "i = 1",
+            "a display operand keeps the spacing the table gives it"
+        );
+        assert_eq!(draw::to_row(&over.expect("an over")).expect("flat"), "n");
+
+        // `AboveBelow` is the position that asked for stacking outright, and it is a
+        // separate arm from the one `Movable` borrows: with only the `Movable` arm left,
+        // `\sum\limits` sets its limits to the right in display mode too.
+        let BoxContent::Limits { under, over, .. } = only_part(r"\sum\limits_{i}^{n}") else {
+            panic!("an AboveBelow script stacks whatever else is true")
+        };
+        assert_eq!(draw::to_row(&under.expect("an under")).expect("flat"), "i");
+        assert_eq!(draw::to_row(&over.expect("an over")).expect("flat"), "n");
+    }
+
+    #[test]
+    fn a_script_that_asked_to_be_stacked_still_comes_back_on_one_row() {
+        // One row has nowhere to stack, so `AboveBelow` is set to the right inline --
+        // the same answer `Movable` gets, reached for the same reason. `Mode` is what
+        // decides it, which is why this is the mode flag's third and last reader.
+        assert_eq!(inline(r"\sum\limits_{i}^{n} x"), "∑ᵢⁿ x");
+        assert_eq!(inline(r"\underset{a}{b}"), "bₐ");
     }
 }

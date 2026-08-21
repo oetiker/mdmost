@@ -116,11 +116,14 @@ const ZERO_ROW: [u16; N] = [0; N];
 const TOUCHES_ROW: [u16; N] = [0, 0, 1, 1, 0, 1, 1, 0, 0, 0];
 
 /// [`Class::Unary`]: binds tight to what follows, per the plan's decision that a sign
-/// with no left operand hugs its operand — `-x` -> `−x`, `-\sin x` -> `−sin x`. Not yet
-/// pinned by a passing test: `src/math/tests.rs`'s
-/// `a_leading_unary_minus_before_a_function_name_keeps_a_space` still asserts the
-/// stage-1 defect (`"− sin x"`, loose) on purpose, until Task 5 renames it to
-/// `a_leading_unary_minus_binds_tight_to_a_function_name` and flips the expectation.
+/// with no left operand hugs its operand — `-x` -> `−x`, `-\sin x` -> `−sin x`. Pinned by
+/// `build.rs`'s `a_function_name_parts_from_its_argument`, over the new engine.
+///
+/// `src/math/tests.rs`'s `a_leading_unary_minus_before_a_function_name_keeps_a_space`
+/// still asserts the stage-1 defect (`"− sin x"`, loose) on purpose, and still passes,
+/// because `render_inline` is still stage 1's own walk. It flips when that walk is
+/// replaced and not before: a test changed while the code under it is unchanged is a
+/// test that fails.
 ///
 /// Two cells break that pattern: `Binary` and `Relation`, because the owner's ruling —
 /// "one space either side of a relation always" — is not something a wildcard is
