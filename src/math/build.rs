@@ -415,8 +415,8 @@ fn atom(content: &Content<'_>) -> (Class, MathBox) {
 /// the caller's loop rather than indexing past it.
 ///
 /// This is a `match` over the whole `Grouping` and not a chain of `if let`, because
-/// later tasks replace single arms of it: [`Grouping::LeftRight`] gets a real fenced box
-/// of its own, and the environments stay here until grids arrive.
+/// later tasks replace single arms of it: [`Grouping::LeftRight`] has its fenced box
+/// already, and the environments stay here until grids arrive.
 fn group(
     events: &[Event<'_>],
     start: usize,
@@ -440,9 +440,24 @@ fn group(
             Ok((inner, used.saturating_add(2)))
         }
         // `\left( ... \right)`: the delimiters are the variant's own fields, not separate
-        // `Content::Delimiter` events, so dropping this arm would silently lose them.
-        // A later task turns it into `boxes::fenced`; until then it refuses by name.
-        Grouping::LeftRight(..) => Err(MathError::NotInline("a delimited group")),
+        // `Content::Delimiter` events, so ignoring them the way `Normal`'s braces are
+        // ignored would silently lose them. `None` is a real `\left.` -- an intentionally
+        // invisible delimiter -- so it is passed on as `None` and nothing is drawn for it,
+        // rather than being replaced by a placeholder character.
+        Grouping::LeftRight(opening, closing) => {
+            let inside = start.saturating_add(1);
+            let (body, used) = build_run(
+                events.get(inside..).unwrap_or_default(),
+                mode,
+                spacing,
+                depth.saturating_add(1),
+            )?;
+            // `used` stops at the `End`; the `Begin` and that `End` are this group's own.
+            Ok((
+                boxes::fenced(*opening, *closing, body),
+                used.saturating_add(2),
+            ))
+        }
         other => Err(MathError::NotInline(grouping_name(other))),
     }
 }
@@ -745,6 +760,22 @@ mod tests {
         }
     }
 
+    /// Builds and draws, for the boxes whose cells are not in the tree's `Text` leaves.
+    ///
+    /// [`flatten`] is a structural assertion as much as a rendering: it panics on any
+    /// content that is not a plain row of text. A `Fenced` box is one row, but it keeps
+    /// its delimiters in its own fields and `draw::write_flat` is what writes them, so
+    /// teaching `flatten` about them would put a second copy of that rule in the test
+    /// helper. This calls the drawing walk instead, which is also the walk Task 6's
+    /// `render_inline` will reach these boxes through. `to_row` refuses a box that is not
+    /// one row, so the one-row guarantee `inline` asserts is kept here too.
+    fn drawn(src: &str) -> String {
+        let storage = Storage::new();
+        let events = parse(src, &storage).expect("parses");
+        let b = build(&events, Mode::Inline).expect("builds inline");
+        draw::to_row(&b).unwrap_or_else(|err| panic!("{src} did not come back on one row: {err}"))
+    }
+
     #[test]
     fn a_bare_variable_is_one_text_box() {
         assert_eq!(inline("x"), "x");
@@ -989,18 +1020,57 @@ mod tests {
     }
 
     #[test]
-    fn a_left_right_group_is_named_rather_than_silently_dropped() {
+    fn a_left_right_group_draws_its_delimiters() {
         // `Grouping::LeftRight` carries its delimiters in the variant's own fields
         // (`pulldown-latex-0.8.0/src/event.rs:316`), not as `Content::Delimiter` events.
-        // Stage 1 assumed the opposite and drew `\left(\frac{a}{b}\right)^2` as `a/b²`.
-        // Until a later task builds a real fence, dropping to a named refusal is the only
-        // honest answer.
-        let storage = Storage::new();
-        let events = parse(r"\left( x \right)", &storage).expect("parses");
-        let err = build(&events, Mode::Inline).expect_err("no fences yet");
+        // Stage 1 assumed the opposite and drew `\left(\frac{a}{b}\right)^2` as `a/b²` --
+        // a different number, drawn silently.
+        //
+        // These eight strings are `src/math/tests.rs:373-392` exactly. Those still measure
+        // stage 1's walk until Task 6 swaps the engines, so they cannot see this arm; this
+        // test is what makes it measurable before the swap rather than after it.
+        assert_eq!(drawn(r"\left(x\right)"), "(x)");
+        assert_eq!(drawn(r"\left(a+b\right)"), "(a + b)");
+        assert_eq!(drawn(r"\left[x\right]"), "[x]");
+        assert_eq!(drawn(r"\left(\frac{a}{b}\right)^2"), "(a/b)²");
+        // `\left.` and `\right.` are deliberately invisible delimiters, not missing ones.
+        assert_eq!(drawn(r"\left.x\right)"), "x)");
+        assert_eq!(drawn(r"\left(x\right."), "(x");
+        // A fence is one atom, so it takes a script without a second pair of brackets,
+        // and it is `Ordinary`, so a binary operator to its left keeps its gap.
+        assert_eq!(drawn(r"a + \left(b\right)"), "a + (b)");
+        assert_eq!(drawn(r"\left(x\right)_0"), "(x)₀");
+
+        // Every case above puts the fence last or leaves nothing after it but a script,
+        // where miscounting the events the group spans would not show. Only ordinary
+        // content after the closing delimiter does -- the same gap the brace-group test
+        // closes with `{ab}c`.
         assert_eq!(
-            format!("{err}"),
-            "a delimited group cannot be drawn on one row"
+            drawn(r"\left(x\right)y"),
+            "(x)y",
+            "the walk resumes after it"
+        );
+    }
+
+    #[test]
+    fn a_fence_counts_toward_the_nesting_cap_like_any_other_group() {
+        // The cap is enforced in `build_run`, so it only sees a fence if this arm passes
+        // `depth + 1` the way the brace arm does. Nesting braces cannot show that: they
+        // go through their own arm.
+        //
+        // One past the cap first, as in the brace test, and for the same reason: with the
+        // increment dropped this line fails as a named test, while the deeper the nesting
+        // the closer the unguarded recursion gets to `SIGABRT`, which no test can report.
+        let nest = |depth: usize| r"\left(".repeat(depth) + "x" + &r"\right)".repeat(depth);
+        assert_eq!(
+            refusal(&nest(MAX_NESTING + 1)),
+            "a formula nested too deeply cannot be drawn on one row"
+        );
+        // And the other side of the same boundary, so the cap is not simply refusing
+        // everything.
+        assert_eq!(
+            drawn(&nest(MAX_NESTING)),
+            "(".repeat(MAX_NESTING) + "x" + &")".repeat(MAX_NESTING)
         );
     }
 
