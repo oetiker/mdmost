@@ -88,13 +88,20 @@ fn write_flat(b: &MathBox, out: &mut String, depth: usize) {
                 out.push(*c);
             }
         }
-        // A zero-height box is a row of text, a list of them, or a one-row fence. Every
-        // other variant has a non-zero `above` or `below` by construction (`boxes.rs`),
-        // so `is_inline` already rejected it and there is nothing to write here.
-        BoxContent::Fraction { .. }
-        | BoxContent::Scripts { .. }
-        | BoxContent::Limits { .. }
-        | BoxContent::Radical { .. } => {}
+        // A `Scripts` or `Limits` whose operands are both `None` is zero-height, so
+        // `is_inline` let it through and its base must still be written -- which is what
+        // `place` does. A present operand always costs a row (`boxes::scripts` takes the
+        // script's whole `height()`, which is at least 1, into `above`/`below`, and
+        // `boxes::limits` adds it), so under `is_inline` both are `None` and the base is
+        // the whole box.
+        BoxContent::Scripts { base, .. } | BoxContent::Limits { base, .. } => {
+            write_flat(base, out, depth.saturating_add(1));
+        }
+        // A `Fraction`'s `above` is `num.height()` and a `Radical`'s is its radicand's
+        // `above` plus the overline row, and a height is at least 1 -- so neither can
+        // ever be zero-height and `is_inline` has already rejected them. Checked against
+        // `boxes::fraction` and `boxes::radical`, not assumed.
+        BoxContent::Fraction { .. } | BoxContent::Radical { .. } => {}
     }
 }
 
@@ -119,6 +126,8 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
     let deeper = depth.saturating_add(1);
     match &b.content {
         BoxContent::Text(s) => {
+            // A negative baseline is a row above the canvas, reachable only after a `u16`
+            // saturation upstream; skipping the draw clips it as the canvas would.
             if let Ok(row) = usize::try_from(baseline) {
                 canvas.write_str(row, usize::from(col), s, theme.base());
             }
@@ -132,7 +141,7 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
         }
         BoxContent::Fraction { num, den } => {
             // The rule is the baseline and spans the wider part; each half is centred
-            // over or under it.
+            // over or under it. The `if let Ok` is the same off-canvas clip as above.
             if let Ok(row) = usize::try_from(baseline) {
                 canvas.hline(
                     row,
@@ -246,7 +255,8 @@ const fn centre(field: u16, content: u16) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::{MAX_DEPTH, to_canvas, to_row};
-    use crate::math::boxes::{fraction, limits, row, scripts, text};
+    use crate::math::boxes::{MathBox, fenced, fraction, limits, radical, row, scripts, text};
+    use crate::text::display_width;
     use crate::theme::Theme;
 
     /// The canvas as one string per row, trailing blanks trimmed, for readable asserts.
@@ -264,6 +274,19 @@ mod tests {
 
     #[test]
     fn a_box_that_needs_a_second_row_refuses_the_inline_path() {
+        // Two rows is the boundary and the only value that says where the refusal is
+        // drawn. A three-row fraction is rejected by any threshold between one and three,
+        // so on its own it pins nothing: `!b.is_inline()` and `b.height() > 2` agree on
+        // it. They disagree on a superscript, which is two rows, and under the looser
+        // test `write_flat` would return the base alone -- a formula that quietly loses
+        // its exponent instead of raising `NotInline`.
+        let two_rows = scripts(text("x"), None, Some(text("2")));
+        assert_eq!(two_rows.height(), 2, "the boundary case must be two rows");
+        assert!(
+            to_row(&two_rows).is_err(),
+            "one row over the prose line is already too many"
+        );
+
         let b = fraction(text("a"), text("b"));
         assert!(to_row(&b).is_err(), "the constraint cannot be bypassed");
     }
@@ -440,5 +463,120 @@ mod tests {
                 .check_invariants()
                 .unwrap_or_else(|e| panic!("{b:?} broke the canvas contract: {e}"));
         }
+    }
+
+    /// One tree, one rendering: `to_row` and row 0 of `to_canvas` must be the same cells.
+    ///
+    /// This is the ONE ENGINE ruling, and until now it was only a sentence in the module
+    /// doc — each walk was tested against its own expectations and neither against the
+    /// other. `write_flat` and `place` are separate matches over the same enum, so every
+    /// task that adds an arm to one of them can silently disagree with the other.
+    ///
+    /// The padding is handled by pinning it to zero rather than by a `trim_end()`. A
+    /// zero-height box has exactly one row and the canvas is asked for the box's own
+    /// width, so the flat string fills the row edge to edge and the two can be compared
+    /// raw. Asserting `display_width(flat) == b.width` first is what makes that safe: if
+    /// a later arm reserves columns it does not write, that assert names the shortfall,
+    /// where a `trim_end()` would swallow it along with any real trailing-space
+    /// difference in the drawn row.
+    #[test]
+    fn the_flat_walk_and_the_canvas_walk_render_the_same_cells() {
+        let theme = Theme::default();
+        let cases: Vec<(&str, MathBox)> = vec![
+            ("plain text", text("E = mc")),
+            (
+                "a row of parts",
+                row(vec![text("E"), text(" = "), text("mc")]),
+            ),
+            ("an empty row", row(vec![])),
+            (
+                "scripts with neither operand",
+                scripts(text("x"), None, None),
+            ),
+            ("limits with neither operand", limits(text("∑"), None, None)),
+            (
+                "a row holding both bare-base shapes",
+                row(vec![
+                    text("a"),
+                    scripts(text("x"), None, None),
+                    limits(text("∑"), None, None),
+                    text("b"),
+                ]),
+            ),
+            (
+                "nested bare bases",
+                scripts(
+                    limits(scripts(text("q"), None, None), None, None),
+                    None,
+                    None,
+                ),
+            ),
+        ];
+
+        for (what, b) in cases {
+            assert!(b.is_inline(), "{what}: the case itself must be zero-height");
+            let flat = to_row(&b).expect("is inline");
+            assert_eq!(
+                display_width(&flat),
+                usize::from(b.width),
+                "{what}: the flat form must fill the width the box reserved, \
+                 so that the canvas row carries no padding to strip"
+            );
+            let canvas = to_canvas(&b, b.width, &theme);
+            assert_eq!(canvas.height(), 1, "{what}: a zero-height box is one row");
+            assert_eq!(
+                canvas.row_text(0),
+                flat,
+                "{what}: the two walks must draw the same cells"
+            );
+        }
+    }
+
+    /// The one shape where the two walks are allowed to disagree, and why.
+    ///
+    /// Deliberate staging, not a bug: `place`'s `Fenced` arm is Task 8's, and `build.rs`
+    /// still refuses `\left(…\right)` by name, so no shipped state can render a blank
+    /// fence. This test exists so that the gap is a written-down fact with an owner
+    /// rather than a silence. **Task 8 must make it fail, and must delete it** — that
+    /// failure is Task 8's acceptance criterion.
+    #[test]
+    fn the_canvas_side_of_a_one_row_fence_is_still_blank_until_task_8() {
+        let theme = Theme::default();
+        let b = fenced(Some('('), Some(')'), text("x"));
+        assert!(b.is_inline(), "a one-row body keeps the fence on one row");
+
+        assert_eq!(
+            to_row(&b).expect("is inline"),
+            "(x)",
+            "the flat walk draws the delimiters today"
+        );
+        assert_eq!(
+            to_canvas(&b, b.width, &theme).row_text(0),
+            "   ",
+            "TASK 8: `place` does not draw `Fenced` yet, so the canvas is the three \
+             columns the box reserved and nothing in them. When Task 8 writes that arm \
+             this assert must fail -- delete this test and let \
+             `the_flat_walk_and_the_canvas_walk_render_the_same_cells` cover the fence \
+             instead. See the module doc: one tree, one rendering."
+        );
+
+        // Deliberately NOT asserted here: the same fence inside a row, where the gap must
+        // stay a hole rather than shift the neighbour. That is the reviewer's D5, ruled to
+        // land with the arm it protects rather than beside this canary.
+    }
+
+    /// `Fraction` and `Radical` cannot be zero-height, which is what the `write_flat`
+    /// catch-all now claims. Pinned here because the claim is about `boxes.rs`, and the
+    /// previous comment asserted a wider invariant that was simply false.
+    #[test]
+    fn a_fraction_and_a_radical_are_never_inline() {
+        assert!(
+            !fraction(text(""), text("")).is_inline(),
+            "a fraction's `above` is the numerator's height, which is at least 1"
+        );
+        assert!(
+            !radical(text(""), None).is_inline(),
+            "a radical's `above` is its radicand's plus the overline row"
+        );
     }
 }
