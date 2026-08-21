@@ -523,6 +523,16 @@ fn element(
         // A braced group is an atom of the enclosing run: `2{ab}` sets the same cells as
         // `2ab`, which is what makes a group transparent to spacing. `group` accounts for
         // the depth of what is inside it, so it is passed `depth` and not `deeper`.
+        //
+        // A `\left…\right` group arrives here as a `Begin` like any other, which is what
+        // makes an *unbraced* fence a whole element: `x^\left(x\right)` sets `x⁽ˣ⁾`, and a
+        // root index the same. This is a Task 6 behaviour change with no cause of its own
+        // in the report -- stage 1 dropped the delimiters here and set `xˣ`, a different
+        // expression drawn silently, because its script walk read the operand's events
+        // itself instead of asking one function what an element is. The braced
+        // `x^{\left(x\right)}` was already right on both engines, so only the unbraced
+        // form moved; both are pinned in
+        // `a_fence_keeps_its_delimiters_as_an_unbraced_operand`.
         Some(Event::Begin(grouping)) => {
             let (inner, used) = group(events, at, grouping, mode, spacing, depth)?;
             Ok((Class::Ordinary, inner, used))
@@ -748,11 +758,26 @@ fn script_box(
 /// the thing a neighbour can bind tighter than. `\frac{\text{if x}}{b}` set `if x/b`,
 /// which reads as `if (x/b)`: design spec §5.2's own misreading example, arriving through
 /// the one arm that was not looking at what it waved through. A number, an operator name,
-/// a two-character relation and a scripted variable each draw no gap and each is one atom
-/// — `12/5`, `sin²`, `x²/c` — and that is the same answer the piece rule gives a `Row`.
+/// a two-character relation and a subscripted variable each draw no gap and each is one
+/// atom — `12/5`, `sin/c`, `xᵢ/c` — and that is the same answer the piece rule gives a
+/// `Row`.
 /// The cost is a redundant pair round a box that already bracketed its own gap
 /// (`\frac{{\sin x}^2}{c}` sets `((sin x)²)/c`), which is the safe direction: this
 /// function's whole job is that ambiguity is worse than redundancy.
+///
+/// A gap is not the only thing a neighbour can bind tighter than. RULED 2026-08-21
+/// (owner): a piece whose **last character is a raised form** is not one atom either.
+/// `{x^2}^2` set `x²²`, which reads as *x to the twenty-second*, and `\sqrt{x^2}` set
+/// `√x²`, which hides where the root ends — the second script simply joins the first, and
+/// the reader has no way to see that it was a separate one. The test is
+/// [`scripts::is_raised_form`] on the last character only: a script binds to what is
+/// immediately before it, so an interior raised character is already fenced in by what
+/// follows it. It is keyed on the *raised* table alone, which is what keeps `{x_i}^2` at
+/// `xᵢ²` and so consistent with the unbraced `x_i^2`; nothing can be read into a lowered
+/// character from the right. The price is a bracket round an operand that reads perfectly
+/// well bare, and it was measured rather than assumed: exactly two assertions in the suite
+/// move, `\frac{x^2}{c}` → `(x²)/c` and `\frac{\sqrt{a}}{b^2}` → `(√a)/(b²)`, both of them
+/// a raised fraction operand. The safe direction again.
 ///
 /// The remaining arm is the two-dimensional contents. None reaches here: [`bracketed`] is
 /// called only from the [`Mode::Inline`] arms above, and a box that needs a second row
@@ -763,7 +788,9 @@ fn is_one_atom(b: &MathBox) -> bool {
         BoxContent::Fenced { left, right, body } => {
             (left.is_some() && right.is_some()) || is_one_atom(body)
         }
-        BoxContent::Text(cells) => !cells.contains(' '),
+        BoxContent::Text(cells) => {
+            !cells.contains(' ') && !cells.chars().last().is_some_and(scripts::is_raised_form)
+        }
         _ => true,
     }
 }
@@ -846,7 +873,7 @@ mod tests {
         //
         // The task brief cited `\not=` for this, which is wrong: that arrives as
         // `Visual(Negation)` plus a single-char `=` relation, and is pinned separately by
-        // `a_negation_is_named_rather_than_silently_dropped` below.
+        // `a_negation_strikes_the_element_it_applies_to_and_keeps_its_class` below.
         assert_eq!(inline(r"a \approxcolon b"), "a ≈: b");
         assert_eq!(inline(r"a \coloneq b"), "a :− b", "the other order, too");
     }
@@ -1102,6 +1129,27 @@ mod tests {
             "(x)y",
             "the walk resumes after it"
         );
+    }
+
+    #[test]
+    fn a_fence_keeps_its_delimiters_as_an_unbraced_operand() {
+        // A Task 6 behaviour change, named late: every frame the swap was measured in
+        // wrapped a script operand and a root index in braces, and the braced form
+        // `x^{\left(x\right)}` renders alike on both engines. The *unbraced* one does not.
+        // Stage 1 read a script's operand events in the script walk itself and had no arm
+        // for `Grouping::LeftRight` there, so the delimiters fell out and `x^\left(x\right)`
+        // set `xˣ` -- a different expression, drawn silently. The engine asks `element`
+        // what one element is, and `element` answers with the whole group, delimiters
+        // included.
+        assert_eq!(drawn(r"x^\left(x\right)"), "x⁽ˣ⁾");
+        assert_eq!(drawn(r"x^\left(a+b\right)"), "x⁽ᵃ⁺ᵇ⁾");
+        assert_eq!(drawn(r"\sqrt[\left(x\right)]{x}"), "⁽ˣ⁾√x");
+        // One-sided, so the raised delimiter that *is* there is the one that is drawn.
+        assert_eq!(drawn(r"x^\left.x\right)"), "xˣ⁾");
+        assert_eq!(drawn(r"\sqrt[\left.x\right)]{x}"), "ˣ⁾√x");
+        // The braced form, which never moved: it is the control that says the change is
+        // in how an unbraced operand is delimited and nothing else.
+        assert_eq!(drawn(r"x^{\left(x\right)}"), "x⁽ˣ⁾");
     }
 
     #[test]
@@ -1404,9 +1452,18 @@ mod tests {
         // a single atom and set `ab/c`, which reads as `a·b/c`.
         assert_eq!(inline(r"\frac{{ab}}{c}"), "(ab)/c");
 
-        // A construct that draws several characters is still one atom: `x²` cannot be
+        // A construct that draws several characters is still one atom: `12` cannot be
         // misread, so bracketing it would only add noise.
-        assert_eq!(inline(r"\frac{x^2}{c}"), "x²/c");
+        assert_eq!(inline(r"\frac{12}{c}"), "12/c");
+
+        // RULED 2026-08-21 (owner, Task 6 fix round). A piece that *ends* raised is the
+        // exception, and this line is the price of it: `x²/c` was the shipped rendering
+        // and is now `(x²)/c`, because the same rule that brackets here is what keeps
+        // `{x^2}^2` from setting `x²²` and `\sqrt{x^2}` from setting `√x²`. Both of those
+        // are wrong mathematics on the reader's terminal; a redundant pair never is. The
+        // rule and its four cases are pinned in
+        // `a_one_piece_operand_that_draws_a_gap_is_parenthesised_all_the_same`.
+        assert_eq!(inline(r"\frac{x^2}{c}"), "(x²)/c");
 
         // An empty group is not one atom either, so it keeps its brackets and the reader
         // can see that the author wrote nothing there. Dropping them sets `√` and `/b`,
@@ -1438,6 +1495,25 @@ mod tests {
         assert_eq!(inline(r"\frac{\sin}{c}"), "sin/c");
         assert_eq!(inline(r"\frac{\coloneq}{c}"), ":−/c");
         assert_eq!(inline(r"\frac{x_i}{c}"), "xᵢ/c");
+
+        // RULED 2026-08-21 (owner, Task 6 fix round), the second half of the same arm: a
+        // piece whose *last* character is a raised form is not one atom either, because
+        // whatever is set against it lands next to a script and joins it. `{x^2}^2` set
+        // `x²²`, which reads as *x to the twenty-second*, and `\sqrt{x^2}` set `√x²`,
+        // which hides where the root ends. Both are wrong mathematics on the reader's
+        // terminal, and a redundant pair of brackets never is; the price is paid by
+        // `\frac{x^2}{c}` (`an_operand_of_more_than_one_atom_is_parenthesised`) and
+        // `\frac{\sqrt{a}}{b^2}` (`src/math/tests.rs`), which now bracket a numerator or
+        // denominator that reads perfectly well bare. Those two are the whole cost,
+        // measured with `--no-fail-fast` before the strings were touched.
+        assert_eq!(inline(r"{x^2}^2"), "(x²)²");
+        assert_eq!(inline(r"\sqrt{x^2}"), "√(x²)");
+        // And the controls that keep the rule from over-bracketing. It is keyed on the
+        // raised table alone, so a lowered trailing character is untouched: nothing
+        // follows a subscript that could be read into it, and bracketing here would set
+        // `(xᵢ)²` where the unbraced `x_i^2` sets `xᵢ²` -- one formula drawn two ways.
+        assert_eq!(inline(r"{x_i}^2"), "xᵢ²");
+        assert_eq!(inline(r"x_i^2"), "xᵢ²");
 
         // RULED with it (deferral F6). `\sqrt\,` used to set `√ ` while `\sqrt{}` set
         // `√()`, and the inconsistency was the whole of F6. The gap rule answers both the

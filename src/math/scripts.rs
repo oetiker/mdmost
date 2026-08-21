@@ -124,6 +124,18 @@ pub(crate) fn superscript(text: &str) -> Option<String> {
     substitute(text, SUPERSCRIPTS)
 }
 
+/// Whether `ch` is one of the raised forms [`superscript`] writes.
+///
+/// This asks about a character that is already on the row — whether it *reads* as a
+/// script — where [`superscript`] asks whether a source character can become one. Keyed
+/// on the raised table alone: a lowered character cannot be misread against a superscript
+/// that follows it. `is_one_atom` in `build.rs` is the only caller, and the header's rule
+/// stands for every other one — this is not a licence to survey drawn output character by
+/// character.
+pub(crate) fn is_raised_form(ch: char) -> bool {
+    SUPERSCRIPTS.iter().any(|(_, raised)| *raised == ch)
+}
+
 /// `text` lowered, or `None` if any character has no subscript form.
 fn subscript(text: &str) -> Option<String> {
     substitute(text, SUBSCRIPTS)

@@ -18,7 +18,15 @@ fn symbols_reports_the_documents_characters_and_not_the_crates_own() {
     // Not reported, because this crate composed them: design spec §5.2's slash and radical
     // sign and §5.1's raised digit are mdmost's answer to a construct, not anything the
     // document asked for by name, so `glyph_inventory` must go on claiming them.
-    assert_eq!(rendered(r"\frac{\sqrt{a}}{b^2}"), "(√a)/b²");
+    //
+    // The denominator's brackets arrived with the RULING of 2026-08-21 (owner, Task 6 fix
+    // round): a piece that ends in a raised character is no longer one atom, so `b²` is
+    // bracketed here where it used to set `(√a)/b²`. That is the price of `{x^2}^2` →
+    // `(x²)²` and `\sqrt{x^2}` → `√(x²)`, pinned in `build.rs`'s
+    // `a_one_piece_operand_that_draws_a_gap_is_parenthesised_all_the_same`. Nothing about
+    // *this* test's subject moves with it: the brackets are the crate's own characters,
+    // which is exactly what the line below claims.
+    assert_eq!(rendered(r"\frac{\sqrt{a}}{b^2}"), "(√a)/(b²)");
     assert_eq!(symbols(r"\frac{\sqrt{a}}{b^2}").expect("parses"), "ab2");
     // A parse failure is an error here as it is in `render_inline`, not an empty answer:
     // an empty one would silently claim every glyph of a broken formula for this crate.
