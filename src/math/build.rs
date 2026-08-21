@@ -191,18 +191,21 @@ fn build_run(
     if depth > MAX_NESTING {
         return Err(MathError::NotInline("a formula nested too deeply"));
     }
-    let mut pieces: Vec<(Class, MathBox)> = Vec::new();
+    let mut pieces: Vec<(Option<Class>, MathBox)> = Vec::new();
     let mut index = 0;
     while index < events.len() {
         match &events[index] {
             Event::End => break,
             // Neither of these is an atom of the run, so neither goes through [`element`]
-            // here: a piece that draws nothing is not the same as no piece at all. A
-            // zero-width `Ordinary` between `\!` and `-x` would give the `−` a left
-            // operand it has not got and set `\!-x` as `− x`.
+            // here: a space the source asked for is glue, and glue has cells but no class.
+            // Both halves matter. A piece that draws nothing is not the same as no piece
+            // at all, and a piece that draws something is not the same as an atom: an
+            // `Ordinary` between `\,` and `-x` would give the `−` a left operand it has
+            // not got and set `\,-x` as `  − x`, where TeX skips the glue and sets a sign.
+            // Hence `None` — [`assemble`] writes the cells and reads through them.
             Event::Space { width, .. } => {
                 if let Some(cells) = source_space(*width, spacing) {
-                    pieces.push((Class::Ordinary, cells));
+                    pieces.push((None, cells));
                 }
                 index += 1;
             }
@@ -210,7 +213,7 @@ fn build_run(
             Event::StateChange(_) => index += 1,
             _ => {
                 let (class, piece, used) = element(events, index, mode, spacing, depth)?;
-                pieces.push((class, piece));
+                pieces.push((Some(class), piece));
                 index = index.saturating_add(used);
             }
         }
@@ -294,12 +297,15 @@ fn source_space(width: Option<Dimension>, spacing: Spacing) -> Option<MathBox> {
 /// The pass reclassifies in place and reads its left neighbour after that neighbour has
 /// been decided, which is what makes a run of signs work: in `a+--b` the second `−` sees
 /// the first already demoted, so only one of them is a sign and the result is `a + − − b`.
-fn assemble(mut pieces: Vec<(Class, MathBox)>, spacing: Spacing) -> MathBox {
+fn assemble(mut pieces: Vec<(Option<Class>, MathBox)>, spacing: Spacing) -> MathBox {
     for i in 0..pieces.len() {
-        if pieces[i].0 != Class::Binary {
+        if pieces[i].0 != Some(Class::Binary) {
             continue;
         }
-        let left = if i == 0 { Class::Edge } else { pieces[i - 1].0 };
+        // Both neighbours are found by looking *through* the classless pieces, which is
+        // TeX's own rule: bin-to-ord looks back at the most recent previous atom, and
+        // glue is not an atom. `\,-x` sets a sign exactly as `-x` does.
+        let left = neighbour(pieces.iter().take(i).rev());
         if matches!(
             left,
             Class::Edge
@@ -310,32 +316,46 @@ fn assemble(mut pieces: Vec<(Class, MathBox)>, spacing: Spacing) -> MathBox {
                 | Class::Function
                 | Class::Large
         ) {
-            pieces[i].0 = Class::Unary;
+            pieces[i].0 = Some(Class::Unary);
             continue;
         }
         // Reading the *unreclassified* right neighbour is correct: this pass only ever
         // turns `Binary` into `Unary` or `Ordinary`, and neither is in the set below, so
         // a neighbour decided later cannot change this answer.
-        let right = pieces.get(i + 1).map_or(Class::Edge, |piece| piece.0);
+        let right = neighbour(pieces.iter().skip(i.saturating_add(1)));
         if matches!(
             right,
             Class::Relation | Class::Close | Class::Punct | Class::Edge
         ) {
-            pieces[i].0 = Class::Ordinary;
+            pieces[i].0 = Some(Class::Ordinary);
         }
     }
 
     let mut parts = Vec::with_capacity(pieces.len().saturating_mul(2));
     let mut previous = Class::Edge;
     for (class, part) in pieces {
-        let columns = spacing.between(previous, class);
-        if columns > 0 {
-            parts.push(text(" ".repeat(usize::from(columns))));
+        // A classless piece writes its cells and leaves `previous` alone, so the two
+        // atoms it sits between are still a pair for the table: `a\,=b` takes the source
+        // space *and* the relation's own column, which is what TeX sets.
+        if let Some(class) = class {
+            let columns = spacing.between(previous, class);
+            if columns > 0 {
+                parts.push(text(" ".repeat(usize::from(columns))));
+            }
+            previous = class;
         }
-        previous = class;
         parts.push(part);
     }
     row(parts)
+}
+
+/// The class of the first classed piece in `towards`, or [`Class::Edge`] if there is none.
+///
+/// The caller passes the pieces on one side of a [`Class::Binary`], nearest first; a run
+/// that has nothing but glue on that side has nothing to bind to, which is what `Edge`
+/// says.
+fn neighbour<'a>(mut towards: impl Iterator<Item = &'a (Option<Class>, MathBox)>) -> Class {
+    towards.find_map(|piece| piece.0).unwrap_or(Class::Edge)
 }
 
 /// One `Content` event as its class and its cells.
@@ -601,10 +621,11 @@ fn script_box(
     let after = at.saturating_add(1);
     let (class, base, a) = element(events, after, mode, spacing, depth)?;
     // Operands of a script are built with spacing suppressed: there is no raised space in
-    // Unicode, so `scripts::superscript` declines on one and `x^{a+b}` would fall back to
-    // its source. The owner ruled this exception; it lives here rather than in the table
-    // because it is a fact about position, not about a pair. Display keeps the enclosing
-    // policy, because a script drawn on its own row can hold a space like any other row.
+    // Unicode, so a space in the operand makes the substitution decline and `x^{a+b}`
+    // would be written flat as `x^{a + b}` instead of raised at all. The owner ruled this
+    // exception; it lives here rather than in the table because it is a fact about
+    // position, not about a pair. Display keeps the enclosing policy, because a script
+    // drawn on its own row can hold a space like any other row.
     let operand_spacing = match mode {
         Mode::Inline => Spacing::Suppressed,
         Mode::Display => spacing,
@@ -649,21 +670,20 @@ fn script_box(
             // raised group delimits itself, and Unicode has `⁽⁾`, so bracketing them
             // would set `x⁽ᵃ⁺ᵇ⁾` where `xᵃ⁺ᵇ` is what was written.
             let mut out = draw::to_row(&bracketed(base))?;
-            // All-or-nothing per group: substitute the whole operand or none of it. A
-            // partial substitution renders `a_{bc}` as `a_b c`, a different expression.
+            // All-or-nothing per group, and the unit is the *group*: substitute the whole
+            // operand or none of it — a partial substitution renders `a_{bc}` as `a_b c`,
+            // a different expression — and where none of it can be substituted, write the
+            // group flat with the marker the author typed (design spec §5.1). The two
+            // groups of one script are decided separately, so `x_i^q` sets `xᵢ^q`.
+            //
+            // Refusing the formula instead would be a different rule: §5.1 says this
+            // formula *is* representable on one row, so §9's fallback to the source is
+            // not the answer here.
             if let Some(sub) = &sub {
-                let cells = draw::to_row(sub)?;
-                out.push_str(
-                    &scripts::subscript(&cells)
-                        .ok_or(MathError::NotInline("a subscript with no lowered form"))?,
-                );
+                out.push_str(&scripts::lowered(&draw::to_row(sub)?));
             }
             if let Some(sup) = &sup {
-                let cells = draw::to_row(sup)?;
-                out.push_str(
-                    &scripts::superscript(&cells)
-                        .ok_or(MathError::NotInline("a superscript with no raised form"))?,
-                );
+                out.push_str(&scripts::raised(&draw::to_row(sup)?));
             }
             text(out)
         }
@@ -860,6 +880,25 @@ mod tests {
     }
 
     #[test]
+    fn a_source_space_writes_its_cells_without_becoming_an_atom() {
+        // A space the source asked for is glue, and glue is not an atom, so the bin-to-ord
+        // pass looks straight through it: the `−` still has nothing on its left to bind
+        // to and is still a sign. Pushed as an `Ordinary` the space gave it a left operand
+        // and set `  − x` -- two columns and a spaced operator, where the author asked for
+        // a thin space and a negative number.
+        assert_eq!(inline(r"\,-x"), " −x");
+        assert_eq!(inline(r"(\,-x)"), "( −x)");
+        // The pair that tells glue from an atom, and the reason the fix is "no class"
+        // rather than "no piece": `{}` *is* an ordinary atom in TeX, so it does give the
+        // `−` a left operand, and these two inputs must not render alike.
+        assert_eq!(inline(r"{}-x"), " − x");
+        // Reading through the glue does not swallow it, and the two atoms it sits between
+        // are still a pair for the table -- the relation keeps its own column as well.
+        assert_eq!(inline(r"a\,b"), "a b");
+        assert_eq!(inline(r"a\,=b"), "a  = b");
+    }
+
+    #[test]
     fn a_formula_nested_beyond_the_cap_is_refused_rather_than_overflowing_the_stack() {
         // Unguarded this aborts the process rather than panicking: measured on this
         // branch, 500 levels build and 5000 abort with SIGABRT, which `#[should_panic]`
@@ -1022,22 +1061,38 @@ mod tests {
     }
 
     #[test]
-    fn a_script_group_with_no_form_is_named_by_which_side_it_is_on() {
-        // Unicode has no superscript `q` and no subscript `b`, so each side declines --
-        // and says which side, because the reader can act on that (`x^{2q}` can be
-        // rewritten, `x_{b}` cannot).
+    fn a_script_group_with_no_form_is_written_flat_one_group_at_a_time() {
+        // Design spec §5.1: a group is substituted only if every character in it has a
+        // form, and a group that has none is written with the marker the author typed --
+        // it is not refused. §9's fallback to the source is for a formula that cannot be
+        // drawn on one row, and this one can. Unicode has no superscript `q` and no
+        // subscript `b`.
+        assert_eq!(inline("x_b"), "x_b");
+        assert_eq!(inline("x^q"), "x^q");
         assert_eq!(
-            refusal("x^{2q}"),
-            "a superscript with no raised form cannot be drawn on one row"
+            inline("a_{bc}"),
+            "a_{bc}",
+            "the braces stay: a_bc reads as (a_b)c"
         );
         assert_eq!(
-            refusal("x_b"),
-            "a subscript with no lowered form cannot be drawn on one row"
+            inline("x^{2q}"),
+            "x^{2q}",
+            "the braces stay: x^2q reads as (x^2)q"
         );
-        // Both sides at once: the subscript is written first, so it is the one reported.
+        assert_eq!(inline("x_b^q"), "x_b^q", "both sides, both flat");
+        // The case that says *per group* and not per formula: one group has forms and
+        // the other has not, and each is decided on its own. A per-formula rule would
+        // give `x_i^q` back as source, or throw the subscript's substitution away.
+        assert_eq!(inline("x_i^q"), "xᵢ^q");
+        // Per group and not per character, either: the inner `y^2` is raised on its own,
+        // and `²` has no raised form, so the outer group keeps that substitution and
+        // falls back around it.
+        assert_eq!(inline("x^{y^2}"), "x^{y²}");
+        // What a script still refuses: an operand that cannot be drawn at all. The
+        // caption names the operand, because the script itself is fine.
         assert_eq!(
-            refusal("x_b^q"),
-            "a subscript with no lowered form cannot be drawn on one row"
+            refusal(r"x^{\sqrt[3]{2}}"),
+            "a root with an index cannot be drawn on one row"
         );
     }
 
@@ -1127,6 +1182,20 @@ mod tests {
         assert_eq!(inline(r"\sqrt{x}"), "√x");
         assert_eq!(inline(r"\sqrt{b+4}"), "√(b + 4)");
         assert_eq!(inline(r"\sqrt{x}y"), "√xy", "and the walk resumes after it");
+    }
+
+    #[test]
+    fn a_rewritten_fraction_or_radical_is_an_ordinary_atom_of_the_run_around_it() {
+        // The rewrite does not decide the class: `a/b` and `√x` are ordinary atoms, and
+        // the run around them spaces them as such. Every other test in this module places
+        // them where several classes give the same cells -- first in the run, where a
+        // `Binary` is demoted to `Unary` and `gap(Edge, Unary) == gap(Edge, Ordinary)`,
+        // or before an `Ordinary`, where the `Unary` and `Ordinary` columns agree again.
+        // Both neighbours here discriminate: an `Ordinary` sits tight on either side, and
+        // a `Binary` keeps its class between two operands and would take a column either
+        // side, setting `x a/b y` and `x √y z`.
+        assert_eq!(inline(r"x\frac{a}{b}y"), "xa/by");
+        assert_eq!(inline(r"x\sqrt{y}z"), "x√yz");
     }
 
     #[test]
@@ -1225,27 +1294,24 @@ mod tests {
         // The other way round: a construct as the element of a `Visual`.
         assert_eq!(inline(r"\sqrt\sqrt x"), "√(√x)");
         // The substitution is still the only question, and a raised slash is one of the
-        // characters Unicode has not got.
-        assert_eq!(
-            refusal(r"x^\frac{a}{b}"),
-            "a superscript with no raised form cannot be drawn on one row"
-        );
+        // characters Unicode has not got -- so the operand is written flat, around the
+        // rewrite the fraction already made of itself.
+        assert_eq!(inline(r"x^\frac{a}{b}"), "x^{a/b}");
     }
 
     #[test]
-    fn a_script_whose_operand_draws_nothing_declines() {
+    fn a_script_whose_operand_draws_nothing_writes_the_bare_marker() {
         // `\,` and `\bf` are elements that carry no atom. As a script operand each gives
         // an empty group, and an empty group declines (`scripts::substitute`) rather than
-        // raising nothing at all. Without an arm for them the element count slips and the
-        // walk reads the *next* event as the operand.
-        assert_eq!(
-            refusal(r"x^\,"),
-            "a superscript with no raised form cannot be drawn on one row"
-        );
-        assert_eq!(
-            refusal(r"x^\bf"),
-            "a superscript with no raised form cannot be drawn on one row"
-        );
+        // raising nothing at all -- so the fallback runs on empty text, and a
+        // zero-character group never reaches the brace rule. Without an arm for these two
+        // the element count slips and the walk reads the *next* event as the operand.
+        assert_eq!(inline(r"x^\,"), "x^");
+        assert_eq!(inline(r"x^\bf"), "x^");
+        // The same answer for the empty group the author can write directly, which is
+        // what says the two are one rule and not two.
+        assert_eq!(inline("x^{}"), "x^");
+        assert_eq!(inline("x_{}"), "x_");
     }
 
     #[test]

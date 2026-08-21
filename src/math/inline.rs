@@ -135,17 +135,17 @@ fn write_into(events: &[Event<'_>], out: &mut String, spacing: Spacing) -> Resul
                 match ty {
                     ScriptType::Subscript => {
                         let sub = take_group(events, &mut index, Spacing::Suppressed)?;
-                        out.push_str(&lowered(&sub));
+                        out.push_str(&scripts::lowered(&sub));
                     }
                     ScriptType::Superscript => {
                         let sup = take_group(events, &mut index, Spacing::Suppressed)?;
-                        out.push_str(&raised(&sup));
+                        out.push_str(&scripts::raised(&sup));
                     }
                     ScriptType::SubSuperscript => {
                         let sub = take_group(events, &mut index, Spacing::Suppressed)?;
                         let sup = take_group(events, &mut index, Spacing::Suppressed)?;
-                        out.push_str(&lowered(&sub));
-                        out.push_str(&raised(&sup));
+                        out.push_str(&scripts::lowered(&sub));
+                        out.push_str(&scripts::raised(&sup));
                     }
                 }
                 if big {
@@ -175,7 +175,7 @@ fn write_into(events: &[Event<'_>], out: &mut String, spacing: Spacing) -> Resul
                     Visual::Root => {
                         let radicand = take_group(events, &mut index, spacing)?;
                         let degree = take_group(events, &mut index, Spacing::Suppressed)?;
-                        out.push_str(&raised(&degree));
+                        out.push_str(&scripts::raised(&degree));
                         out.push('√');
                         out.push_str(&bracketed(&radicand));
                     }
@@ -406,33 +406,6 @@ fn after_large_op(out: &mut String, spacing: Spacing) {
     if spacing == Spacing::Normal && !out.is_empty() && !out.ends_with(' ') {
         out.push(' ');
     }
-}
-
-/// `text` raised, or written with a caret when Unicode cannot raise all of it (§5.1).
-fn raised(text: &str) -> String {
-    scripts::superscript(text).unwrap_or_else(|| flat('^', text))
-}
-
-/// `text` lowered, or written with an underscore when Unicode cannot lower all of it.
-fn lowered(text: &str) -> String {
-    scripts::subscript(text).unwrap_or_else(|| flat('_', text))
-}
-
-/// The flat notation: `x^q`, and `a_{bc}` when the group is more than one character.
-///
-/// The braces are not decoration. `a_bc` reads as `(a_b)c`, so a group that lost its
-/// raising must keep the grouping the author wrote.
-fn flat(marker: char, text: &str) -> String {
-    let mut out = String::with_capacity(text.len() + 3);
-    out.push(marker);
-    if text.chars().count() > 1 {
-        out.push('{');
-        out.push_str(text);
-        out.push('}');
-    } else {
-        out.push_str(text);
-    }
-    out
 }
 
 /// Writes one piece of content.

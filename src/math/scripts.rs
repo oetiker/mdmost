@@ -115,13 +115,48 @@ const SUBSCRIPTS: &[(char, char)] = &[
 ];
 
 /// `text` raised, or `None` if any character has no superscript form.
-pub(crate) fn superscript(text: &str) -> Option<String> {
+fn superscript(text: &str) -> Option<String> {
     substitute(text, SUPERSCRIPTS)
 }
 
 /// `text` lowered, or `None` if any character has no subscript form.
-pub(crate) fn subscript(text: &str) -> Option<String> {
+fn subscript(text: &str) -> Option<String> {
     substitute(text, SUBSCRIPTS)
+}
+
+/// `text` raised, or written with a caret when Unicode cannot raise all of it (§5.1).
+pub(crate) fn raised(text: &str) -> String {
+    superscript(text).unwrap_or_else(|| flat('^', text))
+}
+
+/// `text` lowered, or written with an underscore when Unicode cannot lower all of it.
+pub(crate) fn lowered(text: &str) -> String {
+    subscript(text).unwrap_or_else(|| flat('_', text))
+}
+
+/// The flat notation: `x^q`, and `a_{bc}` when the group is more than one character.
+///
+/// The braces are not decoration. `a_bc` reads as `(a_b)c`, so a group that lost its
+/// raising must keep the grouping the author wrote.
+///
+/// Falling back is a property of the *group*, which is what makes this a fallback and not
+/// a refusal: each of the two groups of `x_i^q` is decided on its own, so the subscript is
+/// lowered and only the superscript is written flat (`xᵢ^q`). Design spec §5.1 states the
+/// rule that way — all-or-nothing per group, never per character and never per formula.
+///
+/// This is the one home for the fallback. Both walks in the tree reach §5.1 through
+/// [`raised`] and [`lowered`], so neither can drift from the other while both are live.
+fn flat(marker: char, text: &str) -> String {
+    let mut out = String::with_capacity(text.len().saturating_add(3));
+    out.push(marker);
+    if text.chars().count() > 1 {
+        out.push('{');
+        out.push_str(text);
+        out.push('}');
+    } else {
+        out.push_str(text);
+    }
+    out
 }
 
 /// All of `text` through `table`, or nothing.
@@ -169,6 +204,24 @@ mod tests {
     fn an_empty_group_declines() {
         assert_eq!(superscript(""), None);
         assert_eq!(subscript(""), None);
+    }
+
+    #[test]
+    fn a_group_that_cannot_be_substituted_is_written_flat_instead() {
+        // §5.1's other half: a group with no form is not dropped and not refused, it is
+        // written with the marker the author typed.
+        assert_eq!(raised("q"), "^q");
+        assert_eq!(lowered("b"), "_b");
+        // Braces where the group is more than one character -- `a_bc` reads as `(a_b)c`.
+        assert_eq!(lowered("bc"), "_{bc}");
+        assert_eq!(raised("2q"), "^{2q}");
+        // A zero-character group never reaches the brace rule, so the marker stands alone.
+        assert_eq!(raised(""), "^");
+        assert_eq!(lowered(""), "_");
+        // A group that *can* be substituted still is: the fallback is the second answer,
+        // not the first.
+        assert_eq!(raised("n+1"), "ⁿ⁺¹");
+        assert_eq!(lowered("i"), "ᵢ");
     }
 
     #[test]
