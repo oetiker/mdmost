@@ -19,20 +19,6 @@
 //! Only the first is a multiply, and calling the whole policy "multiplying by zero" named
 //! one arm while leaving the other sounding covered, which is how it came to have a hole.
 
-// Nothing outside this module's own tests calls these yet: `render_inline` is rewired onto
-// this builder in a later task, so the lib target sees the whole surface as dead while the
-// test target sees all of it live -- the same situation `boxes.rs` and `spacing.rs` are in,
-// and for the same reason. `expect` cannot express that -- it fires
-// `unfulfilled_lint_expectations` on the test target -- so this is `allow`.
-//
-// Measured, not assumed: with this line removed, clippy reports every item in this file as
-// never used -- sixteen warnings, `between` and `writes_source_spaces` sharing one.
-// `dead_code` is transitive, so this module
-// being dead is also why `boxes.rs` and `spacing.rs` keep theirs -- their first caller is
-// this file, and a dead caller does not make a callee live. All three come out together
-// when the renderer calls in.
-#![allow(dead_code)]
-
 use pulldown_latex::event::{
     Content, DelimiterType, Dimension, Event, Grouping, ScriptPosition, ScriptType, Visual,
 };
@@ -45,16 +31,23 @@ use crate::math::{draw, scripts};
 
 /// Whether the formula may use more than the row the prose sits on.
 ///
-/// Nothing branches on this yet. Only the flat part of a formula is built here, and a flat
-/// formula has one answer in either mode — `display_mode_builds_the_same_flat_row_for_flat_input`
-/// says so. The flag is threaded through the walk from the start so that the two-dimensional
-/// constructs, each of which arrives in its own task, have it where they need it rather than
-/// having to be re-plumbed for it.
+/// Three places branch on it, all in this file: [`visual_box`] for the fraction, the two
+/// radicals and their one-row rewrites, and [`script_box`] for a stacked script and for the
+/// suppression a raised operand needs. A flat formula has one answer in either mode —
+/// `display_mode_builds_the_same_flat_row_for_flat_input` says so — and everything else in
+/// the walk threads the flag through untouched, which is what "one engine, one flag" means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Mode {
     /// One row. A taller construct rewrites itself or fails.
     Inline,
     /// Two dimensions.
+    ///
+    /// Only this module's own tests build one yet -- `crate::math::render_inline` asks for
+    /// [`Mode::Inline`] and the display renderer arrives in a later task -- so the lib
+    /// target sees the variant as never constructed while the test target sees it live.
+    /// `expect` cannot express that: it fires `unfulfilled_lint_expectations` on the test
+    /// target.
+    #[allow(dead_code)]
     Display,
 }
 
@@ -362,18 +355,22 @@ fn neighbour<'a>(mut towards: impl Iterator<Item = &'a (Option<Class>, MathBox)>
 ///
 /// `Content::Relation` is the one payload that is not a `char`: `RelationContent` may hold
 /// two, its field is private, and the only accessor is `encode_utf8_to_buf`. Stage 1 does
-/// the same job at `src/math/inline.rs:469-473`, but not the same way: it uses
-/// `from_utf8(..).unwrap_or_default()`, which drops the whole relation if the bytes were
-/// ever not UTF-8, where the lossy conversion below keeps what it can. Neither branch is
-/// reachable — `encode_utf8_to_buf` writes `char`s — so this is a difference in what each
-/// would do if the impossible happened, not in what either draws.
+/// the same job in `src/math/inline.rs`, which Task 6 deleted, and not the same way: it
+/// used `from_utf8(..).unwrap_or_default()`, which would have dropped the whole relation
+/// if the bytes were ever not UTF-8, where the lossy conversion below keeps what it can.
+/// Neither branch is reachable — `encode_utf8_to_buf` writes `char`s — so that was a
+/// difference in what each would have done if the impossible happened, not in what either
+/// drew.
 ///
 /// The two-char relations are the sixteen `multirelation` calls at
 /// `pulldown-latex-0.8.0/src/parser/primitives.rs:1157-1172` — `\approxcolon` is `≈` then
 /// `:`, and six of them are a base character plus U+FE00. `≠` is *not* one of them: it is
 /// a single `char`, and `\not=` does not even arrive as a relation but as
 /// `Visual(Negation)` followed by `=`.
-fn atom(content: &Content<'_>) -> (Class, MathBox) {
+///
+/// Crate-visible for `crate::math::symbols`, which asks it what each content event
+/// resolved to and keeps only the cells (design spec §13).
+pub(crate) fn atom(content: &Content<'_>) -> (Class, MathBox) {
     match content {
         Content::Text(s) => (Class::Ordinary, text(*s)),
         Content::Number(s) => (Class::Ordinary, text(*s)),
@@ -465,8 +462,9 @@ fn group(
 /// What a grouping is called, for [`MathError::NotInline`]'s payload.
 ///
 /// The payload is what the caption shows the reader, so it names the construct rather
-/// than the event. Copied unchanged from `src/math/inline.rs:507`: those strings are what
-/// the reader is told, and rewording them would change that without anyone deciding to.
+/// than the event. Copied unchanged from the walk in `src/math/inline.rs` that Task 6
+/// deleted: those strings are what the reader is told, and rewording them would have
+/// changed that without anyone deciding to.
 /// `Normal` and `LeftRight` never reach here — [`group`] answers both above.
 fn grouping_name(grouping: &Grouping) -> &'static str {
     match grouping {
@@ -587,20 +585,39 @@ fn visual_box(
             };
             Ok((Class::Ordinary, cells, 1usize.saturating_add(a)))
         }
+        // Radicand first, then the index. `pulldown-latex`'s own documentation for this
+        // variant reads "the radicand and the index of the root", and it maps to MathML
+        // `mroot`, whose child order is base then index. Taking them the other way round
+        // draws `\sqrt[3]{x}` as `ˣ√3`.
         Visual::Root => {
-            // Declined before the operands are built, so the caption names the root and
-            // not whatever the radicand happens to contain.
-            //
-            // `3√x` reads as three times a square root, which is a different number.
-            // Declining shows the source instead, which is design spec §9's whole point:
-            // a formula in the wrong place, not an error.
-            if matches!(mode, Mode::Inline) {
-                return Err(MathError::NotInline("a root with an index"));
-            }
             let (_, radicand, a) = element(events, after, mode, spacing, depth)?;
-            let (_, index, b) = element(events, after.saturating_add(a), mode, spacing, depth)?;
+            // The index is raised, so it is built under the same suppression a script
+            // operand is built under and for the same reason: there is no raised space,
+            // and one in the index would make the substitution below decline.
+            let index_spacing = match mode {
+                Mode::Inline => Spacing::Suppressed,
+                Mode::Display => spacing,
+            };
+            let (_, index, b) =
+                element(events, after.saturating_add(a), mode, index_spacing, depth)?;
             let used = 1usize.saturating_add(a).saturating_add(b);
-            Ok((Class::Ordinary, boxes::radical(radicand, Some(index)), used))
+            let cells = match mode {
+                Mode::Display => boxes::radical(radicand, Some(index)),
+                // `scripts::superscript` and not `scripts::raised`: the caret fallback of
+                // design spec §5.1 is a *script* notation, and a root index is not a
+                // script. `^q√x` is not a cube root written plainly, it is nonsense, and
+                // `3√x` would read as three times a square root -- a different number. So
+                // where the index has no raised form the root declines and design spec §9
+                // shows the source, which is the same all-or-nothing rule a script group
+                // follows, applied to the one group this construct has.
+                Mode::Inline => {
+                    let drawn = draw::to_row(&index)?;
+                    let raised = scripts::superscript(&drawn)
+                        .ok_or(MathError::NotInline("a root index with no raised form"))?;
+                    row(vec![text(raised), text("√"), bracketed(radicand)])
+                }
+            };
+            Ok((Class::Ordinary, cells, used))
         }
         Visual::Negation => {
             let (class, inner, a) = element(events, after, mode, spacing, depth)?;
@@ -725,12 +742,28 @@ fn script_box(
 /// pair. With either one absent — `\left.` and `\right.` are invisible, and a fence may be
 /// one-sided — the body reaches the page naked at that end, so the answer is the body's:
 /// `\frac{\left.a+b\right.}{c}` is `(a + b)/c`, not `a + b/c`.
+///
+/// A [`BoxContent::Text`] is one *piece* however many characters it holds, because one
+/// event produced it — but a piece that draws a gap is not one atom, because the gap is
+/// the thing a neighbour can bind tighter than. `\frac{\text{if x}}{b}` set `if x/b`,
+/// which reads as `if (x/b)`: design spec §5.2's own misreading example, arriving through
+/// the one arm that was not looking at what it waved through. A number, an operator name,
+/// a two-character relation and a scripted variable each draw no gap and each is one atom
+/// — `12/5`, `sin²`, `x²/c` — and that is the same answer the piece rule gives a `Row`.
+/// The cost is a redundant pair round a box that already bracketed its own gap
+/// (`\frac{{\sin x}^2}{c}` sets `((sin x)²)/c`), which is the safe direction: this
+/// function's whole job is that ambiguity is worse than redundancy.
+///
+/// The remaining arm is the two-dimensional contents. None reaches here: [`bracketed`] is
+/// called only from the [`Mode::Inline`] arms above, and a box that needs a second row
+/// has already refused by then.
 fn is_one_atom(b: &MathBox) -> bool {
     match &b.content {
         BoxContent::Row(parts) => matches!(parts.as_slice(), [only] if is_one_atom(only)),
         BoxContent::Fenced { left, right, body } => {
             (left.is_some() && right.is_some()) || is_one_atom(body)
         }
+        BoxContent::Text(cells) => !cells.contains(' '),
         _ => true,
     }
 }
@@ -776,9 +809,9 @@ mod tests {
     /// content that is not a plain row of text. A `Fenced` box is one row, but it keeps
     /// its delimiters in its own fields and `draw::write_flat` is what writes them, so
     /// teaching `flatten` about them would put a second copy of that rule in the test
-    /// helper. This calls the drawing walk instead, which is also the walk Task 6's
-    /// `render_inline` will reach these boxes through. `to_row` refuses a box that is not
-    /// one row, so the one-row guarantee `inline` asserts is kept here too.
+    /// helper. This calls the drawing walk instead, which is also the walk
+    /// `crate::math::render_inline` reaches these boxes through. `to_row` refuses a box
+    /// that is not one row, so the one-row guarantee `inline` asserts is kept here too.
     fn drawn(src: &str) -> String {
         let storage = Storage::new();
         let events = parse(src, &storage).expect("parses");
@@ -1036,9 +1069,11 @@ mod tests {
         // Stage 1 assumed the opposite and drew `\left(\frac{a}{b}\right)^2` as `a/b²` --
         // a different number, drawn silently.
         //
-        // These eight strings are `src/math/tests.rs:373-392` exactly. Those still measure
-        // stage 1's walk until Task 6 swaps the engines, so they cannot see this arm; this
-        // test is what makes it measurable before the swap rather than after it.
+        // These eight strings are `src/math/tests.rs`'s
+        // `left_right_draws_its_own_delimiter_characters` exactly. They measured stage 1's
+        // walk when this test was written and this arm was unreachable from them; both
+        // measure this arm now, and the duplication is what proved the arm right before
+        // Task 6 swapped the engines under it.
         assert_eq!(drawn(r"\left(x\right)"), "(x)");
         assert_eq!(drawn(r"\left(a+b\right)"), "(a + b)");
         assert_eq!(drawn(r"\left[x\right]"), "[x]");
@@ -1090,7 +1125,7 @@ mod tests {
 
         // The other side of the rule, and the reason it is not simply "bracket anything
         // that is not a `Row`": a two-sided fence must keep setting one pair, not two.
-        // Stage 1 sets `((a + b))/c` here, so this is a Task 6 improvement to protect.
+        // Stage 1 set `((a + b))/c` here, so this is a Task 6 improvement to protect.
         assert_eq!(drawn(r"\frac{\left(a+b\right)}{c}"), "(a + b)/c");
         // Scripts take the same rule, and here it corrects stage 1, which sets `a + b²`.
         assert_eq!(drawn(r"\left.a+b\right.^2"), "(a + b)²");
@@ -1156,21 +1191,61 @@ mod tests {
     }
 
     #[test]
-    fn an_indexed_root_has_no_honest_one_row_form() {
-        // The one `Visual` with no inline rewrite. It is named, and named for what it is:
-        // the other three all draw now, so a caption saying anything else here would be
-        // reporting the wrong construct.
-        assert_eq!(
-            refusal(r"\sqrt[3]{x}"),
-            "a root with an index cannot be drawn on one row"
-        );
+    fn an_indexed_root_draws_where_its_index_can_be_raised() {
+        // Inverted in Task 6, and the inversion is a bug fix, not a decision: this test
+        // used to assert that `\sqrt[3]{x}` had no honest one-row form, under plan text
+        // that was wrong about what stage 1 did. Stage 1 drew `³√x` and pinned it, and
+        // accepting the refusal here would have been a behaviour regression against
+        // shipped, tested output.
+        //
+        // The radicand comes *first* in the event stream and the index second, which is
+        // what `pulldown-latex` documents for this variant and what MathML's `mroot` does.
+        // The other order draws `ˣ√3`.
+        assert_eq!(inline(r"\sqrt[3]{x}"), "³√x");
+        assert_eq!(inline(r"\sqrt[12]{x}"), "¹²√x");
+        // The radicand is bracketed like any other, and the index is not: it is raised, so
+        // it delimits itself the way a script operand does.
+        assert_eq!(inline(r"\sqrt[3]{a+b}"), "³√(a + b)");
+        // And the index is built with spacing suppressed, for the reason a script operand
+        // is: there is no raised space, so a gap the table put inside the index would make
+        // the substitution decline and lose the whole root. Without the suppression this
+        // index is `n + 1` and the formula refuses instead of drawing.
+        assert_eq!(inline(r"\sqrt[{n+1}]{x}"), "ⁿ⁺¹√x");
 
-        // Declined before its operands are built. With the check placed after them,
-        // `\sqrt[3]{\begin{matrix} a \end{matrix}}` reports the matrix -- true of
-        // something inside it, but not the reason this formula cannot be drawn.
+        // A DEFECT, pinned as one, and older than this engine -- stage 1 drew the same
+        // thing. `pulldown-latex` emits an unbraced multi-token index as *bare* events:
+        // `\sqrt[n+1]{x}` is `Visual(Root)`, the radicand group, then `n`, `+`, `1` with no
+        // grouping round them (dumped from the parser, not assumed). `Visual::Root` governs
+        // two elements and `n` is the whole of the second, so `+1` falls back into the
+        // enclosing run and the (n+1)th root of x draws as the nth root, plus one. That is
+        // different mathematics, drawn silently, and it is the worst kind of output this
+        // crate can produce.
+        //
+        // It cannot be fixed here. The extent of the `[...]` is not in the event stream at
+        // all, so there is nothing for this arm to read; the fix is upstream or in a scan
+        // of the source before parsing, and both are decisions above this task. Braces
+        // restore the grouping, which is the line above.
+        assert_eq!(inline(r"\sqrt[n+1]{x}"), "ⁿ√x + 1");
+
+        // What it still refuses, and why the caption changed with it. There is no `^`
+        // notation for a root index, so where the index has no raised form the whole root
+        // declines rather than falling back the way a script does -- `^q√x` reads as
+        // nothing at all. The caption names the index, because the root itself is fine.
+        assert_eq!(
+            refusal(r"\sqrt[q]{x}"),
+            "a root index with no raised form cannot be drawn on one row"
+        );
+        // The boundary: `p` has a superscript form and `q` has not, and that is the only
+        // difference between these two inputs.
+        assert_eq!(inline(r"\sqrt[p]{x}"), "ᵖ√x");
+
+        // The second case of the old test, kept and flipped rather than deleted. It used
+        // to say the root declines *before* its operands are built, so the caption names
+        // the root and not the matrix inside it. Now that the root draws, the matrix is
+        // the thing that cannot be drawn, and the matrix is what the caption should name.
         assert_eq!(
             refusal(r"\sqrt[3]{\begin{matrix} a \end{matrix}}"),
-            "a root with an index cannot be drawn on one row"
+            "a matrix cannot be drawn on one row"
         );
     }
 
@@ -1202,11 +1277,15 @@ mod tests {
         // and `²` has no raised form, so the outer group keeps that substitution and
         // falls back around it.
         assert_eq!(inline("x^{y^2}"), "x^{y²}");
+        // An indexed root as an operand no longer refuses -- it draws, and `³√2` has no
+        // raised form of its own, so the script falls back around it exactly as `y²` does
+        // above. Changed in Task 6 with the root itself.
+        assert_eq!(inline(r"x^{\sqrt[3]{2}}"), "x^{³√2}");
         // What a script still refuses: an operand that cannot be drawn at all. The
         // caption names the operand, because the script itself is fine.
         assert_eq!(
-            refusal(r"x^{\sqrt[3]{2}}"),
-            "a root with an index cannot be drawn on one row"
+            refusal(r"x^{\begin{matrix} a \end{matrix}}"),
+            "a matrix cannot be drawn on one row"
         );
     }
 
@@ -1334,6 +1413,39 @@ mod tests {
         // which look like a typo in this crate rather than one in the document.
         assert_eq!(inline(r"\sqrt{}"), "√()");
         assert_eq!(inline(r"\frac{}{b}"), "()/b");
+    }
+
+    #[test]
+    fn a_one_piece_operand_that_draws_a_gap_is_parenthesised_all_the_same() {
+        // RULED 2026-08-21, Task 6 (deferral F5, the half `230f00b` left open). A `Text`
+        // box is one *piece* however many characters one event put in it, and `is_one_atom`
+        // used to wave every one of them through. That set `\frac{\text{if x}}{b}` as
+        // `if x/b`, which reads as `if (x/b)` -- design spec §5.2's own misreading example,
+        // arriving through the one arm that was not looking at what it held.
+        //
+        // The rule is the gap, not the character count. A piece that draws a space offers
+        // a neighbour something to bind tighter than, and then it is not one thing any
+        // more. Nothing else about a piece can be misread that way.
+        assert_eq!(inline(r"\frac{\text{if x}}{b}"), "(if x)/b");
+        assert_eq!(inline(r"\sqrt{\text{if x}}"), "√(if x)");
+        assert_eq!(inline(r"{\text{if x}}^2"), "(if x)²");
+
+        // The other side of the same rule, and the reason it is not "count the characters".
+        // A number, an operator name, a two-character relation and a scripted variable each
+        // draw no gap, so each is one atom and each is set bare. Stage 1 counted characters
+        // and wrote `(12)/5`, `(sin)/c` and `(x²)/c`.
+        assert_eq!(inline(r"\frac{12}{5}"), "12/5");
+        assert_eq!(inline(r"\frac{\sin}{c}"), "sin/c");
+        assert_eq!(inline(r"\frac{\coloneq}{c}"), ":−/c");
+        assert_eq!(inline(r"\frac{x_i}{c}"), "xᵢ/c");
+
+        // RULED with it (deferral F6). `\sqrt\,` used to set `√ ` while `\sqrt{}` set
+        // `√()`, and the inconsistency was the whole of F6. The gap rule answers both the
+        // same way and adds no branch to do it: a radicand that draws nothing but a space
+        // is no more one atom than a radicand that draws nothing at all, and in both cases
+        // the brackets are what tell the reader there was a radicand and it was empty.
+        assert_eq!(inline(r"\sqrt\,"), "√( )");
+        assert_eq!(inline(r"\sqrt{}"), "√()");
     }
 
     #[test]

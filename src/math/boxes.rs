@@ -15,13 +15,6 @@
 //! overflow. A clamped box draws wrongly and is caught by the caller's width check; an
 //! overflow aborts the pager.
 
-// Nothing outside this module's own tests calls these yet: `build.rs` is the first caller
-// and arrives in task 3, so the lib target sees the whole surface as dead while the test
-// target sees all of it live. `expect` cannot express that -- it fires
-// `unfulfilled_lint_expectations` on the test target -- so this is `allow`, and it comes
-// out once the builder lands.
-#![allow(dead_code)]
-
 use crate::text::display_width;
 
 /// A laid-out formula fragment: how much space it takes, and what is in it.
@@ -102,10 +95,33 @@ impl MathBox {
         self.above == 0 && self.below == 0
     }
 
+    /// The cells this box draws, with nothing put between them.
+    ///
+    /// Design spec §13 asks a narrow question and this answers exactly it:
+    /// `crate::math::symbols` walks the *content* events and wants the characters the
+    /// document named. A content event becomes a [`BoxContent::Text`], so those two arms
+    /// are the whole answer. The rest draw nothing here on purpose, not by omission: a
+    /// fraction's slash, a radical's sign and a fence's delimiters are composed by this
+    /// crate rather than named by the author, and `tests/glyph_inventory.rs` subtracts
+    /// what this returns from what was drawn and claims the remainder.
+    pub(crate) fn plain_text(&self) -> String {
+        match &self.content {
+            BoxContent::Text(cells) => cells.clone(),
+            BoxContent::Row(parts) => parts.iter().map(MathBox::plain_text).collect(),
+            _ => String::new(),
+        }
+    }
+
     /// Whether this box draws no cells at all.
+    ///
+    /// Only this module's own tests ask yet: the display block that acts on the answer is
+    /// wired up in a later task, so the lib target sees it dead while the test target sees
+    /// it live, which `expect` cannot express -- it fires `unfulfilled_lint_expectations`
+    /// on the test target.
     ///
     /// Design spec §16.3: a display block whose layout produces nothing contributes no
     /// rows to the document — no frame, no caption, no blank line.
+    #[allow(dead_code)]
     pub(crate) fn is_empty(&self) -> bool {
         self.width == 0 && self.above == 0 && self.below == 0
     }
@@ -275,6 +291,25 @@ mod tests {
         let b = text("E = mc");
         assert_eq!((b.width, b.above, b.below), (6, 0, 0));
         assert_eq!(b.height(), 1);
+    }
+
+    #[test]
+    fn plain_text_gathers_the_cells_of_a_row_and_nothing_from_a_construct() {
+        // The nesting is the point. `crate::math::symbols` asks this of a single atom, so
+        // the `Row` arm is not on its path and a walk that returned only the top level
+        // would look right there and be wrong here.
+        assert_eq!(text("α").plain_text(), "α");
+        assert_eq!(
+            row(vec![text("a"), row(vec![text("b"), text("c")])]).plain_text(),
+            "abc"
+        );
+        // A construct contributes nothing, which is what makes the answer "the document's
+        // characters" rather than "the drawn ones": this crate composed the rule row and
+        // the radical sign, so neither is the author's and neither may be subtracted from
+        // what `tests/glyph_inventory.rs` claims. The `a` and `b` inside are unreachable
+        // here for the same reason -- they arrive through their own content events.
+        assert_eq!(fraction(text("a"), text("b")).plain_text(), "");
+        assert_eq!(radical(text("a"), None).plain_text(), "");
     }
 
     #[test]

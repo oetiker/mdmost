@@ -115,7 +115,12 @@ const SUBSCRIPTS: &[(char, char)] = &[
 ];
 
 /// `text` raised, or `None` if any character has no superscript form.
-fn superscript(text: &str) -> Option<String> {
+///
+/// Crate-visible where [`subscript`] is not, because one caller outside this file needs
+/// the answer *before* the fallback below is applied: a root index has no caret notation,
+/// so `\sqrt[q]{x}` must refuse rather than draw `^q√x`. Nothing asks the same of a
+/// lowered group — there is no construct that lowers and cannot fall back.
+pub(crate) fn superscript(text: &str) -> Option<String> {
     substitute(text, SUPERSCRIPTS)
 }
 
