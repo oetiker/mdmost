@@ -1,8 +1,36 @@
 // SPDX-License-Identifier: MIT
-use super::render_inline;
+use super::{render_inline, symbols};
 
 fn rendered(src: &str) -> String {
     render_inline(src).unwrap_or_else(|err| panic!("{src:?} failed: {err}"))
+}
+
+#[test]
+fn symbols_reports_the_documents_characters_and_not_the_crates_own() {
+    // Design spec §13, and the half `tests/glyph_inventory.rs` cannot check on its own: it
+    // *subtracts* this from what was drawn, so a `symbols` that under-reports only makes
+    // the crate claim more glyphs than it should, and a fixture of ASCII formulas would
+    // never notice. Both directions are asserted here instead.
+    //
+    // Reported, because the author named them: `\alpha` and `\times` are the document's
+    // characters, asked for by name and resolved by `pulldown-latex`.
+    assert_eq!(symbols(r"a \times \alpha").expect("parses"), "a×α");
+    // Not reported, because this crate composed them: design spec §5.2's slash and radical
+    // sign and §5.1's raised digit are mdmost's answer to a construct, not anything the
+    // document asked for by name, so `glyph_inventory` must go on claiming them.
+    //
+    // The denominator's brackets arrived with the RULING of 2026-08-21 (owner, Task 6 fix
+    // round): a piece that ends in a raised character is no longer one atom, so `b²` is
+    // bracketed here where it used to set `(√a)/b²`. That is the price of `{x^2}^2` →
+    // `(x²)²` and `\sqrt{x^2}` → `√(x²)`, pinned in `build.rs`'s
+    // `a_one_piece_operand_that_draws_a_gap_is_parenthesised_all_the_same`. Nothing about
+    // *this* test's subject moves with it: the brackets are the crate's own characters,
+    // which is exactly what the line below claims.
+    assert_eq!(rendered(r"\frac{\sqrt{a}}{b^2}"), "(√a)/(b²)");
+    assert_eq!(symbols(r"\frac{\sqrt{a}}{b^2}").expect("parses"), "ab2");
+    // A parse failure is an error here as it is in `render_inline`, not an empty answer:
+    // an empty one would silently claim every glyph of a broken formula for this crate.
+    assert!(symbols(r"\frac{1}").is_err());
 }
 
 #[test]
@@ -27,11 +55,15 @@ fn a_leading_operator_glues_to_what_follows_instead_of_floating() {
 #[test]
 fn a_trailing_operator_never_leaves_a_stray_space() {
     // `a+` is a truncated formula, not a malformed one -- pulldown-latex parses it as
-    // `Ordinary('a')` then `BinaryOp('+')` with nothing after. The operator still gets
-    // its usual left space (it is not the leading token), but `write_events`' final
-    // `trim_end` removes whatever space `spaced` wrote on its right, so the line never
-    // ends in whitespace regardless of what the formula ends in.
-    assert_eq!(rendered("a+"), "a +");
+    // `Ordinary('a')` then `BinaryOp('+')` with nothing after.
+    //
+    // Stage 1 asserted `a +` here: it wrote the operator's usual pair of spaces and then
+    // trimmed the trailing one off the finished string. The engine never writes it. An
+    // operator with nothing on its right to bind to is a sign, not an operator, and takes
+    // no gap on either side -- the second half of the `TeXbook`'s bin-to-ord rule, decided
+    // once in `build.rs`'s unary pass instead of by a trim that could only ever reach the
+    // end of the formula. So the left space goes too, which the old trim could not do.
+    assert_eq!(rendered("a+"), "a+");
 }
 
 #[test]
@@ -111,9 +143,15 @@ fn a_function_name_sits_tight_against_an_opening_delimiter() {
 
 #[test]
 fn a_two_character_relation_is_written_as_one_spaced_unit() {
-    // `RelationContent` can hold two characters (`\shortparallel` and its relatives);
-    // `\coloneq` is one, and its own doc comment names it as the reason
-    // `Content::Relation` cannot share an or-pattern with the other `char`-only arms.
+    // `RelationContent` can hold two characters, and that is why `Content::Relation`
+    // cannot share an or-pattern with the other `char`-only arms. The ones that do are
+    // the sixteen `multirelation` calls at
+    // `pulldown-latex-0.8.0/src/parser/primitives.rs:1157-1172`; `\coloneq` is `:` then
+    // `−`, which is what this asserts.
+    //
+    // This comment named `\shortparallel` as an example. It is not one: it is
+    // `RelationContent::single_char('∥')` at `primitives.rs:1066`, so the example
+    // contradicted the input on the next line.
     assert_eq!(rendered(r"a \coloneq b"), "a :− b");
 }
 
@@ -156,40 +194,48 @@ fn a_sub_and_superscript_pair_is_decided_independently() {
 
 #[test]
 fn a_script_sits_flush_against_a_function_name_base() {
-    // A function name normally earns a trailing space (`\sin x` -> `sin x`), but a
-    // script is not a separate operand -- it attaches directly to its base, so
-    // `\sin^2 x` must read `sin²x`, not `sin ²x`.
-    assert_eq!(rendered(r"\sin^2 x"), "sin²x");
+    // The script itself is still flush -- `sin²`, never `sin ²`: a script is not a
+    // separate operand, and the engine appends it to the base's own cells with no gap
+    // between them at all.
+    //
+    // What changed is the space after. Stage 1 asserted `sin²x`, because it suppressed a
+    // function name's trailing space from inside the script writer, so a scripted `\sin`
+    // stopped being a function name for spacing purposes. The engine keeps the base's
+    // class -- a scripted `\sin` is still `Function` -- and asks the table once:
+    // `gap(Function, Ordinary)` is 1, the same cell that makes `\sin x` read `sin x`.
+    // `sin²x` was a carried stage-1 defect, not a decision.
+    assert_eq!(rendered(r"\sin^2 x"), "sin² x");
 }
 
 #[test]
 fn a_function_used_as_a_script_base_still_gets_its_own_leading_space() {
-    // `take_group`'s single-event branch used to build the base in a fresh, isolated
-    // buffer, so `spaced_word`'s "am I at the head of a run?" check always saw an
-    // empty buffer and always answered yes -- even when the base plainly was not at
-    // the head of the formula. That silently dropped the leading space whenever an
-    // `Ordinary`/`Number` token (which writes no space of its own) preceded the
-    // scripted function name. A preceding `BinaryOp`/`Relation` masked the bug because
-    // those already write their own trailing space, so `2 + \sin^2 x` was never wrong
-    // -- these four are the two working and the two broken shapes side by side.
+    // A scripted `\sin` is spaced by what its base *is*, not by what happened to it: the
+    // engine returns the base's own class from `script_box`, so all four of these are one
+    // lookup of `gap(Ordinary, Function)`, which is 1. Stage 1 had to reach this the hard
+    // way -- through a head-of-run check that could only see an isolated buffer -- and got
+    // it wrong twice before it got it right.
+    //
+    // The trailing halves (`sin² x`, `sin² y`) were `sin²x` and `sin²y` in stage 1; see
+    // `a_script_sits_flush_against_a_function_name_base` for why that was a defect.
     assert_eq!(rendered(r"2\sin x"), "2 sin x");
-    assert_eq!(rendered(r"2\sin^2 x"), "2 sin²x");
+    assert_eq!(rendered(r"2\sin^2 x"), "2 sin² x");
     assert_eq!(rendered(r"x\sin y"), "x sin y");
-    assert_eq!(rendered(r"x\sin^2 y"), "x sin²y");
+    assert_eq!(rendered(r"x\sin^2 y"), "x sin² y");
 }
 
 #[test]
-fn a_group_used_as_a_script_base_still_gets_its_own_leading_space() {
-    // The same bug as above, in the sibling path: `take_group`'s group branch built a
-    // `{…}` base by recursing into its own isolated buffer, so a group's first token
-    // was just as blind to real context as a bare token was. `take_base` now writes a
-    // group base straight into `out` via `write_into`, so its first token's leading
-    // space is earned (or not) by what precedes the *group*, not by the group's own
-    // emptiness -- and the base is then bracketed, so the script still applies to the
-    // whole group rather than just the last atom written (`(sin x)²`, not `sin x²`,
-    // which would read as `sin(x²)`).
+fn a_group_used_as_a_script_base_is_spaced_as_the_ordinary_atom_it_is() {
+    // Renamed: stage 1 asserted `2 (sin x)²` and called the space the group's "own leading
+    // space", carried over from a bug where a `{…}` base could not see what preceded it.
+    // The engine has no head-of-run notion to get wrong. A `Begin` is `Class::Ordinary`
+    // whatever it contains -- a brace group is an Ord atom, which is what TeX calls it too
+    // -- so `2{\sin x}^2` is `gap(Ordinary, Ordinary)`, which is 0. The function name
+    // inside the braces is not what the `2` is set against; the group is.
+    //
+    // The grouping this test exists for is untouched: `(sin x)²`, not `sin x²`, which
+    // would read as `sin(x²)`.
     assert_eq!(rendered(r"{\sin x}^2"), "(sin x)²");
-    assert_eq!(rendered(r"2{\sin x}^2"), "2 (sin x)²");
+    assert_eq!(rendered(r"2{\sin x}^2"), "2(sin x)²");
 }
 
 #[test]
@@ -204,22 +250,36 @@ fn a_multi_atom_brace_group_used_as_a_script_base_keeps_its_grouping() {
 }
 
 #[test]
-fn a_trailing_space_inside_a_bracketed_base_does_not_defeat_the_single_atom_exemption() {
-    // Regression caught in re-review: bracketing ran *before* the unconditional
-    // trailing-space trim at the bottom of `take_base`, so a trailing space
-    // `write_into` leaves behind (a big operator's own spacing, or a function name's)
-    // was sealed *inside* the new parentheses -- which made a genuinely one-character
-    // base count as two, so `bracketed()`'s single-atom exemption never fired.
-    // `{\sum}^2` drew `(∑ )²` instead of the correct `∑²`, a straight regression
-    // against the version before the C1 fix. The body is now trimmed before it is
-    // bracketed, not after.
+fn a_group_used_as_a_script_base_brackets_by_the_pieces_it_holds() {
+    // Renamed. Stage 1's name described a bug in a walk that no longer exists: it wrote
+    // spaces into a buffer and then bracketed the buffer, so a big operator's own trailing
+    // space could be sealed inside the parentheses and make a one-character base count as
+    // two. The engine brackets a *box*, and a box has pieces rather than characters, so
+    // there is no trailing space to seal and no ordering to get wrong.
+    //
+    // These three are unchanged; they are here because they are the case the piece count
+    // and the character count agree on, and one that disagrees follows each way below.
     assert_eq!(rendered(r"{\sum}^2"), "∑²");
     assert_eq!(rendered(r"{\prod}^2"), "∏²");
     assert_eq!(rendered(r"{\int}^2"), "∫²");
-    // Multi-character bases still bracket correctly with the trailing space gone.
-    assert_eq!(rendered(r"{\sin}^2"), "(sin)²");
-    assert_eq!(rendered(r"2{\log}_2"), "2 (log)₂");
-    assert_eq!(rendered(r"{a+}^2"), "(a +)²");
+    // `{\sin}` is one piece where stage 1 counted three characters and wrote `(sin)²`.
+    // `sin²` is the conventional form and the piece count is the rule design spec §5.2
+    // means by "a single atom": one thing set against another, not one column.
+    assert_eq!(rendered(r"{\sin}^2"), "sin²");
+    // RULED 2026-08-21, Task 6. `2\log_2` sets `2 log₂` and `2{\log}_2` sets `2log₂`, and
+    // the braces are the whole difference: a group's class is `Ordinary` where a function
+    // name's is `Function`, and `gap(Ordinary, Ordinary)` is 0. Kept as it stands, for
+    // three reasons. It is what TeX does -- `{…}` is an Ord atom, and the author who wrote
+    // the braces asked for exactly that. Making a group take its content's class instead
+    // would stop a group being transparent to spacing, which `{a}+{b}` -> `a + b` depends
+    // on, and would give `{\sum}x` a large operator's gap. And the author who wants
+    // `2 log₂` writes `2\log_2`, which is the ordinary way to write it. The cost is that
+    // `2log₂` can be read as one identifier; the braces are what asked for that reading.
+    assert_eq!(rendered(r"2{\log}_2"), "2log₂");
+    // The other direction: two pieces, so the brackets stay. The `+` loses its spaces
+    // because a brace group bounds a run and its trailing `Bin` is demoted inside it --
+    // the same rule as `a+` -> `a+`.
+    assert_eq!(rendered(r"{a+}^2"), "(a+)²");
 }
 
 #[test]
@@ -299,33 +359,80 @@ fn a_matrix_declines_rather_than_being_flattened() {
 }
 
 #[test]
-fn a_fraction_or_radical_as_a_script_base_declines_by_name() {
-    // Carried to stage 2 (final review, Task 5): a fraction or a radical drawn on this
-    // row is a two-dimensional box, which a script cannot flatten onto -- correctly
-    // declined, not approximated. Pinned here so stage 2's proper layout of this case
-    // changes a test, not a silent behaviour drift. The message names the position
-    // ("as a script base"), not the construct, because a fraction and a radical both
-    // draw fine elsewhere on this very row (`a_fraction_is_written_with_a_slash`,
-    // `a_root_takes_the_radical_sign`).
-    assert_eq!(
-        render_inline(r"\frac{a}{b}^2").unwrap_err(),
-        crate::error::MathError::NotInline("a fraction as a script base")
-    );
-    assert_eq!(
-        render_inline(r"\sqrt{x}^2").unwrap_err(),
-        crate::error::MathError::NotInline("a radical as a script base")
-    );
+fn a_radical_or_fraction_may_be_a_script_base() {
+    // Renamed and inverted, which is the change this stage exists to make. Stage 1's
+    // one-row walk had no notion of a box, so a fraction or a radical reaching a script
+    // base was a shape it could not carry and it declined by name. In one engine a base is
+    // just a box: the fraction has already rewritten itself to `a/b` on this same row, and
+    // a script goes on it like any other.
+    //
+    // Design spec §5.2 brackets the base, and it has to: `√x` is two atoms, and `√x²`
+    // would read as `√(x²)`, a different number.
+    assert_eq!(rendered(r"\frac{a}{b}^2"), "(a/b)²");
+    assert_eq!(rendered(r"\sqrt{x}^2"), "(√x)²");
 }
 
 #[test]
-fn a_leading_unary_minus_before_a_function_name_keeps_a_space() {
-    // Carried to stage 2 (final review, Task 3): `spaced` suppresses both sides of a
-    // leading operator, but `spaced_word` (a function name) suppresses only its own
-    // leading side, and neither function knows about the other. `-x` reads `−x`
-    // (`a_leading_operator_glues_to_what_follows_instead_of_floating`), but `-\sin x`
-    // reads `− sin x`, not `−sin x` -- correct, merely loose. Pinned so stage 2's
-    // rewrite of this walk changes a test rather than drifting silently.
-    assert_eq!(rendered(r"-\sin x"), "− sin x");
+fn a_leading_unary_minus_binds_tight_to_a_function_name() {
+    // Renamed, because the space it was named for is gone. Stage 1 wrote `− sin x`:
+    // `spaced` suppressed both sides of an operator at the head of a run and `spaced_word`
+    // only the leading one, and neither knew about the other, so a sign in front of a
+    // function name kept a space that `-x` -> `−x` did not. Correct, merely loose, and
+    // pinned then so that this rewrite would change a test rather than drift.
+    //
+    // The spacing table has no head-of-run rule to disagree with. The `−` is demoted to
+    // `Class::Unary` by the bin-to-ord pass because it has nothing on its left, and then
+    // it is one lookup: `gap(Unary, Function)` is 0.
+    assert_eq!(rendered(r"-\sin x"), "−sin x");
+}
+
+#[test]
+fn a_formula_may_begin_or_end_with_a_column_and_keeps_it() {
+    // RULED 2026-08-21, Task 6. `render_inline` returns the row as the engine built it and
+    // trims nothing. Stage 1 trimmed the trailing end, and could not have done the leading
+    // one -- it had no leading space to trim, because its head-of-run rule suppressed the
+    // space instead of writing it.
+    //
+    // Both of these are faithful to TeX and neither is a defect to be tidied away. `\,` is
+    // a thin space the author asked for, and it is the first thing in the run, so the run
+    // starts with a column. `{}-x` is the classic idiom for keeping a minus binary: an
+    // empty group is a zero-width `Ordinary` piece, so the `−` has a left operand, is not
+    // demoted to a sign, and keeps the spaces an operator gets.
+    //
+    // Trimming would put a spacing decision outside `spacing.rs`, which is the one place
+    // this crate decides spacing, and it would make `render_inline` disagree with
+    // `draw::to_row` over the same box -- one engine, split in two again by the back door.
+    // A caller that cannot take a leading column is the caller that should trim.
+    assert_eq!(rendered(r"\,x"), " x");
+    assert_eq!(rendered(r"{}-x"), " − x");
+    assert_eq!(rendered(r"a\,"), "a ");
+    // And the boundary: without the empty group the `−` is a sign and takes no space at
+    // all, which is the difference the idiom exists to make.
+    assert_eq!(rendered(r"-x"), "−x");
+}
+
+#[test]
+fn a_root_index_with_no_raised_form_declines_rather_than_writing_a_caret() {
+    // `\sqrt[3]{x}` draws (`a_root_takes_the_radical_sign`). An index Unicode cannot raise
+    // does not, and stage 1's answer here was wrong rather than merely worse: it reached
+    // for the same `^` fallback a script uses and wrote `^α√x`, which is not a root with
+    // an index written plainly, it is nonsense. There is no caret notation for a root
+    // index. So the root declines and design spec §9 shows the source instead.
+    //
+    // The caption names the index, not the root, because the root is fine -- it is the
+    // index that has no form, and a reader who is told "a root with an index" would go
+    // looking for the wrong thing after seeing `\sqrt[3]{x}` draw on the line above.
+    assert_eq!(
+        render_inline(r"\sqrt[\alpha]{x}").unwrap_err(),
+        crate::error::MathError::NotInline("a root index with no raised form")
+    );
+    // The boundary, one character either side of it: `q` has no superscript form and `p`
+    // has, so these two differ only in whether the table has the letter.
+    assert_eq!(
+        render_inline(r"\sqrt[q]{x}").unwrap_err(),
+        crate::error::MathError::NotInline("a root index with no raised form")
+    );
+    assert_eq!(rendered(r"\sqrt[p]{x}"), "ᵖ√x");
 }
 
 proptest::proptest! {

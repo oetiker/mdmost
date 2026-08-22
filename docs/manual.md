@@ -425,6 +425,12 @@ A formula that fails to parse, or that needs more than one row to lay out — a
 matrix, for instance — falls back to the same verbatim-source rendering as
 `math_inline = false`.
 
+Two limits are applied to the source before it is parsed. A formula may be at
+most 2048 bytes long, and may contain at most 32 commands in an unbroken chain —
+commands with no brace, letter or digit between them, as in `\sqrt\sqrt\sqrt x`.
+Whitespace does not break a chain; a brace does, so `\sqrt{\sqrt{x}}` is not one.
+A formula past either limit falls back the same way.
+
 `$$…$$` and ```` ```math ```` blocks are display math. They are not laid out in
 this version: shown as a framed, syntax-highlighted code block with the reason
 in its bottom edge, the same as an unsupported Mermaid diagram.

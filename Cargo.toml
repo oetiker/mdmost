@@ -163,3 +163,35 @@ assets = [
     { source = "integrations/wezterm/md-open.lua", dest = "/usr/share/doc/mdmost/examples/wezterm/md-open.lua", mode = "644", doc = true },
     { source = "integrations/kitty/open-actions.conf", dest = "/usr/share/doc/mdmost/examples/kitty/open-actions.conf", mode = "644", doc = true },
 ]
+
+# DEVELOPMENT ONLY, AND 0.3.0 DOES NOT SHIP WHILE THIS BLOCK IS HERE.
+#
+# `pulldown-latex` 0.8.0 has three defects we hit. Two abort the whole process with a
+# stack overflow -- not a panic, so `catch_unwind` never sees it -- on unbounded parser
+# recursion: an unbraced control-sequence argument chain (`\sqrt\sqrt...x`), and a run
+# of tokens that emit no event (`\relax`, `%` comments). The third loses the extent of
+# an unbraced optional argument, so `\sqrt[n+1]{x}` draws as the nth root, plus one.
+#
+# All three are fixed on the fork, on three independent branches off upstream main,
+# merged into `mdmost-integration`:
+#
+#   fix/argument-recursion-depth   6e10f81   a depth counter in handle_primitive
+#   fix/next-tail-recursion        49effe3   Parser::next and lex::token driven by a
+#                                            loop instead of recursion
+#   fix/optional-argument-extent   357ce1d   the radical index emitted as a group
+#
+# A patch section applies to local builds only, and crates.io refuses a git dependency
+# outright, so this cannot be published. RULING (owner, 2026-08-22): 0.3.0 waits for an
+# upstream release carrying these fixes, rather than shipping a product that differs
+# from what CI builds, or publishing a renamed fork of someone else's crate. Retire this
+# block, and the `rev`, the moment that release exists; the dependency then goes back to
+# a plain version requirement.
+#
+# The third fix CHANGES RENDERED OUTPUT, so this pin is load-bearing for the test suite:
+# `src/math/build.rs`'s `\sqrt[n+1]{x}` assertion holds only with it. That is why the pin
+# and the release ruling are one decision.
+#
+# `MAX_COMMAND_RUN` and `MAX_SOURCE_BYTES` in `src/math/build.rs` stay regardless. They
+# refuse before the parser runs, so they do not depend on which parser is underneath.
+[patch.crates-io]
+pulldown-latex = { git = "https://github.com/oetiker/pulldown-latex", rev = "e48d7e763e7b2d9ef0ae99fc71a5525f91052444" }

@@ -1607,8 +1607,7 @@ dependencies = [
 [[package]]
 name = "pulldown-latex"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cf850381ae0dbb131f36e31d6090f55363d079ab3e518ad0323b9cb6a96d115"
+source = "git+https://github.com/oetiker/pulldown-latex?rev=e48d7e763e7b2d9ef0ae99fc71a5525f91052444#e48d7e763e7b2d9ef0ae99fc71a5525f91052444"
 dependencies = [
  "bumpalo",
 ]

@@ -1,0 +1,15 @@
+---
+source: src/math/spacing.rs
+expression: grid
+---
+             Edge Ordinary Function   Binary    Unary Relation    Large     Open    Close    Punct
+    Edge        0        0        0        0        0        0        0        0        0        0
+Ordinary        0        0        1        1        0        1        1        0        0        0
+Function        0        1        1        1        1        1        1        0        0        0
+  Binary        0        1        1        1        1        1        1        1        0        0
+   Unary        0        0        0        1        0        1        0        0        0        0
+Relation        0        1        1        1        1        1        1        1        0        0
+   Large        0        1        1        1        1        1        1        0        0        0
+    Open        0        0        0        0        0        0        0        0        0        0
+   Close        0        0        1        1        0        1        1        0        0        0
+   Punct        0        1        1        1        1        1        1        1        1        1
