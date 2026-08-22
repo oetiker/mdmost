@@ -1607,7 +1607,7 @@ dependencies = [
 [[package]]
 name = "pulldown-latex"
 version = "0.8.0"
-source = "git+https://github.com/oetiker/pulldown-latex?rev=c3582a034bd995e9f4322f2a55397ac6cbe69bd1#c3582a034bd995e9f4322f2a55397ac6cbe69bd1"
+source = "git+https://github.com/oetiker/pulldown-latex?rev=e48d7e763e7b2d9ef0ae99fc71a5525f91052444#e48d7e763e7b2d9ef0ae99fc71a5525f91052444"
 dependencies = [
  "bumpalo",
 ]

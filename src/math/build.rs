@@ -1618,20 +1618,24 @@ mod tests {
         // index is `n + 1` and the formula refuses instead of drawing.
         assert_eq!(inline(r"\sqrt[{n+1}]{x}"), "ⁿ⁺¹√x");
 
-        // A DEFECT, pinned as one, and older than this engine -- stage 1 drew the same
-        // thing. `pulldown-latex` emits an unbraced multi-token index as *bare* events:
+        // FIXED UPSTREAM, and this assertion holds only against a parser that carries the
+        // fix. `pulldown-latex` 0.8.0 emits an unbraced multi-token index as *bare* events:
         // `\sqrt[n+1]{x}` is `Visual(Root)`, the radicand group, then `n`, `+`, `1` with no
-        // grouping round them (dumped from the parser, not assumed). `Visual::Root` governs
-        // two elements and `n` is the whole of the second, so `+1` falls back into the
-        // enclosing run and the (n+1)th root of x draws as the nth root, plus one. That is
-        // different mathematics, drawn silently, and it is the worst kind of output this
-        // crate can produce.
+        // grouping round them. `Visual::Root` governs two elements and `n` is the whole of
+        // the second, so `+1` fell back into the enclosing run and the (n+1)th root of x
+        // drew as the nth root, plus one -- different mathematics, drawn silently. Stage 1
+        // did the same, so it was never a regression, only an inherited defect.
         //
-        // It cannot be fixed here. The extent of the `[...]` is not in the event stream at
-        // all, so there is nothing for this arm to read; the fix is upstream or in a scan
-        // of the source before parsing, and both are decisions above this task. Braces
-        // restore the grouping, which is the line above.
-        assert_eq!(inline(r"\sqrt[n+1]{x}"), "ⁿ√x + 1");
+        // It could not be fixed in this arm: the extent of the `[...]` was not in the event
+        // stream at all. The fix is one line in the parser (`handle_argument` on a
+        // `Group` instead of a raw `SubGroup` push), on the fork's
+        // `fix/optional-argument-extent`, which `Cargo.toml`'s `[patch.crates-io]` pins.
+        //
+        // **Against unpatched 0.8.0 this renders `ⁿ√x + 1` and this assertion FAILS.** That
+        // is deliberate and it is the point: 0.3.0 waits for an upstream release carrying
+        // the fix (owner, 2026-08-22), so a red line here is the signal that the release
+        // dependency went backwards, not a test to relax.
+        assert_eq!(inline(r"\sqrt[n+1]{x}"), "ⁿ⁺¹√x");
 
         // What it still refuses, and why the caption changed with it. There is no `^`
         // notation for a root index, so where the index has no raised form the whole root
