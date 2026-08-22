@@ -228,24 +228,38 @@ pub(crate) fn limits(base: MathBox, under: Option<MathBox>, over: Option<MathBox
 
 /// The stroke, the overline, and the radicand under them (design spec §6.2).
 ///
-/// Two columns go to the stroke and the space after it, and one row to the overline.
+/// One row goes to the overline. The stroke's width depends on the shape of the
+/// radicand, because the two forms are drawn differently and the owner has ruled that
+/// they do not share a left offset:
 ///
-/// An index — the `3` of a cube root — is right-aligned into the *single* free column
-/// above the stroke glyph, so its last column sits over the root sign itself. Only that
-/// one column is free: the second stroke column is the gap before the radicand, and an
-/// index reaching into it would read as sitting over the radicand rather than over the
-/// root. An index wider than one column therefore overhangs to the left, one column at a
-/// time, which is what the `STROKE - 1` below counts. Spec §6.2 shows no index example;
-/// this is the owner's ruling, and `draw.rs` must place the index to match it.
+/// * A one-row radicand keeps the plain sign — `√ b + 4` — and that costs **two**
+///   columns, the sign and the space after it.
+/// * A taller radicand is drawn as a vertical stem capped by a square right angle, with
+///   the tick beside the diagonal on the bottom row, and that costs **four**: tick,
+///   diagonal, stem, gap.
+///
+/// An index — the `3` of a cube root — is right-aligned so that its last column is the
+/// stroke's *first* column: over the `√` in the one-row form, over the tick in the tall
+/// one. The tick is the top of the short initial stroke, so this is one rule in both
+/// forms rather than two rules that happen to agree. Spec §6.2 shows no index example;
+/// this and the tall art are the owner's rulings of 2026-08-22, and `draw.rs` places the
+/// index to match.
 pub(crate) fn radical(radicand: MathBox, index: Option<MathBox>) -> MathBox {
-    const STROKE: u16 = 2;
-    let overhang = index
-        .as_ref()
-        .map_or(0, |b| b.width.saturating_sub(STROKE - 1));
+    // Not `STROKE - 1`, and deliberately not a function of `stroke` at all. Exactly ONE
+    // column is free for the index in either form — the stroke's first column, which the
+    // index's last column takes — so everything past the first column of the index
+    // overhangs to the left, one column at a time. The count is 1 because that is how
+    // many columns the *index* is given, not because of how wide the stroke is: the tall
+    // stroke's three further columns are the diagonal, the stem and the gap, and an
+    // index reaching into any of them would collide with the art or read as sitting over
+    // the radicand. Re-coupling this to `stroke` would silently grant a tall root three
+    // free columns.
+    let overhang = index.as_ref().map_or(0, |b| b.width.saturating_sub(1));
+    let stroke = if radicand.is_inline() { 2 } else { 4 };
     MathBox {
         width: radicand
             .width
-            .saturating_add(STROKE)
+            .saturating_add(stroke)
             .saturating_add(overhang),
         above: radicand.above.saturating_add(1),
         below: radicand.below,
@@ -384,6 +398,62 @@ mod tests {
         );
         assert_eq!(b.above, 1, "the overline");
         assert_eq!(b.below, 0);
+    }
+
+    #[test]
+    fn a_tall_radicand_costs_two_more_stroke_columns_than_a_one_row_one() {
+        // The two forms are drawn differently and do not share a left offset: `√ x` is
+        // two columns of stroke, the stem-and-right-angle form is four -- tick, diagonal,
+        // stem, gap.
+        let one_row = radical(text("xyz"), None);
+        assert_eq!(one_row.width, 5, "3 radicand + 2 stroke");
+
+        let tall = radical(fraction(text("a"), text("bcd")), None);
+        assert_eq!(tall.width, 7, "3 radicand + 4 stroke");
+        assert_eq!(tall.above, 2, "the radicand's ascent plus the overline");
+        assert_eq!(tall.below, 1, "and its descent, untouched by the stroke");
+    }
+
+    #[test]
+    fn one_column_of_index_is_free_in_both_forms_and_the_rest_overhangs() {
+        // The four cases the owner ruled on, 2026-08-22. The index's last column is the
+        // stroke's first column in either form, so the free column count is 1 on both
+        // sides and the overhang is `index.width - 1` with no `stroke` in it. A tall
+        // radicand of width 3, so that the 3 and the 4 in `3 + 4 + overhang` cannot be
+        // confused with each other.
+        let tall = || fraction(text("a"), text("bcd"));
+        assert_eq!(tall().width, 3, "the shared radicand width");
+
+        assert_eq!(
+            radical(text("x"), Some(text("3"))).width,
+            3,
+            "1 radicand + 2 stroke + 0 overhang"
+        );
+        assert_eq!(
+            radical(text("x"), Some(text("10"))).width,
+            4,
+            "1 radicand + 2 stroke + 1 overhang"
+        );
+        assert_eq!(
+            radical(tall(), Some(text("3"))).width,
+            7,
+            "3 radicand + 4 stroke + 0 overhang"
+        );
+        assert_eq!(
+            radical(tall(), Some(text("10"))).width,
+            8,
+            "3 radicand + 4 stroke + 1 overhang"
+        );
+
+        // The index never touches the height, in either form.
+        assert_eq!(
+            (
+                radical(tall(), Some(text("10"))).above,
+                radical(tall(), Some(text("10"))).below,
+            ),
+            (2, 1),
+            "the index rides on a row the radical already has"
+        );
     }
 
     #[test]

@@ -236,10 +236,90 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                 );
             }
         }
-        // Task 7 fills in `Radical` and Task 8 fills in `Fenced`. Drawing nothing is the
-        // honest placeholder: the box already reserved the space, so a missing radical
-        // shows as a gap rather than as misplaced neighbours.
-        BoxContent::Radical { .. } | BoxContent::Fenced { .. } => {}
+        BoxContent::Radical { radicand, index } => {
+            // The index's last column is the stroke's *first* column, so everything past
+            // the index's own first column hangs off to the left and pushes the stroke
+            // right. `boxes::radical` reserved exactly this much and nothing here may
+            // disagree with it.
+            let overhang = index.as_ref().map_or(0, |i| i.width.saturating_sub(1));
+            let stroke = col.saturating_add(overhang);
+            let top = baseline.saturating_sub(i32::from(b.above));
+            let bottom = baseline.saturating_add(i32::from(b.below));
+
+            let (radicand_col, index_row) = if radicand.is_inline() {
+                // The plain sign on the baseline, and the overline on the row above it.
+                // The overline spans the radicand alone: drawn to `b.width` it would
+                // reach back over the sign itself.
+                if let Ok(row) = usize::try_from(baseline) {
+                    canvas.write_str(row, usize::from(stroke), "√", theme.base());
+                }
+                if let Ok(row) = usize::try_from(top) {
+                    canvas.hline(
+                        row,
+                        usize::from(stroke.saturating_add(2)),
+                        usize::from(radicand.width),
+                        "─",
+                        theme.base(),
+                    );
+                }
+                (stroke.saturating_add(2), top)
+            } else {
+                // Owner's ruling, 2026-08-22: a vertical stem capped by a square right
+                // angle, with the tick beside the diagonal on the bottom row. Columns
+                // from `stroke`: tick, diagonal, stem, gap, then the radicand.
+                //
+                // The corner sits ON the stem column, so the overline meets it and
+                // covers the gap column as well -- `radicand.width + 1` columns starting
+                // at the gap, not `radicand.width` as in the one-row form above.
+                let stem = stroke.saturating_add(2);
+                if let Ok(row) = usize::try_from(top) {
+                    canvas.write_str(row, usize::from(stem), "┌", theme.base());
+                    canvas.hline(
+                        row,
+                        usize::from(stem.saturating_add(1)),
+                        usize::from(radicand.width).saturating_add(1),
+                        "─",
+                        theme.base(),
+                    );
+                }
+                for r in top.saturating_add(1)..=bottom {
+                    if let Ok(row) = usize::try_from(r) {
+                        canvas.write_str(row, usize::from(stem), "│", theme.base());
+                    }
+                }
+                if let Ok(row) = usize::try_from(bottom) {
+                    canvas.write_str(row, usize::from(stroke), "‾", theme.base());
+                    canvas.write_str(
+                        row,
+                        usize::from(stroke.saturating_add(1)),
+                        "╲",
+                        theme.base(),
+                    );
+                }
+                (stroke.saturating_add(4), bottom.saturating_sub(1))
+            };
+
+            if let Some(index) = index {
+                // Right-aligned so its last column is the stroke's first: over the `√`
+                // in the one-row form, over the tick in the tall one. The tick is the
+                // top of the short initial stroke, which is where the index sits above
+                // `√` -- so this is the one-row rule transcribed, not a second rule
+                // invented for the tall case.
+                place(
+                    index,
+                    canvas,
+                    index_row,
+                    stroke.saturating_add(1).saturating_sub(index.width),
+                    theme,
+                    deeper,
+                );
+            }
+            place(radicand, canvas, baseline, radicand_col, theme, deeper);
+        }
+        // Task 8 fills in `Fenced`. Drawing nothing is the honest placeholder: the box
+        // already reserved the space, so a missing fence shows as a gap rather than as
+        // misplaced neighbours.
+        BoxContent::Fenced { .. } => {}
     }
 }
 
@@ -384,6 +464,102 @@ mod tests {
     }
 
     #[test]
+    fn a_one_row_radicand_keeps_the_plain_sign_and_an_overline() {
+        let theme = Theme::default();
+        let b = radical(text("b + 4"), None);
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["  ─────", "√ b + 4"]);
+        canvas
+            .check_invariants()
+            .expect("exactly width columns on every row");
+    }
+
+    #[test]
+    fn the_one_row_overline_spans_exactly_the_radicand() {
+        // The stroke column and the gap after it are not under the overline. A rule
+        // drawn to the box's width instead of the radicand's -- which is what the
+        // `Fraction` arm one screen up does -- would reach back over the `√` itself,
+        // and only a radicand narrower than the box tells the two apart.
+        let theme = Theme::default();
+        let b = radical(text("xy"), None);
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["  ──", "√ xy"]);
+        canvas
+            .check_invariants()
+            .expect("exactly width columns on every row");
+    }
+
+    #[test]
+    fn a_one_row_root_index_sits_over_the_sign() {
+        let theme = Theme::default();
+        let b = radical(text("x"), Some(text("3")));
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["3 ─", "√ x"]);
+        canvas
+            .check_invariants()
+            .expect("exactly width columns on every row");
+    }
+
+    #[test]
+    fn a_tall_radicand_takes_a_stem_capped_by_a_right_angle() {
+        // The owner's ruling of 2026-08-22. Columns: tick, diagonal, stem, gap,
+        // radicand -- and the tick and the diagonal are drawn on the bottom row only,
+        // so the two columns left of the stem are blank everywhere else.
+        let theme = Theme::default();
+        let b = radical(fraction(text("a"), text("b")), None);
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["  ┌──", "  │ a", "  │ ─", "‾╲│ b"]);
+        canvas
+            .check_invariants()
+            .expect("exactly width columns on every row");
+    }
+
+    #[test]
+    fn a_five_row_radicand_draws_the_stem_as_a_stem() {
+        // A three-row radicand has exactly one row between the cap and the bottom, so
+        // it cannot tell a stem from a single middle row. Five rows can.
+        let theme = Theme::default();
+        let b = radical(fraction(fraction(text("a"), text("b")), text("cd")), None);
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(
+            rows(&canvas),
+            vec!["  ┌───", "  │ a", "  │ ─", "  │ b", "  │ ──", "‾╲│ cd"]
+        );
+        canvas
+            .check_invariants()
+            .expect("exactly width columns on every row");
+    }
+
+    #[test]
+    fn a_tall_root_index_sits_over_the_tick() {
+        // Ruled CROOK-TICK, owner, 2026-08-22: the index is right-aligned so its last
+        // column is the tick's, on the row one above the bottom. The tick is the top of
+        // the short initial stroke, which is where the index sits above `√` in the
+        // one-row form -- the same rule transcribed, not a second one invented.
+        let theme = Theme::default();
+        let b = radical(fraction(text("a"), text("b")), Some(text("3")));
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["  ┌──", "  │ a", "3 │ ─", "‾╲│ b"]);
+        canvas
+            .check_invariants()
+            .expect("exactly width columns on every row");
+    }
+
+    #[test]
+    fn a_wide_tall_root_index_overhangs_and_carries_the_stroke_right() {
+        // The accepted cost of the ruling: a two-column index widens the tall box by
+        // one column, the same charge the one-row root already takes. The diagonal's
+        // column stays clear of the index in both forms.
+        let theme = Theme::default();
+        let b = radical(fraction(text("a"), text("b")), Some(text("10")));
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["   ┌──", "   │ a", "10 │ ─", " ‾╲│ b"]);
+        canvas
+            .check_invariants()
+            .expect("exactly width columns on every row");
+    }
+
+    #[test]
     fn the_baseline_of_a_nested_box_is_the_baseline_of_the_whole() {
         // a + 1/2 + b: the a and the b sit on the fraction's rule row, not above it.
         let theme = Theme::default();
@@ -394,6 +570,60 @@ mod tests {
         ]);
         let canvas = to_canvas(&b, b.width, &theme);
         assert_eq!(rows(&canvas), vec!["    1", "a + ─ + b", "    2"]);
+    }
+
+    /// The `Row` arm must advance by the whole of a radical, stroke and overhang and all.
+    ///
+    /// This discharges defect D5 from the Task 4 review. The `Row` arm advances by
+    /// `part.width` and nothing checks that the columns it skipped are the columns the
+    /// part actually used, so an arm that reserves more than it draws -- or a row that
+    /// advanced by what it *drew* rather than by what the box *measured* -- would put
+    /// the neighbour in the wrong place with no test to say so. Until now no test put a
+    /// radical inside a row at all.
+    ///
+    /// Both shapes are here because they charge different amounts. The indexed one-row
+    /// root reserves an overhang column that sits left of the sign, so a row that
+    /// advanced by `radicand.width + STROKE` would land `b` one column early; the tall
+    /// root's stroke is four columns rather than two, so a row that assumed a constant
+    /// stroke would land it two columns early.
+    #[test]
+    fn a_row_advances_across_a_radical_by_the_width_the_box_reserved() {
+        let theme = Theme::default();
+
+        let indexed = row(vec![
+            text("a"),
+            radical(text("x"), Some(text("10"))),
+            text("b"),
+        ]);
+        assert_eq!(
+            indexed.width, 6,
+            "1 + (1 radicand + 2 stroke + 1 overhang) + 1"
+        );
+        let canvas = to_canvas(&indexed, indexed.width, &theme);
+        assert_eq!(
+            rows(&canvas),
+            vec![" 10 ─", "a √ xb"],
+            "`b` must start at column 5, past the overhang as well as the stroke"
+        );
+        canvas
+            .check_invariants()
+            .expect("exactly width columns on every row");
+
+        let tall = row(vec![
+            text("a"),
+            radical(fraction(text("x"), text("y")), None),
+            text("b"),
+        ]);
+        assert_eq!(tall.width, 7, "1 + (1 radicand + 4 stroke) + 1");
+        let canvas = to_canvas(&tall, tall.width, &theme);
+        assert_eq!(
+            rows(&canvas),
+            vec!["   ┌──", "   │ x", "a  │ ─b", " ‾╲│ y"],
+            "`b` must start at column 6, past the four-column stroke"
+        );
+        canvas
+            .check_invariants()
+            .expect("exactly width columns on every row");
     }
 
     #[test]

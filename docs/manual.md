@@ -516,7 +516,8 @@ coverage will do.
 
 - **Geometric Shapes (U+25A0-U+25FF)** — Heading marks, diagram node shapes, arrowheads.
 
-- **General Punctuation (U+2000-U+206F)** — The elision marker.
+- **General Punctuation (U+2000-U+206F)** — The elision marker, and the tick on a tall
+  radical.
 
 - **Mathematical Operators (U+2200-U+22FF)** — Class-diagram relations, and math's
   radical sign (`\sqrt`).

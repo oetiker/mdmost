@@ -120,8 +120,11 @@ const INVENTORY: &[(&str, &str)] = &[
     // math's raised `1` and `2` (design spec §5.1) — the two digits whose superscript
     // form Unicode placed here instead of in Superscripts and Subscripts, below.
     ("Latin-1 Supplement (U+0080-U+00FF)", "\u{a0}©¹²"),
-    // The elision marker, and `&hellip;`.
-    ("General Punctuation (U+2000-U+206F)", "…"),
+    // The elision marker and `&hellip;`, and `‾` (U+203E), the tick that tips a tall
+    // radical's diagonal (design spec §6.2). Nothing emits the tick yet: display math
+    // does not reach the page until the renderer is wired onto it, so the corpus line
+    // that exercises it is still to come and this entry goes green either way.
+    ("General Punctuation (U+2000-U+206F)", "…‾"),
     // Class-diagram relation glyphs, and math's radical sign (`\sqrt`).
     ("Mathematical Operators (U+2200-U+22FF)", "∧∨√"),
     // Math's raised `n`, `+` and `-`, and lowered `=` and `1` (design spec §5.1) —
