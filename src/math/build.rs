@@ -759,12 +759,41 @@ fn visual_box(
             // The index is raised, so it is built under the same suppression a script
             // operand is built under and for the same reason: there is no raised space,
             // and one in the index would make the substitution below decline.
+            //
+            // This keys off the *outer* mode and still does, because it decides the
+            // index's spacing and not its shape: an inline root raises its index and
+            // there is no raised space, while a display root sets the index at normal
+            // size, where `\sqrt[a + b]{x}` should read `a + b`.
             let index_spacing = match mode {
                 Mode::Inline => Spacing::Suppressed,
                 Mode::Display => spacing,
             };
-            let (_, index, b) =
-                element(events, after.saturating_add(a), mode, index_spacing, depth)?;
+            // `Mode::Inline` whatever the outer mode is: a root index is built in its
+            // one-row form. Owner's ruling, 2026-08-22. Flattening a one-row index is a
+            // no-op, so `\sqrt[3]{x}` is untouched.
+            //
+            // `boxes::radical` reserves the index no rows -- `above` is the radicand's
+            // plus the overline and nothing else -- so a two-dimensional index draws
+            // onto rows the box never claimed, and it does not merely overflow, it
+            // overwrites the stroke. `\sqrt[\frac{a}{b}]{x}` drew as `["─ ─", "b x"]`,
+            // the radical sign replaced by the index's own denominator; on a tall root
+            // the index took the tick instead. Worse, `\sqrt[\sqrt[3]{2}]{x}` and
+            // `\sqrt[\sqrt[q]{2}]{x}` both drew as `["√ 2 ─", "  √ x"]` -- two different
+            // formulas, one rendering, neither of them right.
+            //
+            // Reserving rows for a tall index would not be a sizing fix but a second
+            // index-geometry ruling hiding inside one: the index sits on a single row
+            // over the tick, and a three-row index has no tick to sit over on a one-row
+            // root and would rise past the cap on a tall one. Flattening keeps that
+            // geometry intact and costs nothing in `above`, in the boxes enclosing this
+            // one, or in `draw::centre`.
+            let (_, index, b) = element(
+                events,
+                after.saturating_add(a),
+                Mode::Inline,
+                index_spacing,
+                depth,
+            )?;
             let used = 1usize.saturating_add(a).saturating_add(b);
             let cells = match mode {
                 Mode::Display => boxes::radical(radicand, Some(index)),
@@ -1002,6 +1031,75 @@ mod tests {
         let events = parse(src, &storage).expect("parses");
         let b = build(&events, Mode::Inline).expect("builds inline");
         draw::to_row(&b).unwrap_or_else(|err| panic!("{src} did not come back on one row: {err}"))
+    }
+
+    /// Builds in display mode and draws, as the rows a reader would see.
+    ///
+    /// The display cases below are about where cells land on a canvas, which is the one
+    /// thing [`inline`] and [`drawn`] cannot show: both go through `to_row`, and a
+    /// display box has more than one row by construction.
+    fn display_rows(src: &str) -> Vec<String> {
+        let storage = Storage::new();
+        let events = parse(src, &storage).expect("parses");
+        let b = build(&events, Mode::Display).expect("builds display");
+        let canvas = draw::to_canvas(&b, b.width, &crate::theme::Theme::default());
+        canvas
+            .check_invariants()
+            .unwrap_or_else(|e| panic!("{src} broke the canvas contract: {e}"));
+        (0..canvas.height())
+            .map(|r| canvas.row_text(r).trim_end().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn a_root_index_is_built_in_its_one_row_form() {
+        // Owner's ruling, 2026-08-22. The index rides on a row the radical already has,
+        // so it must be one row; a stacked one used to draw over the stroke and erase
+        // the radical sign.
+
+        // Flattening a one-row index is a no-op. This is the settled case and it must
+        // not move.
+        assert_eq!(display_rows(r"\sqrt[3]{x}"), vec!["3 ─", "√ x"]);
+        assert_eq!(display_rows(r"\sqrt[10]{x}"), vec!["10 ─", " √ x"]);
+
+        // A stacked index is set as `a/b`, the same rewrite an inline fraction takes.
+        // Before the ruling this drew `["─ ─", "b x"]`, with no `√` at all.
+        assert_eq!(
+            display_rows(r"\sqrt[\frac{a}{b}]{x}"),
+            vec!["a/b ─", "  √ x"]
+        );
+
+        // And on a TALL radicand, which is where it matters: the index sits on one row
+        // over the tick, and the tick is what a stacked index destroyed there.
+        assert_eq!(
+            display_rows(r"\sqrt[3]{\frac{a}{b}}"),
+            vec!["  ┌──", "  │ a", "3 │ ─", "‾╲│ b"],
+            "the settled tall case is unmoved"
+        );
+        assert_eq!(
+            display_rows(r"\sqrt[\frac{a}{b}]{\frac{p}{q}}"),
+            vec!["    ┌──", "    │ p", "a/b │ ─", "  ‾╲│ q"],
+            "the tick survives a flattened index"
+        );
+    }
+
+    #[test]
+    fn a_display_root_index_keeps_its_spaces_while_an_inline_one_does_not() {
+        // The `index_spacing` match is keyed on the OUTER mode and building the index
+        // inline did not change that, which is only visible in an index that contains a
+        // space. Inline, the index is raised and there is no raised space, so it is set
+        // tight; in display it is set at normal size and keeps the spacing the author's
+        // operator asked for.
+        assert_eq!(
+            inline(r"\sqrt[a+b]{x}"),
+            "ᵃ⁺ᵇ√x",
+            "raised, and therefore tight"
+        );
+        assert_eq!(
+            display_rows(r"\sqrt[a+b]{x}"),
+            vec!["a + b ─", "    √ x"],
+            "normal size, and therefore spaced"
+        );
     }
 
     #[test]
