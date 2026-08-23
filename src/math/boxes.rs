@@ -238,12 +238,35 @@ pub(crate) fn limits(base: MathBox, under: Option<MathBox>, over: Option<MathBox
 ///   the tick beside the diagonal on the bottom row, and that costs **four**: tick,
 ///   diagonal, stem, gap.
 ///
-/// An index — the `3` of a cube root — is right-aligned so that its last column is the
-/// stroke's *first* column: over the `√` in the one-row form, over the tick in the tall
-/// one. The tick is the top of the short initial stroke, so this is one rule in both
-/// forms rather than two rules that happen to agree. Spec §6.2 shows no index example;
-/// this and the tall art are the owner's rulings of 2026-08-22, and `draw.rs` places the
-/// index to match.
+/// An index — the `3` of a cube root — is placed by two rules, and both are the owner's
+/// ruling of 2026-08-22 (spec §6.2 shows no index example):
+///
+/// * its **rightmost column** sits on the stroke's *first* column — over the `√` in the
+///   one-row form, over the tick in the tall one. The tick is the top of the short
+///   initial stroke, so this is one rule in both forms and not two that agree.
+/// * its **last row** sits one row above the radical's bottom row.
+///
+/// On a one-row root with a one-row index those two rules are exactly `["3 ─", "√ x"]`.
+/// They say nothing about the index being one row, so an index of any size is placed by
+/// them, and this box grows `above` to hold whatever they ask for — see below.
+///
+/// # Why `above` is a maximum
+///
+/// An index is a box like any other and may be a fraction or a root of its own. It is
+/// **not** flattened to one row (that was tried, on 2026-08-22, and reversed the next day:
+/// it refused `\sqrt[\sqrt[q]{2}]{x}`, a formula that draws perfectly well). Instead the
+/// radical is sized to hold it.
+///
+/// The index's last row is one above the bottom row, so it reaches
+/// `index.height() - 1` rows further up than that — and the bottom row is
+/// `radicand.below` below the baseline. The index therefore needs
+/// `index.height() - radicand.below` rows above the baseline, against the
+/// `radicand.above + 1` the stroke and the overline need. Whichever is larger wins.
+///
+/// The big shape already nested inside the *radicand* — `\sqrt{\sqrt{\sqrt{x}}}` draws
+/// three stems side by side — and this is what makes it nest inside the *index* too.
+/// Without the maximum a tall index drew off the top of its own box and over the stroke,
+/// erasing the `√` on a one-row root and the tick on a tall one.
 pub(crate) fn radical(radicand: MathBox, index: Option<MathBox>) -> MathBox {
     // Not `STROKE - 1`, and deliberately not a function of `stroke` at all. Exactly ONE
     // column is free for the index in either form — the stroke's first column, which the
@@ -256,12 +279,18 @@ pub(crate) fn radical(radicand: MathBox, index: Option<MathBox>) -> MathBox {
     // free columns.
     let overhang = index.as_ref().map_or(0, |b| b.width.saturating_sub(1));
     let stroke = if radicand.is_inline() { 2 } else { 4 };
+    // The index's last row is one above the bottom row, and the bottom row is
+    // `radicand.below` below the baseline, so the index reaches this far above it. Zero
+    // when there is no index, which leaves the stroke's own requirement standing.
+    let index_reach = index
+        .as_ref()
+        .map_or(0, |b| b.height().saturating_sub(radicand.below));
     MathBox {
         width: radicand
             .width
             .saturating_add(stroke)
             .saturating_add(overhang),
-        above: radicand.above.saturating_add(1),
+        above: radicand.above.saturating_add(1).max(index_reach),
         below: radicand.below,
         content: BoxContent::Radical {
             radicand: std::boxed::Box::new(radicand),
@@ -591,6 +620,41 @@ mod tests {
             4,
             "the second index column overhangs the stroke"
         );
+    }
+
+    #[test]
+    fn a_radical_grows_above_only_as_far_as_its_index_actually_reaches() {
+        // `above` is a maximum of two claims: the stroke's own (`radicand.above + 1`)
+        // and the index's (`index.height() - radicand.below`). Each case below is here
+        // because a different one of them wins.
+
+        // No index, and a one-row index: the stroke's claim wins and nothing moves.
+        assert_eq!(radical(text("x"), None).above, 1);
+        assert_eq!(radical(text("x"), Some(text("3"))).above, 1, "1 - 0 == 1");
+
+        // A three-row index over a one-row radicand: the index's claim wins outright.
+        let b = radical(text("x"), Some(fraction(text("a"), text("b"))));
+        assert_eq!(b.above, 3, "the index reaches 3 rows above the baseline");
+        assert_eq!(b.below, 0, "and not one row below it");
+        assert_eq!(b.width, 3, "1 radicand + 2 stroke + 0 overhang, unchanged");
+
+        // The same index over a TALL radicand costs nothing: the radicand's own descent
+        // already carries the bottom row a row further down, so the index's claim drops
+        // to 2 and ties with the stroke's. Drop the `- radicand.below` term and this
+        // becomes 3 -- a reserved row nothing ever draws in.
+        let b = radical(
+            fraction(text("p"), text("q")),
+            Some(fraction(text("a"), text("b"))),
+        );
+        assert_eq!((b.above, b.below), (2, 1), "3 - 1 == 2, tying with 1 + 1");
+
+        // A four-row index over a tall radicand: the index wins again, by one.
+        let b = radical(
+            fraction(text("p"), text("q")),
+            Some(radical(fraction(text("a"), text("b")), None)),
+        );
+        assert_eq!(b.above, 3, "4 - 1 == 3 beats 1 + 1");
+        assert_eq!(b.height(), 5);
     }
 
     #[test]

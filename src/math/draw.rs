@@ -243,17 +243,25 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
             // disagree with it.
             let overhang = index.as_ref().map_or(0, |i| i.width.saturating_sub(1));
             let stroke = col.saturating_add(overhang);
-            let top = baseline.saturating_sub(i32::from(b.above));
             let bottom = baseline.saturating_add(i32::from(b.below));
+            // The row the overline or the cap sits on, and it is measured from the
+            // RADICAND, not from the top of the box. Those are the same row only while
+            // the index fits under the stroke's own ascent; once `boxes::radical` grows
+            // `above` to hold a taller index, `baseline - b.above` is the top of the
+            // *index* and drawing the overline there would strand it several rows clear
+            // of what it is supposed to cover.
+            let stroke_top = baseline
+                .saturating_sub(i32::from(radicand.above))
+                .saturating_sub(1);
 
-            let (radicand_col, index_row) = if radicand.is_inline() {
+            let radicand_col = if radicand.is_inline() {
                 // The plain sign on the baseline, and the overline on the row above it.
                 // The overline spans the radicand alone: drawn to `b.width` it would
                 // reach back over the sign itself.
                 if let Ok(row) = usize::try_from(baseline) {
                     canvas.write_str(row, usize::from(stroke), "√", theme.base());
                 }
-                if let Ok(row) = usize::try_from(top) {
+                if let Ok(row) = usize::try_from(stroke_top) {
                     canvas.hline(
                         row,
                         usize::from(stroke.saturating_add(2)),
@@ -262,7 +270,7 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                         theme.base(),
                     );
                 }
-                (stroke.saturating_add(2), top)
+                stroke.saturating_add(2)
             } else {
                 // Owner's ruling, 2026-08-22: a vertical stem capped by a square right
                 // angle, with the tick beside the diagonal on the bottom row. Columns
@@ -272,7 +280,7 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                 // covers the gap column as well -- `radicand.width + 1` columns starting
                 // at the gap, not `radicand.width` as in the one-row form above.
                 let stem = stroke.saturating_add(2);
-                if let Ok(row) = usize::try_from(top) {
+                if let Ok(row) = usize::try_from(stroke_top) {
                     canvas.write_str(row, usize::from(stem), "┌", theme.base());
                     canvas.hline(
                         row,
@@ -282,7 +290,7 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                         theme.base(),
                     );
                 }
-                for r in top.saturating_add(1)..=bottom {
+                for r in stroke_top.saturating_add(1)..=bottom {
                     if let Ok(row) = usize::try_from(r) {
                         canvas.write_str(row, usize::from(stem), "│", theme.base());
                     }
@@ -296,19 +304,29 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                         theme.base(),
                     );
                 }
-                (stroke.saturating_add(4), bottom.saturating_sub(1))
+                stroke.saturating_add(4)
             };
 
             if let Some(index) = index {
-                // Right-aligned so its last column is the stroke's first: over the `√`
-                // in the one-row form, over the tick in the tall one. The tick is the
-                // top of the short initial stroke, which is where the index sits above
-                // `√` -- so this is the one-row rule transcribed, not a second rule
-                // invented for the tall case.
+                // Two rules, one for each axis, and both hold for an index of any size.
+                //
+                // Column: the index's rightmost column is the stroke's first -- over the
+                // `√` in the one-row form, over the tick in the tall one, the tick being
+                // the top of the short initial stroke. So it starts one past the stroke
+                // and backs up by its own width, which is the overhang `boxes::radical`
+                // reserved.
+                //
+                // Row: the index's LAST row is one above the bottom row, so its baseline
+                // is that row less its own descent. On a one-row root with a one-row
+                // index the two rules are exactly `["3 ─", "√ x"]`; a taller index grows
+                // upwards from the same anchor, into the rows `boxes::radical` added to
+                // `above` for it.
                 place(
                     index,
                     canvas,
-                    index_row,
+                    bottom
+                        .saturating_sub(1)
+                        .saturating_sub(i32::from(index.below)),
                     stroke.saturating_add(1).saturating_sub(index.width),
                     theme,
                     deeper,
@@ -554,6 +572,27 @@ mod tests {
         let b = radical(fraction(text("a"), text("b")), Some(text("10")));
         let canvas = to_canvas(&b, b.width, &theme);
         assert_eq!(rows(&canvas), vec!["   ┌──", "   │ a", "10 │ ─", " ‾╲│ b"]);
+        canvas
+            .check_invariants()
+            .expect("exactly width columns on every row");
+    }
+
+    #[test]
+    fn a_tall_index_stacks_up_from_the_row_above_the_bottom() {
+        // The arm's own test, without the parser. Both placement rules are visible here
+        // and neither is the one-row case in disguise: the index's rightmost column is
+        // the `√`'s column, and its LAST row -- the `b` -- is one above the bottom row,
+        // with the rest of it growing upwards into the rows `boxes::radical` reserved.
+        //
+        // The overline is the other half. It sits beside the radicand it covers, on
+        // `baseline - radicand.above - 1`, and not at the top of the box: the index is
+        // two rows taller than the stroke here, so drawing it at `baseline - b.above`
+        // would strand it on row 0 with nothing under it.
+        let theme = Theme::default();
+        let b = radical(text("x"), Some(fraction(text("a"), text("b"))));
+        assert_eq!((b.width, b.above, b.below), (3, 3, 0));
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["a", "─", "b ─", "√ x"]);
         canvas
             .check_invariants()
             .expect("exactly width columns on every row");

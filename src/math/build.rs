@@ -1004,6 +1004,150 @@ mod tests {
         draw::to_row(&b).unwrap_or_else(|err| panic!("{src} did not come back on one row: {err}"))
     }
 
+    /// Builds in display mode and draws, as the rows a reader would see.
+    ///
+    /// The display cases below are about where cells land on a canvas, which is the one
+    /// thing [`inline`] and [`drawn`] cannot show: both go through `to_row`, and a
+    /// display box has more than one row by construction. Every canvas is checked, so a
+    /// case that draws outside the box it reserved fails here rather than looking right.
+    fn display_rows(src: &str) -> Vec<String> {
+        let storage = Storage::new();
+        let events = parse(src, &storage).expect("parses");
+        let b = build(&events, Mode::Display).expect("builds display");
+        let canvas = draw::to_canvas(&b, b.width, &crate::theme::Theme::default());
+        canvas
+            .check_invariants()
+            .unwrap_or_else(|e| panic!("{src} broke the canvas contract: {e}"));
+        (0..canvas.height())
+            .map(|r| canvas.row_text(r).trim_end().to_string())
+            .collect()
+    }
+
+    /// The settled index cases, which the sizing change must not move.
+    #[test]
+    fn a_one_row_root_index_is_where_it_has_always_been() {
+        assert_eq!(display_rows(r"\sqrt[3]{x}"), vec!["3 ─", "√ x"]);
+        assert_eq!(display_rows(r"\sqrt[10]{x}"), vec!["10 ─", " √ x"]);
+        assert_eq!(
+            display_rows(r"\sqrt[3]{\frac{a}{b}}"),
+            vec!["  ┌──", "  │ a", "3 │ ─", "‾╲│ b"]
+        );
+    }
+
+    /// A taller index grows the radical rather than drawing over it.
+    ///
+    /// Owner's ruling of 2026-08-23, reversing the flatten of the day before. The index
+    /// is placed by the same two rules at any size — rightmost column on the stroke's
+    /// first column, last row one above the bottom row — and `boxes::radical` adds the
+    /// rows that asks for. Before this, each of these overwrote the stroke: the `√`
+    /// vanished on a one-row root and the tick on a tall one.
+    #[test]
+    fn a_tall_root_index_grows_the_radical_instead_of_drawing_over_it() {
+        // The case that started it. The index stacks upward from the row above the
+        // bottom, and its one column is the `√`'s column.
+        assert_eq!(
+            display_rows(r"\sqrt[\frac{a}{b}]{x}"),
+            vec!["a", "─", "b ─", "√ x"]
+        );
+
+        // A three-row index over a TALL radicand costs no extra row at all: the
+        // radicand's own descent already puts the bottom row far enough below the
+        // baseline. This is the case that makes the `- radicand.below` term
+        // load-bearing -- without it the box reserves one row too many and draws with a
+        // blank line on top.
+        assert_eq!(
+            display_rows(r"\sqrt[\frac{a}{b}]{\frac{p}{q}}"),
+            vec!["a ┌──", "─ │ p", "b │ ─", "‾╲│ q"]
+        );
+
+        // A tall index that is itself a radical, over a one-row radicand. The outer
+        // overline stays beside what it covers rather than rising with the index.
+        assert_eq!(
+            display_rows(r"\sqrt[\sqrt{\frac{a}{b}}]{x}"),
+            vec!["  ┌──", "  │ a", "  │ ─", "‾╲│ b ─", "    √ x"]
+        );
+
+        // Both tall. The outer tick survives, which is what a stacked index destroyed.
+        assert_eq!(
+            display_rows(r"\sqrt[\sqrt{\frac{a}{b}}]{\frac{p}{q}}"),
+            vec!["  ┌──", "  │ a ┌──", "  │ ─ │ p", "‾╲│ b │ ─", "    ‾╲│ q"]
+        );
+    }
+
+    /// An index that can be drawn is drawn, never refused.
+    ///
+    /// `\sqrt[q]{2}` has no raised form, so it cannot be an *inline* root index and
+    /// declines there. As a *display* index it is just a box, and one whose `below` is
+    /// 0, so it sits above the tick and draws. Flattening the index refused this
+    /// formula, which is what reversed that ruling.
+    #[test]
+    fn a_display_root_index_draws_rather_than_borrowing_the_inline_refusal() {
+        assert_eq!(
+            display_rows(r"\sqrt[\sqrt[q]{2}]{\frac{a}{b}}"),
+            vec!["    ┌──", "q ─ │ a", "√ 2 │ ─", "  ‾╲│ b"]
+        );
+        // And distinct indices stay distinct. Drawing over the stroke used to collapse
+        // these three onto one rendering, which is worse than refusing them.
+        assert_ne!(
+            display_rows(r"\sqrt[\sqrt[q]{2}]{\frac{a}{b}}"),
+            display_rows(r"\sqrt[\sqrt[3]{2}]{\frac{a}{b}}")
+        );
+        assert_ne!(
+            display_rows(r"\sqrt[\sqrt[3]{2}]{\frac{a}{b}}"),
+            display_rows(r"\sqrt[\sqrt{2}]{\frac{a}{b}}")
+        );
+    }
+
+    /// The big shape nests in the radicand, and always did. Pinned so that the index
+    /// work cannot disturb it.
+    #[test]
+    fn the_tall_radical_nests_inside_its_own_radicand() {
+        assert_eq!(
+            display_rows(r"\sqrt{\sqrt{\sqrt{\frac{a}{b}}}}"),
+            vec![
+                "  ┌──────────",
+                "  │   ┌──────",
+                "  │   │   ┌──",
+                "  │   │   │ a",
+                "  │   │   │ ─",
+                "‾╲│ ‾╲│ ‾╲│ b",
+            ]
+        );
+    }
+
+    /// A display index is built in display mode, so no §5.1 fallback reaches the canvas.
+    ///
+    /// `\hat{a}` has no one-row form of its own: flattened it is the literal `a^^`, the
+    /// caret fallback design spec §5.1 uses for *inline* text. Building the index inline
+    /// put that on a display canvas. In display mode the accent stacks, as it does
+    /// everywhere else in display math.
+    #[test]
+    fn a_display_root_index_never_shows_the_inline_caret_fallback() {
+        assert_eq!(
+            inline(r"\hat{a}"),
+            "a^^",
+            "the inline fallback, which must not reach a display canvas"
+        );
+        assert_eq!(display_rows(r"\sqrt[\hat{a}]{x}"), vec!["^", "a ─", "√ x"]);
+    }
+
+    /// The `index_spacing` match keys off the OUTER mode, and only an index containing a
+    /// space shows it: raised text has no space, so an inline root sets its index tight,
+    /// while a display root sets it at normal size and keeps the operator's spacing.
+    #[test]
+    fn a_display_root_index_keeps_its_spaces_while_an_inline_one_does_not() {
+        assert_eq!(
+            inline(r"\sqrt[a+b]{x}"),
+            "ᵃ⁺ᵇ√x",
+            "raised, and therefore tight"
+        );
+        assert_eq!(
+            display_rows(r"\sqrt[a+b]{x}"),
+            vec!["a + b ─", "    √ x"],
+            "normal size, and therefore spaced"
+        );
+    }
+
     #[test]
     fn a_bare_variable_is_one_text_box() {
         assert_eq!(inline("x"), "x");
