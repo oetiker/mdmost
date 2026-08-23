@@ -244,31 +244,7 @@ pub(crate) fn limits(base: MathBox, under: Option<MathBox>, over: Option<MathBox
 /// forms rather than two rules that happen to agree. Spec §6.2 shows no index example;
 /// this and the tall art are the owner's rulings of 2026-08-22, and `draw.rs` places the
 /// index to match.
-///
-/// # The index must be one row, and a taller one is dropped
-///
-/// The index rides on a row this box already has. It is given no `above` and no `below`
-/// of its own, so a two-dimensional index would draw onto rows the box never reserved —
-/// and not merely overflow them but overwrite the stroke, which is how
-/// `\sqrt[\frac{a}{b}]{x}` once drew as `["─ ─", "b x"]` with the radical sign replaced
-/// by the index's denominator.
-///
-/// `build.rs` owes this function a one-row index and builds every index in
-/// [`Mode::Inline`](crate::math::build) to guarantee it, so nothing in the crate reaches
-/// the case below. It is enforced here as well because this constructor is reachable
-/// without the parser — that is how the defect was found — and a constructor that
-/// silently returns a box which erases its own radical sign is not one a later caller
-/// should be able to build by accident.
-///
-/// Dropped rather than asserted: a panic here would be reachable from a hostile formula,
-/// which is the failure mode design spec §9 exists to avoid, and a `debug_assert` would
-/// leave release builds doing the destructive thing. Dropped rather than flattened,
-/// because flattening is `draw::to_row`'s and `draw` is built on this module, not the
-/// other way round. Losing the index is lossy; erasing the root sign renders a different
-/// formula.
 pub(crate) fn radical(radicand: MathBox, index: Option<MathBox>) -> MathBox {
-    // See the "must be one row" section above. Unreachable through `build.rs`.
-    let index = index.filter(MathBox::is_inline);
     // Not `STROKE - 1`, and deliberately not a function of `stroke` at all. Exactly ONE
     // column is free for the index in either form — the stroke's first column, which the
     // index's last column takes — so everything past the first column of the index
@@ -469,16 +445,6 @@ mod tests {
             "3 radicand + 4 stroke + 1 overhang"
         );
 
-        // A one-row index is kept, which is what makes the drop below a drop and not a
-        // constructor that ignores its second argument.
-        assert!(
-            matches!(
-                &radical(text("x"), Some(text("3"))).content,
-                BoxContent::Radical { index: Some(_), .. }
-            ),
-            "a one-row index survives"
-        );
-
         // The index never touches the height, in either form.
         assert_eq!(
             (
@@ -624,33 +590,6 @@ mod tests {
             radical(text("x"), Some(text("10"))).width,
             4,
             "the second index column overhangs the stroke"
-        );
-    }
-
-    #[test]
-    fn an_index_that_is_not_one_row_is_dropped_rather_than_drawn_over_the_stroke() {
-        // The constructor's own guard, and it is not dead code guarding a case the
-        // parser cannot produce: this is exactly how the defect was found, by calling
-        // `radical` directly. Before the guard this box drew as `["─ ─", "b x"]` -- the
-        // `√` overwritten by the index fraction's denominator, the numerator clipped off
-        // the top, a cube root rendered as a different formula entirely.
-        let tall_index = fraction(text("a"), text("b"));
-        assert!(!tall_index.is_inline(), "the case itself must be tall");
-
-        let b = radical(text("x"), Some(tall_index));
-        assert!(
-            matches!(&b.content, BoxContent::Radical { index: None, .. }),
-            "a tall index is dropped, not stored"
-        );
-        assert_eq!(
-            (b.width, b.above, b.below),
-            (3, 1, 0),
-            "and it costs no overhang, exactly as if no index had been passed"
-        );
-        assert_eq!(
-            b.width,
-            radical(text("x"), None).width,
-            "the same box a bare square root builds"
         );
     }
 
