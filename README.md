@@ -46,9 +46,10 @@ sudo install -Dm644 mdmost/man/mdmost.1 /usr/local/share/man/man1/mdmost.1
 ```
 
 **Rust** — `cargo install --git https://github.com/oetiker/mdmost`, or `cargo build
---release` from a checkout. mdmost is not on crates.io, so `cargo install mdmost` will not
-find it. Neither route installs a man page: `cargo install` does not handle man pages at
-all, and the page is generated rather than shipped. Run `make man` in a checkout to build
+--release` from a checkout. mdmost is not published on crates.io — the three early
+releases there are yanked — so `cargo install mdmost` will not work. Neither route
+installs a man page: `cargo install` does not handle man pages at all, and the page is
+generated rather than shipped. Run `make man` in a checkout to build
 one; it needs pandoc. Rust 2024 edition, and no system dependencies beyond a terminal that
 speaks ANSI truecolour. The build needs no C compiler, which is why the regex engine
 behind the highlighter is `fancy-regex` rather than oniguruma.

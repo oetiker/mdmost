@@ -149,7 +149,8 @@ Each release:
    them.
 2. Run the workflow. It bumps `Cargo.toml`, tags, builds five targets, packages `.deb`
    and `.rpm` for the two musl targets, and rewrites `Formula/mdmost.rb` with the new
-   checksums. It does not publish to crates.io; mdmost is not on crates.io (`CHANGES.md`,
+   checksums. It does not publish to crates.io; mdmost is not published there, and the
+   three early releases that are (0.1.0, 0.1.2, 0.2.0) are all yanked (`CHANGES.md`,
    Unreleased, says why).
 3. `git pull` afterwards: the workflow has pushed two commits and a tag to `main`.
 
