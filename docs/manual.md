@@ -510,7 +510,8 @@ protocol.
 a fallback behind it, has to cover them. Any font or font chain with that
 coverage will do.
 
-- **Box Drawing (U+2500-U+257F)** — Every table border, code frame and diagram box.
+- **Box Drawing (U+2500-U+257F)** — Every table border, code frame and diagram box,
+  and math's tall delimiters.
 
 - **Block Elements (U+2580-U+259F)** — Zebra stripes, the scrollbar, gantt bars.
 

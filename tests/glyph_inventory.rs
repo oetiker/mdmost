@@ -141,10 +141,20 @@ const INVENTORY: &[(&str, &str)] = &[
     ("Spacing Modifier Letters (U+02B0-U+02FF)", "ʰʲˡʳˢʷˣʸ"),
     // Math's raised `c f z` — the superscript letters Unicode placed here instead.
     ("Phonetic Extensions Supplement (U+1D80-U+1DBF)", "ᶜᶠᶻ"),
-    // Every frame, rule, table border and diagram box.
+    // Every frame, rule, table border and diagram box. `║` (U+2551) is math's tall `\|`
+    // (design spec §6.4) and nothing else: nothing emits it yet, because display math
+    // does not reach the page until the renderer is wired onto it, so this entry goes
+    // green either way and Task 15's corpus line is what makes it real.
+    //
+    // NOT the other candidate, and it was checked rather than assumed: a sequence
+    // diagram's nested activation bar is also `║` (`src/mermaid/sequence/mod.rs:48`),
+    // but it can never reach the page. Bars are drawn in `plan.bars` order, and
+    // `deactivate` pushes on close, so an inner bar is drawn FIRST and the outer bar's
+    // `vline` -- same lifeline column, spanning the inner rows too -- paints `┃` over
+    // every `║` it drew. Rendering a nested activation both ways emits no `║` at all.
     (
         "Box Drawing (U+2500-U+257F)",
-        "─━│┃┄┆┈┊┌┐┓└┗┘├┤┬┳┴┼╌╎╭╮╯╰╱╲",
+        "─━│┃┄┆┈┊┌┐┓└┗┘├┤┬┳┴┼╌╎╭╮╯╰╱╲║",
     ),
     // Zebra stripes, the gap-row half block, gantt bars.
     ("Block Elements (U+2580-U+259F)", "▀▄█▋▌▍"),

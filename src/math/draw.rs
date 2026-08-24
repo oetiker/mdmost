@@ -350,15 +350,7 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
 
             let mut at = col;
             if let Some(delimiter) = left {
-                write_delimiter(
-                    canvas,
-                    *delimiter,
-                    delim::Side::Left,
-                    top,
-                    height,
-                    at,
-                    theme,
-                );
+                write_delimiter(canvas, *delimiter, top, height, at, theme);
                 at = at.saturating_add(side_cost);
             }
             place(body, canvas, baseline, at, theme, deeper);
@@ -366,15 +358,7 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                 let at = at
                     .saturating_add(body.width)
                     .saturating_add(u16::from(padded));
-                write_delimiter(
-                    canvas,
-                    *delimiter,
-                    delim::Side::Right,
-                    top,
-                    height,
-                    at,
-                    theme,
-                );
+                write_delimiter(canvas, *delimiter, top, height, at, theme);
             }
         }
     }
@@ -389,7 +373,6 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
 fn write_delimiter(
     canvas: &mut Canvas,
     delimiter: char,
-    side: delim::Side,
     top: i32,
     height: u16,
     col: u16,
@@ -398,10 +381,7 @@ fn write_delimiter(
     // `char::encode_utf8` writes into this, so the `&str` the canvas wants costs a stack
     // buffer rather than a `String` per row.
     let mut buf = [0u8; 4];
-    for (offset, piece) in delim::pieces(delimiter, side, height)
-        .into_iter()
-        .enumerate()
-    {
+    for (offset, piece) in delim::pieces(delimiter, height).into_iter().enumerate() {
         // The same off-canvas clip the other arms make: a negative row is only reachable
         // after a `u16` saturation upstream, and skipping the draw clips it as the canvas
         // would.
@@ -991,6 +971,25 @@ mod tests {
         let one_row = fenced(Some('⌈'), Some('⌉'), text("x"));
         let canvas = to_canvas(&one_row, one_row.width, &theme);
         assert_eq!(rows(&canvas), vec!["⌈x⌉"]);
+        canvas.check_invariants().expect("width holds");
+    }
+
+    /// `‖` joins into `║` when it grows, and stays plain on one row.
+    ///
+    /// Owner's ruling, 2026-08-24, and the case that has to be rendered BOTH ways: three
+    /// stacked `‖` read as three norms where one joined double rule reads as one, but a
+    /// one-row `\left\|x\right\|` must still be the author's own plain character.
+    #[test]
+    fn a_double_bar_fence_joins_up_when_it_grows_and_stays_plain_on_one_row() {
+        let theme = Theme::default();
+        let tall = fenced(Some('‖'), Some('‖'), fraction(text("a"), text("b")));
+        let canvas = to_canvas(&tall, tall.width, &theme);
+        assert_eq!(rows(&canvas), vec!["║ a ║", "║ ─ ║", "║ b ║"]);
+        canvas.check_invariants().expect("width holds");
+
+        let one_row = fenced(Some('‖'), Some('‖'), text("x"));
+        let canvas = to_canvas(&one_row, one_row.width, &theme);
+        assert_eq!(rows(&canvas), vec!["‖x‖"]);
         canvas.check_invariants().expect("width holds");
     }
 

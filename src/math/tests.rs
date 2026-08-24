@@ -574,4 +574,11 @@ fn a_display_fence_draws_only_the_delimiters_the_source_asked_for() {
         display(r"\left\lfloor\frac{a}{b}\right\rfloor"),
         vec!["⌊ a ⌋", "⌊ ─ ⌋", "⌊ b ⌋"]
     );
+    // `\|` is the one delimiter whose tall form is a DIFFERENT character from its plain
+    // one, so both cases are rendered from source rather than one being inferred.
+    assert_eq!(
+        display(r"\left\|\frac{a}{b}\right\|"),
+        vec!["║ a ║", "║ ─ ║", "║ b ║"]
+    );
+    assert_eq!(display(r"\left\|x\right\|"), vec!["‖x‖"]);
 }
