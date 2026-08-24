@@ -134,11 +134,13 @@ of `bugfix`, `feature` or `major`. It must be run from `main`, and it refuses ot
 Before the first release:
 
 1. Create `https://github.com/oetiker/mdmost` and push `main`.
-2. Add the `CRATES_IO_TOKEN` repository secret (Settings → Secrets and variables →
-   Actions). It is the only secret this project uses.
-3. Settings → Actions → General → Workflow permissions: allow read and write. The
+2. Settings → Actions → General → Workflow permissions: allow read and write. The
    `version` job pushes a commit and a tag, and the `homebrew` job pushes the rewritten
    formula.
+
+The project uses **no repository secrets**. It used to need `CRATES_IO_TOKEN`; the
+`publish-crate` job is gone and so is the token. If one is still set on the repository,
+revoke it on crates.io rather than leaving a credential in place that nothing reads.
 
 Each release:
 
@@ -146,8 +148,9 @@ Each release:
    into a dated section and uses it verbatim as the release notes — nothing else writes
    them.
 2. Run the workflow. It bumps `Cargo.toml`, tags, builds five targets, packages `.deb`
-   and `.rpm` for the two musl targets, publishes the crate, and rewrites
-   `Formula/mdmost.rb` with the new checksums.
+   and `.rpm` for the two musl targets, and rewrites `Formula/mdmost.rb` with the new
+   checksums. It does not publish to crates.io; mdmost is not on crates.io (`CHANGES.md`,
+   Unreleased, says why).
 3. `git pull` afterwards: the workflow has pushed two commits and a tag to `main`.
 
 What is deliberately not automated, and why, is in

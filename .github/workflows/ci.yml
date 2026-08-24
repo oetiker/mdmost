@@ -32,11 +32,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      # Both checks name `-p mdmost`. This is a workspace now, and its other member is
+      # `vendor/pulldown-latex` — someone else's code, frozen at an upstream commit, that
+      # nobody here is going to restyle. Naming the package is what keeps our standards
+      # applied to our code and only to our code; `vendor/pulldown-latex/Cargo.toml`
+      # carries the other half of the story.
+      #
+      # Measured on 2026-08-24, both checks are green over the vendored crate as well, so
+      # this is not hiding a failure today. It is refusing to inherit one from a toolchain
+      # bump, in code this repository has no business editing.
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo fmt --check -p mdmost
 
       - name: Run Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets -p mdmost -- -D warnings
 
   test:
     name: Test
@@ -58,8 +67,19 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      # Two steps, not one `--workspace`, so that a failure says which crate broke and so
+      # that the mdmost number stays the number this project has always quoted. A bare
+      # `cargo test` would now run only the first of these: the root manifest carries a
+      # `[package]`, so cargo's default member is mdmost alone and the vendored crate's
+      # tests would silently stop running.
       - name: Run tests
-        run: cargo test
+        run: cargo test -p mdmost
+
+      # 72 tests plus 5 doctests, and they are the point of vendoring a *fork*: between
+      # tests/errors.rs and tests/mathml.rs they are the regression tests the four
+      # patches added. If these go red, one of the four has been lost.
+      - name: Run the vendored crate's tests
+        run: cargo test -p pulldown-latex
 
   windows:
     name: Windows compile
@@ -73,7 +93,7 @@ jobs:
       # A compile, not a run: nobody has exercised the pager on Windows. This leg
       # exists so the `cfg` gates in `tui::term` and `tui::stderr` stay honest.
       - name: Cargo check
-        run: cargo check --all-targets
+        run: cargo check --all-targets -p mdmost
 
   docs:
     name: Manual converts

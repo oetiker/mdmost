@@ -4,9 +4,17 @@
 
 ### Breaking
 
-No format for this existed in this file before now; entries here are API breaks a
-`cargo publish` consumer of the library crate would feel, and are why this release is a
-minor bump rather than a patch.
+No format for this existed in this file before now. These entries were written as API
+breaks a `cargo publish` consumer of the library crate would feel, and are why this
+release is a minor bump rather than a patch.
+
+**That premise changed inside this same release.** mdmost is no longer published to
+crates.io (see Changed, below), so there is no such consumer any more: the audience for
+this section is now whoever builds against `mdmost` as a git dependency, and anyone
+reading these entries to understand what moved. The entries are kept as written — they
+describe real changes, and the minor bump they justify has already been decided. **Open
+question for the owner, not settled here: whether tracking API breaks at all still earns
+its keep now that nothing downstream can be broken by them.**
 
 - `render_block_numbered` and `render_blocks` each gained a `source: &str` parameter, so
   that a formula which cannot be drawn can fall back to its own verbatim bytes, delimiters
@@ -45,6 +53,26 @@ minor bump rather than a patch.
   matching `--math`/`--no-math`, `--math-inline`/`--no-math-inline` and
   `--math-backslash`/`--no-math-backslash` flags control this; `math = false` parses
   `$` as ordinary text, exactly as before this existed.
+
+### Changed
+
+- **mdmost is no longer published to crates.io.** `cargo install mdmost` will not find
+  it; the Rust route is now `cargo install --git https://github.com/oetiker/mdmost`, and
+  the release tarballs, the Homebrew tap and the `.deb`/`.rpm` packages are unchanged.
+  The reason is the LaTeX parser: `pulldown-latex` 0.8.0 has four defects mdmost hits
+  with ordinary documents, two of which abort the whole process on a stack overflow
+  rather than panicking. The fixes are ours, they are open as pull requests upstream, and
+  one of the four has already been closed unmerged — so a release that waits for them is
+  a release with no date. Publishing was the only thing that stood in the way of carrying
+  the fixed parser in this repository, and it is the cheaper of the two to give up.
+- **The parser is vendored, at `vendor/pulldown-latex/`.** It was a git dependency on a
+  fork pinned by revision; it is now a workspace member with a path dependency, so a
+  clean checkout builds the code you can read, without fetching a second repository.
+  `vendor/pulldown-latex/VENDORED.md` records the upstream commit, the four patches with
+  their pull-request numbers, what was left behind from the upstream tree, and what has
+  to be true before the whole directory is deleted again. It is meant to be temporary:
+  when upstream releases with these fixes, `vendor/` goes and the crates.io question
+  reopens.
 
 ### Fixed
 
