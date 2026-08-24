@@ -100,16 +100,6 @@ fn write_flat(b: &MathBox, out: &mut String, depth: usize) {
 /// `width` is a floor, not a cap: a formula has exactly one width (design spec §7) and
 /// clipping it is the renderer's decision, made where the measure is known. A narrower
 /// `width` therefore yields a wider canvas, and the caller compares.
-// The display half only. `to_row` and `write_flat` are live -- `crate::math::render_inline`
-// calls them -- but nothing outside this module's own tests draws a canvas yet: the
-// renderer is wired onto the display form in a later task. `expect` cannot express that --
-// it fires `unfulfilled_lint_expectations` on the test target -- so this is `allow`, on the
-// three items rather than on the file, and it comes out when the renderer calls in.
-//
-// Measured, not assumed: with these three lines removed, clippy reports exactly three
-// warnings, `to_canvas`, `place` and `centre` never used. `MAX_DEPTH` is not among them,
-// because the `const _` assertion above is a live item that reads it.
-#[allow(dead_code)]
 pub(crate) fn to_canvas(b: &MathBox, width: u16, theme: &Theme) -> Canvas {
     let width = width.max(b.width);
     let mut canvas = Canvas::new(width, usize::from(b.height()), theme.base());
@@ -119,7 +109,6 @@ pub(crate) fn to_canvas(b: &MathBox, width: u16, theme: &Theme) -> Canvas {
 }
 
 /// Draws `b` with its baseline on `baseline` and its left edge at `col`.
-#[allow(dead_code)]
 fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Theme, depth: usize) {
     if depth > MAX_DEPTH {
         return;
@@ -369,7 +358,6 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
 /// `top` is the enclosure's own top row, so the delimiter runs the full height of what it
 /// encloses: `boxes::fenced` copies the body's `above` and `below` unchanged, which is the
 /// statement that a fence is exactly as tall as its content and no taller.
-#[allow(dead_code)]
 fn write_delimiter(
     canvas: &mut Canvas,
     delimiter: char,
@@ -405,7 +393,6 @@ fn write_delimiter(
 /// Rounding left rather than right so that a one-column overhang falls on the side the
 /// reader's eye starts from, which is the same choice `canvas::align_offset`
 /// (`src/canvas/mod.rs:771`) makes for a centred table cell.
-#[allow(dead_code)]
 const fn centre(field: u16, content: u16) -> u16 {
     field.saturating_sub(content) / 2
 }

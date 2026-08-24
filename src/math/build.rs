@@ -40,14 +40,7 @@ use crate::math::{draw, scripts};
 pub(crate) enum Mode {
     /// One row. A taller construct rewrites itself or fails.
     Inline,
-    /// Two dimensions.
-    ///
-    /// Only this module's own tests build one yet -- `crate::math::render_inline` asks for
-    /// [`Mode::Inline`] and the display renderer arrives in a later task -- so the lib
-    /// target sees the variant as never constructed while the test target sees it live.
-    /// `expect` cannot express that: it fires `unfulfilled_lint_expectations` on the test
-    /// target.
-    #[allow(dead_code)]
+    /// Two dimensions. What `crate::math::render_display` asks for.
     Display,
 }
 

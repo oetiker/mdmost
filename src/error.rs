@@ -222,6 +222,18 @@ pub enum MathError {
     /// an error. The payload names the construct so the caption can be specific.
     #[error("{0} cannot be drawn on one row")]
     NotInline(&'static str),
+
+    /// Drawn, but wider than the caller can show.
+    ///
+    /// The counterpart to `MermaidError::TooNarrow`, and the reason the caller may choose
+    /// a wider canvas and let the reader scroll (design spec §7). Unlike a diagram, a
+    /// formula has exactly one width: `needed` is not a hint to search from, it is the
+    /// answer.
+    #[error("this formula needs {needed} columns")]
+    TooWide {
+        /// The width the formula draws at.
+        needed: u16,
+    },
 }
 
 /// Failures raised by canvas operations that would break the canvas contract.
@@ -254,5 +266,14 @@ mod math_error_tests {
     fn a_construct_that_needs_two_rows_says_so_without_blaming_the_author() {
         let err = MathError::NotInline("a matrix");
         assert_eq!(err.to_string(), "a matrix cannot be drawn on one row");
+    }
+
+    #[test]
+    fn a_formula_too_wide_to_show_says_how_many_columns_it_needs() {
+        // The number is in the message because the message is what the reader sees: design
+        // spec §9 puts it in the bottom edge of the framed source, and "this formula is too
+        // wide" without the width tells a reader nothing they cannot already see.
+        let err = MathError::TooWide { needed: 97 };
+        assert_eq!(err.to_string(), "this formula needs 97 columns");
     }
 }

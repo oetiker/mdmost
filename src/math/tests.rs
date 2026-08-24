@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
-use super::{render_inline, symbols};
+use proptest::{prop_assert, prop_assert_eq};
+
+use super::{render_display, render_inline, symbols};
 
 fn rendered(src: &str) -> String {
     render_inline(src).unwrap_or_else(|err| panic!("{src:?} failed: {err}"))
@@ -435,6 +437,49 @@ fn a_root_index_with_no_raised_form_declines_rather_than_writing_a_caret() {
     assert_eq!(rendered(r"\sqrt[p]{x}"), "ᵖ√x");
 }
 
+/// Strings made of the characters most likely to confuse a LaTeX parser.
+///
+/// One definition, used by both proptests. It was written inline inside
+/// `latex_shaped_noise_never_panics` when it had one caller; the display proptest wants the
+/// same vocabulary, and two copies of a word list drift the moment either grows.
+fn latex_shaped() -> impl proptest::strategy::Strategy<Value = String> {
+    use proptest::strategy::Strategy;
+    proptest::collection::vec(
+        proptest::sample::select(vec![
+            "\\frac",
+            "\\sqrt",
+            "\\sum",
+            "{",
+            "}",
+            "^",
+            "_",
+            "&",
+            "\\\\",
+            "\\begin{pmatrix}",
+            "\\end{pmatrix}",
+            "\\alpha",
+            "$",
+            "\\",
+            // Delimiter-aware vocabulary, added alongside the `\left`/`\right`
+            // fix: bare brackets, `\left`/`\right` themselves, an invisible
+            // delimiter, and plain letters/digits so a generated string is more
+            // often something the parser accepts far enough to reach the new
+            // code, rather than failing at the lexer on every case.
+            "\\left",
+            "\\right",
+            "(",
+            ")",
+            "[",
+            "]",
+            ".",
+            "a",
+            "1",
+        ]),
+        0..20,
+    )
+    .prop_map(|parts| parts.concat())
+}
+
 proptest::proptest! {
     /// Design spec §9: a wrecked formula must never take down a document.
     #[test]
@@ -444,25 +489,39 @@ proptest::proptest! {
 
     /// The same, over strings made of the characters most likely to confuse a parser.
     #[test]
-    fn latex_shaped_noise_never_panics(
-        src in {
-            use proptest::strategy::Strategy;
-            proptest::collection::vec(
-                proptest::sample::select(vec![
-                    "\\frac", "\\sqrt", "\\sum", "{", "}", "^", "_", "&", "\\\\",
-                    "\\begin{pmatrix}", "\\end{pmatrix}", "\\alpha", "$", "\\",
-                    // Delimiter-aware vocabulary, added alongside the `\left`/`\right`
-                    // fix: bare brackets, `\left`/`\right` themselves, an invisible
-                    // delimiter, and plain letters/digits so a generated string is more
-                    // often something the parser accepts far enough to reach the new
-                    // code, rather than failing at the lexer on every case.
-                    "\\left", "\\right", "(", ")", "[", "]", ".", "a", "1",
-                ]),
-                0..20,
-            ).prop_map(|parts| parts.concat())
-        }
-    ) {
+    fn latex_shaped_noise_never_panics(src in latex_shaped()) {
         let _ = render_inline(&src);
+    }
+
+    /// Design spec §14. The display path does far more arithmetic than the inline one —
+    /// baselines, saturating widths, negative row offsets — and every one of those is a
+    /// place a formula could take the pager down. It may fail; it may not panic.
+    ///
+    /// A width of 1 is in the list deliberately: it is the value that exercises
+    /// `draw::centre`'s `saturating_sub` and `draw::place`'s `usize::try_from` guards,
+    /// because every construct wider than one column is then drawn against a floor it
+    /// overruns.
+    #[test]
+    fn render_display_never_panics_and_always_holds_the_canvas_contract(src in latex_shaped()) {
+        let theme = crate::theme::Theme::default();
+        for width in [1u16, 8, 40, 200] {
+            match render_display(&src, width, &theme) {
+                Ok(canvas) => {
+                    prop_assert!(canvas.check_invariants().is_ok());
+                    // Equality, not the floor `draw::to_canvas` promises. `TooWide` is
+                    // returned before the draw, so a box wider than `width` never reaches
+                    // `to_canvas` through here and its widening never fires: every canvas
+                    // this function returns — the empty one included — is exactly `width`.
+                    prop_assert_eq!(canvas.width(), width);
+                }
+                // The error is not merely an error: `needed` is the answer, so it has to
+                // be a width this call could not show.
+                Err(crate::error::MathError::TooWide { needed }) => {
+                    prop_assert!(needed > width);
+                }
+                Err(_) => {}
+            }
+        }
     }
 }
 
@@ -493,10 +552,13 @@ fn left_right_still_draws_its_delimiters_as_a_script_base() {
     assert_eq!(rendered(r"\left(x\right)_0"), "(x)₀");
 }
 
-/// A display formula drawn on a canvas, one string per row, trailing blanks trimmed.
+/// A display formula drawn on a canvas at its own width, one string per row, trailing
+/// blanks trimmed.
 ///
-/// `render_display` is Task 9's, so display drawing has no public entry point yet; these
-/// tests reach the same two steps it will and go through `build` and `draw` directly.
+/// Deliberately not through [`render_display`], which takes the *caller's* width and would
+/// pad every row out to it — these tests assert the art, and a formula's own width is the
+/// only width at which the art is exactly the formula. Reaching `build` and `draw` directly
+/// is what lets `b.width` be passed as the floor.
 fn display(src: &str) -> Vec<String> {
     let storage = pulldown_latex::Storage::new();
     let events = super::build::parse(src, &storage).unwrap_or_else(|e| panic!("{src:?}: {e}"));
@@ -581,4 +643,124 @@ fn a_display_fence_draws_only_the_delimiters_the_source_asked_for() {
         vec!["║ a ║", "║ ─ ║", "║ b ║"]
     );
     assert_eq!(display(r"\left\|x\right\|"), vec!["‖x‖"]);
+}
+
+#[test]
+fn a_display_formula_draws_as_a_canvas() {
+    let theme = crate::theme::Theme::default();
+    let canvas = render_display(r"\frac{a}{b}", 40, &theme).expect("draws");
+    assert_eq!(canvas.height(), 3);
+    assert_eq!(canvas.width(), 40);
+    canvas.check_invariants().expect("width holds");
+}
+
+#[test]
+fn a_display_formula_wider_than_the_width_says_what_it_needs() {
+    let theme = crate::theme::Theme::default();
+    let err = render_display(r"\frac{a+b+c+d+e+f}{2}", 8, &theme).expect_err("too wide");
+    let crate::error::MathError::TooWide { needed } = err else {
+        panic!("expected TooWide, got {err:?}")
+    };
+    assert!(needed > 8, "and the number is the answer, not a hint");
+}
+
+#[test]
+fn a_formula_that_exactly_fits_draws_and_one_column_narrower_does_not() {
+    // The boundary, from both sides, because `TooWide` is one comparison and a `>=` there
+    // is as easy to write as a `>`. `E = mc` is six columns
+    // (`display_and_inline_agree_about_a_flat_formula` renders it), so six fits exactly and
+    // five is the first width that cannot show it.
+    let theme = crate::theme::Theme::default();
+    let canvas = render_display("E = mc", 6, &theme).expect("exactly the width is not too wide");
+    assert_eq!(canvas.width(), 6);
+    assert_eq!(canvas.row_text(0), "E = mc");
+    assert_eq!(
+        render_display("E = mc", 5, &theme).expect_err("one column short"),
+        crate::error::MathError::TooWide { needed: 6 },
+        "and `needed` is the formula's own width, not the width that was asked for"
+    );
+}
+
+#[test]
+fn a_block_that_draws_nothing_draws_nothing() {
+    // Design spec §16.3. The rule is stated over the *result*, so all five of these are the
+    // same case and none of them is a listed command: a `\newcommand`, a `\def` with and
+    // without a parameter, a comment and whitespace all lay out to a box with no cells.
+    let theme = crate::theme::Theme::default();
+    for src in [
+        r"\newcommand{\R}[0]{\mathbb{R}}",
+        r"\def\R{\mathbb{R}}",
+        r"\def\R#1{\mathbb{R}}",
+        "% nothing but a comment",
+        "   ",
+    ] {
+        let canvas = render_display(src, 40, &theme).unwrap_or_else(|e| panic!("{src:?}: {e}"));
+        assert_eq!(
+            canvas.height(),
+            0,
+            "{src:?}: no frame, no caption, no blank line"
+        );
+    }
+    // And the other side of the rule, which is what stops it being "return an empty canvas":
+    // a formula that draws something must not take the empty path. `\R` is the same macro
+    // put to use, so the pair also says the definition really was read and not merely
+    // skipped over.
+    let drawn = render_display(r"\def\R{\mathbb{R}}\R", 40, &theme).expect("draws");
+    assert_eq!(drawn.height(), 1, "a formula with cells keeps its row");
+
+    // PINNED DEFECT, not a decision: `\newcommand{\R}{\mathbb{R}}` -- design spec §16.3's
+    // own example, and the spelling every LaTeX author writes -- does not parse. This
+    // crate's pinned `pulldown-latex` makes the `[n]` argument count MANDATORY:
+    // `new_command` (`parser/primitives.rs`) does
+    // `optional_argument(..).ok_or(ErrorKind::Argument)?` where real LaTeX defaults it to
+    // zero. Nothing in `src/math/` can fix it and nothing here should paper over it, so it
+    // is asserted as it stands: when the fork gains the default, this line goes red and is
+    // the place to delete.
+    assert!(matches!(
+        render_display(r"\newcommand{\R}{\mathbb{R}}", 40, &theme),
+        Err(crate::error::MathError::Parse { .. })
+    ));
+}
+
+#[test]
+fn a_display_formula_that_does_not_parse_is_an_error_not_a_panic() {
+    let theme = crate::theme::Theme::default();
+    assert!(matches!(
+        render_display(r"\frac{", 40, &theme),
+        Err(crate::error::MathError::Parse { .. })
+    ));
+}
+
+#[test]
+fn a_construct_this_engine_cannot_build_reaches_the_display_caller_as_an_error() {
+    // `render_display` must not swallow `NotInline`. Two routes reach it in display mode and
+    // neither is an inline constraint: a grid, which no mode builds yet (design spec §6.5),
+    // and `build::parse`'s source caps, which run before the mode is consulted at all.
+    //
+    // Both matter to the caller for the same reason: design spec §9's framed source is
+    // reached by returning the error, so an arm that turned either into an empty canvas
+    // would make the formula vanish off the page instead.
+    let theme = crate::theme::Theme::default();
+    assert_eq!(
+        render_display(r"\begin{pmatrix} 1 \end{pmatrix}", 40, &theme).expect_err("no grids yet"),
+        crate::error::MathError::NotInline("a matrix")
+    );
+    assert_eq!(
+        render_display(&r"\alpha".repeat(64), 40, &theme).expect_err("past the command-run cap"),
+        crate::error::MathError::NotInline("a formula with more than 32 chained commands")
+    );
+}
+
+#[test]
+fn display_and_inline_agree_about_a_flat_formula() {
+    // One engine: a formula that needs no second row is the same row either way. The claim
+    // is narrow on purpose — this pins that the two entry points agree, not that the two
+    // walks do; `draw.rs`'s `the_flat_walk_and_the_canvas_walk_render_the_same_cells` is
+    // where that is pinned, and it asserts `is_inline` on every case, so neither test can
+    // catch a substitution that only shows up on a tall box.
+    let theme = crate::theme::Theme::default();
+    let canvas = render_display("E = mc", 40, &theme).expect("draws");
+    assert_eq!(canvas.height(), 1);
+    assert_eq!(canvas.row_text(0).trim_end(), "E = mc");
+    assert_eq!(render_inline("E = mc").expect("renders"), "E = mc");
 }
