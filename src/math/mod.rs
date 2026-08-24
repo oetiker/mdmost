@@ -17,6 +17,7 @@
 
 mod boxes;
 mod build;
+mod delim;
 mod draw;
 pub(crate) mod scripts;
 mod spacing;
