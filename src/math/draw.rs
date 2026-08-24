@@ -20,6 +20,7 @@
 use crate::canvas::Canvas;
 use crate::error::MathError;
 use crate::math::boxes::{BoxContent, MathBox};
+use crate::math::delim;
 use crate::theme::Theme;
 
 /// How many levels of box either walk descends before it stops drawing.
@@ -334,10 +335,88 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
             }
             place(radicand, canvas, baseline, radicand_col, theme, deeper);
         }
-        // Task 8 fills in `Fenced`. Drawing nothing is the honest placeholder: the box
-        // already reserved the space, so a missing fence shows as a gap rather than as
-        // misplaced neighbours.
-        BoxContent::Fenced { .. } => {}
+        BoxContent::Fenced { left, right, body } => {
+            // The columns `boxes::fenced` charged for, walked left to right. Each side
+            // that HAS a delimiter costs one column for the delimiter and, against a tall
+            // body, one more for the space between it and the content. A side that is
+            // `None` is a `\left.` and costs nothing at all, so the advance is per side
+            // rather than a constant -- `\left[\frac{a}{b}\right.` is three columns wide,
+            // not five, and advancing by a constant would put the body one column right of
+            // where the box reserved it and overrun the canvas.
+            let padded = !body.is_inline();
+            let side_cost = 1u16.saturating_add(u16::from(padded));
+            let top = baseline.saturating_sub(i32::from(b.above));
+            let height = b.height();
+
+            let mut at = col;
+            if let Some(delimiter) = left {
+                write_delimiter(
+                    canvas,
+                    *delimiter,
+                    delim::Side::Left,
+                    top,
+                    height,
+                    at,
+                    theme,
+                );
+                at = at.saturating_add(side_cost);
+            }
+            place(body, canvas, baseline, at, theme, deeper);
+            if let Some(delimiter) = right {
+                let at = at
+                    .saturating_add(body.width)
+                    .saturating_add(u16::from(padded));
+                write_delimiter(
+                    canvas,
+                    *delimiter,
+                    delim::Side::Right,
+                    top,
+                    height,
+                    at,
+                    theme,
+                );
+            }
+        }
+    }
+}
+
+/// Writes one delimiter down the rows the enclosure spans.
+///
+/// `top` is the enclosure's own top row, so the delimiter runs the full height of what it
+/// encloses: `boxes::fenced` copies the body's `above` and `below` unchanged, which is the
+/// statement that a fence is exactly as tall as its content and no taller.
+#[allow(dead_code)]
+fn write_delimiter(
+    canvas: &mut Canvas,
+    delimiter: char,
+    side: delim::Side,
+    top: i32,
+    height: u16,
+    col: u16,
+    theme: &Theme,
+) {
+    // `char::encode_utf8` writes into this, so the `&str` the canvas wants costs a stack
+    // buffer rather than a `String` per row.
+    let mut buf = [0u8; 4];
+    for (offset, piece) in delim::pieces(delimiter, side, height)
+        .into_iter()
+        .enumerate()
+    {
+        // The same off-canvas clip the other arms make: a negative row is only reachable
+        // after a `u16` saturation upstream, and skipping the draw clips it as the canvas
+        // would.
+        let Ok(offset) = i32::try_from(offset) else {
+            continue;
+        };
+        let Ok(row) = usize::try_from(top.saturating_add(offset)) else {
+            continue;
+        };
+        canvas.write_str(
+            row,
+            usize::from(col),
+            piece.encode_utf8(&mut buf),
+            theme.base(),
+        );
     }
 }
 
@@ -781,6 +860,39 @@ mod tests {
                     None,
                 ),
             ),
+            // The fence, inherited from the canary this test replaced. Both walks are
+            // exercised on each combination of present and absent delimiter, because a
+            // one-row fence pays a *per-side* cost and the two-sided case is the one
+            // where a constant advance and a per-side advance agree by accident.
+            ("a one-row fence", fenced(Some('('), Some(')'), text("x"))),
+            (
+                "a fence with only an opening delimiter",
+                fenced(Some('['), None, text("x")),
+            ),
+            (
+                "a fence with only a closing delimiter",
+                fenced(None, Some(']'), text("x")),
+            ),
+            (
+                "a fence with neither, which is `\\left. … \\right.`",
+                fenced(None, None, text("x")),
+            ),
+            (
+                "a fence inside a row",
+                row(vec![
+                    text("a"),
+                    fenced(Some('('), Some(')'), text("x")),
+                    text("b"),
+                ]),
+            ),
+            // A delimiter with no box-art form, on the walk that compares the two
+            // renderings cell by cell. `write_flat` pushes the author's own character, so
+            // this is where a substituting `place` would be caught: drawing `│` for `⌊`
+            // makes the two walks disagree, by design.
+            (
+                "a fence whose delimiters have no box-art form",
+                fenced(Some('⌊'), Some('⌋'), text("x")),
+            ),
         ];
 
         for (what, b) in cases {
@@ -802,37 +914,112 @@ mod tests {
         }
     }
 
-    /// The one shape where the two walks are allowed to disagree, and why.
-    ///
-    /// Deliberate staging, not a bug: `place`'s `Fenced` arm is Task 8's, and `build.rs`
-    /// still refuses `\left(…\right)` by name, so no shipped state can render a blank
-    /// fence. This test exists so that the gap is a written-down fact with an owner
-    /// rather than a silence. **Task 8 must make it fail, and must delete it** — that
-    /// failure is Task 8's acceptance criterion.
     #[test]
-    fn the_canvas_side_of_a_one_row_fence_is_still_blank_until_task_8() {
+    fn a_one_row_fence_takes_the_plain_characters() {
         let theme = Theme::default();
-        let b = fenced(Some('('), Some(')'), text("x"));
-        assert!(b.is_inline(), "a one-row body keeps the fence on one row");
+        let b = fenced(Some('('), Some(')'), text("x + y"));
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["(x + y)"]);
+        canvas.check_invariants().expect("width holds");
+    }
 
-        assert_eq!(
-            to_row(&b).expect("is inline"),
-            "(x)",
-            "the flat walk draws the delimiters today"
-        );
-        assert_eq!(
-            to_canvas(&b, b.width, &theme).row_text(0),
-            "   ",
-            "TASK 8: `place` does not draw `Fenced` yet, so the canvas is the three \
-             columns the box reserved and nothing in them. When Task 8 writes that arm \
-             this assert must fail -- delete this test and let \
-             `the_flat_walk_and_the_canvas_walk_render_the_same_cells` cover the fence \
-             instead. See the module doc: one tree, one rendering."
-        );
+    #[test]
+    fn a_tall_fence_grows_box_art_and_pads_off_the_content() {
+        let theme = Theme::default();
+        let b = fenced(Some('('), Some(')'), fraction(text("a"), text("b")));
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["╭ a ╮", "│ ─ │", "╰ b ╯"]);
+        canvas.check_invariants().expect("width holds");
+    }
 
-        // Deliberately NOT asserted here: the same fence inside a row, where the gap must
-        // stay a hole rather than shift the neighbour. That is the reviewer's D5, ruled to
-        // land with the arm it protects rather than beside this canary.
+    /// The other three presence combinations, drawn rather than reasoned about.
+    ///
+    /// A two-sided fence is the case where a per-side advance and a constant one agree,
+    /// so on its own it pins neither. These three tell them apart: with one side absent
+    /// the box is narrower by that side's whole cost, and the body sits where the
+    /// narrower box put it.
+    #[test]
+    fn a_tall_fence_charges_and_draws_only_the_sides_that_are_there() {
+        let theme = Theme::default();
+
+        let left_only = fenced(Some('['), None, fraction(text("a"), text("b")));
+        assert_eq!(left_only.width, 3, "body 1 + one side at 2");
+        let canvas = to_canvas(&left_only, left_only.width, &theme);
+        assert_eq!(rows(&canvas), vec!["┌ a", "│ ─", "└ b"]);
+        canvas.check_invariants().expect("width holds");
+
+        let right_only = fenced(None, Some(']'), fraction(text("a"), text("b")));
+        assert_eq!(right_only.width, 3, "body 1 + one side at 2");
+        let canvas = to_canvas(&right_only, right_only.width, &theme);
+        assert_eq!(rows(&canvas), vec!["a ┐", "─ │", "b ┘"]);
+        canvas.check_invariants().expect("width holds");
+
+        // `\left. … \right.`: both delimiters intentionally invisible. The body is drawn
+        // flush, and no column anywhere is reserved for a fence that is not there.
+        let neither = fenced(None, None, fraction(text("a"), text("b")));
+        assert_eq!(neither.width, 1, "an invisible fence costs nothing");
+        let canvas = to_canvas(&neither, neither.width, &theme);
+        assert_eq!(rows(&canvas), vec!["a", "─", "b"]);
+        canvas.check_invariants().expect("width holds");
+    }
+
+    #[test]
+    fn an_invisible_delimiter_draws_nothing_and_reserves_nothing() {
+        let theme = Theme::default();
+        let b = fenced(None, Some('}'), fraction(text("a"), text("b")));
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(canvas.width(), b.width);
+        assert!(rows(&canvas)[0].starts_with('a'), "no left piece was drawn");
+        canvas.check_invariants().expect("width holds");
+    }
+
+    /// A delimiter is never replaced by a different one — owner's ruling, 2026-08-24.
+    ///
+    /// `delim.rs` pins this over the whole reachable set, but only in terms of the pieces
+    /// it hands back. This is the same rule stated about *cells on a canvas*, which is
+    /// the thing the reader actually sees, and it is stated tall as well as one-row:
+    /// the one-row form takes the plain character on any path, so a substitution that
+    /// only bites when the body grows would survive a one-row test alone.
+    #[test]
+    fn a_tall_delimiter_with_no_box_art_is_still_the_authors_own_character() {
+        let theme = Theme::default();
+        let b = fenced(Some('⌊'), Some('⌋'), fraction(text("a"), text("b")));
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["⌊ a ⌋", "⌊ ─ ⌋", "⌊ b ⌋"]);
+        canvas.check_invariants().expect("width holds");
+
+        let one_row = fenced(Some('⌈'), Some('⌉'), text("x"));
+        let canvas = to_canvas(&one_row, one_row.width, &theme);
+        assert_eq!(rows(&canvas), vec!["⌈x⌉"]);
+        canvas.check_invariants().expect("width holds");
+    }
+
+    /// Defect D5, in the form the radical test cannot take.
+    ///
+    /// `a_row_advances_across_a_radical_by_the_width_the_box_reserved` already kills the
+    /// "advance by 0" mutation on this same `Row` arm, so a fence repeat of it would pin
+    /// nothing new. What it pins instead is that a fence draws *inside* the columns
+    /// `boxes::fenced` charged for, with a neighbour hard up against them: the fence here
+    /// is one-sided and tall, so its per-side cost is two, and an arm that spent one
+    /// column on a padded side draws the body over the neighbour's column.
+    ///
+    /// Measured, not claimed. With `side_cost` cut to a bare 1 this test goes red along
+    /// with five others. It is NOT sensitive to the other half of the per-side rule --
+    /// charging for an absent delimiter -- because both of this fence's delimiters that
+    /// matter are on the present side; `a_tall_fence_charges_and_draws_only_the_sides_
+    /// that_are_there` and the two-walk test are what catch that one.
+    #[test]
+    fn a_row_advances_across_a_fence_by_the_width_the_box_reserved() {
+        let theme = Theme::default();
+        let b = row(vec![
+            text("a"),
+            fenced(Some('('), None, fraction(text("n"), text("m"))),
+            text("z"),
+        ]);
+        assert_eq!(b.width, 5, "1 + (body 1 + one side at 2) + 1");
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec![" ╭ n", "a│ ─z", " ╰ m"]);
+        canvas.check_invariants().expect("width holds");
     }
 
     /// `Fraction` and `Radical` cannot be zero-height, which is what the `write_flat`

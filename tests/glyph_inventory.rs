@@ -121,10 +121,11 @@ const INVENTORY: &[(&str, &str)] = &[
     // form Unicode placed here instead of in Superscripts and Subscripts, below.
     ("Latin-1 Supplement (U+0080-U+00FF)", "\u{a0}©¹²"),
     // The elision marker and `&hellip;`, and `‾` (U+203E), the tick that tips a tall
-    // radical's diagonal (design spec §6.2). Nothing emits the tick yet: display math
-    // does not reach the page until the renderer is wired onto it, so the corpus line
-    // that exercises it is still to come and this entry goes green either way.
-    ("General Punctuation (U+2000-U+206F)", "…‾"),
+    // radical's diagonal (design spec §6.2). `‖` (U+2016) is math's double bar,
+    // `\left\|` and `\Vert`. Nothing emits the tick or the bar yet: display math does
+    // not reach the page until the renderer is wired onto it, so the corpus line that
+    // exercises them is still to come and this entry goes green either way.
+    ("General Punctuation (U+2000-U+206F)", "…‾‖"),
     // Class-diagram relation glyphs, and math's radical sign (`\sqrt`).
     ("Mathematical Operators (U+2200-U+22FF)", "∧∨√"),
     // Math's raised `n`, `+` and `-`, and lowered `=` and `1` (design spec §5.1) —
@@ -151,8 +152,17 @@ const INVENTORY: &[(&str, &str)] = &[
     ("Geometric Shapes (U+25A0-U+25FF)", "▲△▶▼▽◀◆◇◈◉○●◯"),
     // The degraded-diagram caption marker.
     ("Dingbats (U+2700-U+27BF)", "✗"),
-    // Class-diagram generics.
-    ("Misc Mathematical Symbols-A (U+27C0-U+27EF)", "⟨⟩"),
+    // Class-diagram generics, and math's angle, white-square and flattened-round
+    // delimiters -- `\langle`, `\lAngle`, `\lBrack`, `\lgroup` and their closers.
+    ("Misc Mathematical Symbols-A (U+27C0-U+27EF)", "⟨⟩⟦⟧⟪⟫⟮⟯"),
+    // Math's extensible arrow delimiters: `\left\uparrow` and friends.
+    ("Arrows (U+2190-U+21FF)", "↑↓↕⇑⇓⇕"),
+    // Math's ceiling, floor and moustache delimiters -- `\lceil`, `\lfloor`,
+    // `\lmoustache` and their closers.
+    ("Miscellaneous Technical (U+2300-U+23FF)", "⌈⌉⌊⌋⎰⎱"),
+    // Math's white-brace and double-parenthesis delimiters -- `\lBrace`,
+    // `\llparenthesis`, `\llangle` and their closers.
+    ("Misc Mathematical Symbols-B (U+2980-U+29FF)", "⦃⦄⦇⦈⦉⦊"),
     // Code-fence language icons, drawn only when icons are on. These are the
     // one row a reader can opt out of, with `--no-icons`.
     (

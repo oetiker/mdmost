@@ -516,13 +516,22 @@ coverage will do.
 
 - **Geometric Shapes (U+25A0-U+25FF)** — Heading marks, diagram node shapes, arrowheads.
 
-- **General Punctuation (U+2000-U+206F)** — The elision marker, and the tick on a tall
-  radical.
+- **General Punctuation (U+2000-U+206F)** — The elision marker, the tick on a tall
+  radical, and math's double bar.
 
 - **Mathematical Operators (U+2200-U+22FF)** — Class-diagram relations, and math's
   radical sign (`\sqrt`).
 
-- **Misc Mathematical Symbols-A (U+27C0-U+27EF)** — Class-diagram generics.
+- **Misc Mathematical Symbols-A (U+27C0-U+27EF)** — Class-diagram generics, and math's
+  angle, white-square and flattened-round delimiters.
+
+- **Arrows (U+2190-U+21FF)** — Math's arrow delimiters.
+
+- **Miscellaneous Technical (U+2300-U+23FF)** — Math's ceiling, floor and moustache
+  delimiters.
+
+- **Misc Mathematical Symbols-B (U+2980-U+29FF)** — Math's white-brace and
+  double-parenthesis delimiters.
 
 - **Dingbats (U+2700-U+27BF)** — The marker on a degraded diagram's caption.
 

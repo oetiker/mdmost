@@ -492,3 +492,86 @@ fn left_right_still_draws_its_delimiters_as_a_script_base() {
     // script's own base would lose its delimiters just the same.
     assert_eq!(rendered(r"\left(x\right)_0"), "(x)₀");
 }
+
+/// A display formula drawn on a canvas, one string per row, trailing blanks trimmed.
+///
+/// `render_display` is Task 9's, so display drawing has no public entry point yet; these
+/// tests reach the same two steps it will and go through `build` and `draw` directly.
+fn display(src: &str) -> Vec<String> {
+    let storage = pulldown_latex::Storage::new();
+    let events = super::build::parse(src, &storage).unwrap_or_else(|e| panic!("{src:?}: {e}"));
+    let b = super::build::build(&events, super::build::Mode::Display)
+        .unwrap_or_else(|e| panic!("{src:?}: {e}"));
+    let theme = crate::theme::Theme::default();
+    let canvas = super::draw::to_canvas(&b, b.width, &theme);
+    canvas.check_invariants().expect("width holds on every row");
+    (0..canvas.height())
+        .map(|r| canvas.row_text(r).trim_end().to_string())
+        .collect()
+}
+
+/// A root index that is a fence draws, instead of leaving the rows it reserved empty.
+///
+/// Carried from the Task 7 review. Task 7 grew a radical's `above` to hold an index of any
+/// size, so a `Fenced` index reserved its rows straight away — but nothing drew into them
+/// while `place`'s `Fenced` arm was empty, and both of these came out with two blank rows
+/// on top:
+///
+/// ```text
+/// ["", "", "      ─", "    √ x"]
+/// ```
+///
+/// This is the check that the reserve and the drawing agree about height, not merely that
+/// something appears: the index fills exactly the rows Task 7 added and no others, so a
+/// fence one row taller or shorter than its reserve would show up here as a blank row or
+/// a clipped one rather than as a silently wrong-looking root.
+#[test]
+fn a_fenced_root_index_fills_the_rows_the_radical_reserved_for_it() {
+    assert_eq!(
+        display(r"\sqrt[\left(\frac{a}{b}\right)]{x}"),
+        vec!["╭ a ╮", "│ ─ │", "╰ b ╯ ─", "    √ x"]
+    );
+    // `\binom` reaches the same arm by a different route -- it is a `\left(…\right)` the
+    // author never typed -- so it is asserted rather than assumed to follow.
+    //
+    // The rule between `n` and `k` is WRONG and is not this task's to fix. `\binom`
+    // arrives as `Visual::Fraction(Some(0em))`, an explicitly ruleless fraction, and
+    // `build.rs`'s `Visual::Fraction(_)` (`build.rs:732`) discards that thickness and
+    // builds an ordinary fraction. The defect predates this task -- it is why
+    // `\binom{n}{k}` already sets inline as `(n/k)`, a slash that reads as division --
+    // and `build.rs` belongs to Task 8a. Drawing the fence is only what made it visible
+    // on a canvas for the first time. Pinned as it stands, so the fix has a test to
+    // change rather than a silence to discover.
+    assert_eq!(
+        display(r"\sqrt[\binom{n}{k}]{x}"),
+        vec!["╭ n ╮", "│ ─ │", "╰ k ╯ ─", "    √ x"]
+    );
+}
+
+/// The four presence combinations, end to end from LaTeX rather than from a hand-built box.
+///
+/// `\left.` is the case a builder test cannot reach by hand: it is the source construct
+/// that produces `None`, and the whole reason `boxes::fenced` charges per side.
+#[test]
+fn a_display_fence_draws_only_the_delimiters_the_source_asked_for() {
+    assert_eq!(
+        display(r"\left(\frac{a}{b}\right)"),
+        vec!["╭ a ╮", "│ ─ │", "╰ b ╯"]
+    );
+    assert_eq!(
+        display(r"\left[\frac{a}{b}\right."),
+        vec!["┌ a", "│ ─", "└ b"]
+    );
+    assert_eq!(
+        display(r"\left.\frac{a}{b}\right]"),
+        vec!["a ┐", "─ │", "b ┘"]
+    );
+    assert_eq!(display(r"\left.\frac{a}{b}\right."), vec!["a", "─", "b"]);
+    // A delimiter with no box-art form, reached from the source that names it. This is
+    // the no-substitution ruling stated where the reader meets it: `\lfloor` must not
+    // arrive on the page as a bar.
+    assert_eq!(
+        display(r"\left\lfloor\frac{a}{b}\right\rfloor"),
+        vec!["⌊ a ⌋", "⌊ ─ ⌋", "⌊ b ⌋"]
+    );
+}
