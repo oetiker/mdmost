@@ -1,0 +1,429 @@
+// TODO: Consider using `phf`s for this
+
+use crate::event::DelimiterType;
+
+use super::Token;
+
+#[rustfmt::skip]
+pub fn is_binary(c: char) -> bool {
+    matches!(
+        c,
+        '\u{002B}' | '\u{002F}' | '\u{00B1}' | '\u{005C}' | '\u{00B7}' | '\u{00D7}' | '\u{00F7}' | '\u{2022}' |
+        '\u{2040}' | '\u{2044}' | '\u{204E}' | '\u{2061}' | '\u{2062}' | '\u{2213}' | '\u{2214}' | '\u{2215}' |
+        '\u{2216}' | '\u{2217}' | '\u{2218}' | '\u{2219}' | '\u{2227}' | '\u{2228}' | '\u{2229}' | '\u{222A}' |
+        '\u{2238}' | '\u{223E}' | '\u{2240}' | '\u{228C}' | '\u{228D}' | '\u{228E}' | '\u{2293}' | '\u{2294}' |
+        '\u{2295}' | '\u{2296}' | '\u{2297}' | '\u{2298}' | '\u{2299}' | '\u{229A}' | '\u{229B}' | '\u{229C}' |
+        '\u{229D}' | '\u{229E}' | '\u{229F}' | '\u{22A0}' | '\u{22A1}' | '\u{22B9}' | '\u{22BA}' | '\u{22BB}' |
+        '\u{22BC}' | '\u{22BD}' | '\u{22C4}' | '\u{22C5}' | '\u{22C6}' | '\u{22C7}' | '\u{22C9}' | '\u{22CA}' |
+        '\u{22CB}' | '\u{22CC}' | '\u{22CE}' | '\u{22CF}' | '\u{22D2}' | '\u{22D3}' | '\u{2305}' | '\u{2306}' |
+        '\u{233D}' | '\u{25B2}' | '\u{25B3}' | '\u{25B4}' | '\u{25B5}' | '\u{25B6}' | '\u{25B7}' | '\u{25B8}' |
+        '\u{25B9}' | '\u{25BC}' | '\u{25BD}' | '\u{25BE}' | '\u{25BF}' | '\u{25C0}' | '\u{25C1}' | '\u{25C2}' |
+        '\u{25C3}' | '\u{25C4}' | '\u{25C5}' | '\u{25CA}' | '\u{25CB}' | '\u{25E6}' | '\u{25EB}' | '\u{25EC}' |
+        '\u{25F8}' | '\u{25F9}' | '\u{25FA}' | '\u{25FB}' | '\u{25FC}' | '\u{25FD}' | '\u{25FE}' | '\u{25FF}' |
+        '\u{2605}' | '\u{2606}' | '\u{27CE}' | '\u{27CF}' | '\u{27D1}' | '\u{27E0}' | '\u{27E1}' | '\u{27E2}' |
+        '\u{27E3}' | '\u{29B6}' | '\u{29B7}' | '\u{29B8}' | '\u{29B9}' | '\u{29C0}' | '\u{29C1}' | '\u{29C4}' |
+        '\u{29C5}' | '\u{29C6}' | '\u{29C7}' | '\u{29C8}' | '\u{27E4}' | '\u{27E5}' | '\u{29D6}' | '\u{29D7}' |
+        '\u{29E2}' | '\u{29EB}' | '\u{29F5}' | '\u{29F6}' | '\u{29F7}' | '\u{29FA}' | '\u{29FB}' | '\u{29FE}' |
+        '\u{29FF}' | '\u{2A22}' | '\u{2A23}' | '\u{2A24}' | '\u{2A25}' | '\u{2A26}' | '\u{2A27}' | '\u{2A28}' |
+        '\u{2A29}' | '\u{2A2A}' | '\u{2A2B}' | '\u{2A2C}' | '\u{2A2D}' | '\u{2A2E}' | '\u{2A2F}' | '\u{2A30}' |
+        '\u{2A31}' | '\u{2A32}' | '\u{2A33}' | '\u{2A34}' | '\u{2A35}' | '\u{2A36}' | '\u{2A37}' | '\u{2A38}' |
+        '\u{2A39}' | '\u{2A3A}' | '\u{2A3B}' | '\u{2A3C}' | '\u{2A3D}' | '\u{2A3E}' | '\u{2A3F}' | '\u{2A40}' |
+        '\u{2A41}' | '\u{2A42}' | '\u{2A43}' | '\u{2A44}' | '\u{2A45}' | '\u{2A46}' | '\u{2A47}' | '\u{2A48}' |
+        '\u{2A49}' | '\u{2A4A}' | '\u{2A4B}' | '\u{2A4C}' | '\u{2A4D}' | '\u{2A4E}' | '\u{2A4F}' | '\u{2A50}' |
+        '\u{2A51}' | '\u{2A52}' | '\u{2A53}' | '\u{2A54}' | '\u{2A55}' | '\u{2A56}' | '\u{2A57}' | '\u{2A58}' |
+        '\u{2A71}' | '\u{2A72}' | '\u{2AF4}' | '\u{2AF5}' | '\u{2AF6}' | '\u{2AFB}' | '\u{2AFD}' | '\u{2AFE}' 
+    )
+}
+
+#[rustfmt::skip]
+pub fn is_relation(c: char) -> bool {
+    matches!(
+        c,
+        '\u{003A}' | '\u{003C}' | '\u{003D}' | '\u{003E}' | '\u{2020}' | '\u{2021}' | '\u{204F}' | '\u{2050}' |
+        '\u{2190}'..='\u{21B3}' | '\u{21B6}' | '\u{21B7}' | '\u{21BA}'..='\u{21FF}' | '\u{2208}' | '\u{2209}' |
+        '\u{220A}' | '\u{220B}' | '\u{220C}' | '\u{220D}' | '\u{221D}' | '\u{2223}' | '\u{2224}' | '\u{2225}' |
+        '\u{2226}' | '\u{2234}' | '\u{2235}' | '\u{2236}' | '\u{2237}' | '\u{2239}' | '\u{223A}' | '\u{223B}' |
+        '\u{223C}' | '\u{223D}' | '\u{2241}' | '\u{2242}' | '\u{2243}' | '\u{2244}' | '\u{2245}' | '\u{2246}' |
+        '\u{2247}' | '\u{2248}' | '\u{2249}' | '\u{224A}' | '\u{224B}' | '\u{224C}' | '\u{224D}' | '\u{224E}' |
+        '\u{224F}' | '\u{2250}' | '\u{2251}' | '\u{2252}' | '\u{2253}' | '\u{2254}' | '\u{2255}' | '\u{2256}' |
+        '\u{2257}' | '\u{2258}' | '\u{2259}' | '\u{225A}' | '\u{225B}' | '\u{225C}' | '\u{225D}' | '\u{225E}' |
+        '\u{225F}' | '\u{2260}' | '\u{2261}' | '\u{2262}' | '\u{2263}' | '\u{2264}' | '\u{2265}' | '\u{2266}' |
+        '\u{2267}' | '\u{2268}' | '\u{2269}' | '\u{226A}' | '\u{226B}' | '\u{226C}' | '\u{226D}' | '\u{226E}' |
+        '\u{226F}' | '\u{2270}' | '\u{2271}' | '\u{2272}' | '\u{2273}' | '\u{2274}' | '\u{2275}' | '\u{2276}' |
+        '\u{2277}' | '\u{2278}' | '\u{2279}' | '\u{227A}' | '\u{227B}' | '\u{227C}' | '\u{227D}' | '\u{227E}' |
+        '\u{227F}' | '\u{2280}' | '\u{2281}' | '\u{2282}' | '\u{2283}' | '\u{2284}' | '\u{2285}' | '\u{2286}' |
+        '\u{2287}' | '\u{2288}' | '\u{2289}' | '\u{228A}' | '\u{228B}' | '\u{228F}' | '\u{2290}' | '\u{2291}' |
+        '\u{2292}' | '\u{22A2}' | '\u{22A3}' | '\u{22A5}' | '\u{22A6}' | '\u{22A7}' | '\u{22A8}' | '\u{22A9}' |
+        '\u{22AA}' | '\u{22AB}' | '\u{22AC}' | '\u{22AD}' | '\u{22AE}' | '\u{22AF}' | '\u{22B0}' | '\u{22B1}' |
+        '\u{22B2}' | '\u{22B3}' | '\u{22B4}' | '\u{22B5}' | '\u{22B6}' | '\u{22B7}' | '\u{22B8}' | '\u{22C8}' |
+        '\u{22CD}' | '\u{22D0}' | '\u{22D1}' | '\u{22D4}' | '\u{22D5}' | '\u{22D6}' | '\u{22D7}' | '\u{22D8}' |
+        '\u{22D9}' | '\u{22DA}' | '\u{22DB}' | '\u{22DC}' | '\u{22DD}' | '\u{22DE}' | '\u{22DF}' | '\u{22E0}' |
+        '\u{22E1}' | '\u{22E2}' | '\u{22E3}' | '\u{22E4}' | '\u{22E5}' | '\u{22E6}' | '\u{22E7}' | '\u{22E8}' |
+        '\u{22E9}' | '\u{22EA}' | '\u{22EB}' | '\u{22EC}' | '\u{22ED}' | '\u{22EE}' | '\u{22EF}' | '\u{22F0}' |
+        '\u{22F1}' | '\u{22F2}' | '\u{22F3}' | '\u{22F4}' | '\u{22F5}' | '\u{22F6}' | '\u{22F7}' | '\u{22F8}' |
+        '\u{22F9}' | '\u{22FA}' | '\u{22FB}' | '\u{22FC}' | '\u{22FD}' | '\u{22FE}' | '\u{22FF}' | '\u{2322}' |
+        '\u{2323}' | '\u{233F}' | '\u{237C}' | '\u{23B0}' | '\u{23B1}' | '\u{27C2}' | '\u{27C3}' | '\u{27C4}' |
+        '\u{27C5}' | '\u{27C6}' | '\u{27C7}' | '\u{27C8}' | '\u{27C9}' | '\u{27CA}' | '\u{27CB}' | '\u{27CD}' |
+        '\u{27D2}' | '\u{27D3}' | '\u{27D4}' | '\u{27DA}' | '\u{27DB}' | '\u{27DC}' | '\u{27DD}' | '\u{27DE}' |
+        '\u{27DF}' | '\u{27F0}' | '\u{27F1}' | '\u{27F2}' | '\u{27F3}' | '\u{27F4}' | '\u{27F5}' | '\u{27F6}' |
+        '\u{27F7}' | '\u{27F8}' | '\u{27F9}' | '\u{27FA}' | '\u{27FB}' | '\u{27FC}' | '\u{27FD}' | '\u{27FE}' |
+        '\u{27FF}' | '\u{2900}' | '\u{2901}' | '\u{2902}' | '\u{2903}' | '\u{2904}' | '\u{2905}' | '\u{2906}' |
+        '\u{2907}' | '\u{2908}' | '\u{2909}' | '\u{290A}' | '\u{290B}' | '\u{290C}' | '\u{290D}' | '\u{290E}' |
+        '\u{290F}' | '\u{2910}' | '\u{2911}' | '\u{2912}' | '\u{2913}' | '\u{2914}' | '\u{2915}' | '\u{2916}' |
+        '\u{2917}' | '\u{2918}' | '\u{2919}' | '\u{291A}' | '\u{291B}' | '\u{291C}' | '\u{291D}' | '\u{291E}' |
+        '\u{291F}' | '\u{2920}' | '\u{2921}' | '\u{2922}' | '\u{2923}' | '\u{2924}' | '\u{2925}' | '\u{2926}' |
+        '\u{2927}' | '\u{2928}' | '\u{2929}' | '\u{292A}' | '\u{292B}' | '\u{292C}' | '\u{292D}' | '\u{292E}' |
+        '\u{292F}' | '\u{2930}' | '\u{2931}' | '\u{2932}' | '\u{2933}' | '\u{2934}' | '\u{2935}' | '\u{2936}' |
+        '\u{2937}' | '\u{2938}' | '\u{2939}' | '\u{293A}' | '\u{293B}' | '\u{293C}' | '\u{293D}' | '\u{293E}' |
+        '\u{293F}' | '\u{2940}' | '\u{2941}' | '\u{2942}' | '\u{2943}' | '\u{2944}' | '\u{2945}' | '\u{2946}' |
+        '\u{2947}' | '\u{2948}' | '\u{2949}' | '\u{294A}' | '\u{294B}' | '\u{294C}' | '\u{294D}' | '\u{294E}' |
+        '\u{294F}' | '\u{2950}' | '\u{2951}' | '\u{2952}' | '\u{2953}' | '\u{2954}' | '\u{2955}' | '\u{2956}' |
+        '\u{2957}' | '\u{2958}' | '\u{2959}' | '\u{295A}' | '\u{295B}' | '\u{295C}' | '\u{295D}' | '\u{295E}' |
+        '\u{295F}' | '\u{2960}' | '\u{2961}' | '\u{2962}' | '\u{2963}' | '\u{2964}' | '\u{2965}' | '\u{2966}' |
+        '\u{2967}' | '\u{2968}' | '\u{2969}' | '\u{296A}' | '\u{296B}' | '\u{296C}' | '\u{296D}' | '\u{296E}' |
+        '\u{296F}' | '\u{2970}' | '\u{2971}' | '\u{2972}' | '\u{2973}' | '\u{2974}' | '\u{2975}' | '\u{2976}' |
+        '\u{2977}' | '\u{2978}' | '\u{2979}' | '\u{297A}' | '\u{297B}' | '\u{297C}' | '\u{297D}' | '\u{297E}' |
+        '\u{297F}' | '\u{29CE}' | '\u{29CF}' | '\u{29D0}' | '\u{29D1}' | '\u{29D2}' | '\u{29D3}' | '\u{29D4}' |
+        '\u{29D5}' | '\u{29DF}' | '\u{29E1}' | '\u{29E3}' | '\u{29E4}' | '\u{29E5}' | '\u{29E6}' | '\u{29F4}' |
+        '\u{2A59}' | '\u{2A66}' | '\u{2A67}' | '\u{2A68}' | '\u{2A69}' | '\u{2A6A}' | '\u{2A6B}' | '\u{2A6C}' |
+        '\u{2A6D}' | '\u{2A6E}' | '\u{2A6F}' | '\u{2A70}' | '\u{2A73}' | '\u{2A74}' | '\u{2A75}' | '\u{2A76}' |
+        '\u{2A77}' | '\u{2A78}' | '\u{2A79}' | '\u{2A7A}' | '\u{2A7B}' | '\u{2A7C}' | '\u{2A7D}' | '\u{2A7E}' |
+        '\u{2A7F}' | '\u{2A80}' | '\u{2A81}' | '\u{2A82}' | '\u{2A83}' | '\u{2A84}' | '\u{2A85}' | '\u{2A86}' |
+        '\u{2A87}' | '\u{2A88}' | '\u{2A89}' | '\u{2A8A}' | '\u{2A8B}' | '\u{2A8C}' | '\u{2A8D}' | '\u{2A8E}' |
+        '\u{2A8F}' | '\u{2A90}' | '\u{2A91}' | '\u{2A92}' | '\u{2A93}' | '\u{2A94}' | '\u{2A95}' | '\u{2A96}' |
+        '\u{2A97}' | '\u{2A98}' | '\u{2A99}' | '\u{2A9A}' | '\u{2A9B}' | '\u{2A9C}' | '\u{2A9D}' | '\u{2A9E}' |
+        '\u{2A9F}' | '\u{2AA0}' | '\u{2AA1}' | '\u{2AA2}' | '\u{2AA3}' | '\u{2AA4}' | '\u{2AA5}' | '\u{2AA6}' |
+        '\u{2AA7}' | '\u{2AA8}' | '\u{2AA9}' | '\u{2AAA}' | '\u{2AAB}' | '\u{2AAC}' | '\u{2AAD}' | '\u{2AAE}' |
+        '\u{2AAF}' | '\u{2AB0}' | '\u{2AB1}' | '\u{2AB2}' | '\u{2AB3}' | '\u{2AB4}' | '\u{2AB5}' | '\u{2AB6}' |
+        '\u{2AB7}' | '\u{2AB8}' | '\u{2AB9}' | '\u{2ABA}' | '\u{2ABB}' | '\u{2ABC}' | '\u{2ABD}' | '\u{2ABE}' |
+        '\u{2ABF}' | '\u{2AC0}' | '\u{2AC1}' | '\u{2AC2}' | '\u{2AC3}' | '\u{2AC4}' | '\u{2AC5}' | '\u{2AC6}' |
+        '\u{2AC7}' | '\u{2AC8}' | '\u{2AC9}' | '\u{2ACA}' | '\u{2ACB}' | '\u{2ACC}' | '\u{2ACD}' | '\u{2ACE}' |
+        '\u{2ACF}' | '\u{2AD0}' | '\u{2AD1}' | '\u{2AD2}' | '\u{2AD3}' | '\u{2AD4}' | '\u{2AD5}' | '\u{2AD6}' |
+        '\u{2AD7}' | '\u{2AD8}' | '\u{2AD9}' | '\u{2ADA}' | '\u{2ADB}' | '\u{2ADC}' | '\u{2ADD}' | '\u{2ADE}' |
+        '\u{2ADF}' | '\u{2AE0}' | '\u{2AE2}' | '\u{2AE3}' | '\u{2AE4}' | '\u{2AE5}' | '\u{2AE6}' | '\u{2AE7}' |
+        '\u{2AE8}' | '\u{2AE9}' | '\u{2AEA}' | '\u{2AEB}' | '\u{2AEC}' | '\u{2AED}' | '\u{2AEE}' | '\u{2AEF}' |
+        '\u{2AF0}' | '\u{2AF2}' | '\u{2AF3}' | '\u{2AF7}' | '\u{2AF8}' | '\u{2AF9}' | '\u{2AFA}' | '\u{2B95}' |
+        '\u{2B00}'..='\u{2B11}' | '\u{2B30}'..='\u{2B44}' | '\u{2B45}' | '\u{2B46}' | '\u{2B47}'..='\u{2B4C}'
+    )
+}
+
+pub fn char_delimiter_map(c: char) -> Option<(char, DelimiterType)> {
+    Some(match c {
+        '(' | '⦇' | '⟮' | '[' | '⟦' | '⦃' | '⟨' | '⟪' | '⦉' | '⌊' | '⌈' | '┌' | '└' | '⎰' => {
+            (c, DelimiterType::Open)
+        }
+        ')' | '⦈' | '⟯' | ']' | '⟧' | '⦄' | '⟩' | '⟫' | '⦊' | '⌋' | '⌉' | '┐' | '┘' | '⎱' => {
+            (c, DelimiterType::Close)
+        }
+        '|' | '‖' | '↑' | '⇑' | '↓' | '⇓' | '↕' | '⇕' | '/' => {
+            (c, DelimiterType::Fence)
+        }
+        _ => return None,
+    })
+}
+
+/// Returns the matching delimiter for the given control sequence, if it exists.
+pub fn control_sequence_delimiter_map(cs: &str) -> Option<(char, DelimiterType)> {
+    Some(match cs {
+        "lparen" => ('(', DelimiterType::Open),
+        "rparen" => (')', DelimiterType::Close),
+        "llparenthesis" => ('⦇', DelimiterType::Open),
+        "rrparenthesis" => ('⦈', DelimiterType::Close),
+        "lgroup" => ('⟮', DelimiterType::Open),
+        "rgroup" => ('⟯', DelimiterType::Close),
+
+        "lbrack" => ('[', DelimiterType::Open),
+        "rbrack" => (']', DelimiterType::Close),
+        "lBrack" => ('⟦', DelimiterType::Open),
+        "rBrack" => ('⟧', DelimiterType::Close),
+
+        "{" | "lbrace" => ('{', DelimiterType::Open),
+        "}" | "rbrace" => ('}', DelimiterType::Close),
+        "lBrace" => ('⦃', DelimiterType::Open),
+        "rBrace" => ('⦄', DelimiterType::Close),
+
+        "langle" => ('⟨', DelimiterType::Open),
+        "rangle" => ('⟩', DelimiterType::Close),
+        "lAngle" => ('⟪', DelimiterType::Open),
+        "rAngle" => ('⟫', DelimiterType::Close),
+        "llangle" => ('⦉', DelimiterType::Open),
+        "rrangle" => ('⦊', DelimiterType::Close),
+
+        "lfloor" => ('⌊', DelimiterType::Open),
+        "rfloor" => ('⌋', DelimiterType::Close),
+        "lceil" => ('⌈', DelimiterType::Open),
+        "rceil" => ('⌉', DelimiterType::Close),
+        "ulcorner" => ('┌', DelimiterType::Open),
+        "urcorner" => ('┐', DelimiterType::Close),
+        "llcorner" => ('└', DelimiterType::Open),
+        "lrcorner" => ('┘', DelimiterType::Close),
+
+        "lmoustache" => ('⎰', DelimiterType::Open),
+        "rmoustache" => ('⎱', DelimiterType::Close),
+        "backslash" => ('\\', DelimiterType::Fence),
+
+        "vert" => ('|', DelimiterType::Fence),
+        "lvert" => ('|', DelimiterType::Open),
+        "rvert" => ('|', DelimiterType::Close),
+        "|" | "Vert" => ('‖', DelimiterType::Fence),
+        "lVert" => ('‖', DelimiterType::Open),
+        "rVert" => ('‖', DelimiterType::Close),
+        "uparrow" => ('↑', DelimiterType::Fence),
+        "Uparrow" => ('⇑', DelimiterType::Fence),
+        "downarrow" => ('↓', DelimiterType::Fence),
+        "Downarrow" => ('⇓', DelimiterType::Fence),
+        "updownarrow" => ('↕', DelimiterType::Fence),
+        "Updownarrow" => ('⇕', DelimiterType::Fence),
+        _ => return None,
+    })
+}
+
+/// Returns the matching delimiter character for the given token, if it exists, along with whether
+/// the delimiter is an opening (left) delimiter.
+pub fn token_to_delim(token: Token) -> Option<(char, DelimiterType)> {
+    match token {
+        Token::ControlSequence(cs) => control_sequence_delimiter_map(cs),
+        Token::Character(c) => char_delimiter_map(c.into()),
+    }
+}
+
+/// Returns the RGB triple for a `dvipsnames` color (the 68 named colors from
+/// LaTeX's `xcolor` package with `[dvipsnames]` option).
+///
+/// dvipsnames are case-sensitive (e.g. `Blue` is distinct from CSS's `blue`),
+/// so this lookup is performed against the original (un-lowercased) input
+/// before falling back to the case-insensitive CSS named-color table.
+///
+/// Hex values mirror MathJax's `ColorConstants.ts` (which matches the
+/// `xcolor` package definitions).
+pub fn dvipsnames_color(color: &str) -> Option<(u8, u8, u8)> {
+    Some(match color {
+        "Apricot" => (0xFB, 0xB9, 0x82),
+        "Aquamarine" => (0x00, 0xB5, 0xBE),
+        "Bittersweet" => (0xC0, 0x4F, 0x17),
+        "Black" => (0x22, 0x1E, 0x1F),
+        "Blue" => (0x2D, 0x2F, 0x92),
+        "BlueGreen" => (0x00, 0xB3, 0xB8),
+        "BlueViolet" => (0x47, 0x39, 0x92),
+        "BrickRed" => (0xB6, 0x32, 0x1C),
+        "Brown" => (0x79, 0x25, 0x00),
+        "BurntOrange" => (0xF7, 0x92, 0x1D),
+        "CadetBlue" => (0x74, 0x72, 0x9A),
+        "CarnationPink" => (0xF2, 0x82, 0xB4),
+        "Cerulean" => (0x00, 0xA2, 0xE3),
+        "CornflowerBlue" => (0x41, 0xB0, 0xE4),
+        "Cyan" => (0x00, 0xAE, 0xEF),
+        "Dandelion" => (0xFD, 0xBC, 0x42),
+        "DarkOrchid" => (0xA4, 0x53, 0x8A),
+        "Emerald" => (0x00, 0xA9, 0x9D),
+        "ForestGreen" => (0x00, 0x9B, 0x55),
+        "Fuchsia" => (0x8C, 0x36, 0x8C),
+        "Goldenrod" => (0xFF, 0xDF, 0x42),
+        "Gray" => (0x94, 0x96, 0x98),
+        "Green" => (0x00, 0xA6, 0x4F),
+        "GreenYellow" => (0xDF, 0xE6, 0x74),
+        "JungleGreen" => (0x00, 0xA9, 0x9A),
+        "Lavender" => (0xF4, 0x9E, 0xC4),
+        "LimeGreen" => (0x8D, 0xC7, 0x3E),
+        "Magenta" => (0xEC, 0x00, 0x8C),
+        "Mahogany" => (0xA9, 0x34, 0x1F),
+        "Maroon" => (0xAF, 0x32, 0x35),
+        "Melon" => (0xF8, 0x9E, 0x7B),
+        "MidnightBlue" => (0x00, 0x67, 0x95),
+        "Mulberry" => (0xA9, 0x3C, 0x93),
+        "NavyBlue" => (0x00, 0x6E, 0xB8),
+        "OliveGreen" => (0x3C, 0x80, 0x31),
+        "Orange" => (0xF5, 0x81, 0x37),
+        "OrangeRed" => (0xED, 0x13, 0x5A),
+        "Orchid" => (0xAF, 0x72, 0xB0),
+        "Peach" => (0xF7, 0x96, 0x5A),
+        "Periwinkle" => (0x79, 0x77, 0xB8),
+        "PineGreen" => (0x00, 0x8B, 0x72),
+        "Plum" => (0x92, 0x26, 0x8F),
+        "ProcessBlue" => (0x00, 0xB0, 0xF0),
+        "Purple" => (0x99, 0x47, 0x9B),
+        "RawSienna" => (0x97, 0x40, 0x06),
+        "Red" => (0xED, 0x1B, 0x23),
+        "RedOrange" => (0xF2, 0x60, 0x35),
+        "RedViolet" => (0xA1, 0x24, 0x6B),
+        "Rhodamine" => (0xEF, 0x55, 0x9F),
+        "RoyalBlue" => (0x00, 0x71, 0xBC),
+        "RoyalPurple" => (0x61, 0x3F, 0x99),
+        "RubineRed" => (0xED, 0x01, 0x7D),
+        "Salmon" => (0xF6, 0x92, 0x89),
+        "SeaGreen" => (0x3F, 0xBC, 0x9D),
+        "Sepia" => (0x67, 0x18, 0x00),
+        "SkyBlue" => (0x46, 0xC5, 0xDD),
+        "SpringGreen" => (0xC6, 0xDC, 0x67),
+        "Tan" => (0xDA, 0x9D, 0x76),
+        "TealBlue" => (0x00, 0xAE, 0xB3),
+        "Thistle" => (0xD8, 0x83, 0xB7),
+        "Turquoise" => (0x00, 0xB4, 0xCE),
+        "Violet" => (0x58, 0x42, 0x9B),
+        "VioletRed" => (0xEF, 0x58, 0xA0),
+        "White" => (0xFF, 0xFF, 0xFF),
+        "WildStrawberry" => (0xEE, 0x29, 0x67),
+        "Yellow" => (0xFF, 0xF2, 0x00),
+        "YellowGreen" => (0x98, 0xCC, 0x70),
+        "YellowOrange" => (0xFA, 0xA2, 0x1A),
+        _ => return None,
+    })
+}
+
+/// Returns whether the given string is a valid primitive color.
+///
+/// Named colors come from the [MDN docs](https://developer.mozilla.org/en-US/docs/Web/CSS/named-color#value),
+/// which is a list of about 150 official css color names.
+pub fn primitive_color(color: &str) -> Option<(u8, u8, u8)> {
+    if color.len() > 20 {
+        return None;
+    };
+    Some(match color.to_lowercase().as_str() {
+        "aliceblue" => (240, 248, 255),
+        "antiquewhite" => (250, 235, 215),
+        "aqua" | "cyan" => (0, 255, 255),
+        "aquamarine" => (127, 255, 212),
+        "azure" => (240, 255, 255),
+        "beige" => (245, 245, 220),
+        "bisque" => (255, 228, 196),
+        "black" => (0, 0, 0),
+        "blanchedalmond" => (255, 235, 205),
+        "blue" => (0, 0, 255),
+        "blueviolet" => (138, 43, 226),
+        "brown" => (165, 42, 42),
+        "burlywood" => (222, 184, 135),
+        "cadetblue" => (95, 158, 160),
+        "chartreuse" => (127, 255, 0),
+        "chocolate" => (210, 105, 30),
+        "coral" => (255, 127, 80),
+        "cornflowerblue" => (100, 149, 237),
+        "cornsilk" => (255, 248, 220),
+        "crimson" => (220, 20, 60),
+        "darkblue" => (0, 0, 139),
+        "darkcyan" => (0, 139, 139),
+        "darkgoldenrod" => (184, 134, 11),
+        "darkgray" => (169, 169, 169),
+        "darkgreen" => (0, 100, 0),
+        "darkgrey" => (169, 169, 169),
+        "darkkhaki" => (189, 183, 107),
+        "darkmagenta" => (139, 0, 139),
+        "darkolivegreen" => (85, 107, 47),
+        "darkorange" => (255, 140, 0),
+        "darkorchid" => (153, 50, 204),
+        "darkred" => (139, 0, 0),
+        "darksalmon" => (233, 150, 122),
+        "darkseagreen" => (143, 188, 143),
+        "darkslateblue" => (72, 61, 139),
+        "darkslategray" => (47, 79, 79),
+        "darkslategrey" => (47, 79, 79),
+        "darkturquoise" => (0, 206, 209),
+        "darkviolet" => (148, 0, 211),
+        "deeppink" => (255, 20, 147),
+        "deepskyblue" => (0, 191, 255),
+        "dimgray" => (105, 105, 105),
+        "dimgrey" => (105, 105, 105),
+        "dodgerblue" => (30, 144, 255),
+        "firebrick" => (178, 34, 34),
+        "floralwhite" => (255, 250, 240),
+        "forestgreen" => (34, 139, 34),
+        "magenta" | "fuchsia" => (255, 0, 255),
+        "gainsboro" => (220, 220, 220),
+        "ghostwhite" => (248, 248, 255),
+        "gold" => (255, 215, 0),
+        "goldenrod" => (218, 165, 32),
+        "grey" | "gray" => (128, 128, 128),
+        "green" => (0, 128, 0),
+        "greenyellow" => (173, 255, 47),
+        "honeydew" => (240, 255, 240),
+        "hotpink" => (255, 105, 180),
+        "indianred" => (205, 92, 92),
+        "indigo" => (75, 0, 130),
+        "ivory" => (255, 255, 240),
+        "khaki" => (240, 230, 140),
+        "lavender" => (230, 230, 250),
+        "lavenderblush" => (255, 240, 245),
+        "lawngreen" => (124, 252, 0),
+        "lemonchiffon" => (255, 250, 205),
+        "lightblue" => (173, 216, 230),
+        "lightcoral" => (240, 128, 128),
+        "lightcyan" => (224, 255, 255),
+        "lightgoldenrodyellow" => (250, 250, 210),
+        "lightgray" => (211, 211, 211),
+        "lightgreen" => (144, 238, 144),
+        "lightgrey" => (211, 211, 211),
+        "lightpink" => (255, 182, 193),
+        "lightsalmon" => (255, 160, 122),
+        "lightseagreen" => (32, 178, 170),
+        "lightskyblue" => (135, 206, 250),
+        "lightslategray" => (119, 136, 153),
+        "lightslategrey" => (119, 136, 153),
+        "lightsteelblue" => (176, 196, 222),
+        "lightyellow" => (255, 255, 224),
+        "lime" => (0, 255, 0),
+        "limegreen" => (50, 205, 50),
+        "linen" => (250, 240, 230),
+        "maroon" => (128, 0, 0),
+        "mediumaquamarine" => (102, 205, 170),
+        "mediumblue" => (0, 0, 205),
+        "mediumorchid" => (186, 85, 211),
+        "mediumpurple" => (147, 112, 219),
+        "mediumseagreen" => (60, 179, 113),
+        "mediumslateblue" => (123, 104, 238),
+        "mediumspringgreen" => (0, 250, 154),
+        "mediumturquoise" => (72, 209, 204),
+        "mediumvioletred" => (199, 21, 133),
+        "midnightblue" => (25, 25, 112),
+        "mintcream" => (245, 255, 250),
+        "mistyrose" => (255, 228, 225),
+        "moccasin" => (255, 228, 181),
+        "navajowhite" => (255, 222, 173),
+        "navy" => (0, 0, 128),
+        "oldlace" => (253, 245, 230),
+        "olive" => (128, 128, 0),
+        "olivedrab" => (107, 142, 35),
+        "orange" => (255, 165, 0),
+        "orangered" => (255, 69, 0),
+        "orchid" => (218, 112, 214),
+        "palegoldenrod" => (238, 232, 170),
+        "palegreen" => (152, 251, 152),
+        "paleturquoise" => (175, 238, 238),
+        "palevioletred" => (219, 112, 147),
+        "papayawhip" => (255, 239, 213),
+        "peachpuff" => (255, 218, 185),
+        "peru" => (205, 133, 63),
+        "pink" => (255, 192, 203),
+        "plum" => (221, 160, 221),
+        "powderblue" => (176, 224, 230),
+        "purple" => (128, 0, 128),
+        "rebeccapurple" => (102, 51, 153),
+        "red" => (255, 0, 0),
+        "rosybrown" => (188, 143, 143),
+        "royalblue" => (65, 105, 225),
+        "saddlebrown" => (139, 69, 19),
+        "salmon" => (250, 128, 114),
+        "sandybrown" => (244, 164, 96),
+        "seagreen" => (46, 139, 87),
+        "seashell" => (255, 245, 238),
+        "sienna" => (160, 82, 45),
+        "silver" => (192, 192, 192),
+        "skyblue" => (135, 206, 235),
+        "slateblue" => (106, 90, 205),
+        "slategray" => (112, 128, 144),
+        "slategrey" => (112, 128, 144),
+        "snow" => (255, 250, 250),
+        "springgreen" => (0, 255, 127),
+        "steelblue" => (70, 130, 180),
+        "tan" => (210, 180, 140),
+        "teal" => (0, 128, 128),
+        "thistle" => (216, 191, 216),
+        "tomato" => (255, 99, 71),
+        "turquoise" => (64, 224, 208),
+        "violet" => (238, 130, 238),
+        "wheat" => (245, 222, 179),
+        "white" => (255, 255, 255),
+        "whitesmoke" => (245, 245, 245),
+        "yellow" => (255, 255, 0),
+        "yellowgreen" => (154, 205, 50),
+        _ => return None,
+    })
+}
