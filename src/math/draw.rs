@@ -99,7 +99,14 @@ fn write_flat(b: &MathBox, out: &mut String, depth: usize) {
 ///
 /// `width` is a floor, not a cap: a formula has exactly one width (design spec §7) and
 /// clipping it is the renderer's decision, made where the measure is known. A narrower
-/// `width` therefore yields a wider canvas, and the caller compares.
+/// `width` therefore yields a wider canvas.
+///
+/// No caller takes that branch today. [`crate::math::render_display`] is the only one
+/// outside this module's own tests, and it returns [`MathError::TooWide`] before calling,
+/// so through it the canvas is always exactly `width` — asserted, not argued, by the
+/// display proptest. The floor stays because this function is handed a *box* and cannot
+/// know whether its caller means to scroll; deciding that here would put the renderer's
+/// policy in the drawer.
 pub(crate) fn to_canvas(b: &MathBox, width: u16, theme: &Theme) -> Canvas {
     let width = width.max(b.width);
     let mut canvas = Canvas::new(width, usize::from(b.height()), theme.base());
