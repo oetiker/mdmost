@@ -166,19 +166,24 @@ assets = [
 
 # DEVELOPMENT ONLY, AND 0.3.0 DOES NOT SHIP WHILE THIS BLOCK IS HERE.
 #
-# `pulldown-latex` 0.8.0 has three defects we hit. Two abort the whole process with a
+# `pulldown-latex` 0.8.0 has four defects we hit. Two abort the whole process with a
 # stack overflow -- not a panic, so `catch_unwind` never sees it -- on unbounded parser
 # recursion: an unbraced control-sequence argument chain (`\sqrt\sqrt...x`), and a run
 # of tokens that emit no event (`\relax`, `%` comments). The third loses the extent of
-# an unbraced optional argument, so `\sqrt[n+1]{x}` draws as the nth root, plus one.
+# an unbraced optional argument, so `\sqrt[n+1]{x}` draws as the nth root, plus one. The
+# fourth rejects `\newcommand{\R}{\mathbb{R}}` -- valid LaTeX, design spec 16.3's own
+# example, and the spelling every author writes -- because it makes the `[n]` parameter
+# count mandatory where LaTeX defaults it to zero.
 #
-# All three are fixed on the fork, on three independent branches off upstream main,
+# All four are fixed on the fork, on four independent branches off upstream main,
 # merged into `mdmost-integration`:
 #
-#   fix/argument-recursion-depth   6e10f81   a depth counter in handle_primitive
-#   fix/next-tail-recursion        49effe3   Parser::next and lex::token driven by a
-#                                            loop instead of recursion
-#   fix/optional-argument-extent   357ce1d   the radical index emitted as a group
+#   fix/argument-recursion-depth        6e10f81   a depth counter in handle_primitive
+#   fix/next-tail-recursion             49effe3   Parser::next and lex::token driven by a
+#                                                 loop instead of recursion
+#   fix/optional-argument-extent        357ce1d   the radical index emitted as a group
+#   fix/newcommand-optional-arg-count   74b8219   the parameter count of \newcommand read
+#                                                 as 0 when absent instead of erroring
 #
 # A patch section applies to local builds only, and crates.io refuses a git dependency
 # outright, so this cannot be published. RULING (owner, 2026-08-22): 0.3.0 waits for an
@@ -187,11 +192,12 @@ assets = [
 # block, and the `rev`, the moment that release exists; the dependency then goes back to
 # a plain version requirement.
 #
-# The third fix CHANGES RENDERED OUTPUT, so this pin is load-bearing for the test suite:
-# `src/math/build.rs`'s `\sqrt[n+1]{x}` assertion holds only with it. That is why the pin
-# and the release ruling are one decision.
+# Two of the fixes CHANGE WHAT PARSES OR RENDERS, so this pin is load-bearing for the
+# test suite: `src/math/build.rs`'s `\sqrt[n+1]{x}` assertion and `src/math/tests.rs`'s
+# bare `\newcommand{\R}{\mathbb{R}}` case hold only with it. That is why the pin and the
+# release ruling are one decision.
 #
 # `MAX_COMMAND_RUN` and `MAX_SOURCE_BYTES` in `src/math/build.rs` stay regardless. They
 # refuse before the parser runs, so they do not depend on which parser is underneath.
 [patch.crates-io]
-pulldown-latex = { git = "https://github.com/oetiker/pulldown-latex", rev = "e48d7e763e7b2d9ef0ae99fc71a5525f91052444" }
+pulldown-latex = { git = "https://github.com/oetiker/pulldown-latex", rev = "cf0b98d138e6ce06a083aa9db25acb4d500bcb55" }

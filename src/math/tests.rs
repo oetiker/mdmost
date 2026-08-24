@@ -683,11 +683,13 @@ fn a_formula_that_exactly_fits_draws_and_one_column_narrower_does_not() {
 
 #[test]
 fn a_block_that_draws_nothing_draws_nothing() {
-    // Design spec §16.3. The rule is stated over the *result*, so all five of these are the
-    // same case and none of them is a listed command: a `\newcommand`, a `\def` with and
-    // without a parameter, a comment and whitespace all lay out to a box with no cells.
+    // Design spec §16.3. The rule is stated over the *result*, so all six of these are the
+    // same case and none of them is a listed command: a `\newcommand` with and without a
+    // parameter count, a `\def` with and without a parameter, a comment and whitespace all
+    // lay out to a box with no cells.
     let theme = crate::theme::Theme::default();
     for src in [
+        r"\newcommand{\R}{\mathbb{R}}",
         r"\newcommand{\R}[0]{\mathbb{R}}",
         r"\def\R{\mathbb{R}}",
         r"\def\R#1{\mathbb{R}}",
@@ -707,19 +709,6 @@ fn a_block_that_draws_nothing_draws_nothing() {
     // skipped over.
     let drawn = render_display(r"\def\R{\mathbb{R}}\R", 40, &theme).expect("draws");
     assert_eq!(drawn.height(), 1, "a formula with cells keeps its row");
-
-    // PINNED DEFECT, not a decision: `\newcommand{\R}{\mathbb{R}}` -- design spec §16.3's
-    // own example, and the spelling every LaTeX author writes -- does not parse. This
-    // crate's pinned `pulldown-latex` makes the `[n]` argument count MANDATORY:
-    // `new_command` (`parser/primitives.rs`) does
-    // `optional_argument(..).ok_or(ErrorKind::Argument)?` where real LaTeX defaults it to
-    // zero. Nothing in `src/math/` can fix it and nothing here should paper over it, so it
-    // is asserted as it stands: when the fork gains the default, this line goes red and is
-    // the place to delete.
-    assert!(matches!(
-        render_display(r"\newcommand{\R}{\mathbb{R}}", 40, &theme),
-        Err(crate::error::MathError::Parse { .. })
-    ));
 }
 
 #[test]
