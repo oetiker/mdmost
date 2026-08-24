@@ -46,8 +46,9 @@ use crate::theme::Theme;
 ///
 /// # Errors
 ///
-/// [`MathError::Parse`] if the LaTeX does not parse, [`MathError::NotInline`] if it parses
-/// but cannot be written on one row.
+/// [`MathError::Parse`] if the LaTeX does not parse, [`MathError::NotDrawable`] if it parses
+/// but this engine will not draw it on the prose row: a construct with no honest one-row
+/// form, or a source `build` refuses whatever the mode.
 pub fn render_inline(src: &str) -> Result<String, MathError> {
     let storage = Storage::new();
     let events = build::parse(src, &storage)?;
@@ -73,11 +74,10 @@ pub fn render_inline(src: &str) -> Result<String, MathError> {
 /// wider than `width`, carrying the width it needs — a formula has exactly one width
 /// (design spec §7), so `needed` is the answer and not a hint to search from.
 ///
-/// [`MathError::NotInline`] as well, despite the name, and it is not a bug: `build::parse`
-/// refuses a pathological source before the mode is consulted at all, and a construct this
-/// engine cannot build in *either* mode — a grid — reports itself the same way. Every one
-/// of the three takes the caller to design spec §9's framed source, which is why one
-/// return type covers them.
+/// [`MathError::NotDrawable`] if this engine will not build the formula at all: a source
+/// past one of `build`'s caps, or a construct no mode draws yet — a grid, which is stage 3.
+/// All three take the caller to design spec §9's framed source, which is why one return
+/// type covers them.
 pub fn render_display(src: &str, width: u16, theme: &Theme) -> Result<Canvas, MathError> {
     let storage = Storage::new();
     let events = build::parse(src, &storage)?;

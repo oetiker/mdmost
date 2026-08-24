@@ -215,13 +215,20 @@ pub enum MathError {
         message: String,
     },
 
-    /// Well-formed, but it needs more than one row and the caller had one.
+    /// Well-formed, but this engine will not draw it where the caller asked.
     ///
-    /// This blames neither the author nor the parser: a matrix inline is a perfectly
-    /// good formula in the wrong place, and the reader is shown its source rather than
+    /// Two families reach here. One is refused in **either** mode, some of it before the
+    /// mode is consulted at all: a source past `build`'s length or command-run cap, a
+    /// formula nested past `MAX_DEPTH`, an unfinished construct. The other is refused
+    /// **inline only**: a grid, or a construct with no honest one-row form, which display
+    /// will draw once stage 3 lands.
+    ///
+    /// That split is why the message says "here" and not what is wrong with the formula.
+    /// A matrix inline is a perfectly good formula in the wrong place, so this blames
+    /// neither the author nor the parser, and the reader is shown the source rather than
     /// an error. The payload names the construct so the caption can be specific.
-    #[error("{0} cannot be drawn on one row")]
-    NotInline(&'static str),
+    #[error("{0} cannot be drawn here")]
+    NotDrawable(&'static str),
 
     /// Drawn, but wider than the caller can show.
     ///
@@ -263,9 +270,19 @@ mod math_error_tests {
     }
 
     #[test]
-    fn a_construct_that_needs_two_rows_says_so_without_blaming_the_author() {
-        let err = MathError::NotInline("a matrix");
-        assert_eq!(err.to_string(), "a matrix cannot be drawn on one row");
+    fn a_construct_the_engine_will_not_draw_says_so_without_blaming_the_author() {
+        // Both families of payload, because one wording has to serve both and only the
+        // word "here" makes that possible. A matrix is refused inline and will draw in
+        // display once stage 3 lands; a nesting past the cap is refused in either mode.
+        // "cannot be drawn on one row" was true of the first and false of the second.
+        let inline_only = MathError::NotDrawable("a matrix");
+        assert_eq!(inline_only.to_string(), "a matrix cannot be drawn here");
+
+        let either_mode = MathError::NotDrawable("a formula nested too deeply");
+        assert_eq!(
+            either_mode.to_string(),
+            "a formula nested too deeply cannot be drawn here"
+        );
     }
 
     #[test]

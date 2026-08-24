@@ -5,7 +5,7 @@
 //! only here: a display formula and an inline formula are the same tree, and inline is the
 //! constraint `above == 0 && below == 0` over it. A construct that cannot meet the
 //! constraint rewrites itself — a fraction becomes `a/b` — or, where no honest one-row
-//! form exists, fails with [`MathError::NotInline`] so the caller can show the source.
+//! form exists, fails with [`MathError::NotDrawable`] so the caller can show the source.
 //!
 //! Spacing is not decided here. Every adjacent pair goes through `spacing::gap`, and the
 //! one exception the owner ruled — no spaces inside a script operand — is applied *here*
@@ -171,14 +171,14 @@ fn longest_command_run(src: &str) -> usize {
 ///
 /// # Errors
 ///
-/// [`MathError::NotInline`] with a message naming which cap fired.
+/// [`MathError::NotDrawable`] with a message naming which cap fired.
 fn refuse_pathological_source(src: &str) -> Result<(), MathError> {
     // Length first: it is the cheaper test, and it bounds the scan below.
     if src.len() > MAX_SOURCE_BYTES {
-        return Err(MathError::NotInline("a formula longer than 2048 bytes"));
+        return Err(MathError::NotDrawable("a formula longer than 2048 bytes"));
     }
     if longest_command_run(src) > MAX_COMMAND_RUN {
-        return Err(MathError::NotInline(
+        return Err(MathError::NotDrawable(
             "a formula with more than 32 chained commands",
         ));
     }
@@ -203,7 +203,7 @@ fn refuse_pathological_source(src: &str) -> Result<(), MathError> {
 ///
 /// # Errors
 ///
-/// [`MathError::NotInline`] if the source is past either cap, [`MathError::Parse`] if the
+/// [`MathError::NotDrawable`] if the source is past either cap, [`MathError::Parse`] if the
 /// LaTeX does not parse.
 pub(crate) fn parse<'a>(src: &'a str, storage: &'a Storage) -> Result<Vec<Event<'a>>, MathError> {
     refuse_pathological_source(src)?;
@@ -227,8 +227,9 @@ pub(crate) fn parse<'a>(src: &'a str, storage: &'a Storage) -> Result<Vec<Event<
 ///
 /// # Errors
 ///
-/// [`MathError::NotInline`] when `mode` is [`Mode::Inline`] and the formula needs a
-/// second row.
+/// [`MathError::NotDrawable`] when `mode` is [`Mode::Inline`] and the formula needs a
+/// second row, and — in **either** mode — when it nests past [`MAX_NESTING`], ends
+/// unfinished, or is a grid, which no mode builds yet.
 pub(crate) fn build(events: &[Event<'_>], mode: Mode) -> Result<MathBox, MathError> {
     let (parts, _) = build_run(events, mode, Spacing::Normal, 0)?;
     Ok(parts)
@@ -326,7 +327,7 @@ fn build_run(
     // The one check that guards the recursion, at the point the recursion re-enters, so
     // that every path into it is covered by the single test.
     if depth > MAX_NESTING {
-        return Err(MathError::NotInline("a formula nested too deeply"));
+        return Err(MathError::NotDrawable("a formula nested too deeply"));
     }
     let mut pieces: Vec<(Option<Class>, MathBox)> = Vec::new();
     let mut index = 0;
@@ -599,11 +600,11 @@ fn group(
                 used.saturating_add(2),
             ))
         }
-        other => Err(MathError::NotInline(grouping_name(other))),
+        other => Err(MathError::NotDrawable(grouping_name(other))),
     }
 }
 
-/// What a grouping is called, for [`MathError::NotInline`]'s payload.
+/// What a grouping is called, for [`MathError::NotDrawable`]'s payload.
 ///
 /// The payload is what the caption shows the reader, so it names the construct rather
 /// than the event. Copied unchanged from the walk in `src/math/inline.rs` that Task 6
@@ -652,7 +653,7 @@ fn element(
     // about *our* stack: a construct that recurses here without a control sequence per
     // level would be invisible to the source scan.
     if depth > MAX_NESTING {
-        return Err(MathError::NotInline("a formula nested too deeply"));
+        return Err(MathError::NotDrawable("a formula nested too deeply"));
     }
     let deeper = depth.saturating_add(1);
     match events.get(at) {
@@ -663,7 +664,7 @@ fn element(
         // hang: an element of zero events leaves the caller's walk exactly where it
         // started. An *empty group* is a different thing and does arrive -- `\sqrt{}` is
         // `Begin`, `End` -- and it is an element, of two events, that draws nothing.
-        None | Some(Event::End) => Err(MathError::NotInline("an unfinished construct")),
+        None | Some(Event::End) => Err(MathError::NotDrawable("an unfinished construct")),
         Some(Event::Content(content)) => {
             let (class, cells) = atom(content);
             Ok((class, cells, 1))
@@ -689,7 +690,7 @@ fn element(
         Some(Event::Script { ty, position }) => {
             script_box(events, at, *ty, *position, mode, spacing, deeper)
         }
-        Some(Event::EnvironmentFlow(_)) => Err(MathError::NotInline("a multi-row environment")),
+        Some(Event::EnvironmentFlow(_)) => Err(MathError::NotDrawable("a multi-row environment")),
         // Neither carries an atom of its own, so as an element each draws nothing —
         // `x^\,` and `x^\bf` ask for an empty script, and an empty script declines
         // (`scripts::substitute`). They are elements all the same: a construct that
@@ -771,7 +772,7 @@ fn visual_box(
                 Mode::Inline => {
                     let drawn = draw::to_row(&index)?;
                     let raised = scripts::superscript(&drawn)
-                        .ok_or(MathError::NotInline("a root index with no raised form"))?;
+                        .ok_or(MathError::NotDrawable("a root index with no raised form"))?;
                     row(vec![text(raised), text("√"), bracketed(radicand)])
                 }
             };
@@ -1313,7 +1314,7 @@ mod tests {
         // Written against `MAX_NESTING` rather than a literal so it follows the cap.
         assert_eq!(
             refusal(&nest(MAX_NESTING + 1)),
-            "a formula nested too deeply cannot be drawn on one row"
+            "a formula nested too deeply cannot be drawn here"
         );
 
         // Far past it: this is the one that documents the real hazard, and it is only
@@ -1326,13 +1327,13 @@ mod tests {
         assert_eq!(nest(1023).len(), MAX_SOURCE_BYTES - 1);
         assert_eq!(
             refusal(&nest(1023)),
-            "a formula nested too deeply cannot be drawn on one row"
+            "a formula nested too deeply cannot be drawn here"
         );
         // And past the byte cap the other guard answers instead, which is the interaction
         // between the two and the reason the line above stops at 1023.
         assert_eq!(
             scan_refusal(&nest(5000)),
-            "a formula longer than 2048 bytes cannot be drawn on one row"
+            "a formula longer than 2048 bytes cannot be drawn here"
         );
 
         // And the cap is not so tight that ordinary nesting trips it -- including at the
@@ -1389,7 +1390,7 @@ mod tests {
         parser_accepts(&relaxes(MAX_COMMAND_RUN + 1));
         assert_eq!(
             scan_refusal(&relaxes(MAX_COMMAND_RUN + 1)),
-            "a formula with more than 32 chained commands cannot be drawn on one row"
+            "a formula with more than 32 chained commands cannot be drawn here"
         );
 
         // The cap exactly still builds, and the run really did reach it -- asserted, not
@@ -1413,7 +1414,7 @@ mod tests {
         );
         assert_eq!(
             scan_refusal(&chain),
-            "a formula with more than 32 chained commands cannot be drawn on one row"
+            "a formula with more than 32 chained commands cannot be drawn here"
         );
     }
 
@@ -1435,7 +1436,7 @@ mod tests {
         parser_accepts(&comments);
         assert_eq!(
             scan_refusal(&comments),
-            "a formula longer than 2048 bytes cannot be drawn on one row"
+            "a formula longer than 2048 bytes cannot be drawn here"
         );
 
         // The cheapest event-less *token* of the 838 the parser knows, at 6 source bytes a
@@ -1449,13 +1450,13 @@ mod tests {
         parser_accepts(&relaxes);
         assert_eq!(
             scan_refusal(&relaxes),
-            "a formula longer than 2048 bytes cannot be drawn on one row"
+            "a formula longer than 2048 bytes cannot be drawn here"
         );
 
         // The boundary, from both sides, on a source with no commands in it at all.
         assert_eq!(
             scan_refusal(&"x".repeat(MAX_SOURCE_BYTES + 1)),
-            "a formula longer than 2048 bytes cannot be drawn on one row"
+            "a formula longer than 2048 bytes cannot be drawn here"
         );
         assert_eq!(
             inline(&"x".repeat(MAX_SOURCE_BYTES)).len(),
@@ -1472,7 +1473,7 @@ mod tests {
         assert_eq!(longest_command_run(&hazard), 0);
         assert_eq!(
             scan_refusal(&hazard),
-            "a formula longer than 2048 bytes cannot be drawn on one row"
+            "a formula longer than 2048 bytes cannot be drawn here"
         );
     }
 
@@ -1686,7 +1687,7 @@ mod tests {
         let nest = |depth: usize| r"\left(".repeat(depth) + "x" + &r"\right)".repeat(depth);
         assert_eq!(
             refusal(&nest(MAX_NESTING + 1)),
-            "a formula nested too deeply cannot be drawn on one row"
+            "a formula nested too deeply cannot be drawn here"
         );
         // And the other side of the same boundary, so the cap is not simply refusing
         // everything.
@@ -1712,24 +1713,24 @@ mod tests {
     #[test]
     fn a_construct_that_needs_a_second_row_is_named_rather_than_guessed() {
         // `assert_eq!` on the whole caption, not `contains`. Against `contains("cannot be
-        // drawn on one row")` every arm of `grouping_name` could be deleted and the
+        // drawn here")` every arm of `grouping_name` could be deleted and the
         // catch-all left standing, and this test would still pass -- the payload is the
         // only part that says what the reader is looking at, so it is the part to pin.
         assert_eq!(
             refusal(r"\begin{matrix} a \\ b \end{matrix}"),
-            "a matrix cannot be drawn on one row"
+            "a matrix cannot be drawn here"
         );
         assert_eq!(
             refusal(r"\begin{cases} a \\ b \end{cases}"),
-            "a cases environment cannot be drawn on one row"
+            "a cases environment cannot be drawn here"
         );
         assert_eq!(
             refusal(r"\begin{array}{c} a \end{array}"),
-            "an array cannot be drawn on one row"
+            "an array cannot be drawn here"
         );
         assert_eq!(
             refusal(r"\begin{aligned} a \end{aligned}"),
-            "an aligned environment cannot be drawn on one row"
+            "an aligned environment cannot be drawn here"
         );
     }
 
@@ -1780,7 +1781,7 @@ mod tests {
         // nothing at all. The caption names the index, because the root itself is fine.
         assert_eq!(
             refusal(r"\sqrt[q]{x}"),
-            "a root index with no raised form cannot be drawn on one row"
+            "a root index with no raised form cannot be drawn here"
         );
         // The boundary: `p` has a superscript form and `q` has not, and that is the only
         // difference between these two inputs.
@@ -1792,7 +1793,7 @@ mod tests {
         // the thing that cannot be drawn, and the matrix is what the caption should name.
         assert_eq!(
             refusal(r"\sqrt[3]{\begin{matrix} a \end{matrix}}"),
-            "a matrix cannot be drawn on one row"
+            "a matrix cannot be drawn here"
         );
     }
 
@@ -1832,7 +1833,7 @@ mod tests {
         // caption names the operand, because the script itself is fine.
         assert_eq!(
             refusal(r"x^{\begin{matrix} a \end{matrix}}"),
-            "a matrix cannot be drawn on one row"
+            "a matrix cannot be drawn here"
         );
     }
 
@@ -2127,7 +2128,7 @@ mod tests {
         let chain = |n: usize| r"\sqrt".repeat(n) + " x";
         assert_eq!(
             scan_refusal(&chain(MAX_COMMAND_RUN + 1)),
-            "a formula with more than 32 chained commands cannot be drawn on one row"
+            "a formula with more than 32 chained commands cannot be drawn here"
         );
 
         // The other side of the boundary, one repeat apart: 32 links of rewrite parse and
@@ -2145,7 +2146,7 @@ mod tests {
         // wrong way round: 129 was never a margin, it was two repeats below the abort.
         assert_eq!(
             scan_refusal(&chain(129)),
-            "a formula with more than 32 chained commands cannot be drawn on one row"
+            "a formula with more than 32 chained commands cannot be drawn here"
         );
     }
 

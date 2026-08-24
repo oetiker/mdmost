@@ -357,7 +357,7 @@ fn a_matrix_declines_rather_than_being_flattened() {
     // spec §5.2 says is not representable in one row — and not the `&` that a wider
     // fixture would have tripped over first.
     let err = render_inline(r"\begin{pmatrix} 1 \end{pmatrix}").unwrap_err();
-    assert_eq!(err, crate::error::MathError::NotInline("a matrix"));
+    assert_eq!(err, crate::error::MathError::NotDrawable("a matrix"));
 }
 
 #[test]
@@ -426,13 +426,13 @@ fn a_root_index_with_no_raised_form_declines_rather_than_writing_a_caret() {
     // looking for the wrong thing after seeing `\sqrt[3]{x}` draw on the line above.
     assert_eq!(
         render_inline(r"\sqrt[\alpha]{x}").unwrap_err(),
-        crate::error::MathError::NotInline("a root index with no raised form")
+        crate::error::MathError::NotDrawable("a root index with no raised form")
     );
     // The boundary, one character either side of it: `q` has no superscript form and `p`
     // has, so these two differ only in whether the table has the letter.
     assert_eq!(
         render_inline(r"\sqrt[q]{x}").unwrap_err(),
-        crate::error::MathError::NotInline("a root index with no raised form")
+        crate::error::MathError::NotDrawable("a root index with no raised form")
     );
     assert_eq!(rendered(r"\sqrt[p]{x}"), "ᵖ√x");
 }
@@ -733,7 +733,7 @@ fn a_display_formula_that_does_not_parse_is_an_error_not_a_panic() {
 
 #[test]
 fn a_construct_this_engine_cannot_build_reaches_the_display_caller_as_an_error() {
-    // `render_display` must not swallow `NotInline`. Two routes reach it in display mode and
+    // `render_display` must not swallow `NotDrawable`. Two routes reach it in display mode and
     // neither is an inline constraint: a grid, which no mode builds yet (design spec §6.5),
     // and `build::parse`'s source caps, which run before the mode is consulted at all.
     //
@@ -743,11 +743,11 @@ fn a_construct_this_engine_cannot_build_reaches_the_display_caller_as_an_error()
     let theme = crate::theme::Theme::default();
     assert_eq!(
         render_display(r"\begin{pmatrix} 1 \end{pmatrix}", 40, &theme).expect_err("no grids yet"),
-        crate::error::MathError::NotInline("a matrix")
+        crate::error::MathError::NotDrawable("a matrix")
     );
     assert_eq!(
         render_display(&r"\alpha".repeat(64), 40, &theme).expect_err("past the command-run cap"),
-        crate::error::MathError::NotInline("a formula with more than 32 chained commands")
+        crate::error::MathError::NotDrawable("a formula with more than 32 chained commands")
     );
 }
 

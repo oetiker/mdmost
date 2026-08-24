@@ -45,12 +45,12 @@ const _: () = assert!(
 ///
 /// # Errors
 ///
-/// [`MathError::NotInline`] if the box needs more than the row the prose sits on. The
+/// [`MathError::NotDrawable`] if the box needs more than the row the prose sits on. The
 /// check is here rather than at the call site so the constraint of design spec §4 cannot
 /// be forgotten by a future caller.
 pub(crate) fn to_row(b: &MathBox) -> Result<String, MathError> {
     if !b.is_inline() {
-        return Err(MathError::NotInline("this formula"));
+        return Err(MathError::NotDrawable("this formula"));
     }
     let mut out = String::new();
     write_flat(b, &mut out, 0);
@@ -431,7 +431,7 @@ mod tests {
         // so on its own it pins nothing: `!b.is_inline()` and `b.height() > 2` agree on
         // it. They disagree on a superscript, which is two rows, and under the looser
         // test `write_flat` would return the base alone -- a formula that quietly loses
-        // its exponent instead of raising `NotInline`.
+        // its exponent instead of raising `NotDrawable`.
         let two_rows = scripts(text("x"), None, Some(text("2")));
         assert_eq!(two_rows.height(), 2, "the boundary case must be two rows");
         assert!(
