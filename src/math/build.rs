@@ -508,7 +508,7 @@ fn neighbour<'a>(mut towards: impl Iterator<Item = &'a (Option<Class>, MathBox)>
 /// drew.
 ///
 /// The two-char relations are the sixteen `multirelation` calls at
-/// `pulldown-latex-0.8.0/src/parser/primitives.rs:1157-1172` — `\approxcolon` is `≈` then
+/// `vendor/pulldown-latex/src/parser/primitives.rs:1171-1186` — `\approxcolon` is `≈` then
 /// `:`, and six of them are a base character plus U+FE00. `≠` is *not* one of them: it is
 /// a single `char`, and `\not=` does not even arrive as a relation but as
 /// `Visual(Negation)` followed by `=`.
@@ -1162,7 +1162,7 @@ mod tests {
     fn a_two_character_relation_survives_whole() {
         // `RelationContent` may hold two chars, its field is private, and the only way out
         // is `encode_utf8_to_buf`. `\approxcolon` is `multirelation('≈', ':')` at
-        // `pulldown-latex-0.8.0/src/parser/primitives.rs:1165` -- verified by dumping the
+        // `vendor/pulldown-latex/src/parser/primitives.rs:1179` -- verified by dumping the
         // stream, which yields `RelationContent { content: ('≈', Some(':')) }`. A handler
         // that read only the first char would drop the colon and set `a ≈ b`, which is a
         // different relation rather than a worse-looking one.
@@ -1359,9 +1359,10 @@ mod tests {
     /// Asserts the *parser* accepts `src`, so that a refusal of it can only be ours.
     ///
     /// This is the guard against a test that passes for the wrong reason. `mdmost` builds
-    /// against a fork of `pulldown-latex` in which the parser returns an error rather than
-    /// aborting the process, so an assertion of the form "a deep chain produces an error"
-    /// would go on passing with our scan deleted — the fork's error would answer for it.
+    /// against the vendored `pulldown-latex` under `vendor/`, in which the parser returns
+    /// an error rather than aborting the process, so an assertion of the form "a deep chain
+    /// produces an error" would go on passing with our scan deleted — the parser's own
+    /// error would answer for it.
     /// The two inputs this is called on are legitimate LaTeX that parses cleanly and that
     /// we refuse anyway, and this runs the unwrapped parser over them to say so.
     ///
@@ -1588,7 +1589,7 @@ mod tests {
     #[test]
     fn a_left_right_group_draws_its_delimiters() {
         // `Grouping::LeftRight` carries its delimiters in the variant's own fields
-        // (`pulldown-latex-0.8.0/src/event.rs:316`), not as `Content::Delimiter` events.
+        // (`vendor/pulldown-latex/src/event.rs:316`), not as `Content::Delimiter` events.
         // Stage 1 assumed the opposite and drew `\left(\frac{a}{b}\right)^2` as `a/b²` --
         // a different number, drawn silently.
         //
@@ -1756,8 +1757,8 @@ mod tests {
         // index is `n + 1` and the formula refuses instead of drawing.
         assert_eq!(inline(r"\sqrt[{n+1}]{x}"), "ⁿ⁺¹√x");
 
-        // FIXED UPSTREAM, and this assertion holds only against a parser that carries the
-        // fix. `pulldown-latex` 0.8.0 emits an unbraced multi-token index as *bare* events:
+        // FIXED IN THE PARSER, and this assertion holds only against a parser that carries
+        // the fix. `pulldown-latex` 0.8.0 emits an unbraced multi-token index as *bare* events:
         // `\sqrt[n+1]{x}` is `Visual(Root)`, the radicand group, then `n`, `+`, `1` with no
         // grouping round them. `Visual::Root` governs two elements and `n` is the whole of
         // the second, so `+1` fell back into the enclosing run and the (n+1)th root of x
@@ -1766,13 +1767,15 @@ mod tests {
         //
         // It could not be fixed in this arm: the extent of the `[...]` was not in the event
         // stream at all. The fix is one line in the parser (`handle_argument` on a
-        // `Group` instead of a raw `SubGroup` push), on the fork's
-        // `fix/optional-argument-extent`, which `Cargo.toml`'s `[patch.crates-io]` pins.
+        // `Group` instead of a raw `SubGroup` push), and it is in this repository, at
+        // `vendor/pulldown-latex/src/parser/primitives.rs`. It came from the fork branch
+        // `fix/optional-argument-extent`; upstream PR #75 was still open when the parser
+        // was vendored, so this is not a fix anyone else has yet.
         //
-        // **Against unpatched 0.8.0 this renders `ⁿ√x + 1` and this assertion FAILS.** That
-        // is deliberate and it is the point: 0.3.0 waits for an upstream release carrying
-        // the fix (owner, 2026-08-22), so a red line here is the signal that the release
-        // dependency went backwards, not a test to relax.
+        // **Against unpatched 0.8.0 this renders `ⁿ√x + 1` and this assertion FAILS.**
+        // That is deliberate and it is the point. A red line here means the vendored tree
+        // went backwards -- someone re-synced `vendor/` to an upstream that has not taken
+        // this patch. It is not a test to relax; see `vendor/pulldown-latex/VENDORED.md`.
         assert_eq!(inline(r"\sqrt[n+1]{x}"), "ⁿ⁺¹√x");
 
         // What it still refuses, and why the caption changed with it. There is no `^`

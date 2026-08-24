@@ -25,7 +25,8 @@ const N: usize = 10;
 /// What a piece of a formula is, for the purpose of what goes beside it.
 ///
 /// These are `pulldown-latex`'s content categories (`Content` at
-/// `~/.cargo/registry/src/index.crates.io-*/pulldown-latex-0.8.0/src/event.rs:102`)
+/// `vendor/pulldown-latex/src/event.rs:102`, in this repository since the crate was
+/// vendored)
 /// collapsed to the distinctions that change spacing, plus two of our own: [`Class::Unary`]
 /// for a sign with nothing to its left to bind to, and [`Class::Edge`] for the ends of the
 /// formula.
