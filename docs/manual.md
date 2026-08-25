@@ -431,9 +431,10 @@ commands with no brace, letter or digit between them, as in `\sqrt\sqrt\sqrt x`.
 Whitespace does not break a chain; a brace does, so `\sqrt{\sqrt{x}}` is not one.
 A formula past either limit falls back the same way.
 
-`$$…$$` and ```` ```math ```` blocks are display math. They are not laid out in
-this version: shown as a framed, syntax-highlighted code block with the reason
-in its bottom edge, the same as an unsupported Mermaid diagram.
+`$$…$$` and ```` ```math ```` blocks are display math, drawn as rows of box
+art. One that does not parse, or that this version does not draw, is shown as a
+framed, syntax-highlighted code block with the reason in its bottom edge, the
+same as an unsupported Mermaid diagram.
 
 ## Mermaid
 

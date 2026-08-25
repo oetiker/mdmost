@@ -46,9 +46,10 @@ its keep now that nothing downstream can be broken by them.**
   where a full raised or lowered form exists and written flat (`x^q`) where it does
   not, `\frac{a}{b}` reads `a/b`, `\sqrt{x}` reads `√x`, and a big operator such as
   `\sum` or `\int` carries its limits as a subscript and superscript on the one
-  character. A `$$…$$` block or a ```` ```math ```` fence is display math; it is not
-  laid out in this version and is shown as its own framed, syntax-highlighted source
-  instead, the same as an unsupported Mermaid diagram. `\(…\)` and `\[…\]` are read as
+  character. A `$$…$$` block or a ```` ```math ```` fence is display math, drawn
+  as rows of box art; one that does not parse, or that this version does not draw,
+  is shown as its own framed, syntax-highlighted source instead, the same as an
+  unsupported Mermaid diagram. `\(…\)` and `\[…\]` are read as
   well behind `math_backslash`, off by default. Three configuration keys and their
   matching `--math`/`--no-math`, `--math-inline`/`--no-math-inline` and
   `--math-backslash`/`--no-math-backslash` flags control this; `math = false` parses
