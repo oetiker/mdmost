@@ -6,8 +6,9 @@
 //! * `crate::highlight::highlight(lang, src, &Theme) -> Vec<Line>`
 //! * `crate::mermaid::render_mermaid_with(src, width, &Theme, Fit) -> Result<Canvas, MermaidError>`
 //! * `crate::math::render_inline(src) -> Result<String, MathError>`
+//! * `crate::math::render_display(src, width, &Theme) -> Result<Canvas, MathError>`
 //!
-//! Routing all three through this module keeps the dependency in one place, so a change
+//! Routing all four through this module keeps the dependency in one place, so a change
 //! on any side is a change to one function here rather than to every call site.
 //!
 //! A Mermaid failure is never fatal: [`render_code_block`](super::code::render_code_block)
@@ -59,6 +60,22 @@ pub(crate) fn mermaid(
 /// Propagates the [`MathError`] so the caller can degrade to the source (design spec §9).
 pub(crate) fn math_inline(src: &str) -> Result<String, MathError> {
     crate::math::render_inline(src)
+}
+
+/// Draws a formula as a block of box art.
+///
+/// Named for what it returns, like [`mermaid`] and [`math_inline`] beside it.
+///
+/// There is no layout counter here. A diagram is laid out repeatedly while the width
+/// search hunts for a fit, which is why [`MERMAID_LAYOUTS`] exists to keep that cost
+/// visible; a formula has exactly one width and is laid out once (design spec §7).
+///
+/// # Errors
+///
+/// Propagates the [`MathError`] so the caller can degrade to the framed source
+/// (design spec §9).
+pub(crate) fn math_display(src: &str, width: u16, theme: &Theme) -> Result<Canvas, MathError> {
+    crate::math::render_display(src, width, theme)
 }
 
 // How many diagram layouts this thread has asked for. A counter rather than an

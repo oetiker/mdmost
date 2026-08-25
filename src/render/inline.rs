@@ -466,8 +466,9 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, ids: &mut usize, out: &mu
             }
             NodeKind::Math { literal, display } => {
                 // Display math inside an inline run is a `$$…$$` that comrak kept in a
-                // paragraph. It is not laid out in this stage, and even when it is, it
-                // is a block: shown as its own source here.
+                // paragraph beside other content, so `hoist_display_math` left it there:
+                // prose with a formula in it, not a display block. It is drawn as a
+                // block or not at all, so here it is shown as its own source.
                 let drawn = (!*display && ctx.options.math_inline)
                     .then(|| bridge::math_inline(literal).ok())
                     .flatten();

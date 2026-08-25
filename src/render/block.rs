@@ -18,7 +18,7 @@ use crate::text::{Align, Line, Span, display_width, pad_to_width, repeat_to_widt
 use crate::theme::{Style, Theme};
 
 use super::inline::{HTML_MARKER, render_inline};
-use super::{Ctx, MAX_TABLE_DEPTH, RenderOptions, code, inline, table};
+use super::{Ctx, MAX_TABLE_DEPTH, RenderOptions, bridge, code, inline, table};
 
 /// The vertical bar drawn to the left of a block quote.
 pub(crate) const QUOTE_BAR: &str = "▌";
@@ -254,15 +254,15 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         }
         NodeKind::Image { url, .. } => image(node, url, width, ctx),
         NodeKind::SkippedHtml { .. } => html_marker(width, ctx),
-        // Display math is not laid out in this stage. The framed source is not a
-        // placeholder: it is the permanent failure path (design spec §9), reached here
-        // for the temporary reason that nothing can lay it out yet — so the reader sees
-        // the same thing for "cannot be drawn yet" and "cannot be drawn", which is the
-        // truth in both cases.
+        // A display formula is drawn where it can be and shown as its own framed source
+        // where it cannot. The framed source is not a placeholder: it is the permanent
+        // failure path of design spec §9, and a formula that will not parse or will not
+        // fit reaches it for a reason that will not go away by itself. The caption is
+        // the `MathError`'s own `Display`, so the reader is told which reason.
         //
         // No line origins: spec §10 gives a formula one span over the whole construct,
-        // and stage 2 is what draws the cells that span can name. Recording per-line
-        // spans of the source dump would be a different, wrong answer.
+        // which Task 12 adds to the drawn canvas. Per-line spans of a source dump would
+        // be a different, wrong answer.
         //
         // `trim_matches('\n')`: a `$$…$$` literal is everything between the two lines
         // of dollars, so it opens with the newline right after the first `$$` and
@@ -278,14 +278,19 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         NodeKind::Math {
             literal,
             display: true,
-        } => code::fallback(
-            literal.trim_matches('\n'),
-            Some("math"),
-            &"display math is not laid out yet",
-            &[],
-            width,
-            ctx,
-        ),
+        } => {
+            let source = literal.trim_matches('\n');
+            match bridge::math_display(source, width, ctx.theme) {
+                // Design spec §16.3: a block whose layout draws nothing contributes no
+                // rows. Returned before `resize_width` so it stays genuinely empty —
+                // `resize_width` would make it one zero-height canvas of `width`
+                // columns, still zero rows today, but the early return states the
+                // intent and a later change there cannot quietly put a row back.
+                Ok(canvas) if canvas.is_empty() => return canvas,
+                Ok(canvas) => canvas,
+                Err(err) => code::fallback(source, Some("math"), &err, &[], width, ctx),
+            }
+        }
         // Anything else in a block position is inline content: a bare text run in a
         // table cell, for instance.
         _ => render_inline(std::slice::from_ref(node), width, ctx.base, ctx),
@@ -372,8 +377,8 @@ fn paragraph(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
     // with other content beside its `$$…$$` (`hoist_display_math` in `doc::convert`
     // only lifts a paragraph whose *sole* child is display math) keeps that formula as
     // prose, shown as its own source mid-sentence — going through `render_sequence`
-    // would instead have split it into a framed block followed by a second, orphaned
-    // inline run for the rest of the sentence.
+    // would instead have split it into a block of its own followed by a second,
+    // orphaned inline run for the rest of the sentence.
     render_inline(&node.children, width, ctx.base, ctx)
 }
 

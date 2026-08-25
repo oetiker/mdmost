@@ -676,8 +676,8 @@ fn digit_count(lines: usize) -> usize {
 /// A block's source shown as a framed code block, with the reason in its bottom edge.
 ///
 /// The frame's top edge already names the language, so the caption says what happened,
-/// not what the block is. Two callers: a diagram that would not draw, and display math
-/// that cannot be laid out yet — design spec §9's one failure rendering, reached for two
+/// not what the block is. Two callers: a diagram that would not draw, and a display
+/// formula that would not draw — design spec §9's one failure rendering, reached for two
 /// reasons.
 pub(super) fn fallback(
     literal: &str,

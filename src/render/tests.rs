@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::canvas::{Canvas, Hotspot, HotspotKind};
-use crate::doc::Doc;
+use crate::doc::{Doc, MathSyntax};
 use crate::text::display_width;
 use crate::theme::{Attributes, Theme};
 use crate::tui::icons::is_private_use;
@@ -3832,47 +3832,175 @@ fn render_block_with_no_source_falls_back_to_the_bare_formula_instead_of_droppin
     );
 }
 
+/// A display formula that will not draw shows its own source, framed, with the reason
+/// in the bottom edge — the permanent failure path of design spec §9.
+///
+/// A matrix is drawn by no mode yet (stage 3), so `MathError::NotDrawable` is the honest
+/// way to reach this arm's `Err` branch without inventing a broken document.
 #[test]
-fn display_math_shows_its_source_in_a_captioned_frame_for_now() {
-    let doc = Doc::parse("$$\n\\frac{a}{b}\n$$\n");
+fn display_math_that_will_not_draw_shows_its_source_in_a_captioned_frame() {
+    let doc = Doc::parse("$$\n\\begin{pmatrix} 1 & 0 \\end{pmatrix}\n$$\n");
     let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
     let text: String = (0..canvas.height())
         .map(|row| canvas.row_text(row))
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        text.contains(r"\frac{a}{b}"),
-        "display math must show its source until it is laid out; got {text:?}"
+        text.contains(r"\begin{pmatrix} 1 & 0 \end{pmatrix}"),
+        "a formula that would not draw must still show its source; got {text:?}"
     );
-    // The frame is the whole of this task. Asserting only that the literal appears
-    // somewhere would pass with the implementation deleted: Task 10's inline arm already
-    // draws the verbatim source of a `$$` block it will not lay out.
+    // The frame is what separates this from a bare source dump: asserting only that the
+    // literal appears somewhere would also pass for the inline arm, which shows the
+    // verbatim source of a `$$` block with no frame at all.
     assert!(
         text.contains('╭') && text.contains('╯'),
         "the source is framed, not dumped; got {text:?}"
     );
+    // The caption is the `MathError`'s own `Display`, so it names *which* failure — not
+    // a fixed sentence that would read the same for a parse error and a matrix.
     assert!(
-        text.contains("display math is not laid out yet"),
+        text.contains("a matrix cannot be drawn here"),
         "the bottom edge names the reason; got {text:?}"
     );
     assert!(canvas.check_invariants().is_ok());
 }
 
+/// The same for a ```` ```math ```` fence, which `doc::convert` turns into the very same
+/// `NodeKind::Math { display: true }` — one arm, two spellings.
 #[test]
-fn a_math_fence_shows_its_source_in_a_captioned_frame_for_now() {
-    let doc = Doc::parse("```math\n\\frac{a}{b}\n```\n");
+fn a_math_fence_that_will_not_draw_shows_its_source_in_a_captioned_frame() {
+    let doc = Doc::parse("```math\n\\begin{pmatrix} 1 & 0 \\end{pmatrix}\n```\n");
     let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
     let text: String = (0..canvas.height())
         .map(|row| canvas.row_text(row))
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains(r"\frac{a}{b}"), "got {text:?}");
+    assert!(
+        text.contains(r"\begin{pmatrix} 1 & 0 \end{pmatrix}"),
+        "got {text:?}"
+    );
     assert!(text.contains('╭') && text.contains('╯'), "got {text:?}");
     assert!(
-        text.contains("display math is not laid out yet"),
+        text.contains("a matrix cannot be drawn here"),
         "got {text:?}"
     );
     assert!(canvas.check_invariants().is_ok());
+}
+
+/// A display formula is drawn as box art, and its source is gone from the page.
+///
+/// Both assertions are needed: drawing the formula *and* still dumping the source below
+/// it would satisfy either one alone.
+#[test]
+fn a_display_formula_draws_as_box_art_not_as_its_source() {
+    for markdown in ["$$\\frac{a}{b}$$", "```math\n\\frac{a}{b}\n```\n"] {
+        let doc = Doc::parse(markdown);
+        let canvas = render_block(
+            &doc.root().children[0],
+            40,
+            &Theme::default(),
+            &RenderOptions::default(),
+        );
+        let text = canvas.plain_text();
+        assert!(
+            text.contains('─'),
+            "the fraction rule is missing for {markdown:?}: {text:?}"
+        );
+        assert!(
+            !text.contains("\\frac"),
+            "the source is still being dumped for {markdown:?}: {text:?}"
+        );
+    }
+}
+
+/// The block entry point reaches the same fallback the document one does.
+///
+/// [`render_block`] is handed no document source, so it is a different path to the arm
+/// than [`render_document`] — and the reader must still see what they wrote either way.
+#[test]
+fn a_display_formula_that_will_not_parse_shows_its_framed_source() {
+    for markdown in ["$$\\frac{$$", "```math\n\\frac{\n```\n"] {
+        let doc = Doc::parse(markdown);
+        let canvas = render_block(
+            &doc.root().children[0],
+            40,
+            &Theme::default(),
+            &RenderOptions::default(),
+        );
+        let text = canvas.plain_text();
+        assert!(
+            text.contains("\\frac{"),
+            "the reader must still see what they wrote for {markdown:?}: {text:?}"
+        );
+        assert!(
+            text.contains('╭') || text.contains('┌'),
+            "and it is framed for {markdown:?}: {text:?}"
+        );
+    }
+}
+
+/// Design spec §16.3: a block whose layout draws no cells contributes no rows.
+///
+/// No frame, no caption, no blank row — a `\newcommand` block is setup, not content, and
+/// a hole in the page is exactly what a reader would read it as.
+#[test]
+fn a_definition_only_block_contributes_no_rows() {
+    for markdown in [
+        "$$\\newcommand{\\R}{\\mathbb{R}}$$",
+        "```math\n\\newcommand{\\R}{\\mathbb{R}}\n```\n",
+    ] {
+        let doc = Doc::parse(markdown);
+        let canvas = render_block(
+            &doc.root().children[0],
+            40,
+            &Theme::default(),
+            &RenderOptions::default(),
+        );
+        assert_eq!(
+            canvas.height(),
+            0,
+            "no frame, no caption, no hole in the page for {markdown:?}"
+        );
+    }
+}
+
+/// With the dollar syntax off, nothing here is reached at all.
+///
+/// The regression that matters most to a reader who did not ask for any of this. There
+/// is no `MathSyntax::NONE`: with `dollars: false` the `$$…$$` is an ordinary paragraph
+/// and the fence an ordinary code block, so neither is a `NodeKind::Math` and the arm is
+/// never entered — which is what design spec §3 promises and what this pins.
+#[test]
+fn math_off_still_shows_the_source_untouched() {
+    let off = MathSyntax {
+        dollars: false,
+        backslash: false,
+    };
+    let doc = Doc::parse_with("$$\\frac{a}{b}$$", off);
+    let canvas = render_block(
+        &doc.root().children[0],
+        40,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    assert!(
+        canvas.plain_text().contains("$$"),
+        "got {:?}",
+        canvas.plain_text()
+    );
+
+    let doc = Doc::parse_with("```math\n\\frac{a}{b}\n```\n", off);
+    let canvas = render_block(
+        &doc.root().children[0],
+        40,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    let text = canvas.plain_text();
+    assert!(
+        text.contains("\\frac{a}{b}"),
+        "the fence stays an ordinary code block; got {text:?}"
+    );
 }
 
 /// The formula is line 1 of the frame, for both `$$…$$` and a fence — not a blank line
@@ -3884,9 +4012,17 @@ fn a_math_fence_shows_its_source_in_a_captioned_frame_for_now() {
 /// numbers on, where it is a numbered blank row above the formula, for content that
 /// never had one. Found by rendering the actual output rather than only checking that
 /// the literal appears somewhere in the canvas (2026-08-19 review).
+///
+/// The formula is a matrix because there has to *be* a frame to be first inside: one
+/// that draws has no frame at all now. The trim is on the literal, before anything looks
+/// at it, so which failure brings the frame back does not matter — only that the leading
+/// newline is still being cut.
 #[test]
 fn the_formula_is_the_first_row_inside_the_frame_for_both_dollars_and_a_fence() {
-    for markdown in ["$$\n\\frac{a}{b}\n$$\n", "```math\n\\frac{a}{b}\n```\n"] {
+    for markdown in [
+        "$$\n\\begin{pmatrix} 1 & 0 \\end{pmatrix}\n$$\n",
+        "```math\n\\begin{pmatrix} 1 & 0 \\end{pmatrix}\n```\n",
+    ] {
         let doc = Doc::parse(markdown);
         let canvas = render_document(&doc, 60, None, &Theme::default_dark(), &PLAIN);
         let rows: Vec<String> = (0..canvas.height())
@@ -3897,7 +4033,7 @@ fn the_formula_is_the_first_row_inside_the_frame_for_both_dollars_and_a_fence() 
             .position(|row| row.contains('╭'))
             .unwrap_or_else(|| panic!("no top frame edge in {rows:?}"));
         assert!(
-            rows[top + 1].contains(r"\frac{a}{b}"),
+            rows[top + 1].contains(r"\begin{pmatrix}"),
             "row right under the top edge must be the formula, not a blank line; \
              markdown {markdown:?}, rows {rows:?}"
         );
@@ -3912,9 +4048,11 @@ fn the_formula_is_the_first_row_inside_the_frame_for_both_dollars_and_a_fence() 
 /// `join_gutter` only checked the *top* edge for a collision between the junction column
 /// and the title before drawing `┬`; the bottom edge just wrote `┴` unconditionally,
 /// with no equivalent check against the caption. With line numbers on and a caption long
-/// enough to reach the gutter's column (which "display math is not laid out yet" and
-/// "not a diagram type — mdmost draws …" both are), a character of the caption's own
-/// text was silently overwritten — `display` came out `di┴play`, `not` came out `no┴`.
+/// enough to reach the gutter's column — which, at four columns of gutter, is anything
+/// from three columns of caption up, so every caption either fallback has ever written —
+/// a character of the caption's own text was silently overwritten. The captions that
+/// found it were `display math is not laid out yet`, which came out `di┴play` and no
+/// longer exists, and `not a diagram type — mdmost draws …`, which came out `no┴`.
 /// `a_mermaid_fence_degrades_to_a_captioned_code_block` never caught this because its
 /// `lines()` helper renders without line numbers, the one configuration the bug cannot
 /// appear in.
@@ -3955,14 +4093,20 @@ fn an_overlong_caption_still_ellipsizes_after_the_gutter_shifts_it() {
 fn the_caption_is_not_corrupted_by_the_gutter_junction_with_line_numbers_on() {
     let numbered = RenderOptions::new(false, true);
 
-    let math_doc = Doc::parse("$$\n\\frac{a}{b}\n$$\n");
+    // Measured, not assumed (2026-08-25): at width 60 with one numbered line the gutter
+    // is four columns, which puts the junction on the frame's column 4 — and a caption
+    // starts on column 2, so anything from three columns of caption up is standing on
+    // it. `a matrix cannot be drawn here` is twenty-nine and needs no ellipsis, so the
+    // whole of it can be asserted; with the junction check reverted the `┴` lands on its
+    // `m` and the row reads `╰───┴ a ┴atrix cannot be drawn here`.
+    let math_doc = Doc::parse("$$\n\\begin{pmatrix} 1 & 0 \\end{pmatrix}\n$$\n");
     let math_canvas = render_document(&math_doc, 60, None, &Theme::default_dark(), &numbered);
     let math_text = (0..math_canvas.height())
         .map(|row| math_canvas.row_text(row))
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        math_text.contains("display math is not laid out yet"),
+        math_text.contains("a matrix cannot be drawn here"),
         "the math fallback's caption must survive intact with line numbers on; got {math_text:?}"
     );
 
@@ -3975,10 +4119,10 @@ fn the_caption_is_not_corrupted_by_the_gutter_junction_with_line_numbers_on() {
     );
 }
 
-/// A lone `$$…$$` inside a table cell also reaches the framed-fallback block arm, and
-/// the table's own width negotiation and row-height measurement handle it exactly as
-/// they handle any other block-shaped cell content — checked at a spread of widths
-/// rather than assumed, since this is a case Task 11's brief never mentions.
+/// A lone `$$…$$` inside a table cell also reaches the display-math block arm, and the
+/// table's own width negotiation and row-height measurement handle it exactly as they
+/// handle any other block-shaped cell content — checked at a spread of widths rather than
+/// assumed, since this is a case Task 11's brief never mentions.
 ///
 /// Unlike a `Paragraph`, GFM table cells hold inline content directly with no wrapper
 /// (comrak never puts a `Paragraph` inside a `TableCell`), so `hoist_display_math`'s
@@ -3987,8 +4131,14 @@ fn the_caption_is_not_corrupted_by_the_gutter_junction_with_line_numbers_on() {
 /// `is_inline`'s `display: false` narrowing it now reaches the block arm the same way a
 /// top-level one does. Nothing about that combination needed a fix: `render_table_node`
 /// measures a cell's content by rendering it, the same as it would a nested list or code
-/// fence, so the column widens and the row grows tall enough to hold the frame — no
-/// overflow, no clipped table rule, no panic at any width tried.
+/// fence, so the column widens and the row grows tall enough to hold all three rows of
+/// the fraction — no clipped table rule, no panic at any width tried.
+///
+/// **Re-pointed 2026-08-25 with Task 10**: the cell used to hold the framed source and
+/// the assertions read `\frac{alpha}{beta}` off it. It is drawn now, so they read the
+/// fraction instead. Asserting `╭` here would no longer measure anything — the *table's*
+/// own top-left corner is `╭`, so that check would pass with the cell rendering nothing
+/// at all.
 #[test]
 fn a_table_cell_with_a_lone_display_formula_widens_its_cell_without_breaking_the_table() {
     let markdown = "| a | b |\n|---|---|\n| $$\\frac{alpha}{beta}\\text{longer}$$ | text |\n";
@@ -4001,18 +4151,31 @@ fn a_table_cell_with_a_lone_display_formula_widens_its_cell_without_breaking_the
     }
     let doc = Doc::parse(markdown);
     let canvas = render_document(&doc, 40, None, &Theme::default_dark(), &PLAIN);
-    let text: String = (0..canvas.height())
+    let rows: Vec<String> = (0..canvas.height())
         .map(|row| canvas.row_text(row))
-        .collect::<Vec<_>>()
-        .join("\n");
-    // The frame sits fully inside the table's own borders — a `┬`/`┴` from the table
-    // and a `╭`/`╯` from the formula's frame on the same rows, never past the table's
-    // right rule.
-    assert!(text.contains('╭') && text.contains("┬─"), "got {text:?}");
+        .collect();
+    let text = rows.join("\n");
     assert!(
-        text.contains(r"\frac{alpha}{beta}"),
-        "the cell still shows the source; got {text:?}"
+        !text.contains(r"\frac"),
+        "the cell draws the formula rather than dumping it; got {text:?}"
     );
+    // Three rows of fraction inside one table row, each still between the table's own
+    // vertical rules — the row grew, the column widened, and nothing spilled past `│`.
+    let numerator = rows
+        .iter()
+        .position(|row| row.contains("alpha"))
+        .unwrap_or_else(|| panic!("no numerator row in {rows:?}"));
+    for (offset, expected) in [(0, "alpha"), (1, "─────longer"), (2, "beta")] {
+        let row = &rows[numerator + offset];
+        assert!(
+            row.contains(expected),
+            "row {offset} of the fraction is missing {expected:?}; got {rows:?}"
+        );
+        assert!(
+            row.matches('│').count() >= 3,
+            "the fraction must stay inside the table's rules; got {row:?}"
+        );
+    }
 }
 
 #[test]

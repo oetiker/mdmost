@@ -13,10 +13,12 @@ expression: canvas.plain_text()
                                                                                                                         
  Structures are linearised inline: a/b, √x, and ∑ᵢ₌₁ⁿ i.                                                                
                                                                                                                         
- Display math is not laid out yet:                                                                                      
+ Display math is drawn as box art:                                                                                      
                                                                                                                         
- ╭ math ────────────────────────────────────────────────────────────────╮                                               
- │ \frac{-b \pm \sqrt{b^2-4ac}}{2a}                                     │                                               
- ╰ display math is not laid out yet ────────────────────────────────────╯                                               
+        ┌─────────                                                                                                      
+        │  2                                                                                                            
+ −b ± ‾╲│ b  − 4ac                                                                                                      
+ ─────────────────                                                                                                      
+        2a                                                                                                              
                                                                                                                         
  Currency is not math: it costs $5 and $10 in total.

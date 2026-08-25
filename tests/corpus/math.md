@@ -9,7 +9,7 @@ Scripts that do not are written flat: $x^q$.
 Structures are linearised inline: $\frac{a}{b}$, $\sqrt{x}$, and
 $\sum_{i=1}^{n} i$.
 
-Display math is not laid out yet:
+Display math is drawn as box art:
 
 $$
 \frac{-b \pm \sqrt{b^2-4ac}}{2a}

@@ -37,7 +37,7 @@ Document
     Math
     Text(".")
   Paragraph
-    Text("Display math is not laid out yet:")
+    Text("Display math is drawn as box art:")
   Math
   Paragraph
     Text("Currency is not math: it costs $5 and $1…")
