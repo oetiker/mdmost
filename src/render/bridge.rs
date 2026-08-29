@@ -6,10 +6,14 @@
 //! * `crate::highlight::highlight(lang, src, &Theme) -> Vec<Line>`
 //! * `crate::mermaid::render_mermaid_with(src, width, &Theme, Fit) -> Result<Canvas, MermaidError>`
 //! * `crate::math::render_inline(src) -> Result<String, MathError>`
-//! * `crate::math::render_display(src, width, &Theme) -> Result<Canvas, MathError>`
+//! * `crate::math::render_display_natural(src, width, &Theme) -> Result<Canvas, MathError>`
 //!
 //! Routing all four through this module keeps the dependency in one place, so a change
 //! on any side is a change to one function here rather than to every call site.
+//!
+//! `math::render_display` is the one entry point of a collaborator that is deliberately
+//! *not* routed here, because nothing in the renderer calls it any more: see
+//! [`math_natural`] for what replaced it and why.
 //!
 //! A Mermaid failure is never fatal: [`render_code_block`](super::code::render_code_block)
 //! turns the error into a syntax-highlighted code block with a dim caption naming the
@@ -62,9 +66,17 @@ pub(crate) fn math_inline(src: &str) -> Result<String, MathError> {
     crate::math::render_inline(src)
 }
 
-/// Draws a formula as a block of box art.
+/// Draws a formula as a block of box art, as wide as the formula and no wider, refusing
+/// above `width`.
 ///
 /// Named for what it returns, like [`mermaid`] and [`math_inline`] beside it.
+///
+/// **The renderer asks for the natural width, never the padded one.** `math::render_display`
+/// pads its canvas out to `width`, which is the right answer for a caller laying a formula
+/// into a fixed column and the wrong one for every caller here: once the canvas is padded,
+/// the formula and the padding are the same cells, so there is nothing left to centre
+/// (design spec §7) and nothing to measure a table column by. The padding this module does
+/// want is applied where the centring is decided — [`super::math::centred`].
 ///
 /// There is no layout counter here. A diagram is laid out repeatedly while the width
 /// search hunts for a fit, which is why [`MERMAID_LAYOUTS`] exists to keep that cost
@@ -74,8 +86,8 @@ pub(crate) fn math_inline(src: &str) -> Result<String, MathError> {
 ///
 /// Propagates the [`MathError`] so the caller can degrade to the framed source
 /// (design spec §9).
-pub(crate) fn math_display(src: &str, width: u16, theme: &Theme) -> Result<Canvas, MathError> {
-    crate::math::render_display(src, width, theme)
+pub(crate) fn math_natural(src: &str, width: u16, theme: &Theme) -> Result<Canvas, MathError> {
+    crate::math::render_display_natural(src, width, theme)
 }
 
 // How many diagram layouts this thread has asked for. A counter rather than an

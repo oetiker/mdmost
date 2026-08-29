@@ -18,7 +18,7 @@ use crate::text::{Align, Line, Span, display_width, pad_to_width, repeat_to_widt
 use crate::theme::{Style, Theme};
 
 use super::inline::{HTML_MARKER, render_inline};
-use super::{Ctx, MAX_TABLE_DEPTH, RenderOptions, bridge, code, inline, table};
+use super::{Ctx, MAX_TABLE_DEPTH, RenderOptions, bridge, code, inline, math, table};
 
 /// The vertical bar drawn to the left of a block quote.
 pub(crate) const QUOTE_BAR: &str = "▌";
@@ -280,14 +280,26 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
             display: true,
         } => {
             let source = literal.trim_matches('\n');
-            match bridge::math_display(source, width, ctx.theme) {
+            // Drawn at its own width, not padded out to `width`, because there is nothing
+            // to centre in a canvas that already fills the measure — see
+            // `math::render_display_natural`. `width` is still the cap: a formula wider
+            // than it takes the framed source here, and the *document* renderer is the
+            // only caller that can offer it more room than the measure
+            // (`super::math::formula`).
+            match bridge::math_natural(source, width, ctx.theme) {
                 // Design spec §16.3: a block whose layout draws nothing contributes no
                 // rows. Returned before `resize_width` so it stays genuinely empty —
                 // `resize_width` would make it one zero-height canvas of `width`
                 // columns, still zero rows today, but the early return states the
                 // intent and a later change there cannot quietly put a row back.
                 Ok(canvas) if canvas.is_empty() => return canvas,
-                Ok(canvas) => canvas,
+                // Design spec §7, the only centring in this program. The frame is `width`
+                // itself: this path lays a formula out inside a table cell, a quote or a
+                // list item, and there the measure it is given *is* the column of prose it
+                // belongs to. The document renderer is the one caller with a prose cap
+                // narrower than the width it lays out across, and it centres through
+                // `math::formula` instead, against that cap.
+                Ok(canvas) => math::centred(&canvas, width, width, ctx.base),
                 Err(err) => code::fallback(source, Some("math"), &err, &[], width, ctx),
             }
         }

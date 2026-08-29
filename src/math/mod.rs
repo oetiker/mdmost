@@ -11,9 +11,13 @@
 //! that says so. A construct that cannot meet the constraint rewrites itself onto the row
 //! — a fraction becomes `a/b` — or fails by name so the caller can show the source.
 //!
-//! Both halves have an entry point — [`render_inline`] and [`render_display`] — but only
-//! the inline one has a caller in `render`. `render::document` still shows a display
-//! formula as its own source; wiring it to [`render_display`] is a later task.
+//! Both halves have an entry point, and the display half has two. [`render_inline`] draws
+//! a formula onto the prose row. [`render_display`] draws one into a column of a given
+//! width, padding the canvas out to it; [`render_display_natural`] stops one step short of
+//! the padding and hands back the width the formula itself drew at, which is what a caller
+//! centring it or measuring a table column needs. `render` asks for the natural width
+//! throughout — see `render::bridge` — and applies its own padding where it decides the
+//! centring.
 
 mod boxes;
 mod build;
@@ -60,8 +64,11 @@ pub fn render_inline(src: &str) -> Result<String, MathError> {
 ///
 /// Design spec §6. The canvas is exactly `width` columns on every row: a narrower formula
 /// is padded out to the measure, and a wider one does not come back as a canvas at all.
-/// `draw::to_canvas` treats `width` as a floor rather than a cap, but the comparison here
-/// happens first, so nothing wider than `width` ever reaches it by this route.
+///
+/// The padding is the whole of the difference from [`render_display_natural`], which does
+/// the walk and stops one step short of it. A caller that wants to know how wide the
+/// formula is — to centre it, or to measure a table column — cannot ask this one, because
+/// once the canvas is padded the formula and the padding are the same cells.
 ///
 /// A formula that draws no cells returns an empty canvas rather than an error: design spec
 /// §16.3 makes a definition-only block contribute no rows, and stating the rule over the
@@ -79,18 +86,52 @@ pub fn render_inline(src: &str) -> Result<String, MathError> {
 /// All three take the caller to design spec §9's framed source, which is why one return
 /// type covers them.
 pub fn render_display(src: &str, width: u16, theme: &Theme) -> Result<Canvas, MathError> {
+    let mut canvas = render_display_natural(src, width, theme)?;
+    canvas.resize_width(width, theme.base());
+    Ok(canvas)
+}
+
+/// Draws `src` as a block of box art at the width the formula itself draws at.
+///
+/// The same walk as [`render_display`] under the same cap, differing in one thing: the
+/// canvas comes back the width of the *formula*, not the width of the *column*. Both
+/// answers are wanted, by callers asking different questions.
+///
+/// [`render_display`] answers "lay this out in `width` columns", so it pads, and a block
+/// renderer writing into a fixed measure wants exactly that. Two callers want the other
+/// answer and cannot get it from a padded canvas, because the padding is indistinguishable
+/// from the formula:
+///
+/// * **Centring** (design spec §7) needs something to centre. A canvas that already fills
+///   the measure has no slack in it, so centring it is a no-op — which is what it was,
+///   silently, until this function existed.
+/// * **Measuring a table cell** needs the column width a formula asks for. A drawn formula
+///   cannot be squeezed, so this one number is both its minimum and its natural width.
+///
+/// Pass `u16::MAX` for `width` to ask with no cap at all, which is what a measurement
+/// does: there is no column yet to be too wide for.
+///
+/// # Errors
+///
+/// Identical to [`render_display`]'s, on identical terms — `width` is compared against the
+/// laid-out width before anything is drawn, so a formula past the cap costs a layout and
+/// not a canvas.
+pub fn render_display_natural(src: &str, width: u16, theme: &Theme) -> Result<Canvas, MathError> {
     let storage = Storage::new();
     let events = build::parse(src, &storage)?;
     let laid_out = build::build(&events, build::Mode::Display)?;
     if laid_out.is_empty() {
-        return Ok(Canvas::empty(width));
+        // Width 0, not `width`: a formula that draws no cells has no width of its own,
+        // and `render_display` pads this back out to the measure for the caller that
+        // wanted one. Design spec §16.3 makes it contribute no rows either way.
+        return Ok(Canvas::empty(0));
     }
     if laid_out.width > width {
         return Err(MathError::TooWide {
             needed: laid_out.width,
         });
     }
-    Ok(draw::to_canvas(&laid_out, width, theme))
+    Ok(draw::to_canvas(&laid_out, laid_out.width, theme))
 }
 
 /// The characters `src`'s own commands resolved to.

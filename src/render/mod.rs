@@ -45,6 +45,7 @@ pub mod document;
 pub(crate) mod glyphs;
 pub mod inline;
 mod link;
+pub(crate) mod math;
 pub mod table;
 
 #[cfg(test)]
