@@ -299,7 +299,20 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
                 // belongs to. The document renderer is the one caller with a prose cap
                 // narrower than the width it lays out across, and it centres through
                 // `math::formula` instead, against that cap.
-                Ok(canvas) => math::centred(&canvas, width, width, ctx.base),
+                //
+                // Spec §10's one span and one atom go on last, over the centred canvas:
+                // `drawn_bounds` measures the drawn rectangle *inside* the padding, which
+                // is where the formula actually is. `source` and not `literal` — the
+                // trimmed text is what a paste has to match line for line
+                // (`code::math_block`). The framed-source arms below and above get
+                // neither: a source dump is a code block, not a formula's atom.
+                Ok(canvas) => code::math_block(
+                    math::centred(&canvas, width, width, ctx.base),
+                    width,
+                    source,
+                    node.source,
+                    ctx,
+                ),
                 Err(err) => code::fallback(source, Some("math"), &err, &[], width, ctx),
             }
         }

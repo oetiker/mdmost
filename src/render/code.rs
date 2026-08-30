@@ -163,6 +163,63 @@ pub(crate) fn diagram_block(
     canvas
 }
 
+/// Places a drawn formula in a block, with the one span and one atom of design spec §10.
+///
+/// Not [`diagram_block`], which rebases each label's span onto its own bytes. A formula
+/// has no labels and no per-cell provenance to rebase: `pulldown-latex`'s events carry no
+/// source positions at all, which is *why* §10 makes a formula atomic rather than a
+/// consequence of it. Passing an empty `origins` to [`diagram_block`] would behave the
+/// same and say nothing.
+///
+/// **`literal` is the trimmed source, never comrak's raw literal.** A `$$…$$` literal
+/// opens with the newline right after the opener — measured, not assumed: comrak gives
+/// `"$$\n\\frac{a}{b}\n$$\n"` the literal `"\n\\frac{a}{b}\n"` — and `select::atom_text`
+/// walks [`Atom::content`] one line per source line. An untrimmed literal is therefore
+/// shifted by a line against the document; its first entry is a bare `"\n"`, whose
+/// compared form is the empty string, every line ends with the empty string, so the
+/// match succeeds and the formula's own line is cut down to a newline. The paste comes
+/// back without the formula in it. Both drawn call sites already hold the trimmed
+/// `source`; pass that.
+///
+/// `block` is the construct's own extent in the document — the node's `source`, dollars
+/// or fences included, because §10 copies the whole thing.
+pub(crate) fn math_block(
+    mut canvas: Canvas,
+    width: u16,
+    literal: &str,
+    block: SourceSpan,
+    ctx: Ctx<'_>,
+) -> Canvas {
+    if let Some((row, rows, col, cols)) = drawn_bounds(&canvas) {
+        canvas.add_span(SearchSpan {
+            source_start: block.start,
+            source_end: block.end,
+            // Spec §10: the whole construct is the unit. The same pair `select::resolve`
+            // would compute from `None`, written out because `render::inline` writes it
+            // out for an inline formula and the two must not differ on the same question.
+            unit: Some((block.start, block.end)),
+            row,
+            col,
+            cols,
+            // The cells say `a/b` where the bytes say `\frac{a}{b}`. A span that is not a
+            // byte-for-byte copy has no interior position, so search and selection take
+            // all of it or none of it.
+            copied: false,
+        });
+        canvas.add_atom(Atom {
+            row,
+            rows,
+            col,
+            cols,
+            source_start: block.start,
+            source_end: block.end,
+            content: literal.to_string(),
+        });
+    }
+    canvas.resize_width(width, ctx.base);
+    canvas
+}
+
 /// The bounding box of the cells a diagram actually drew: `(row, rows, col, cols)`.
 ///
 /// A layout hands back a canvas as wide as the space it was offered, so the drawing sits

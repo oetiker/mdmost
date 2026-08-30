@@ -3971,6 +3971,94 @@ fn a_press_on_box_art_in_a_quote_copies_the_opener_without_its_prefix() {
     }
 }
 
+/// Copying a **multi-line** `$$` block gives back the source, formula included.
+///
+/// The one shape that catches an untrimmed `Atom::content`. comrak's literal for
+/// `"$$\n\\frac{a}{b}\n$$\n"` is `"\n\\frac{a}{b}\n"` — measured — so it opens with the
+/// newline right after the opener. `select::atom_text` walks the content one line per
+/// source line, and an untrimmed literal is therefore shifted by one: its first entry is
+/// a bare `"\n"`, whose compared form is the empty string, every line ends with the empty
+/// string, so the shifted match *succeeds* and the formula's own line is silently cut
+/// down to a newline. Run against the raw literal this asserts `"$$\n\n$$"`.
+///
+/// A single-line `$$…$$` cannot see it: it is one line, `atom_text` emits it verbatim
+/// before the content loop runs at all.
+#[test]
+fn copying_a_multi_line_display_formula_yields_the_whole_source() {
+    let source = "$$\n\\frac{a}{b}\n$$\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    // The fraction rule: drawing, and the only thing on its row.
+    let (row, col, cols) = drawn(&canvas, "─");
+    let on_art = drag(Pos::new(row, col), Pos::new(row, col + cols - 1));
+    let extract = select::extract(&canvas, source, on_art).expect("the drag covered drawn cells");
+    assert_eq!(
+        extract.text, "$$\n\\frac{a}{b}\n$$",
+        "the whole construct, and the formula still in it"
+    );
+}
+
+/// The same for the ```` ```math ```` fence, whose literal ends in a newline instead.
+///
+/// Both spellings reach the same `NodeKind::Math` arm, so both go through the same trim
+/// and both must paste. `strip_to_content` compares the trailing newline off each side
+/// before matching, which is why the fence form was never at risk — asserted rather than
+/// argued.
+#[test]
+fn copying_a_multi_line_math_fence_yields_the_whole_source() {
+    let source = "```math\n\\frac{a}{b}\n```\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (row, col, cols) = drawn(&canvas, "─");
+    let on_art = drag(Pos::new(row, col), Pos::new(row, col + cols - 1));
+    let extract = select::extract(&canvas, source, on_art).expect("the drag covered drawn cells");
+    assert_eq!(extract.text, "```math\n\\frac{a}{b}\n```");
+}
+
+/// Spec §10's container-prefix rule: a quoted formula copies as clean LaTeX.
+///
+/// And the reason `Atom::content` is matched as a *suffix* of each source line rather
+/// than spliced by offset — what a container stripped is not recoverable from the source
+/// range alone.
+#[test]
+fn copying_a_quoted_display_formula_takes_the_marker_off() {
+    let source = "> $$\n> \\frac{a}{b}\n> $$\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (row, col, cols) = drawn(&canvas, "─");
+    let on_art = drag(Pos::new(row, col), Pos::new(row, col + cols - 1));
+    let extract = select::extract(&canvas, source, on_art).expect("the drag covered drawn cells");
+    assert_eq!(extract.text, "$$\n\\frac{a}{b}\n$$");
+    for line in extract.text.lines() {
+        assert!(
+            !line.starts_with('>'),
+            "no line keeps a quote marker, got {:?}",
+            extract.text
+        );
+    }
+}
+
+/// A press anywhere in the rectangle takes the formula whole (spec §10, §2.2's third case).
+///
+/// Every row and every column of the three the fraction draws must answer the same
+/// source range: the atom has no interior position, so where the reader pressed cannot
+/// change what they get.
+#[test]
+fn a_press_anywhere_in_a_formula_copies_all_of_it() {
+    let source = "$$\n\\frac{a}{b}\n$$\n";
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let (rule, col, _) = drawn(&canvas, "─");
+    for row in rule - 1..=rule + 1 {
+        let press = drag(Pos::new(row, col), Pos::new(row, col));
+        let extract = select::extract(&canvas, source, press).expect("the press was on a cell");
+        assert_eq!(
+            extract.text, "$$\n\\frac{a}{b}\n$$",
+            "row {row} of the formula answered differently"
+        );
+    }
+}
+
 /// The mirror of [`the_prefix_comes_off_the_diagram_and_not_off_the_prose_beside_it`]:
 /// quoted prose *above*, dragged down into the diagram.
 ///

@@ -3913,6 +3913,137 @@ fn a_display_formula_draws_as_box_art_not_as_its_source() {
     }
 }
 
+/// Design spec §10: one span over the whole construct, and not one per drawn row.
+///
+/// `copied: false` is the load-bearing half. The cells say `a`, `─`, `b` where the bytes
+/// say `\frac{a}{b}`, so nothing may index into the span — search and selection take all
+/// of it or none of it.
+#[test]
+fn a_drawn_formula_gets_one_span_over_the_whole_construct() {
+    let doc = Doc::parse("$$\\frac{a}{b}$$");
+    let canvas = render_block(
+        &doc.root().children[0],
+        40,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    assert_eq!(canvas.spans().len(), 1, "one span, not one per row");
+    let span = &canvas.spans()[0];
+    assert!(!span.copied, "the cells are not the bytes");
+    // Spec §10 names the unit, and `render::inline` writes it out for an inline formula
+    // rather than leaving `select::resolve` to infer it. The same construct gets the same
+    // answer on both paths.
+    assert_eq!(span.unit, Some((span.source_start, span.source_end)));
+    assert_eq!(
+        doc.source().get(span.source_start..span.source_end),
+        Some("$$\\frac{a}{b}$$"),
+        "the span covers the construct, dollars included"
+    );
+}
+
+/// Copying a formula must yield the LaTeX, because the box art is not pasteable.
+#[test]
+fn a_drawn_formula_gets_one_atom_carrying_its_latex() {
+    let doc = Doc::parse("$$\\frac{a}{b}$$");
+    let canvas = render_block(
+        &doc.root().children[0],
+        40,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    assert_eq!(canvas.atoms().len(), 1);
+    assert_eq!(
+        canvas.atoms()[0].content,
+        "\\frac{a}{b}",
+        "copying it must yield the LaTeX, not the box art"
+    );
+}
+
+/// The atom is the whole drawn rectangle, so a drag anywhere in it takes the formula.
+#[test]
+fn the_atom_covers_every_row_the_formula_drew() {
+    let doc = Doc::parse("$$\\frac{a}{b}$$");
+    let canvas = render_block(
+        &doc.root().children[0],
+        40,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    let atom = &canvas.atoms()[0];
+    // Measured, not assumed: `\frac{a}{b}` draws `a`, `─`, `b`, one column wide, and the
+    // suite otherwise pins only the width (`render::math::tests`).
+    assert_eq!(
+        atom.rows, 3,
+        "a fraction is three rows and all three are its own"
+    );
+    assert_eq!(
+        atom.cols, 1,
+        "and one column, which is what the width tests pin"
+    );
+    let drawn: Vec<String> = (atom.row..atom.row + atom.rows)
+        .map(|row| canvas.row_text(row).trim().to_string())
+        .collect();
+    assert_eq!(
+        drawn,
+        ["a", "─", "b"],
+        "the atom's rows are the rows the formula actually drew"
+    );
+}
+
+/// The `copied: false` invariant exists to protect a span with no interior position.
+#[test]
+fn a_span_with_no_interior_position_is_highlighted_whole() {
+    let doc = Doc::parse("$$\\frac{ab}{c}$$");
+    let canvas = render_block(
+        &doc.root().children[0],
+        40,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    let span = &canvas.spans()[0];
+    assert!(span.cols > 0 && span.source_end > span.source_start);
+}
+
+/// A formula that will not draw is a code block, and a code block is not a formula's atom.
+///
+/// The framed-source arms are three of the five that do *not* get `code::math_block`
+/// (plan Task 12, Step 3). Hanging a math atom on a source dump would make a drag over
+/// the dumped `\frac{` copy the block as if it had been drawn.
+#[test]
+fn a_formula_that_falls_back_to_its_source_gets_no_math_atom() {
+    let doc = Doc::parse("$$\\frac{$$");
+    let canvas = render_block(
+        &doc.root().children[0],
+        40,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    let text = canvas.plain_text();
+    assert!(
+        text.contains("\\frac{"),
+        "the fixture must actually be taking the fallback: {text:?}"
+    );
+    assert!(
+        canvas.atoms().is_empty(),
+        "a framed source dump carries no formula atom"
+    );
+}
+
+/// Spec §16.3: a block that draws nothing draws nothing — no rows, and so no atom either.
+#[test]
+fn a_formula_that_draws_nothing_gets_no_span_and_no_atom() {
+    let doc = Doc::parse("$$\\newcommand{\\R}{\\mathbb{R}}$$");
+    let canvas = render_block(
+        &doc.root().children[0],
+        40,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    assert_eq!(canvas.height(), 0, "a macro definition contributes no rows");
+    assert!(canvas.atoms().is_empty());
+    assert!(canvas.spans().is_empty());
+}
+
 /// The block entry point reaches the same fallback the document one does.
 ///
 /// [`render_block`] is handed no document source, so it is a different path to the arm

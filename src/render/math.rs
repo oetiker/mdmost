@@ -109,15 +109,34 @@ pub(crate) fn formula(
         // It fits: the width it is laid out at is the width it was asked for, which makes
         // `at == width` at the call site and spends one layout where the clip search spent
         // seven.
-        Ok(canvas) if canvas.width() <= from => {
-            Some((from, centred(&canvas, from, frame, ctx.base)))
-        }
+        Ok(canvas) if canvas.width() <= from => Some((
+            from,
+            // Spec §10's one span and one atom, over the centred canvas — see
+            // `code::math_block`, and `render::block`'s own drawn arm, which is the same
+            // three lines against a different frame.
+            code::math_block(
+                centred(&canvas, from, frame, ctx.base),
+                from,
+                source,
+                node.source,
+                ctx,
+            ),
+        )),
         // Wider than the measure but the surplus earns the room: the canvas is its own
         // width and the caller side-scrolls to it. Centring is a no-op at that width, and
         // is left in rather than branched around so there is one path through this.
         Ok(canvas) if canvas.width() - from >= MIN_SURPLUS => {
             let at = canvas.width();
-            Some((at, centred(&canvas, at, frame, ctx.base)))
+            Some((
+                at,
+                code::math_block(
+                    centred(&canvas, at, frame, ctx.base),
+                    at,
+                    source,
+                    node.source,
+                    ctx,
+                ),
+            ))
         }
         // Wider, but not by enough to be worth a horizontal scrollbar on every row of the
         // document. The framed source at the measure is the answer, and returning it — as
@@ -311,6 +330,38 @@ mod tests {
         assert_eq!(canvas.width(), at);
         assert_eq!(indent_of(&canvas, rule_row(&canvas)), 0, "left-aligned");
         canvas.check_invariants().expect("width holds");
+    }
+
+    /// The side-scrolled arm carries design spec §10's span and atom too.
+    ///
+    /// Three arms draw a formula — one in `render::block`, two here — and this is the one
+    /// no other test reaches: dropping `code::math_block` from it killed nothing until
+    /// this test existed. A formula the reader has to scroll to is exactly the one they
+    /// are most likely to copy instead of retyping.
+    #[test]
+    fn a_side_scrolled_formula_still_gets_its_span_and_atom() {
+        // 25 columns of formula, 17 available: a surplus of 8, which is `MIN_SURPLUS`.
+        let doc = Doc::parse(MID);
+        let (at, canvas) = formula(
+            node(&doc),
+            17,
+            17,
+            Limits::new(200, 1),
+            &theme(),
+            &RenderOptions::default(),
+        )
+        .expect("a formula that draws is answered for");
+        assert_eq!(at, 25, "widened to its own width");
+        assert_eq!(canvas.spans().len(), 1, "one span, not one per row");
+        let span = &canvas.spans()[0];
+        assert!(!span.copied, "the cells are not the bytes");
+        assert_eq!(span.unit, Some((span.source_start, span.source_end)));
+        assert_eq!(canvas.atoms().len(), 1);
+        assert_eq!(
+            canvas.atoms()[0].content,
+            MID.trim_matches('$'),
+            "the LaTeX, and the dollars off it"
+        );
     }
 
     #[test]
