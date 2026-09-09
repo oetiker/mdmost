@@ -22,6 +22,7 @@
 //! | [`dump`] | `--render-once` output, ANSI or plain |
 //! | [`wide`] | Rendering over-wide blocks so they stay horizontally reachable |
 //! | `term` | Terminal lifecycle, signal safety and the event loop |
+//! | `probe` | Asking the terminal how wide it draws an emoji-presentation sequence |
 //!
 //! The split exists because design spec §13 requires application state to be testable
 //! without a terminal: [`app::App`] never touches one.
@@ -36,6 +37,7 @@ pub mod help;
 pub mod icons;
 pub mod open;
 pub mod popup;
+mod probe;
 pub mod select;
 pub mod stderr;
 mod term;
@@ -54,6 +56,15 @@ pub use app::{App, AppOptions, Focus, Overlay, PromptKind};
 /// Returns any I/O failure raised by the terminal.
 pub fn run(app: &mut App) -> std::io::Result<()> {
     term::run(app)
+}
+
+/// How many columns this terminal gives an emoji-presentation sequence, if it will say.
+///
+/// See [`probe`] for what is asked, when it is skipped, and why the answer is worth
+/// asking for. Exists here for the same reason [`terminal_width`] does: the binary need
+/// not depend on `crossterm` itself.
+pub fn emoji_columns() -> Option<u16> {
+    probe::emoji_columns()
 }
 
 /// Restores the terminal, for callers that need to bail out mid-flight.

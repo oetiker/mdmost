@@ -48,6 +48,18 @@ minor bump rather than a patch.
 
 ### Fixed
 
+- A terminal that draws an emoji-presentation sequence such as `☸️` (a narrow character
+  plus `U+FE0F`) in one column no longer leaves stale characters strewn across the screen
+  when the document is scrolled. The standard makes such a sequence two columns wide,
+  `unicode-width` and `ratatui` both measure two, and a terminal that advances by one is
+  then one column out for the whole run of cells it was handed — which is why the damage
+  spread well beyond the line the emoji was on. mdmost now asks the terminal at startup
+  how wide it draws one, and on a clear answer of one column drops the selector, which
+  draws the same glyph there and puts every measurement back on one number. `narrow_emoji`
+  in the configuration file and `--narrow-emoji` / `--wide-emoji` settle it without
+  measuring. `Config` gained the field, which is an API break for a caller building one
+  by struct literal.
+
 - A Mermaid diagram's degraded-code caption is no longer corrupted where the
   line-number gutter's bottom-edge junction crosses it — "not a diagram type" no
   longer comes out "no┴ a diagram type". This shipped in v0.2.0 for every caption long

@@ -144,6 +144,19 @@ pub struct Config {
     /// agree about. `less` does not capture either. Turn it on with `--mouse` or
     /// `mouse = true`.
     pub mouse: bool,
+    /// Whether this terminal draws an emoji-presentation sequence in one column.
+    ///
+    /// `U+FE0F` asks for the emoji form of a character that also has a text form, and
+    /// the standard makes the result two columns wide. Several terminals draw it in one.
+    /// Nothing can reconcile that after the fact — `unicode-width` and `ratatui` both
+    /// measure two — so `true` drops the selector instead, which draws the same glyph on
+    /// such a terminal and puts every measurement back on one number (see
+    /// [`crate::text::narrow_emoji`]).
+    ///
+    /// Tri-state like [`Config::icons`], and for the same reason: `None` — the default —
+    /// means nobody has said, and the answer is measured from the terminal at startup.
+    /// `--narrow-emoji` / `--wide-emoji` override even a value written in the file.
+    pub narrow_emoji: Option<bool>,
     /// How many document lines one mouse-wheel notch scrolls.
     pub scroll_step: u16,
     /// The widest the document body is laid out, however wide the terminal is.
@@ -176,6 +189,7 @@ impl Default for Config {
             toc_open: false,
             toc_width: DEFAULT_TOC_WIDTH,
             mouse: false,
+            narrow_emoji: None,
             scroll_step: 3,
             body_width: Some(DEFAULT_BODY_WIDTH),
             keys: KeyBindings::defaults(),
@@ -350,6 +364,7 @@ struct RawConfig {
     title_banner: Option<bool>,
     section_numbers: Option<bool>,
     mouse: Option<bool>,
+    narrow_emoji: Option<bool>,
     scroll_step: Option<u16>,
     body_width: Option<u16>,
     #[serde(default)]
@@ -398,10 +413,11 @@ impl RawConfig {
     /// Validates the raw file into a [`Config`], collecting per-entry problems.
     fn into_config(self, text: &str, path: &Path, problems: &mut Vec<ConfigError>) -> Config {
         let mut config = Config {
-            // Carried straight across as an `Option`, unlike every setting below it: an
-            // absent `icons` key must stay absent so it reaches detection, rather than
-            // being resolved here to a fixed answer.
+            // Carried straight across as an `Option`, unlike every setting below them:
+            // an absent `icons` or `narrow_emoji` key must stay absent so it reaches
+            // detection, rather than being resolved here to a fixed answer.
             icons: self.icons,
+            narrow_emoji: self.narrow_emoji,
             ..Config::default()
         };
 
@@ -627,6 +643,7 @@ const KNOWN_KEYS: &[&str] = &[
     "title_banner",
     "section_numbers",
     "mouse",
+    "narrow_emoji",
     "scroll_step",
     "body_width",
     "toc",

@@ -64,6 +64,13 @@ writes plain text rather than escape sequences.
 - **`--no-math-backslash`** — Do not read `\(…\)` and `\[…\]`, even if the configuration
   file does.
 
+- **`--narrow-emoji`** — Draw an emoji whose form is set by a variation selector
+  (`U+FE0F`) in one column rather than two, for a terminal that does the same. Left to
+  itself **mdmost** measures the terminal; see *Emoji width* below.
+
+- **`--wide-emoji`** — Draw such an emoji at the width the standard gives it, without
+  measuring the terminal.
+
 - **`--mouse`** — Capture the mouse: the wheel scrolls, the scrollbar drags, a click in
   the contents pane jumps, and a drag over the document copies the Markdown source
   behind it.
@@ -247,6 +254,28 @@ becomes `copied`.
 Capturing the mouse takes away the terminal's own drag-select for as long as
 **mdmost** runs.
 
+## Emoji width
+
+`U+FE0F` asks for the emoji form of a character that also has a text form — `☸️` is
+`☸` plus that selector — and the standard makes the result two columns wide.
+Several terminals draw it in one and move the cursor by one. Nothing can be
+patched over that afterwards: the width tables say two, and so does the library
+that paints the screen, so on such a terminal every line containing one is drawn
+one column out from there on, and scrolling leaves stale characters behind.
+
+**mdmost** therefore asks the terminal at startup: it draws the sequence at the
+start of a line, reads back where the cursor ended up, and erases what it drew.
+A clear answer of one column makes it drop the selector for the rest of the
+session, which draws the same glyph on such a terminal and puts every
+measurement back on one number. Any other answer — including no answer — leaves
+the document exactly as it is.
+
+The question is not put at all when there is no terminal on both standard input
+and standard output, or when `TERM` is unset, `dumb` or `linux`. To settle it
+without being asked, write `narrow_emoji = true` (or `false`) in the
+configuration file, or pass `--narrow-emoji` / `--wide-emoji`; a flag is saved by
+`S`, a measurement never is.
+
 # CONFIGURATION
 
 The configuration file is TOML, at *~/.config/mdmost/config.toml*, or in the
@@ -263,6 +292,7 @@ icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to det
 line_numbers = false     # line-number gutter in fenced code blocks
 title_banner = false     # off; true sets a lone `#` title as a wrapped FIGlet banner
 section_numbers = true   # number headings when a document nests three levels or more
+narrow_emoji = false     # emoji-presentation sequences in one column; omit to measure
 mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies
                          # source, and code frames and tables get a [copy] button
 scroll_step  = 3         # document lines per mouse-wheel notch

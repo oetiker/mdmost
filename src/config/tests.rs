@@ -534,3 +534,17 @@ fn a_misspelt_math_key_is_reported_and_dropped() {
     let loaded = Config::parse_str("mathinline = true\n", path());
     assert_eq!(loaded.problems.len(), 1, "{:?}", loaded.problems);
 }
+
+#[test]
+fn the_emoji_width_answer_is_kept_tri_state() {
+    // Unset means nobody has said, and the answer is measured from the terminal — the
+    // same shape as `icons`, and for the same reason: `Some(false)` and "unset" behave
+    // alike today, but only the first must keep behaving that way on a terminal where
+    // the measurement would say otherwise.
+    assert_eq!(Config::default().narrow_emoji, None);
+    assert_eq!(Config::parse_str("", path()).config.narrow_emoji, None);
+
+    let loaded = Config::parse_str("narrow_emoji = true\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.narrow_emoji, Some(true));
+}

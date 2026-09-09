@@ -673,3 +673,41 @@ fn truncate_to_width_costs_a_wide_cluster_honestly() {
         WIDE_PLUS_SPACING_MARK
     );
 }
+
+// ---------------------------------------------------------------------------
+// Emoji presentation on a terminal that does not widen it.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_variation_selector_is_dropped_from_a_narrow_base() {
+    // `unicode-width` gives U+2638 one column and U+2638 U+FE0F two, which is what
+    // the standard asks for and what several terminals do not do. Dropping the selector
+    // is what puts every measurement — ours, ratatui's and the terminal's — back on the
+    // same number, and it draws the same glyph on a terminal that ignored it anyway.
+    assert_eq!(narrow_emoji("a ☸️ b"), "a ☸ b");
+    assert_eq!(display_width(&narrow_emoji("a ☸️ b")), 5);
+}
+
+#[test]
+fn an_emoji_that_is_wide_on_its_own_is_left_alone() {
+    // No selector to drop, and nobody disagrees about these: every terminal measured
+    // gives them two columns.
+    for text in ["📄 Report", "🌾 Agrocheck", "👤 Fritz"] {
+        assert_eq!(narrow_emoji(text), text);
+    }
+}
+
+#[test]
+fn a_zwj_sequence_keeps_its_selectors() {
+    // Several emoji glued into one cluster. How wide a terminal draws that is its own
+    // disagreement, and taking a selector out of the middle would change which glyph
+    // is drawn rather than only how wide it is.
+    let family = "👨‍❤️‍👨";
+    assert_eq!(narrow_emoji(family), family);
+}
+
+#[test]
+fn text_with_nothing_to_drop_is_not_copied() {
+    let text = "plain prose with no emoji at all";
+    assert!(matches!(narrow_emoji(text), std::borrow::Cow::Borrowed(_)));
+}

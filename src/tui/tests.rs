@@ -7438,3 +7438,35 @@ fn a_popup_shows_the_source_of_math_that_will_not_draw() {
         "a formula that will not draw shows its source, not a hole: {text:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Reading the terminal's answer to `ESC [ 6 n` (`super::probe`).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_cursor_report_is_read_as_a_column() {
+    assert_eq!(super::probe::column_of(b"\x1b[1;3R"), Some(3));
+    assert_eq!(super::probe::column_of(b"\x1b[24;80R"), Some(80));
+}
+
+#[test]
+fn a_report_is_found_among_whatever_else_arrived() {
+    // A keystroke can land in the same read as the reply, and a terminal is free to
+    // answer other things first.
+    assert_eq!(super::probe::column_of(b"q\x1b[1;3R"), Some(3));
+    assert_eq!(super::probe::column_of(b"\x1b[?1;2c\x1b[1;5R"), Some(5));
+}
+
+#[test]
+fn anything_that_is_not_a_report_is_no_answer() {
+    for bytes in [
+        &b""[..],
+        &b"\x1b["[..],
+        &b"\x1b[1;R"[..],
+        &b"\x1b[1;3"[..],
+        &b"hello"[..],
+        &b"\x1b[99999;99999R"[..],
+    ] {
+        assert_eq!(super::probe::column_of(bytes), None, "{bytes:?}");
+    }
+}

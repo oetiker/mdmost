@@ -142,6 +142,7 @@ starting: the problem is reported and the rest of the file still applies.
 ```toml
 theme        = "dark"    # name of a built-in or a [themes.*] table
 line_numbers = false     # line-number gutter in fenced code blocks
+narrow_emoji = false     # emoji-presentation sequences in one column; omit to measure
 mouse        = false     # wheel, drag-to-copy, and [copy] buttons
 body_width   = 72        # widest the prose body is laid out; 0 for no cap
 section_numbers = true   # number headings when a document nests three levels or more
