@@ -76,8 +76,9 @@ minor bump rather than a patch.
   how wide it draws one, and on a clear answer of one column drops the selector, which
   draws the same glyph there and puts every measurement back on one number. `narrow_emoji`
   in the configuration file and `--narrow-emoji` / `--wide-emoji` settle it without
-  measuring. `Config` gained the field, which is an API break for a caller building one
-  by struct literal.
+  measuring, and a document re-read from a changed file is narrowed exactly as the first
+  read was. `Config` gained the field and `AppOptions` gained `narrow_emoji: bool`, which
+  is an API break for a caller building either by struct literal.
 
 - A Mermaid diagram's degraded-code caption is no longer corrupted where the
   line-number gutter's bottom-edge junction crosses it — "not a diagram type" no

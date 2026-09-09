@@ -392,6 +392,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         AppOptions {
             title,
             icons,
+            narrow_emoji,
             theme: theme_name,
             // `[toc] open` in the configuration file counts as much as `--toc` does.
             toc_open: cli.toc || config_toc_open,

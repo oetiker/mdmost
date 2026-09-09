@@ -40,6 +40,26 @@ fn pager(source: &str) -> App {
     pager_with(source, Config::default())
 }
 
+/// Builds an app over `source` for a terminal that draws emoji sequences in one column.
+fn pager_narrow(source: &str) -> App {
+    let mut app = App::new(
+        Doc::parse(source),
+        Config::default(),
+        AppOptions {
+            config_path: None,
+            title: "sample.md".to_string(),
+            icons: false,
+            narrow_emoji: true,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(80, 12);
+    let _ = app.canvas();
+    app
+}
+
 /// Builds an app over `source` at a fixed size, with a given configuration.
 fn pager_with(source: &str, config: Config) -> App {
     let mut app = App::new(
@@ -49,6 +69,7 @@ fn pager_with(source: &str, config: Config) -> App {
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -92,6 +113,7 @@ fn the_body_cap_reaches_the_render_through_the_pager() {
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -234,6 +256,7 @@ fn render_options_follow_the_flags_that_feed_them() {
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -274,6 +297,7 @@ fn there_is_a_horizontal_offset_only_when_something_is_over_wide() {
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: Some(200),
@@ -636,6 +660,7 @@ fn rebinding_a_key_changes_what_it_does() {
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -674,6 +699,7 @@ fn an_unknown_start_theme_falls_back_without_refusing_to_start() {
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "no such theme".to_string(),
             toc_open: false,
             width: None,
@@ -757,6 +783,7 @@ fn a_forced_width_overrides_the_terminal() {
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: Some(40),
@@ -807,6 +834,7 @@ fn pager_named(source: &str, title: &str, width: u16, height: u16) -> App {
             config_path: None,
             title: title.to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -829,6 +857,7 @@ fn numbered_pager_at(source: &str, width: u16, height: u16) -> App {
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -1936,6 +1965,7 @@ fn a_wide_character_binding_does_not_ragged_edge_the_help_column() {
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -2313,6 +2343,7 @@ fn the_match_key_hint_names_the_keys_the_reader_actually_bound() {
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -2776,6 +2807,7 @@ fn themed_pager(source: &str, theme: &str, width: u16, height: u16) -> App {
         AppOptions {
             title: "sample.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: theme.to_string(),
             toc_open: false,
             width: None,
@@ -4514,6 +4546,7 @@ fn a_multi_row_drag_yields_source_line_structure_not_the_renderers() {
         AppOptions {
             title: "t.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: Some(30),
@@ -7800,4 +7833,35 @@ fn the_math_syntax_follows_the_configuration() {
     config.math = false;
     assert!(!config.math_syntax().dollars);
     assert!(!config.math_syntax().backslash);
+}
+
+#[test]
+fn a_reload_narrows_emoji_the_way_the_first_read_did() {
+    // The answer was measured once, before the document was first parsed. A file that
+    // changes underneath must be read under the same answer, or the selector comes back
+    // on the reload and the screen starts smearing again.
+    let dir = TempDir::new("narrow");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager_narrow("# One\n");
+    let mut watcher = super::watch::Watcher::new(&path);
+
+    std::fs::write(&path, "# Two ☸️ three\n").expect("write");
+    super::term::reload_tick(&mut app, &mut watcher);
+    super::term::reload_tick(&mut app, &mut watcher);
+
+    assert_eq!(app.doc().source(), "# Two ☸ three\n");
+}
+
+#[test]
+fn a_reload_keeps_the_selector_when_the_terminal_wanted_it() {
+    let dir = TempDir::new("wide");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager("# One\n");
+    let mut watcher = super::watch::Watcher::new(&path);
+
+    std::fs::write(&path, "# Two ☸️ three\n").expect("write");
+    super::term::reload_tick(&mut app, &mut watcher);
+    super::term::reload_tick(&mut app, &mut watcher);
+
+    assert_eq!(app.doc().source(), "# Two ☸️ three\n");
 }

@@ -279,6 +279,7 @@ fn the_key_binding_saves_the_live_settings_and_says_where() {
         AppOptions {
             title: "x.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             config_path: Some(path.clone()),
@@ -315,6 +316,7 @@ fn saving_reports_a_failure_rather_than_claiming_success() {
         AppOptions {
             title: "x.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             config_path: Some(path.clone()),

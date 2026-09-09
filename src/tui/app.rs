@@ -246,6 +246,14 @@ pub struct AppOptions {
     /// icons too, not merely the status bar. List bullets are ASCII either way
     /// (see `render::glyphs`).
     pub icons: bool,
+    /// Whether this terminal draws an emoji-presentation sequence in one column.
+    ///
+    /// The answer [`crate::config::Config::narrow_emoji`] resolves to, already settled:
+    /// the binary measures the terminal once, before the document is first parsed. It is
+    /// kept because a *re*-read has to happen under the same answer — see
+    /// [`super::term`] — or the selector would come back on the first reload and the
+    /// screen would start smearing again.
+    pub narrow_emoji: bool,
     /// The theme to start in.
     pub theme: String,
     /// Whether the table-of-contents pane starts open.
@@ -423,6 +431,14 @@ impl App {
     /// The parsed document.
     pub fn doc(&self) -> &Doc {
         &self.doc
+    }
+
+    /// Whether an emoji-presentation sequence is drawn in one column here.
+    ///
+    /// Settled before the first parse and kept for the life of the pager, so that a
+    /// document re-read from a changed file is narrowed exactly as the first read was.
+    pub fn narrow_emoji(&self) -> bool {
+        self.options.narrow_emoji
     }
 
     /// The active configuration.

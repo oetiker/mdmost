@@ -328,10 +328,20 @@ pub(super) fn reload_tick(app: &mut App, watcher: &mut Watcher) {
     }
     let path = watcher.path();
     match std::fs::read_to_string(path) {
-        Ok(source) => app.reload(crate::doc::Doc::parse_auto_with(
-            &source,
-            app.config().math_syntax(),
-        )),
+        // Narrowed first, exactly as the binary narrowed the first read: the terminal was
+        // measured once, and a document re-read under a different answer would put the
+        // selector back and start the screen smearing again (see `super::probe`).
+        Ok(source) => {
+            let source = if app.narrow_emoji() {
+                crate::text::narrow_emoji(&source).into_owned()
+            } else {
+                source
+            };
+            app.reload(crate::doc::Doc::parse_auto_with(
+                &source,
+                app.config().math_syntax(),
+            ));
+        }
         Err(error) => app.notify(
             format!("could not re-read {}: {error}", path.display()),
             true,
