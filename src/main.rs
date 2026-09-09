@@ -104,6 +104,18 @@ struct Cli {
     #[arg(long, conflicts_with = "math_backslash")]
     no_math_backslash: bool,
 
+    /// Do not re-read the document when the file it came from changes on disk.
+    ///
+    /// Watching is on by default and costs one `stat` every eighth of a second. Turn it
+    /// off to keep reading the document as it was when it was opened, whatever the
+    /// writer does to the file in the meantime.
+    #[arg(long)]
+    no_reload: bool,
+
+    /// Re-read the document when its file changes, even if the config file says not to.
+    #[arg(long, conflicts_with = "no_reload")]
+    reload: bool,
+
     /// Capture the mouse: wheel scrolls, the scrollbar drags, clicks jump in the contents
     /// pane, and dragging over the document copies the Markdown source behind it.
     ///
@@ -259,11 +271,12 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         return Ok(ExitCode::from(EXIT_USAGE));
     }
 
-    let (source, title) = match read_input(match input {
+    let source_path = match input {
         Input::File(path) => Some(path),
         // `Nothing` returned above, so this is standard input either way.
         Input::Stdin | Input::Nothing => None,
-    }) {
+    };
+    let (source, title) = match read_input(source_path) {
         Ok(pair) => pair,
         Err(error) => {
             let _ = writeln!(io::stderr(), "mdmost: {error}");
@@ -277,14 +290,9 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         cli.no_math_backslash,
         config.math_backslash,
     );
+    config.reload = resolve_flag(cli.reload, cli.no_reload, config.reload);
 
-    let doc = Doc::parse_auto_with(
-        &source,
-        mdmost::doc::MathSyntax {
-            dollars: config.math,
-            backslash: config.math && config.math_backslash,
-        },
-    );
+    let doc = Doc::parse_auto_with(&source, config.math_syntax());
 
     let theme_name = cli.theme.clone().unwrap_or_else(|| config.theme.clone());
     let icons = resolve_icons(&cli, config.icons);
@@ -331,7 +339,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             width: cli.width,
         },
     );
-    tui::run(&mut app)?;
+    tui::run(&mut app, source_path)?;
     Ok(ExitCode::SUCCESS)
 }
 

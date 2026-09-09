@@ -135,6 +135,11 @@ impl Config {
             },
             Entry {
                 section: None,
+                key: "reload",
+                value: Some(self.reload.to_string()),
+            },
+            Entry {
+                section: None,
                 key: "scroll_step",
                 value: Some(self.scroll_step.to_string()),
             },
@@ -211,6 +216,9 @@ impl Config {
         }
         if back.mouse != self.mouse {
             return refuse("mouse");
+        }
+        if back.reload != self.reload {
+            return refuse("reload");
         }
         if back.scroll_step != self.scroll_step {
             return refuse("scroll_step");

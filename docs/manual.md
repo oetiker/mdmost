@@ -64,6 +64,12 @@ writes plain text rather than escape sequences.
 - **`--no-math-backslash`** — Do not read `\(…\)` and `\[…\]`, even if the configuration
   file does.
 
+- **`--no-reload`** — Do not re-read the document when the file it came from changes on
+  disk. Watching is on by default; see *Reloading* below.
+
+- **`--reload`** — Re-read the document when its file changes, even if the configuration
+  file turns it off.
+
 - **`--mouse`** — Capture the mouse: the wheel scrolls, the scrollbar drags, a click in
   the contents pane jumps, and a drag over the document copies the Markdown source
   behind it.
@@ -247,6 +253,27 @@ becomes `copied`.
 Capturing the mouse takes away the terminal's own drag-select for as long as
 **mdmost** runs.
 
+# RELOADING
+
+A document read from a file is re-read whenever that file changes on disk, so a
+pager left open beside an editor keeps up with what is being written. The
+reading position is kept: **mdmost** remembers which part of the *source* was at
+the top of the screen and puts the viewport back on it, carrying it across the
+edit, so text inserted above what you are reading does not push you off it.
+
+A live search is re-run against the new text, and the contents pane is rebuilt.
+A footnote popup closes, because the marker it points at may have moved.
+
+The file is looked at once every eighth of a second, and a change is acted on
+only once it has stopped changing, so a document is never shown half-written.
+An editor that saves by renaming a new file over the old one leaves a moment
+where the path does not exist; that is a save in progress, not a reason to
+throw away what is on screen. A file that cannot be read, or that is not text,
+is reported in the status bar and leaves the document alone.
+
+Nothing is watched when the document arrived on standard input: there is no file
+to look at. Turn watching off with `--no-reload` or `reload = false`.
+
 # CONFIGURATION
 
 The configuration file is TOML, at *~/.config/mdmost/config.toml*, or in the
@@ -263,6 +290,7 @@ icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to det
 line_numbers = false     # line-number gutter in fenced code blocks
 title_banner = false     # off; true sets a lone `#` title as a wrapped FIGlet banner
 section_numbers = true   # number headings when a document nests three levels or more
+reload       = true      # re-read the document when its file changes on disk
 mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies
                          # source, and code frames and tables get a [copy] button
 scroll_step  = 3         # document lines per mouse-wheel notch

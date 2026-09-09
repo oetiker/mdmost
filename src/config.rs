@@ -144,6 +144,15 @@ pub struct Config {
     /// agree about. `less` does not capture either. Turn it on with `--mouse` or
     /// `mouse = true`.
     pub mouse: bool,
+    /// Whether the document is re-read when the file it came from changes on disk.
+    ///
+    /// On by default: a pager pointed at a file somebody is editing in another window
+    /// is expected to keep up, and the reader who wanted a frozen copy of a moving
+    /// file can pipe it in instead. Turn it off with `--no-reload` or `reload = false`.
+    ///
+    /// It has nothing to act on when the document arrived on standard input: there is
+    /// no file to watch, and the setting is ignored rather than being an error.
+    pub reload: bool,
     /// How many document lines one mouse-wheel notch scrolls.
     pub scroll_step: u16,
     /// The widest the document body is laid out, however wide the terminal is.
@@ -176,6 +185,7 @@ impl Default for Config {
             toc_open: false,
             toc_width: DEFAULT_TOC_WIDTH,
             mouse: false,
+            reload: true,
             scroll_step: 3,
             body_width: Some(DEFAULT_BODY_WIDTH),
             keys: KeyBindings::defaults(),
@@ -207,6 +217,19 @@ impl Loaded {
 }
 
 impl Config {
+    /// Which math delimiters a document should be parsed with.
+    ///
+    /// Lives here because two callers need the same answer — the binary at startup and
+    /// the pager when it re-reads a file that changed — and two derivations of it are
+    /// two chances to disagree about what `math = false` covers.
+    pub fn math_syntax(&self) -> crate::doc::MathSyntax {
+        crate::doc::MathSyntax {
+            dollars: self.math,
+            // `math` dominates: with the parser off there is nothing to extend.
+            backslash: self.math && self.math_backslash,
+        }
+    }
+
     /// The path configuration is read from when none is given on the command line.
     ///
     /// Returns `None` when the platform has no home directory to speak of.
@@ -350,6 +373,7 @@ struct RawConfig {
     title_banner: Option<bool>,
     section_numbers: Option<bool>,
     mouse: Option<bool>,
+    reload: Option<bool>,
     scroll_step: Option<u16>,
     body_width: Option<u16>,
     #[serde(default)]
@@ -425,6 +449,9 @@ impl RawConfig {
         }
         if let Some(mouse) = self.mouse {
             config.mouse = mouse;
+        }
+        if let Some(reload) = self.reload {
+            config.reload = reload;
         }
         if let Some(step) = self.scroll_step {
             if step == 0 {
@@ -627,6 +654,7 @@ const KNOWN_KEYS: &[&str] = &[
     "title_banner",
     "section_numbers",
     "mouse",
+    "reload",
     "scroll_step",
     "body_width",
     "toc",

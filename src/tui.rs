@@ -22,6 +22,7 @@
 //! | [`dump`] | `--render-once` output, ANSI or plain |
 //! | [`wide`] | Rendering over-wide blocks so they stay horizontally reachable |
 //! | `term` | Terminal lifecycle, signal safety and the event loop |
+//! | `watch` | Noticing that the file behind the document changed on disk |
 //!
 //! The split exists because design spec §13 requires application state to be testable
 //! without a terminal: [`app::App`] never touches one.
@@ -39,6 +40,7 @@ pub mod popup;
 pub mod select;
 pub mod stderr;
 mod term;
+mod watch;
 
 #[cfg(test)]
 mod tests;
@@ -47,13 +49,17 @@ pub use app::{App, AppOptions, Focus, Overlay, PromptKind};
 
 /// Runs the pager to completion.
 ///
+/// `source` is the file the document was read from, if it came from one: the pager
+/// re-reads it while it runs whenever the reader has left `reload` on. `None` — a
+/// document that arrived on standard input — is watched for nothing.
+///
 /// The terminal is restored on every exit path, including panics and `SIGTERM`.
 ///
 /// # Errors
 ///
 /// Returns any I/O failure raised by the terminal.
-pub fn run(app: &mut App) -> std::io::Result<()> {
-    term::run(app)
+pub fn run(app: &mut App, source: Option<&std::path::Path>) -> std::io::Result<()> {
+    term::run(app, source)
 }
 
 /// Restores the terminal, for callers that need to bail out mid-flight.
