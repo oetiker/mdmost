@@ -20,6 +20,13 @@ minor bump rather than a patch.
   spec §10). `SearchSpan` has no constructor and is not `#[non_exhaustive]`, so any
   consumer building one by struct literal — as this crate itself does, in sixteen places —
   stops compiling until the new field is added.
+- `mdmost::tui::run` gained a second parameter, `source: Option<&Path>` — the file the
+  document was read from, which the pager now watches for changes. Pass `None` for a
+  document that did not come from a file, which is what the old signature meant.
+- `Config` gained a public field, `reload: bool` (default `true`), and a method,
+  `Config::math_syntax`, which is the one place `math` and `math_backslash` are turned
+  into a `MathSyntax`. As with the fields below, only a caller building a `Config` by
+  struct literal has to change.
 - `RenderOptions` gained a public field, `math_inline: bool`, and `Config` gained three,
   `math: bool`, `math_inline: bool` and `math_backslash: bool`. Both types already had a
   builder (`RenderOptions::with_math_inline` is new alongside it) and `Default`, so an
@@ -32,6 +39,18 @@ minor bump rather than a patch.
   old behaviour.
 
 ### New
+
+- A document read from a file is re-read while the pager is open, so **mdmost** left
+  beside an editor keeps up with what is being written. The reading position survives
+  the edit: the source offset at the top of the screen is carried across the changed
+  region, so text inserted above what you are reading does not push you off it. A live
+  search is re-run, the contents pane is rebuilt, and a footnote popup closes because
+  the marker it points at may have moved. The file is looked at once every eighth of a
+  second — one `stat`, no new dependency — and a change is acted on only once it has
+  stopped changing, so a half-written save is never shown; a path that momentarily
+  vanishes, which is how many editors save, is waited out rather than treated as an
+  empty document. Standard input is watched for nothing, there being no file. On by
+  default; `--no-reload`, `--reload` and `reload = false` control it.
 
 - `$E = mc^2$` reads as `E = mc²` on the line, wherever inline math appears in a
   document: a paragraph, a table cell, a list item, a footnote. Scripts are Unicode

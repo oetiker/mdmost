@@ -548,3 +548,15 @@ fn the_emoji_width_answer_is_kept_tri_state() {
     assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
     assert_eq!(loaded.config.narrow_emoji, Some(true));
 }
+
+#[test]
+fn auto_reload_is_on_unless_the_file_turns_it_off() {
+    // On by default: a document the reader is editing in another window should keep
+    // up without anybody having to ask for it.
+    assert!(Config::default().reload);
+    assert!(Config::parse_str("", path()).config.reload);
+
+    let loaded = Config::parse_str("reload = false\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert!(!loaded.config.reload);
+}

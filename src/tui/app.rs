@@ -41,6 +41,36 @@ const MAX_REPEAT: usize = 10_000;
 /// the label back. Nothing here schedules a wake-up.
 pub const FLASH_FOR: u64 = 600;
 
+/// Where `offset` in `old` ends up in `new`, for one contiguous edit.
+///
+/// The reading position is remembered as a byte offset into the document source, and an
+/// edit above it moves the bytes it counts. Comparing the two sources from both ends
+/// finds the region that actually changed: an offset before it keeps its value, an
+/// offset after it shifts by however much the document grew or shrank, and an offset
+/// *inside* it has no answer — the text it named is what was edited — so it keeps its
+/// value and the reader lands as near as the render allows.
+///
+/// Exact for the single edited region an editor's save produces, which is the case this
+/// exists for. Several edits at once collapse into the one region that spans them, which
+/// is approximate rather than wrong: only the position is at stake, and the reader can
+/// see where they are.
+pub(super) fn remap_offset(old: &str, new: &str, offset: usize) -> usize {
+    let old = old.as_bytes();
+    let new = new.as_bytes();
+    let common = old.len().min(new.len());
+    let prefix = (0..common).take_while(|&i| old[i] == new[i]).count();
+    if offset < prefix {
+        return offset;
+    }
+    let suffix = (0..common - prefix)
+        .take_while(|&i| old[old.len() - 1 - i] == new[new.len() - 1 - i])
+        .count();
+    if offset >= old.len() - suffix {
+        return (offset + new.len()).saturating_sub(old.len());
+    }
+    offset.min(new.len())
+}
+
 /// Whether `key` is a bare digit, and so part of a repeat count.
 fn is_count_digit(key: Key) -> bool {
     matches!(key.code, KeyCode::Char(ch) if ch.is_ascii_digit()) && key.mods.is_empty()
@@ -854,6 +884,52 @@ impl App {
         }
         self.clamp();
         self.track_toc();
+    }
+
+    /// Replaces the document with a newly parsed one, keeping the reader in place.
+    ///
+    /// The file behind the pager changed and [`super::term`] read it again; the state
+    /// machine touches no file itself (design spec §13), so it is handed the parsed
+    /// result. Everything derived from the old document is rebuilt here rather than
+    /// carried over — the table of contents, the search hits, the render — and
+    /// everything anchored to the *old canvas* is dropped, exactly as a reflow drops it.
+    ///
+    /// The reading position survives the way it survives a resize, through the source
+    /// offset of the topmost visible text; unlike a resize, that offset has to be
+    /// carried across the edit first (see [`remap_offset`]), because the bytes it counts
+    /// have moved.
+    pub fn reload(&mut self, doc: Doc) {
+        self.ensure_rendered();
+        let anchor = self
+            .source_offset_at(self.scroll)
+            .map(|offset| remap_offset(self.doc.source(), doc.source(), offset));
+        // Both are anchored to geometry the new render is about to replace, the same
+        // way a resize invalidates them.
+        self.bar_grab = None;
+        self.popup = None;
+        self.doc = doc;
+        // Rebuilt before the render, because `ensure_rendered` re-attaches the pane's
+        // anchors to the new canvas and would otherwise attach the old pane to it.
+        self.toc = Toc::from_doc(
+            &self.doc,
+            &crate::numbering::Numbering::enabled(&self.doc, self.config.section_numbers),
+        );
+        // Re-run rather than re-located: `ensure_rendered` projects existing hits onto
+        // the new canvas, but the hits themselves came from the old *source* and a
+        // reload is precisely the case where that source changed.
+        if !self.search.query().is_empty() {
+            self.search = Search::new(self.doc.source(), self.search.query(), self.search.mode())
+                .unwrap_or_else(|_| Search::empty());
+        }
+        self.search_index = None;
+        self.ensure_rendered();
+        if let Some(offset) = anchor {
+            self.scroll = self.row_for_source_offset(offset);
+        }
+        self.clamp();
+        self.refilter_toc();
+        self.track_toc();
+        self.notify("reloaded", false);
     }
 
     /// Renders the document if the cache is stale, then re-attaches anchors and hits.

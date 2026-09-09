@@ -7470,3 +7470,334 @@ fn anything_that_is_not_a_report_is_no_answer() {
         assert_eq!(super::probe::column_of(bytes), None, "{bytes:?}");
     }
 }
+// Reloading a document whose file changed underneath the pager.
+//
+// The state machine touches no file (design spec §13): `super::term` reads and parses,
+// and hands the new document over. What is tested here is everything that happens on
+// this side of that hand-over.
+// ---------------------------------------------------------------------------
+
+/// [`SAMPLE`] with enough filler under it that any of its headings can be scrolled to
+/// the top of a twelve-row viewport, which is what makes a reading position observable.
+fn padded_sample() -> String {
+    format!("{SAMPLE}\n{}", "Filler line of prose.\n\n".repeat(20))
+}
+
+/// The row the heading named `text` was rendered on.
+fn row_of_heading(app: &mut App, text: &str) -> usize {
+    let _ = app.canvas();
+    let index = app
+        .toc()
+        .entries()
+        .iter()
+        .position(|entry| entry.text == text)
+        .unwrap_or_else(|| panic!("no heading called {text}"));
+    app.toc()
+        .row_of(index)
+        .unwrap_or_else(|| panic!("{text} was not rendered"))
+}
+
+#[test]
+fn reloading_keeps_the_reading_position_when_the_edit_is_below_it() {
+    let source = padded_sample();
+    let mut app = pager(&source);
+    let details = row_of_heading(&mut app, "Details");
+    app.scroll_by(details as isize);
+    assert_eq!(
+        app.scroll(),
+        details,
+        "the sample is too short to test this"
+    );
+
+    let mut edited = source.clone();
+    edited.push_str("\n## Afterword\n\nNu xi omicron.\n");
+    app.reload(Doc::parse(&edited));
+
+    assert_eq!(
+        app.scroll(),
+        row_of_heading(&mut app, "Details"),
+        "the reader was left somewhere else by an edit below them"
+    );
+}
+
+#[test]
+fn reloading_keeps_the_reading_position_when_the_edit_is_above_it() {
+    let source = padded_sample();
+    let mut app = pager(&source);
+    let summary = row_of_heading(&mut app, "Summary");
+    app.scroll_by(summary as isize);
+    assert_eq!(
+        app.scroll(),
+        summary,
+        "the sample is too short to test this"
+    );
+
+    // What an editor does most: text appears above what is on screen. The anchor is a
+    // byte offset into the old source, so it has to be carried across the edit rather
+    // than used as it stands, or the reader slides by the size of the insertion.
+    let edited = format!("Preface. One more line of it.\n\n{source}");
+    app.reload(Doc::parse(&edited));
+
+    assert_eq!(
+        app.scroll(),
+        row_of_heading(&mut app, "Summary"),
+        "the reader slid off the section they were reading"
+    );
+}
+
+#[test]
+fn reloading_a_shorter_document_clamps_to_its_end() {
+    let mut app = pager(SAMPLE);
+    app.act(Action::Bottom);
+    assert!(app.scroll() > 0);
+
+    app.reload(Doc::parse("# Tiny\n\nOne line.\n"));
+
+    assert!(
+        app.scroll() <= app.max_scroll(),
+        "scrolled past the end of the new document"
+    );
+}
+
+#[test]
+fn reloading_rebuilds_the_table_of_contents() {
+    let mut app = pager(SAMPLE);
+    app.reload(Doc::parse("# Fresh\n\n## Second\n"));
+    let _ = app.canvas();
+
+    let headings: Vec<&str> = app
+        .toc()
+        .entries()
+        .iter()
+        .map(|entry| entry.text.as_str())
+        .collect();
+    assert_eq!(headings, ["Fresh", "Second"]);
+}
+
+#[test]
+fn reloading_re_runs_the_live_search() {
+    let mut app = pager(SAMPLE);
+    app.act(Action::SearchForward);
+    for ch in "Needle".chars() {
+        app.on_key(Key::char(ch));
+    }
+    app.on_key(Key::plain(KeyCode::Enter));
+    assert_eq!(app.search().len(), 2);
+
+    let edited = format!("{SAMPLE}\nNeedle once more.\n");
+    app.reload(Doc::parse(&edited));
+    let _ = app.canvas();
+
+    assert_eq!(
+        app.search().len(),
+        3,
+        "the search was not re-run against the new document"
+    );
+}
+
+#[test]
+fn reloading_closes_a_footnote_popup() {
+    // The box is anchored to a marker at a position the new render may not have, and a
+    // box pointing at a sentence that has moved is worse than no box (design spec §6).
+    let mut app = open_footnote("a[^n]\n\n[^n]: short\n", 80, 24);
+    app.reload(Doc::parse("b[^n]\n\n[^n]: short\n"));
+    assert!(app.popup().is_none());
+}
+
+#[test]
+fn reloading_says_so_in_the_status_bar() {
+    let mut app = pager(SAMPLE);
+    app.reload(Doc::parse("# Fresh\n"));
+    let notice = app.notice().expect("a reload is worth reporting");
+    assert!(!notice.is_error, "a reload is not a failure");
+    assert!(
+        notice.text.contains("reloaded"),
+        "unexpected notice: {}",
+        notice.text
+    );
+}
+
+#[test]
+fn an_offset_before_an_edit_keeps_its_value() {
+    let old = "alpha\nbeta\n";
+    let new = "alpha\nbeta\ngamma\n";
+    assert_eq!(super::app::remap_offset(old, new, 2), 2);
+}
+
+#[test]
+fn an_offset_after_an_edit_moves_with_it() {
+    let old = "alpha\nbeta\n";
+    let new = "one\ntwo\nalpha\nbeta\n";
+    // "beta" starts at 6 in the old source and at 14 in the new one.
+    assert_eq!(super::app::remap_offset(old, new, 6), 14);
+
+    // And the same in reverse, when the lines above are deleted again.
+    assert_eq!(super::app::remap_offset(new, old, 14), 6);
+}
+
+#[test]
+fn an_offset_inside_an_edit_stays_within_the_new_source() {
+    let old = "alpha\nbeta\ngamma\n";
+    let new = "alpha\nB\ngamma\n";
+    let mapped = super::app::remap_offset(old, new, 8);
+    assert!(mapped <= new.len(), "{mapped} is past the end of {new:?}");
+}
+
+#[test]
+fn an_unchanged_source_maps_every_offset_to_itself() {
+    let text = "alpha\nbeta\n";
+    for offset in 0..=text.len() {
+        assert_eq!(super::app::remap_offset(text, text, offset), offset);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Noticing that the file changed (`super::watch`).
+// ---------------------------------------------------------------------------
+
+/// A directory that removes itself, so a test cannot leak into the developer's home.
+struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> Self {
+        let base = std::env::temp_dir().join(format!(
+            "mdmost-watch-{}-{}-{name}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|since| since.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&base).expect("temp dir");
+        Self(base)
+    }
+
+    fn file(&self, name: &str, content: &str) -> std::path::PathBuf {
+        let path = self.0.join(name);
+        std::fs::write(&path, content).expect("write");
+        path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn an_untouched_file_is_never_reported_as_changed() {
+    let dir = TempDir::new("untouched");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path);
+    for _ in 0..5 {
+        assert!(!watcher.changed());
+    }
+}
+
+#[test]
+fn a_change_is_reported_once_it_has_settled() {
+    let dir = TempDir::new("settled");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path);
+
+    std::fs::write(&path, "# One\n\nAnd a second paragraph.\n").expect("write");
+    assert!(
+        !watcher.changed(),
+        "a file seen changing for the first time may still be half written"
+    );
+    assert!(watcher.changed(), "the change settled and was not reported");
+    assert!(!watcher.changed(), "the same change was reported twice");
+}
+
+#[test]
+fn a_file_still_being_written_is_left_alone_until_it_stops() {
+    let dir = TempDir::new("in-flight");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path);
+
+    std::fs::write(&path, "# One\n\nHalf of a").expect("write");
+    assert!(!watcher.changed());
+    std::fs::write(
+        &path,
+        "# One\n\nHalf of a paragraph, then the rest of it.\n",
+    )
+    .expect("write");
+    assert!(!watcher.changed(), "reported a file that was still growing");
+    assert!(watcher.changed(), "the finished file was never reported");
+}
+
+#[test]
+fn a_file_that_vanishes_mid_save_is_not_a_change() {
+    // Editors that save by writing a new file and renaming it over the old one leave a
+    // window where the path does not exist. That is a save in progress, not a document
+    // to load, and certainly not a reason to throw away the one on screen.
+    let dir = TempDir::new("renamed");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path);
+
+    std::fs::remove_file(&path).expect("remove");
+    assert!(!watcher.changed());
+    assert!(!watcher.changed());
+
+    std::fs::write(&path, "# One\n\nBack again, with more text.\n").expect("write");
+    assert!(!watcher.changed());
+    assert!(watcher.changed(), "the replacement file was never reported");
+}
+
+#[test]
+fn a_settled_change_reaches_the_document() {
+    let dir = TempDir::new("tick");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager("# One\n");
+    let mut watcher = super::watch::Watcher::new(&path);
+
+    std::fs::write(&path, "# Two\n\nWith a paragraph.\n").expect("write");
+    super::term::reload_tick(&mut app, &mut watcher);
+    assert_eq!(
+        app.doc().source(),
+        "# One\n",
+        "a change was taken up before it had settled"
+    );
+
+    super::term::reload_tick(&mut app, &mut watcher);
+    assert_eq!(app.doc().source(), "# Two\n\nWith a paragraph.\n");
+    assert_eq!(app.toc().entries()[0].text, "Two");
+}
+
+#[test]
+fn a_file_that_cannot_be_read_keeps_the_document_on_screen() {
+    let dir = TempDir::new("unreadable");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager("# One\n");
+    let mut watcher = super::watch::Watcher::new(&path);
+
+    // Not text, so reading it back as a document fails where opening it did not.
+    std::fs::write(&path, [0x23, 0x20, 0xff, 0xfe, 0x0a]).expect("write");
+    super::term::reload_tick(&mut app, &mut watcher);
+    super::term::reload_tick(&mut app, &mut watcher);
+
+    assert_eq!(
+        app.doc().source(),
+        "# One\n",
+        "an unreadable file replaced the document that was on screen"
+    );
+    let notice = app.notice().expect("the failure was not reported");
+    assert!(notice.is_error, "unexpected notice: {}", notice.text);
+}
+
+#[test]
+fn the_math_syntax_follows_the_configuration() {
+    let mut config = Config::default();
+    assert!(config.math_syntax().dollars);
+    assert!(!config.math_syntax().backslash);
+
+    config.math_backslash = true;
+    assert!(config.math_syntax().backslash);
+
+    // `math = false` dominates: with the parser off there is nothing for either of the
+    // other two keys to act on.
+    config.math = false;
+    assert!(!config.math_syntax().dollars);
+    assert!(!config.math_syntax().backslash);
+}

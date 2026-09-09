@@ -55,6 +55,7 @@ fn settings() -> Config {
         toc_open: true,
         toc_width: 44,
         mouse: true,
+        reload: false,
         scroll_step: 7,
         body_width: Some(72),
         ..Config::default()

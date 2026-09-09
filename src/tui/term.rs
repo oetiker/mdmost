@@ -23,6 +23,7 @@
 //! than open-coded anywhere.
 
 use std::io::{self, Write};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -37,6 +38,7 @@ use crate::canvas::HotspotKind;
 use crate::config::{Key, KeyCode, KeyMods};
 
 use super::app::{Activation, App, Focus};
+use super::watch::Watcher;
 use super::{chrome, draw};
 
 /// How long the loop waits for input before checking the termination flag.
@@ -178,7 +180,7 @@ impl Input {
 ///
 /// Returns any I/O failure from the terminal, including [`terminal_gone`] when the
 /// terminal is hung up under the pager. The terminal is restored either way.
-pub fn run(app: &mut App) -> io::Result<()> {
+pub fn run(app: &mut App, source: Option<&Path>) -> io::Result<()> {
     install_panic_hook();
     // Declared before the `Restore` guard so that it is dropped after it: what a
     // library complained about is printed once the terminal is the reader's again, not
@@ -211,7 +213,10 @@ pub fn run(app: &mut App) -> io::Result<()> {
     // restoration has to be part of that order rather than a scope-end surprise.
     let guard = Restore;
 
-    let result = event_loop(app, &mut terminal, &input, &terminate);
+    // Nothing to watch when the document came down a pipe, and nothing to watch when
+    // the reader turned it off.
+    let mut watcher = source.filter(|_| app.config().reload).map(Watcher::new);
+    let result = event_loop(app, &mut terminal, &input, &terminate, watcher.as_mut());
     if result.is_err() {
         // `ratatui`'s `Terminal` complains into standard error from its destructor
         // when it cannot show the cursor — and when a terminal has just died, that
@@ -241,6 +246,7 @@ fn event_loop(
     terminal: &mut ratatui::DefaultTerminal,
     input: &Input,
     terminate: &Arc<AtomicBool>,
+    mut watched: Option<&mut Watcher>,
 ) -> io::Result<()> {
     // Laying out a large document takes real time, and an empty alternate screen is
     // indistinguishable from a hang (usability review B5). One cheap frame first says
@@ -266,6 +272,11 @@ fn event_loop(
         redraw = true;
         if waited == Wait::Gone {
             return Err(terminal_gone());
+        }
+        // Before the events, so that a document which changed under a reader who is
+        // holding a movement key is still re-read rather than starved by the input.
+        if let Some(watcher) = watched.as_deref_mut() {
+            reload_tick(app, watcher);
         }
         // The descriptor was live a moment ago, so `crossterm` may look at it. Zero
         // timeout: the waiting has already been done, and asking even when nothing
@@ -300,6 +311,32 @@ fn event_loop(
         }
     }
     Ok(())
+}
+
+/// Re-reads the document when the file behind it has changed and settled.
+///
+/// Reading and parsing live here rather than in [`App`] because the state machine
+/// touches no file (design spec §13); what it is handed is a parsed document.
+///
+/// A file that cannot be read or is not text is reported in the status bar and changes
+/// nothing else: the document on screen is the last one that *was* readable, which is
+/// more use to the reader than an empty screen. The change is consumed either way, so a
+/// file that stays broken says so once rather than on every tick.
+pub(super) fn reload_tick(app: &mut App, watcher: &mut Watcher) {
+    if !watcher.changed() {
+        return;
+    }
+    let path = watcher.path();
+    match std::fs::read_to_string(path) {
+        Ok(source) => app.reload(crate::doc::Doc::parse_auto_with(
+            &source,
+            app.config().math_syntax(),
+        )),
+        Err(error) => app.notify(
+            format!("could not re-read {}: {error}", path.display()),
+            true,
+        ),
+    }
 }
 
 /// Dispatches a key event.
