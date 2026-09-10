@@ -12,7 +12,7 @@
 //! document is never parsed half-written. See [`Watcher::changed`].
 
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 /// What is compared to decide whether a file changed.
 ///
@@ -45,15 +45,24 @@ pub(super) struct Watcher {
     seen: Option<Stamp>,
     /// A stamp seen once and not yet confirmed by a second look.
     pending: Option<Stamp>,
+    /// How long a file that is being written has to be still before it is re-read.
+    settle: Duration,
+    /// When [`Watcher::pending`] was last set to something new.
+    moved: Option<Instant>,
+    /// Whether the pending change arrived out of a quiet spell rather than mid-burst.
+    after_quiet: bool,
 }
 
 impl Watcher {
     /// Starts watching `path` as it stands now.
-    pub(super) fn new(path: &Path) -> Self {
+    pub(super) fn new(path: &Path, settle: Duration) -> Self {
         Self {
             path: path.to_path_buf(),
             seen: Stamp::of(path),
             pending: None,
+            settle,
+            moved: None,
+            after_quiet: true,
         }
     }
 
@@ -73,6 +82,23 @@ impl Watcher {
     /// rename that editors save through — is not a change and is not an error. The
     /// document stays as it is and the next tick looks again.
     pub(super) fn changed(&mut self) -> bool {
+        self.changed_at(Instant::now())
+    }
+
+    /// [`Watcher::changed`], against a clock the caller supplies.
+    ///
+    /// The time is passed in rather than read here so that a test can cross the settle
+    /// window in a microsecond and get the same answer on every run.
+    ///
+    /// Settling is two questions, not one. The first is whether the file is *momentarily*
+    /// still — the same stamp two looks running — which is what keeps a half-written save
+    /// from being parsed. The second is [`Watcher::settle`]: a change that arrives out of
+    /// a quiet spell is taken up as soon as it is momentarily still, and one that arrives
+    /// while the file is already being written is ridden out until the writing stops for
+    /// the whole window. A file written without pause is therefore never taken up after
+    /// the first change, which is the point: every re-read would be thrown away by the
+    /// next write, at the cost of a re-render and a status-bar flash apiece.
+    pub(super) fn changed_at(&mut self, at: Instant) -> bool {
         let Some(now) = Stamp::of(&self.path) else {
             self.pending = None;
             return false;
@@ -81,12 +107,26 @@ impl Watcher {
             self.pending = None;
             return false;
         }
-        if self.pending == Some(now) {
-            self.seen = Some(now);
-            self.pending = None;
-            return true;
+        if self.pending != Some(now) {
+            // The stamp moved. Whether this is the start of a burst or a lone save is
+            // decided here, while the gap back to the previous move is still known.
+            self.after_quiet = self
+                .moved
+                .is_none_or(|moved| at.saturating_duration_since(moved) >= self.settle);
+            self.pending = Some(now);
+            self.moved = Some(at);
+            return false;
         }
-        self.pending = Some(now);
-        false
+        // Momentarily still. Take it up if it came out of the quiet, or if the writing
+        // has now stopped for the whole window.
+        let still_for = self
+            .moved
+            .map_or(self.settle, |moved| at.saturating_duration_since(moved));
+        if !self.after_quiet && still_for < self.settle {
+            return false;
+        }
+        self.seen = Some(now);
+        self.pending = None;
+        true
     }
 }

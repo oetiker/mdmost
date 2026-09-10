@@ -149,6 +149,11 @@ impl Config {
             },
             Entry {
                 section: None,
+                key: "reload_settle",
+                value: Some(self.reload_settle.to_string()),
+            },
+            Entry {
+                section: None,
                 key: "scroll_step",
                 value: Some(self.scroll_step.to_string()),
             },
@@ -231,6 +236,9 @@ impl Config {
         }
         if back.reload != self.reload {
             return refuse("reload");
+        }
+        if back.reload_settle != self.reload_settle {
+            return refuse("reload_settle");
         }
         if back.scroll_step != self.scroll_step {
             return refuse("scroll_step");

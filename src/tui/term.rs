@@ -215,7 +215,10 @@ pub fn run(app: &mut App, source: Option<&Path>) -> io::Result<()> {
 
     // Nothing to watch when the document came down a pipe, and nothing to watch when
     // the reader turned it off.
-    let mut watcher = source.filter(|_| app.config().reload).map(Watcher::new);
+    let settle = Duration::from_secs(app.config().reload_settle.into());
+    let mut watcher = source
+        .filter(|_| app.config().reload)
+        .map(|path| Watcher::new(path, settle));
     let result = event_loop(app, &mut terminal, &input, &terminate, watcher.as_mut());
     if result.is_err() {
         // `ratatui`'s `Terminal` complains into standard error from its destructor

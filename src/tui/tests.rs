@@ -7718,13 +7718,129 @@ impl Drop for TempDir {
     }
 }
 
+/// A clock a test drives by hand, so the settle window can be crossed without sleeping.
+///
+/// The watcher is asked what the time is rather than reading it, which is what lets a
+/// test cross a two-second window in a microsecond and get the same answer every run.
+struct Clock(std::time::Instant);
+
+impl Clock {
+    fn new() -> Self {
+        Self(std::time::Instant::now())
+    }
+
+    /// `seconds` after the clock was made.
+    fn at(&self, seconds: f64) -> std::time::Instant {
+        self.0 + std::time::Duration::from_secs_f64(seconds)
+    }
+}
+
+/// The settle window the tests below use, well clear of the fractions they step by.
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
+
 #[test]
 fn an_untouched_file_is_never_reported_as_changed() {
     let dir = TempDir::new("untouched");
     let path = dir.file("doc.md", "# One\n");
-    let mut watcher = super::watch::Watcher::new(&path);
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
     for _ in 0..5 {
         assert!(!watcher.changed());
+    }
+}
+
+#[test]
+fn a_change_after_a_quiet_spell_is_taken_up_at_once() {
+    // The reader who saves once and looks over at the pager is the common case, and
+    // waiting out the settle window for them would make the feature feel broken.
+    let clock = Clock::new();
+    let dir = TempDir::new("quiet");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    std::fs::write(&path, "# One\n\nA second paragraph.\n").expect("write");
+    assert!(!watcher.changed_at(clock.at(10.0)));
+    assert!(
+        watcher.changed_at(clock.at(10.2)),
+        "a lone change waited on the settle window it should have skipped"
+    );
+}
+
+#[test]
+fn a_burst_of_writes_is_taken_up_once_it_stops() {
+    // An editor that saves while the reader types produces one of these. Re-reading on
+    // each save costs a full re-render and flashes the status bar, so the burst is
+    // ridden out and the document catches up when the writing stops.
+    let clock = Clock::new();
+    let dir = TempDir::new("burst");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    // The first save comes out of the quiet and is taken up at once.
+    std::fs::write(&path, "# One\na\n").expect("write");
+    assert!(!watcher.changed_at(clock.at(0.0)));
+    assert!(watcher.changed_at(clock.at(0.1)));
+
+    // The rest arrive half a second apart, and none of them is taken up.
+    for (index, at) in [0.5_f64, 1.0, 1.5].into_iter().enumerate() {
+        std::fs::write(&path, format!("# One\n{}\n", "b".repeat(index + 2))).expect("write");
+        assert!(!watcher.changed_at(clock.at(at)));
+        assert!(
+            !watcher.changed_at(clock.at(at + 0.1)),
+            "a change mid-burst was taken up at {at}s"
+        );
+    }
+
+    // Still short of the window measured from the last write, so still nothing.
+    assert!(
+        !watcher.changed_at(clock.at(3.4)),
+        "the burst was taken up before it had been still for the settle window"
+    );
+    assert!(
+        watcher.changed_at(clock.at(3.6)),
+        "the burst was never taken up after it stopped"
+    );
+}
+
+#[test]
+fn a_file_written_without_pause_is_never_taken_up() {
+    // A document being regenerated in a loop. Every re-read would be thrown away by the
+    // next one, so after the first the reader is left with a document that holds still.
+    let clock = Clock::new();
+    let dir = TempDir::new("endless");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    std::fs::write(&path, "# One\nstart\n").expect("write");
+    assert!(!watcher.changed_at(clock.at(0.0)));
+    assert!(watcher.changed_at(clock.at(0.1)));
+
+    for step in 1..120 {
+        let at = f64::from(step) * 0.5;
+        std::fs::write(&path, format!("# One\n{}\n", "x".repeat(step as usize))).expect("write");
+        assert!(!watcher.changed_at(clock.at(at)));
+        assert!(
+            !watcher.changed_at(clock.at(at + 0.1)),
+            "a file still being written was taken up at {at}s"
+        );
+    }
+}
+
+#[test]
+fn a_settle_window_of_zero_takes_up_every_change() {
+    // The escape hatch for a reader who would rather see every write, whatever it costs.
+    let clock = Clock::new();
+    let dir = TempDir::new("no-settle");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, std::time::Duration::ZERO);
+
+    for step in 1..4 {
+        let at = f64::from(step) * 0.5;
+        std::fs::write(&path, format!("# One\n{}\n", "y".repeat(step as usize))).expect("write");
+        assert!(!watcher.changed_at(clock.at(at)));
+        assert!(
+            watcher.changed_at(clock.at(at + 0.1)),
+            "a change was held back although the settle window is zero"
+        );
     }
 }
 
@@ -7732,7 +7848,7 @@ fn an_untouched_file_is_never_reported_as_changed() {
 fn a_change_is_reported_once_it_has_settled() {
     let dir = TempDir::new("settled");
     let path = dir.file("doc.md", "# One\n");
-    let mut watcher = super::watch::Watcher::new(&path);
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
 
     std::fs::write(&path, "# One\n\nAnd a second paragraph.\n").expect("write");
     assert!(
@@ -7745,19 +7861,30 @@ fn a_change_is_reported_once_it_has_settled() {
 
 #[test]
 fn a_file_still_being_written_is_left_alone_until_it_stops() {
+    let clock = Clock::new();
     let dir = TempDir::new("in-flight");
     let path = dir.file("doc.md", "# One\n");
-    let mut watcher = super::watch::Watcher::new(&path);
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
 
     std::fs::write(&path, "# One\n\nHalf of a").expect("write");
-    assert!(!watcher.changed());
+    assert!(!watcher.changed_at(clock.at(0.0)));
     std::fs::write(
         &path,
         "# One\n\nHalf of a paragraph, then the rest of it.\n",
     )
     .expect("write");
-    assert!(!watcher.changed(), "reported a file that was still growing");
-    assert!(watcher.changed(), "the finished file was never reported");
+    assert!(
+        !watcher.changed_at(clock.at(0.05)),
+        "reported a file that was still growing"
+    );
+    assert!(
+        !watcher.changed_at(clock.at(0.15)),
+        "a file that grew twice in a tenth of a second is still being written"
+    );
+    assert!(
+        watcher.changed_at(clock.at(2.2)),
+        "the finished file was never reported"
+    );
 }
 
 #[test]
@@ -7767,7 +7894,7 @@ fn a_file_that_vanishes_mid_save_is_not_a_change() {
     // to load, and certainly not a reason to throw away the one on screen.
     let dir = TempDir::new("renamed");
     let path = dir.file("doc.md", "# One\n");
-    let mut watcher = super::watch::Watcher::new(&path);
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
 
     std::fs::remove_file(&path).expect("remove");
     assert!(!watcher.changed());
@@ -7783,7 +7910,7 @@ fn a_settled_change_reaches_the_document() {
     let dir = TempDir::new("tick");
     let path = dir.file("doc.md", "# One\n");
     let mut app = pager("# One\n");
-    let mut watcher = super::watch::Watcher::new(&path);
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
 
     std::fs::write(&path, "# Two\n\nWith a paragraph.\n").expect("write");
     super::term::reload_tick(&mut app, &mut watcher);
@@ -7803,7 +7930,7 @@ fn a_file_that_cannot_be_read_keeps_the_document_on_screen() {
     let dir = TempDir::new("unreadable");
     let path = dir.file("doc.md", "# One\n");
     let mut app = pager("# One\n");
-    let mut watcher = super::watch::Watcher::new(&path);
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
 
     // Not text, so reading it back as a document fails where opening it did not.
     std::fs::write(&path, [0x23, 0x20, 0xff, 0xfe, 0x0a]).expect("write");
@@ -7843,7 +7970,7 @@ fn a_reload_narrows_emoji_the_way_the_first_read_did() {
     let dir = TempDir::new("narrow");
     let path = dir.file("doc.md", "# One\n");
     let mut app = pager_narrow("# One\n");
-    let mut watcher = super::watch::Watcher::new(&path);
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
 
     std::fs::write(&path, "# Two ☸️ three\n").expect("write");
     super::term::reload_tick(&mut app, &mut watcher);
@@ -7857,7 +7984,7 @@ fn a_reload_keeps_the_selector_when_the_terminal_wanted_it() {
     let dir = TempDir::new("wide");
     let path = dir.file("doc.md", "# One\n");
     let mut app = pager("# One\n");
-    let mut watcher = super::watch::Watcher::new(&path);
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
 
     std::fs::write(&path, "# Two ☸️ three\n").expect("write");
     super::term::reload_tick(&mut app, &mut watcher);

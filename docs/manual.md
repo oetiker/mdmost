@@ -273,6 +273,17 @@ A footnote popup closes, because the marker it points at may have moved.
 
 The file is looked at once every eighth of a second, and a change is acted on
 only once it has stopped changing, so a document is never shown half-written.
+
+How long it must have stopped for depends on what the file was doing before.
+A change that arrives out of a quiet spell is taken up straight away, which is
+the reader who saves in one window and looks over at the other. A change that
+arrives while the file is *already* being written is ridden out instead: an
+editor that saves every second or two would otherwise cost a full re-render and
+a status-bar flash on each save, and every one of those re-reads would be thrown
+away by the next. The document catches up once the writing has stopped for
+`reload_settle` seconds, two by default. A file that is written without pause is
+therefore never taken up after the first change; it holds still until the writing
+stops. Set `reload_settle = 0` to take up every change as soon as it has settled.
 An editor that saves by renaming a new file over the old one leaves a moment
 where the path does not exist; that is a save in progress, not a reason to
 throw away what is on screen. A file that cannot be read, or that is not text,
@@ -299,6 +310,7 @@ title_banner = false     # off; true sets a lone `#` title as a wrapped FIGlet b
 section_numbers = true   # number headings when a document nests three levels or more
 narrow_emoji = false     # emoji-presentation sequences in one column; omit to measure
 reload       = true      # re-read the document when its file changes on disk
+reload_settle = 2        # seconds a file being written must hold still first; 0 for none
 mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies
                          # source, and code frames and tables get a [copy] button
 scroll_step  = 3         # document lines per mouse-wheel notch

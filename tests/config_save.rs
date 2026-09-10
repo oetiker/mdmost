@@ -56,6 +56,7 @@ fn settings() -> Config {
         toc_width: 44,
         mouse: true,
         reload: false,
+        reload_settle: 9,
         scroll_step: 7,
         body_width: Some(72),
         ..Config::default()

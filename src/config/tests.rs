@@ -560,3 +560,23 @@ fn auto_reload_is_on_unless_the_file_turns_it_off() {
     assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
     assert!(!loaded.config.reload);
 }
+
+#[test]
+fn the_settle_window_defaults_to_two_seconds_and_can_be_set() {
+    // Whole seconds, because TOML tells `2` and `2.0` apart: a decimal field would turn
+    // the obvious `reload_settle = 2` into a type error.
+    assert_eq!(Config::default().reload_settle, DEFAULT_RELOAD_SETTLE);
+    assert_eq!(
+        Config::parse_str("", path()).config.reload_settle,
+        DEFAULT_RELOAD_SETTLE
+    );
+
+    let loaded = Config::parse_str("reload_settle = 5\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.reload_settle, 5);
+
+    // Zero is the escape hatch, not a mistake: take up every change as it settles.
+    let loaded = Config::parse_str("reload_settle = 0\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.reload_settle, 0);
+}

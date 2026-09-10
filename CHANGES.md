@@ -52,6 +52,16 @@ minor bump rather than a patch.
   empty document. Standard input is watched for nothing, there being no file. On by
   default; `--no-reload`, `--reload` and `reload = false` control it.
 
+  How long a change must have settled for depends on what the file was doing before it.
+  One that arrives out of a quiet spell is taken up at once — the reader who saves and
+  looks over. One that arrives while the file is already being written is ridden out,
+  because each re-read costs a full re-render and a status-bar flash and would be thrown
+  away by the next write; the document catches up once the writing has stopped for
+  `reload_settle` seconds, two by default. A file written without pause therefore holds
+  still after the first change. `reload_settle = 0` takes up every settled change.
+  `Config` gained the field, which is an API break for a caller building one by struct
+  literal.
+
 - `$E = mc^2$` reads as `E = mc²` on the line, wherever inline math appears in a
   document: a paragraph, a table cell, a list item, a footnote. Scripts are Unicode
   where a full raised or lowered form exists and written flat (`x^q`) where it does

@@ -33,6 +33,12 @@ use crate::theme::{Color, Theme};
 
 pub use keys::{Action, ActionGroup, Key, KeyBindings, KeyCode, KeyMods};
 
+/// How long a file being written holds still before it is re-read, in seconds.
+///
+/// Long enough to ride out an editor that saves while the reader types, short enough
+/// that a pause in the writing shows up before the reader wonders whether it will.
+pub const DEFAULT_RELOAD_SETTLE: u16 = 2;
+
 /// The default width of the table-of-contents pane, in columns.
 pub const DEFAULT_TOC_WIDTH: u16 = 30;
 
@@ -166,6 +172,19 @@ pub struct Config {
     /// It has nothing to act on when the document arrived on standard input: there is
     /// no file to watch, and the setting is ignored rather than being an error.
     pub reload: bool,
+    /// How long a file that is being written must hold still before it is re-read.
+    ///
+    /// A change that arrives out of a quiet spell is taken up at once, which is the
+    /// reader who saves and looks over. A change that arrives while the file is already
+    /// being written is ridden out instead: an editor saving on every keystroke would
+    /// otherwise cost a full re-render and a status-bar flash apiece, and every one of
+    /// those re-reads would be thrown away by the next. The document catches up once
+    /// the writing has stopped for this long.
+    ///
+    /// In whole seconds, because TOML tells `2` and `2.0` apart and a reader writing the
+    /// obvious `reload_settle = 2` for a decimal field would get a type error. `0` takes
+    /// up every change as soon as it has settled.
+    pub reload_settle: u16,
     /// How many document lines one mouse-wheel notch scrolls.
     pub scroll_step: u16,
     /// The widest the document body is laid out, however wide the terminal is.
@@ -200,6 +219,7 @@ impl Default for Config {
             mouse: false,
             narrow_emoji: None,
             reload: true,
+            reload_settle: DEFAULT_RELOAD_SETTLE,
             scroll_step: 3,
             body_width: Some(DEFAULT_BODY_WIDTH),
             keys: KeyBindings::defaults(),
@@ -389,6 +409,7 @@ struct RawConfig {
     mouse: Option<bool>,
     narrow_emoji: Option<bool>,
     reload: Option<bool>,
+    reload_settle: Option<u16>,
     scroll_step: Option<u16>,
     body_width: Option<u16>,
     #[serde(default)]
@@ -468,6 +489,9 @@ impl RawConfig {
         }
         if let Some(reload) = self.reload {
             config.reload = reload;
+        }
+        if let Some(settle) = self.reload_settle {
+            config.reload_settle = settle;
         }
         if let Some(step) = self.scroll_step {
             if step == 0 {
@@ -672,6 +696,7 @@ const KNOWN_KEYS: &[&str] = &[
     "mouse",
     "narrow_emoji",
     "reload",
+    "reload_settle",
     "scroll_step",
     "body_width",
     "toc",
