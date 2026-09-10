@@ -136,10 +136,15 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                 at = at.saturating_add(part.width);
             }
         }
-        BoxContent::Fraction { num, den } => {
-            // The rule is the baseline and spans the wider part; each half is centred
+        BoxContent::Fraction { num, den, rule } => {
+            // The baseline row is the rule and spans the wider part; each half is centred
             // over or under it. The `if let Ok` is the same off-canvas clip as above.
-            if let Ok(row) = usize::try_from(baseline) {
+            //
+            // `rule` false leaves that row blank and draws nothing else differently: a
+            // binomial coefficient is not a division, and the row it does not draw is
+            // still its baseline, so the two halves land where they always did. This is
+            // the only reader of the flag (RULING, owner, 2026-09-10).
+            if let (true, Ok(row)) = (*rule, usize::try_from(baseline)) {
                 canvas.hline(
                     row,
                     usize::from(col),

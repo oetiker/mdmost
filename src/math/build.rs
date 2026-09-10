@@ -723,12 +723,34 @@ fn visual_box(
 ) -> Result<(Class, MathBox, usize), MathError> {
     let after = at.saturating_add(1);
     match visual {
-        Visual::Fraction(_) => {
+        // The thickness is the whole signal, and the command name is not read at all.
+        //
+        // `\frac`, `\dfrac`, `\tfrac` and `\cfrac` arrive as `None` — no opinion, draw the
+        // usual rule. `\binom`, `\dbinom` and `\tbinom` arrive as `Some(0em)`, an
+        // explicitly ruleless fraction, which is the same construct `\atop` is and the
+        // same one `\genfrac{}{}{0pt}{}` asks for by hand. Any other `Some(d)` draws the
+        // rule too: a terminal has one rule and no thicker one to offer, so a thickness we
+        // cannot honour is still a request for a rule (RULING, owner, 2026-09-10).
+        //
+        // The unit is deliberately not consulted. Zero of anything is zero, and converting
+        // units to find that out would only add a way to get it wrong.
+        Visual::Fraction(thickness) => {
+            let ruleless = matches!(thickness, Some(d) if d.value == 0.0);
             let (_, num, a) = element(events, after, mode, spacing, depth)?;
             let (_, den, b) = element(events, after.saturating_add(a), mode, spacing, depth)?;
             let used = 1usize.saturating_add(a).saturating_add(b);
             let cells = match mode {
+                Mode::Display if ruleless => boxes::fraction_ruleless(num, den),
                 Mode::Display => boxes::fraction(num, den),
+                // A ruleless fraction has no one-row form and this engine does not invent
+                // one. `(n/k)` is wrong twice: the slash says "divided by", which is a
+                // different number, and the parentheses make the mistake look deliberate.
+                // There is no conventional flat notation to fall back on, and design spec
+                // §9's refusal shows the reader the source instead, which is at least
+                // unambiguous. Same message for `\genfrac{}{}{0pt}{}` — same construct.
+                Mode::Inline if ruleless => {
+                    return Err(MathError::NotDrawable("a binomial coefficient"));
+                }
                 // The one-row rewrite. The slash carries no class and no gap of its own:
                 // `a/b` is set tight, and what keeps `\frac{a+b}{c}` from reading as the
                 // different expression `a + b/c` is the parentheses, not a space.
@@ -2171,7 +2193,7 @@ mod tests {
 
         // Parts of different widths, so a numerator/denominator swap cannot hide behind
         // a width that is a max and two heights that are both 1.
-        let BoxContent::Fraction { num, den } = only_part(r"\frac{a}{bb}") else {
+        let BoxContent::Fraction { num, den, .. } = only_part(r"\frac{a}{bb}") else {
             panic!("display mode must not rewrite a fraction to a slash")
         };
         assert_eq!(
@@ -2238,5 +2260,72 @@ mod tests {
         // decides it, which is why this is the mode flag's third and last reader.
         assert_eq!(inline(r"\sum\limits_{i}^{n} x"), "∑ᵢⁿ x");
         assert_eq!(inline(r"\underset{a}{b}"), "bₐ");
+    }
+
+    /// The rule follows the thickness the parser reports, not the command's name.
+    ///
+    /// RULING, owner, 2026-09-10 (Task 14b), point 3. `\binom`, `\dbinom` and `\tbinom`
+    /// arrive as `Visual::Fraction(Some(0em))` -- an explicitly ruleless fraction -- while
+    /// `\frac`, `\dfrac`, `\tfrac` and `\cfrac` arrive as `Fraction(None)`. `\genfrac`
+    /// reaches the same arm and can ask for either, in any unit. Matching on the name
+    /// would get `\genfrac{}{}{0pt}{}` wrong in one direction and `\genfrac{}{}{2pt}{}`
+    /// wrong in the other, so the thickness is the only signal read.
+    #[test]
+    fn a_fractions_rule_follows_the_thickness_and_not_the_command_name() {
+        /// The first `Fraction` anywhere in a display box. `\binom` wraps its fraction in
+        /// a `\left(…\right)` the author never typed, so `only_part` cannot reach it.
+        fn first_fraction(src: &str) -> BoxContent {
+            fn walk(b: &crate::math::boxes::MathBox) -> Option<BoxContent> {
+                match &b.content {
+                    BoxContent::Fraction { .. } => Some(b.content.clone()),
+                    BoxContent::Row(parts) => parts.iter().find_map(walk),
+                    BoxContent::Fenced { body, .. } => walk(body),
+                    _ => None,
+                }
+            }
+            let storage = Storage::new();
+            let events = parse(src, &storage).expect("parses");
+            let b = build(&events, Mode::Display).expect("builds");
+            walk(&b).unwrap_or_else(|| panic!("{src}: no fraction in {:?}", b.content))
+        }
+
+        for src in [r"\binom{n}{k}", r"\dbinom{n}{k}", r"\tbinom{n}{k}"] {
+            assert!(
+                matches!(
+                    first_fraction(src),
+                    BoxContent::Fraction { rule: false, .. }
+                ),
+                "{src} is a binomial coefficient, not a division"
+            );
+        }
+        for src in [r"\frac{a}{b}", r"\dfrac{a}{b}", r"\tfrac{a}{b}"] {
+            assert!(
+                matches!(first_fraction(src), BoxContent::Fraction { rule: true, .. }),
+                "{src} keeps the rule it has always drawn"
+            );
+        }
+        // The same command, both answers, decided by the third argument alone.
+        assert!(
+            matches!(
+                first_fraction(r"\genfrac{}{}{0pt}{}{a}{b}"),
+                BoxContent::Fraction { rule: false, .. }
+            ),
+            "a zero thickness is ruleless whatever asked for it -- this is `\\atop`"
+        );
+        assert!(
+            matches!(
+                first_fraction(r"\genfrac{}{}{2pt}{}{a}{b}"),
+                BoxContent::Fraction { rule: true, .. }
+            ),
+            "a terminal has no thicker rule to offer, so any non-zero thickness draws the one we have"
+        );
+        // Zero in a different unit is still zero: the value is read, the unit is not.
+        assert!(
+            matches!(
+                first_fraction(r"\genfrac{}{}{0em}{}{a}{b}"),
+                BoxContent::Fraction { rule: false, .. }
+            ),
+            "the unit of nothing does not matter"
+        );
     }
 }

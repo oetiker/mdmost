@@ -596,17 +596,81 @@ fn a_fenced_root_index_fills_the_rows_the_radical_reserved_for_it() {
     // `\binom` reaches the same arm by a different route -- it is a `\left(…\right)` the
     // author never typed -- so it is asserted rather than assumed to follow.
     //
-    // The rule between `n` and `k` is WRONG and is not this task's to fix. `\binom`
-    // arrives as `Visual::Fraction(Some(0em))`, an explicitly ruleless fraction, and
-    // `build.rs`'s `Visual::Fraction(_)` (`build.rs:732`) discards that thickness and
-    // builds an ordinary fraction. The defect predates this task -- it is why
-    // `\binom{n}{k}` already sets inline as `(n/k)`, a slash that reads as division --
-    // and `build.rs` belongs to Task 8a. Drawing the fence is only what made it visible
-    // on a canvas for the first time. Pinned as it stands, so the fix has a test to
-    // change rather than a silence to discover.
+    // The middle row is blank and the rest of the picture is identical to the `\frac`
+    // above it, which is the point: a ruleless fraction measures exactly like a ruled one
+    // (RULING, owner, 2026-09-10), so the radical's reserve, the fence's three rows and
+    // the column the overline starts in are all unmoved by the rule going away.
     assert_eq!(
         display(r"\sqrt[\binom{n}{k}]{x}"),
-        vec!["╭ n ╮", "│ ─ │", "╰ k ╯ ─", "    √ x"]
+        vec!["╭ n ╮", "│   │", "╰ k ╯ ─", "    √ x"]
+    );
+}
+
+/// A binomial coefficient is not a division: no rule, in display mode.
+///
+/// RULING, owner, 2026-09-10 (Task 14b). `\binom{n}{k}` shipped from stage 1 drawing the
+/// rule of a fraction, because `build.rs` discarded the thickness the parser hands it and
+/// every `Visual::Fraction` became one construct. A rule between `n` and `k` says "n
+/// divided by k", which is a different number from the one the author wrote.
+///
+/// The blank row is the baseline, not an absence: it is the row the rule would have been
+/// on, and the fenced cases show it at full width rather than trimmed away.
+#[test]
+fn a_binomial_coefficient_draws_no_rule_between_its_parts() {
+    for src in [r"\binom{n}{k}", r"\dbinom{n}{k}", r"\tbinom{n}{k}"] {
+        assert_eq!(
+            display(src),
+            vec!["╭ n ╮", "│   │", "╰ k ╯"],
+            "{src} must not draw a division"
+        );
+    }
+    // Unmoved: the fraction the reader has always had.
+    assert_eq!(display(r"\frac{a}{b}"), vec!["a", "─", "b"]);
+    assert_eq!(display(r"\dfrac{a}{b}"), vec!["a", "─", "b"]);
+    // `\genfrac` asks for either from the same command, and the thickness is what decides
+    // -- `0pt` is `\atop`, the identical construct without the parentheses. The middle row
+    // comes back empty rather than as a space only because `display` trims each row's
+    // tail; the fenced cases above are where its full width is visible.
+    assert_eq!(display(r"\genfrac{}{}{0pt}{}{a}{b}"), vec!["a", "", "b"]);
+    assert_eq!(display(r"\genfrac{}{}{2pt}{}{a}{b}"), vec!["a", "─", "b"]);
+}
+
+/// Inline, a ruleless fraction refuses; it does not invent a flat notation.
+///
+/// RULING, owner, 2026-09-10 (Task 14b), point 2. `(n/k)` is the wrong answer twice over:
+/// the slash reads as division, and the parentheses make it look deliberate. There is no
+/// conventional one-row notation for a binomial coefficient, and design spec §9's "no
+/// symbol table of our own" covers notation as much as it covers glyphs -- so the engine
+/// declines and the reader gets the verbatim source with its dollars, which is at least
+/// unambiguous.
+///
+/// The message is the same for `\genfrac{}{}{0pt}{}` because it is the same construct.
+#[test]
+fn an_inline_binomial_coefficient_refuses_rather_than_setting_a_slash() {
+    for src in [
+        r"\binom{n}{k}",
+        r"\dbinom{n}{k}",
+        r"\tbinom{n}{k}",
+        r"\genfrac{}{}{0pt}{}{a}{b}",
+    ] {
+        assert_eq!(
+            render_inline(src).expect_err("no one-row form exists"),
+            crate::error::MathError::NotDrawable("a binomial coefficient"),
+            "{src} has no honest one row"
+        );
+    }
+    // Unmoved: a ruled fraction still sets flat, and it is `a/b` and not `(a/b)` --
+    // measured at c9c3e13, not assumed. The brackets appear only where a part needs them.
+    assert_eq!(render_inline(r"\frac{a}{b}").expect("renders"), "a/b");
+    assert_eq!(
+        render_inline(r"\genfrac{}{}{2pt}{}{a}{b}").expect("renders"),
+        "a/b"
+    );
+    // A binomial anywhere inside an inline formula refuses the whole formula, the way a
+    // matrix does: there is no partial answer to give.
+    assert_eq!(
+        render_inline(r"1 + \binom{n}{k}").expect_err("no one-row form exists"),
+        crate::error::MathError::NotDrawable("a binomial coefficient")
     );
 }
 

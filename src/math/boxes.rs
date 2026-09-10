@@ -37,12 +37,18 @@ pub(crate) enum BoxContent {
     Text(String),
     /// A horizontal list sharing one baseline.
     Row(Vec<MathBox>),
-    /// Numerator over denominator. The rule row is the baseline.
+    /// Numerator over denominator. The baseline row is the rule, drawn or blank.
     Fraction {
-        /// Drawn above the rule.
+        /// Drawn above the baseline row.
         num: std::boxed::Box<MathBox>,
         /// Drawn below it.
         den: std::boxed::Box<MathBox>,
+        /// Whether the baseline row carries a rule.
+        ///
+        /// False for a binomial coefficient and for anything else the source declared
+        /// zero-thickness; the row is still there and still the baseline, it is simply
+        /// left blank. See [`fraction_ruleless`].
+        rule: bool,
     },
     /// A base with scripts set to its right.
     Scripts {
@@ -156,6 +162,26 @@ pub(crate) fn row(parts: Vec<MathBox>) -> MathBox {
 /// The rule row *is* the baseline, so the numerator is entirely above and the denominator
 /// entirely below — each contributing its whole height, not just its `above`.
 pub(crate) fn fraction(num: MathBox, den: MathBox) -> MathBox {
+    stack(num, den, true)
+}
+
+/// The same stack with the baseline row left blank: a binomial coefficient.
+///
+/// RULING, owner, 2026-09-10: a ruleless fraction keeps the geometry of a ruled one, and
+/// the rule row is simply not drawn. Nothing else moves, so a fence or radical wrapped
+/// round this box reserves exactly what it would reserve for [`fraction`].
+///
+/// A separate constructor rather than a third parameter on [`fraction`]: the flag is read
+/// at one place in the whole crate (`build.rs`'s `Visual::Fraction` arm, from the
+/// thickness the parser reports), while `fraction` itself is called from some fifty
+/// places, none of which have anything to say about rules. A bool at each of those would
+/// be noise standing where a reason should be.
+pub(crate) fn fraction_ruleless(num: MathBox, den: MathBox) -> MathBox {
+    stack(num, den, false)
+}
+
+/// The geometry both fraction constructors share, so it cannot drift between them.
+fn stack(num: MathBox, den: MathBox, rule: bool) -> MathBox {
     let width = num.width.max(den.width);
     let above = num.height();
     let below = den.height();
@@ -166,6 +192,7 @@ pub(crate) fn fraction(num: MathBox, den: MathBox) -> MathBox {
         content: BoxContent::Fraction {
             num: std::boxed::Box::new(num),
             den: std::boxed::Box::new(den),
+            rule,
         },
     }
 }
@@ -366,6 +393,36 @@ mod tests {
             "the numerator is one row, all of it above the rule"
         );
         assert_eq!(b.below, 1);
+    }
+
+    /// A ruleless fraction reports every number a ruled one reports.
+    ///
+    /// RULING, owner, 2026-09-10 (Task 14b): the baseline of a ruleless fraction is the
+    /// row the rule would have been on, left blank. So nothing around it moves -- a
+    /// fence, a radical or a neighbour that sizes itself to a binomial sizes itself
+    /// exactly as it would to a `\frac` of the same two parts. Asserting the geometry
+    /// against the ruled box rather than against literal numbers is what makes this a
+    /// claim about the two staying together, rather than about one of them alone.
+    #[test]
+    fn a_ruleless_fraction_measures_exactly_like_a_ruled_one() {
+        let ruled = fraction(text("-b + d"), text("2a"));
+        let ruleless = fraction_ruleless(text("-b + d"), text("2a"));
+        assert_eq!(ruleless.width, ruled.width);
+        assert_eq!(ruleless.above, ruled.above);
+        assert_eq!(ruleless.below, ruled.below);
+        assert_eq!(ruleless.height(), ruled.height());
+        // The whole of the difference is the flag `draw` reads.
+        assert!(
+            matches!(ruled.content, BoxContent::Fraction { rule: true, .. }),
+            "a `\\frac` draws its rule"
+        );
+        assert!(
+            matches!(ruleless.content, BoxContent::Fraction { rule: false, .. }),
+            "a binomial does not"
+        );
+        // Still three rows, so the `write_flat` catch-all never meets one -- the same
+        // invariant `a_fraction_and_a_radical_are_never_inline` pins for the ruled box.
+        assert!(!ruleless.is_inline());
     }
 
     #[test]
@@ -657,7 +714,7 @@ mod tests {
         // Equal-height parts hide a num/den swap completely: the width is a max and both
         // heights are 1. Only the stored content shows it.
         let b = fraction(text("a"), text("bb"));
-        let BoxContent::Fraction { num, den } = &b.content else {
+        let BoxContent::Fraction { num, den, .. } = &b.content else {
             panic!("fraction built {:?}", b.content)
         };
         assert_eq!(
