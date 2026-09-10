@@ -34,11 +34,11 @@
 use crate::canvas::Canvas;
 use crate::doc::{Node, NodeKind};
 use crate::error::MathError;
-use crate::theme::{Style, Theme};
+use crate::theme::Style;
 
 use super::diagram::Limits;
 use super::document::MIN_SURPLUS;
-use super::{Ctx, RenderOptions, bridge, code};
+use super::{Ctx, bridge, code};
 
 /// Centres `canvas` within `frame`, on a canvas `width` columns wide.
 ///
@@ -91,8 +91,7 @@ pub(crate) fn formula(
     from: u16,
     frame: u16,
     limits: Limits,
-    theme: &Theme,
-    options: &RenderOptions,
+    ctx: Ctx<'_>,
 ) -> Option<(u16, Canvas)> {
     let NodeKind::Math {
         literal,
@@ -102,10 +101,13 @@ pub(crate) fn formula(
         return None;
     };
     let source = literal.trim_matches('\n');
-    let ctx = Ctx::new(theme, options);
+    // The document's context, not a fresh one: this is the display path every top-level
+    // formula takes in the pager, so it is where the macro preamble (design spec §16)
+    // must arrive, and `ctx` is how it arrives everywhere else.
+    let preamble = ctx.preamble(node.source.start);
     // Measured once, at its own width. The error carries the answer, not a hint to search
     // from, so there is no probe loop here and `limits.probes` goes unread.
-    match bridge::math_natural(source, limits.width(), theme) {
+    match bridge::math_natural(&preamble, source, limits.width(), ctx.theme) {
         // It fits: the width it is laid out at is the width it was asked for, which makes
         // `at == width` at the call site and spends one layout where the clip search spent
         // seven.
@@ -176,6 +178,8 @@ pub(crate) fn formula(
 mod tests {
     use super::*;
     use crate::doc::Doc;
+    use crate::render::RenderOptions;
+    use crate::theme::Theme;
 
     /// A formula that draws one column wide.
     const NARROW: &str = "$$\\frac{a}{b}$$";
@@ -225,7 +229,7 @@ mod tests {
             (past_the_prose_cap().as_str(), 89),
         ] {
             let literal = src.trim_matches('$');
-            let canvas = bridge::math_natural(literal, u16::MAX, &theme)
+            let canvas = bridge::math_natural("", literal, u16::MAX, &theme)
                 .unwrap_or_else(|err| panic!("{literal} does not draw: {err}"));
             assert_eq!(canvas.width(), expected, "the drawn width of {literal}");
         }
@@ -278,8 +282,7 @@ mod tests {
             118,
             72,
             Limits::new(354, 1),
-            &theme(),
-            &RenderOptions::default(),
+            Ctx::new(&theme(), &RenderOptions::default()),
         )
         .expect("a formula that builds is always answered for");
         assert_eq!(at, 118, "it fits, so it asks for the width it was given");
@@ -305,8 +308,7 @@ mod tests {
             118,
             72,
             Limits::new(354, 1),
-            &theme(),
-            &RenderOptions::default(),
+            Ctx::new(&theme(), &RenderOptions::default()),
         )
         .expect("a formula that builds is always answered for");
         assert_eq!(at, 118, "89 fits inside 118, so no widening is asked for");
@@ -322,8 +324,7 @@ mod tests {
             20,
             20,
             Limits::new(200, 1),
-            &theme(),
-            &RenderOptions::default(),
+            Ctx::new(&theme(), &RenderOptions::default()),
         )
         .expect("wants a wider canvas");
         assert_eq!(at, 41, "it asked for the width it draws at");
@@ -347,8 +348,7 @@ mod tests {
             17,
             17,
             Limits::new(200, 1),
-            &theme(),
-            &RenderOptions::default(),
+            Ctx::new(&theme(), &RenderOptions::default()),
         )
         .expect("a formula that draws is answered for");
         assert_eq!(at, 25, "widened to its own width");
@@ -375,8 +375,7 @@ mod tests {
             23,
             23,
             Limits::new(200, 1),
-            &theme(),
-            &RenderOptions::default(),
+            Ctx::new(&theme(), &RenderOptions::default()),
         )
         .expect("answered for, and the answer is 'do not widen this'");
         assert_eq!(at, 23, "the measure, not the 25 it would have liked");
@@ -403,8 +402,7 @@ mod tests {
             36,
             36,
             Limits::new(200, 1),
-            &theme(),
-            &RenderOptions::default(),
+            Ctx::new(&theme(), &RenderOptions::default()),
         )
         .expect("answered for");
         assert_eq!(at, 36, "a surplus of five does not earn the room");
@@ -426,8 +424,7 @@ mod tests {
             20,
             20,
             Limits::new(24, 1),
-            &theme(),
-            &RenderOptions::default(),
+            Ctx::new(&theme(), &RenderOptions::default()),
         )
         .expect("answered for");
         assert_eq!(at, 20);
@@ -444,8 +441,7 @@ mod tests {
                 20,
                 20,
                 Limits::new(200, 1),
-                &theme(),
-                &RenderOptions::default(),
+                Ctx::new(&theme(), &RenderOptions::default()),
             )
             .is_none()
         );
@@ -459,7 +455,7 @@ mod tests {
         let theme = theme();
         assert!(
             matches!(
-                bridge::math_natural(BROKEN.trim_matches('$'), u16::MAX, &theme),
+                bridge::math_natural("", BROKEN.trim_matches('$'), u16::MAX, &theme),
                 Err(MathError::Parse { .. })
             ),
             "the premise of this test: this formula does not build"
@@ -471,8 +467,7 @@ mod tests {
                 20,
                 20,
                 Limits::new(200, 1),
-                &theme,
-                &RenderOptions::default(),
+                Ctx::new(&theme, &RenderOptions::default()),
             )
             .is_none()
         );
@@ -488,8 +483,7 @@ mod tests {
             40,
             40,
             Limits::new(200, 1),
-            &theme(),
-            &RenderOptions::default(),
+            Ctx::new(&theme(), &RenderOptions::default()),
         )
         .expect("it builds");
         assert_eq!(at, 40);

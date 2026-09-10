@@ -469,8 +469,10 @@ fn collect(nodes: &[Node], style: Style, ctx: Ctx<'_>, ids: &mut usize, out: &mu
                 // paragraph beside other content, so `hoist_display_math` left it there:
                 // prose with a formula in it, not a display block. It is drawn as a
                 // block or not at all, so here it is shown as its own source.
+                // Under the document's macro preamble (design spec §16): an inline
+                // formula sees the definitions before it exactly as a display one does.
                 let drawn = (!*display && ctx.options.math_inline)
-                    .then(|| bridge::math_inline(literal).ok())
+                    .then(|| bridge::math_inline(&ctx.preamble(node.source.start), literal).ok())
                     .flatten();
                 match drawn {
                     // The drawn text is not a copy of the source it came from, so the

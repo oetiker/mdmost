@@ -72,12 +72,19 @@ pub fn render_block(node: &Node, width: u16, theme: &Theme, options: &RenderOpti
 ///
 /// The same as [`render_block`] except that a heading in `numbers` is drawn with its
 /// number in front of it. This is what a caller assembling the top level block by block
-/// — the pager's [`crate::render::render_document`] — needs: the numbering is a
-/// property of the whole document, so it is computed there, once, and handed down.
+/// needs: the numbering is a property of the whole document, so it is computed there,
+/// once, and handed down.
 ///
 /// `source` is the whole document text, carried the same way `numbers` is: computed
 /// once by the caller that has the whole document in view, and handed to every block so
 /// a formula that will not draw can fall back to its own bytes of it (design spec §5.3).
+///
+/// The document's macro definitions (design spec §16) are *not* carried: the pager's
+/// [`crate::render::render_document`] builds its own [`Ctx`] with them and renders through
+/// [`render_block_ctx`], so a formula there sees the definitions before it, while a block
+/// rendered through this entry point sees only what it defines itself. Widening this
+/// signature instead would have been one more argument on a `pub` function already at
+/// clippy's limit, for a caller that does not exist.
 pub fn render_block_numbered(
     node: &Node,
     width: u16,
@@ -286,7 +293,10 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
             // than it takes the framed source here, and the *document* renderer is the
             // only caller that can offer it more room than the measure
             // (`super::math::formula`).
-            match bridge::math_natural(source, width, ctx.theme) {
+            // Under the document's macro preamble (design spec §16), which is empty
+            // for a block rendered on its own.
+            let preamble = ctx.preamble(node.source.start);
+            match bridge::math_natural(&preamble, source, width, ctx.theme) {
                 // Design spec §16.3: a block whose layout draws nothing contributes no
                 // rows. Returned before `resize_width` so it stays genuinely empty —
                 // `resize_width` would make it one zero-height canvas of `width`

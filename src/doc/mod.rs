@@ -366,12 +366,53 @@ pub struct Heading {
     pub source: SourceSpan,
 }
 
+/// A display math block that may define macros (design spec §16).
+///
+/// A *candidate*: its literal mentions `\newcommand` or `\def`, which is a textual
+/// pre-filter and not the rule. Whether the block exports its macros is decided by the
+/// renderer, which is the only side that can tell whether the block draws nothing
+/// (spec §16.3) — `doc` knows nothing of `math` and must not learn. A mixed block, one
+/// that defines a macro and draws something too, is therefore a candidate here and is
+/// refused there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MacroCandidate {
+    /// Where the block starts in [`Doc::source`], which is how "before" is decided.
+    pub start: usize,
+    /// The block's LaTeX, trimmed of the newlines a `$$` block carries around it.
+    pub literal: String,
+}
+
+/// Every display math block whose literal mentions a macro definition, in document order.
+///
+/// One walk over the finished tree rather than a push at each place a math node is made:
+/// there are three of those (`$$`, a ```` ```math ```` fence, and `\[…\]` from the
+/// backslash pass), and the walk cannot miss one.
+fn macro_candidates(root: &Node) -> Vec<MacroCandidate> {
+    let mut out = Vec::new();
+    root.walk(&mut |node| {
+        if let NodeKind::Math {
+            literal,
+            display: true,
+        } = &node.kind
+            && (literal.contains("\\newcommand") || literal.contains("\\def"))
+        {
+            out.push(MacroCandidate {
+                start: node.source.start,
+                literal: literal.trim_matches('\n').to_string(),
+            });
+        }
+    });
+    out
+}
+
 /// A parsed Markdown document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Doc {
     source: String,
     root: Node,
     headings: Vec<Heading>,
+    /// The display blocks that may define macros, in document order (design spec §16).
+    macro_candidates: Vec<MacroCandidate>,
     version: u64,
 }
 
@@ -398,10 +439,12 @@ impl Doc {
         let mut hasher = DefaultHasher::new();
         source.hash(&mut hasher);
 
+        let macro_candidates = macro_candidates(&owned);
         Self {
             source: source.to_string(),
             root: owned,
             headings,
+            macro_candidates,
             version: hasher.finish(),
         }
     }
@@ -439,6 +482,7 @@ impl Doc {
             root: plain::document(source),
             source: source.to_string(),
             headings: Vec::new(),
+            macro_candidates: Vec::new(),
             version: hasher.finish(),
         }
     }
@@ -461,6 +505,14 @@ impl Doc {
     /// Every heading, in document order.
     pub fn headings(&self) -> &[Heading] {
         &self.headings
+    }
+
+    /// Every display math block that may define macros, in document order.
+    ///
+    /// Candidates, not definitions: see [`MacroCandidate`] for what the renderer still
+    /// has to decide.
+    pub(crate) fn macro_candidates(&self) -> &[MacroCandidate] {
+        &self.macro_candidates
     }
 
     /// Looks a heading up by its anchor id.

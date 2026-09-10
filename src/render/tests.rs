@@ -4093,6 +4093,195 @@ fn a_definition_only_block_contributes_no_rows() {
             "no frame, no caption, no hole in the page for {markdown:?}"
         );
     }
+    // And at document level: no hole where the block was. The document with the block
+    // and the one without it read the same, blank rows included.
+    let with = Doc::parse("$$\\newcommand{\\R}{\\mathbb{R}}$$\n\nProse.\n");
+    let without = Doc::parse("Prose.\n");
+    let a = render_document(
+        &with,
+        40,
+        None,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    let b = render_document(
+        &without,
+        40,
+        None,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    assert_eq!(a.plain_text(), b.plain_text());
+}
+
+// Design spec §16: a macro defined in a display block that draws nothing is visible to
+// every formula after it. The engine draws `\mathbb{R}` as a plain `R` (font changes are
+// not glyph changes here), so what these tests look for is the *drawn* formula against
+// the *source* fallback of spec §9 — `x ∈ R` against `\R` — not a double-struck glyph.
+
+#[test]
+fn a_macro_defined_in_an_earlier_block_resolves_in_a_later_one() {
+    let doc = Doc::parse("$$\\newcommand{\\R}{\\mathbb{R}}$$\n\nSome prose.\n\n$$x \\in \\R$$\n");
+    let canvas = render_document(&doc, 40, None, &Theme::default(), &RenderOptions::default());
+    let text = canvas.plain_text();
+    assert!(
+        text.contains("x ∈ R"),
+        "the macro did not resolve: {text:?}"
+    );
+    assert!(!text.contains("\\R"), "the source leaked: {text:?}");
+}
+
+#[test]
+fn a_macro_used_before_its_definition_is_not_found() {
+    // Design spec §16.2: one pass, document order, and this direction is the rule rather
+    // than a limitation to be fixed by a second pass.
+    let doc = Doc::parse("$$x \\in \\R$$\n\n$$\\newcommand{\\R}{\\mathbb{R}}$$\n");
+    let canvas = render_document(&doc, 40, None, &Theme::default(), &RenderOptions::default());
+    let text = canvas.plain_text();
+    assert!(
+        text.contains("\\R"),
+        "an undefined macro shows its source, which is spec §9's failure path: {text:?}"
+    );
+    assert!(
+        !text.contains("x ∈ R"),
+        "the definition reached back: {text:?}"
+    );
+}
+
+#[test]
+fn an_inline_formula_sees_an_earlier_definition_too() {
+    let doc = Doc::parse("$$\\newcommand{\\R}{\\mathbb{R}}$$\n\nThe set $\\R$ is real.\n");
+    let canvas = render_document(&doc, 40, None, &Theme::default(), &RenderOptions::default());
+    let text = canvas.plain_text();
+    assert!(text.contains("The set R is real."), "got {text:?}");
+    assert!(!text.contains("\\R"), "the source leaked: {text:?}");
+}
+
+/// RULED 2026-09-10 (owner): only a block that draws nothing exports its macros.
+///
+/// The alternative — prepending the whole literal of any block holding a definition —
+/// concatenates that block's *content* into every later formula's source, so `x = 1`
+/// would be drawn a second time inside `y ∈ ℝ`. A mixed block keeps its macros local,
+/// and the later formula, with `\R` undefined, shows its source (spec §9).
+#[test]
+fn a_mixed_block_keeps_its_macros_to_itself() {
+    let doc = Doc::parse("$$\\newcommand{\\R}{\\mathbb{R}} \\quad x = 1$$\n\n$$y \\in \\R$$\n");
+    let canvas = render_document(&doc, 40, None, &Theme::default(), &RenderOptions::default());
+    let text = canvas.plain_text();
+    assert_eq!(
+        text.matches("x = 1").count(),
+        1,
+        "the mixed block's content must be drawn exactly once: {text:?}"
+    );
+    assert!(
+        text.contains("\\R"),
+        "the second block must show its source, because \\R is undefined there: {text:?}"
+    );
+}
+
+/// The preamble reaches a table cell — and reaches its *measurement*, not only its glyph.
+///
+/// Both the inline and the display cell path measure a formula before there is a column
+/// for it, so a cell measured without the definitions and drawn with them would be laid
+/// out at the width of `\R`'s framed source and then draw `R` in it. The document with
+/// the macro must therefore read exactly like the one with the expansion written out,
+/// borders included, and the table's drawn width is asserted on its own.
+#[test]
+fn a_macro_reaches_a_formula_in_a_table_cell() {
+    let with_macro = Doc::parse(
+        "$$\\newcommand{\\R}{\\mathbb{R}}$$\n\n| set | also |\n|---|---|\n| $\\R$ | $$\\R$$ |\n",
+    );
+    let expanded = Doc::parse("| set | also |\n|---|---|\n| $\\mathbb{R}$ | $$\\mathbb{R}$$ |\n");
+    let theme = Theme::default();
+    let options = RenderOptions::default();
+    let a = render_document(&with_macro, 60, None, &theme, &options);
+    let b = render_document(&expanded, 60, None, &theme, &options);
+    let text = a.plain_text();
+    assert!(
+        !text.contains("\\R"),
+        "the source leaked into a cell: {text:?}"
+    );
+    let border = |canvas: &Canvas| {
+        canvas
+            .plain_text()
+            .lines()
+            .find(|line| line.contains('─'))
+            .map(|line| line.trim_end().len())
+            .expect("a table draws a border")
+    };
+    assert_eq!(
+        border(&a),
+        border(&b),
+        "the column must be measured at the resolved width:\n{}\n{}",
+        a.plain_text(),
+        b.plain_text()
+    );
+    assert_eq!(a.plain_text(), b.plain_text());
+}
+
+/// Document order, strictly before: a formula sees the definitions above it and none
+/// below it, so a later block redefining `\R` changes the formulas after it and not the
+/// one before it.
+#[test]
+fn the_preamble_stops_at_the_formula() {
+    let doc = Doc::parse(
+        "$$\\newcommand{\\R}{\\mathbb{R}}$$\n\n$$x \\in \\R$$\n\n$$\\def\\R{\\mathbb{Q}}$$\n\n$$y \\in \\R$$\n",
+    );
+    let canvas = render_document(&doc, 40, None, &Theme::default(), &RenderOptions::default());
+    let text = canvas.plain_text();
+    assert!(
+        text.contains("x ∈ R"),
+        "the first formula sees the first definition: {text:?}"
+    );
+    assert!(
+        text.contains("y ∈ Q"),
+        "the second formula sees the redefinition: {text:?}"
+    );
+    assert!(
+        !text.contains("x ∈ Q"),
+        "the redefinition reached back: {text:?}"
+    );
+}
+
+/// A definition block is a definition block wherever `hoist_display_math` lifts it: a
+/// `$$…$$` paragraph inside a block quote or a list item is hoisted the same way as one
+/// at the top level, so it exports the same way.
+#[test]
+fn a_definition_block_inside_a_quote_or_a_list_item_exports_too() {
+    for markdown in [
+        "> $$\\newcommand{\\R}{\\mathbb{R}}$$\n\n$$x \\in \\R$$\n",
+        "- $$\\newcommand{\\R}{\\mathbb{R}}$$\n\n$$x \\in \\R$$\n",
+    ] {
+        let doc = Doc::parse(markdown);
+        let canvas = render_document(&doc, 40, None, &Theme::default(), &RenderOptions::default());
+        let text = canvas.plain_text();
+        assert!(
+            text.contains("x ∈ R"),
+            "{markdown:?}: the macro did not resolve: {text:?}"
+        );
+        assert!(
+            !text.contains("\\R"),
+            "{markdown:?}: the source leaked: {text:?}"
+        );
+    }
+}
+
+/// The standalone entry points carry no definitions — the same trade `Ctx::source`
+/// documents — so a block rendered on its own sees only what it defines itself.
+#[test]
+fn a_block_rendered_on_its_own_has_no_preamble() {
+    let doc = Doc::parse("$$\\newcommand{\\R}{\\mathbb{R}}$$\n\n$$x \\in \\R$$\n");
+    let canvas = render_block(
+        &doc.root().children[1],
+        40,
+        &Theme::default(),
+        &RenderOptions::default(),
+    );
+    assert!(
+        canvas.plain_text().contains("\\R"),
+        "got {:?}",
+        canvas.plain_text()
+    );
 }
 
 /// With the dollar syntax off, nothing here is reached at all.

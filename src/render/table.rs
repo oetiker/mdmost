@@ -749,7 +749,11 @@ fn measure_block(node: &Node, ctx: Ctx<'_>) -> (usize, usize) {
             display: true,
         } => {
             let source = literal.trim_matches('\n');
-            match super::bridge::math_natural(source, u16::MAX, ctx.theme) {
+            // Under the same macro preamble the cell is drawn with (design spec §16), or
+            // a formula using a macro is measured at its framed source's width and drawn
+            // at the macro's — the disagreement this arm exists to prevent.
+            let preamble = ctx.preamble(node.source.start);
+            match super::bridge::math_natural(&preamble, source, u16::MAX, ctx.theme) {
                 Ok(canvas) => {
                     let drawn = usize::from(canvas.width());
                     (drawn, drawn)

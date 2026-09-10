@@ -38,10 +38,11 @@
 use crate::canvas::{Canvas, Cell};
 use crate::doc::{Doc, Node, NodeKind};
 use crate::numbering::Numbering;
-use crate::render::{Limits, RenderOptions, margins, render_block_numbered, render_flat};
+use crate::render::{Ctx, Limits, RenderOptions, margins, render_flat};
 use crate::theme::Theme;
 
 use super::block;
+use super::macros;
 
 /// The glyph the renderers paint in a row's last column when content is cut off.
 ///
@@ -56,10 +57,16 @@ pub(crate) use super::code::OVERFLOW_MARKER;
 pub(crate) use super::block::QUOTE_BAR;
 
 /// The whole-document inputs every block is rendered against, bundled so the functions
-/// that thread them down to [`render_block_numbered`] stay under clippy's argument limit.
+/// that thread them down stay under clippy's argument limit.
 ///
 /// `Copy` for the same reason [`super::Ctx`] is: every block in the loop takes its own
 /// copy rather than sharing a borrow that would have to outlive the loop body.
+///
+/// Blocks are rendered through [`block::render_block_ctx`] with the [`Ctx`] this builds,
+/// not through the public [`super::render_block_numbered`]: that signature carries
+/// numbers and source but not the macro definitions, and widening a `pub` function
+/// already at clippy's argument limit for the one caller that lives beside it is the
+/// wrong trade. Everything a block needs from the whole document is here, once.
 #[derive(Debug, Clone, Copy)]
 struct DocCtx<'a> {
     theme: &'a Theme,
@@ -67,6 +74,18 @@ struct DocCtx<'a> {
     numbers: &'a Numbering,
     /// The whole document text, for a formula that will not draw (design spec §5.3).
     source: &'a str,
+    /// The display blocks that define macros and draw nothing (design spec §16).
+    macros: &'a [macros::Definition],
+}
+
+impl<'a> DocCtx<'a> {
+    /// The rendering context every block of this document starts from.
+    fn ctx(self) -> Ctx<'a> {
+        Ctx::new(self.theme, self.options)
+            .numbered(self.numbers)
+            .with_source(self.source)
+            .with_macros(self.macros)
+    }
 }
 
 /// The widest a single block is ever grown to.
@@ -118,11 +137,16 @@ pub fn render_document(
     // deeply enough to want numbers. Computed once here and handed to every block, so
     // the pager and the piped renderer number identically.
     let numbers = Numbering::enabled(doc, options.section_numbers);
+    // And the macro definitions (design spec §16) are the third: which candidate blocks
+    // draw nothing is decided here, once, so a formula never re-renders a block to find
+    // out and a table cell is measured with the same definitions it is drawn with.
+    let macros = macros::definitions(doc, theme);
     let doc_ctx = DocCtx {
         theme,
         options,
         numbers: &numbers,
         source: doc.source(),
+        macros: &macros,
     };
     for (index, node) in blocks.iter().enumerate() {
         let part = match banner.take() {
@@ -242,8 +266,9 @@ fn is_exempt(node: &Node) -> bool {
 
 /// Renders one block at the width its kind earns, and places it in the body.
 ///
-/// `doc.source` is threaded down to [`render_block_numbered`] so a formula that will not
-/// draw can fall back to its own bytes of it — see [`super::Ctx::source`].
+/// `doc` is threaded down as the block's [`Ctx`] so a formula that will not draw can
+/// fall back to its own bytes of the source — see [`super::Ctx::source`] — and a formula
+/// that uses a macro sees the definitions before it — see [`super::Ctx::macros`].
 fn render_placed(
     node: &Node,
     measure: Measure,
@@ -259,14 +284,7 @@ fn render_placed(
     let canvas = if is_exempt(node) {
         render_widened(node, measure, doc, clip)
     } else {
-        let capped = render_block_numbered(
-            node,
-            measure.prose,
-            doc.theme,
-            doc.options,
-            doc.numbers,
-            doc.source,
-        );
+        let capped = block::render_block_ctx(node, measure.prose, doc.ctx());
         if clip.is_clipped(&capped) {
             // The cap would cut this block short, so it takes the whole body — and
             // beyond it, if the whole body is not enough either.
@@ -372,22 +390,18 @@ fn render_widened(node: &Node, measure: Measure, doc: DocCtx<'_>, clip: &ClipTes
     {
         return canvas;
     }
-    if let Some((_, canvas)) =
-        super::math::formula(node, width, measure.prose, limits, doc.theme, doc.options)
-    {
+    if let Some((_, canvas)) = super::math::formula(node, width, measure.prose, limits, doc.ctx()) {
         // No guard: `formula` has already applied `MIN_SURPLUS` and answers with the
         // block to draw either way. Re-testing `at` here would be a second rule deciding
         // one width, and the range the two disagreed in is where the defect lived.
         return canvas;
     }
-    let narrow =
-        render_block_numbered(node, width, doc.theme, doc.options, doc.numbers, doc.source);
+    let narrow = block::render_block_ctx(node, width, doc.ctx());
     let is_clipped = |canvas: &Canvas| clip.is_clipped(canvas);
     if !is_clipped(&narrow) || width >= MAX_BLOCK_WIDTH {
         return narrow;
     }
-    let render =
-        |at: u16| render_block_numbered(node, at, doc.theme, doc.options, doc.numbers, doc.source);
+    let render = |at: u16| block::render_block_ctx(node, at, doc.ctx());
 
     // Double until the block fits, which bounds the search; then bisect for the
     // narrowest width that still fits, so the scrollable extent matches the content
