@@ -64,6 +64,19 @@ writes plain text rather than escape sequences.
 - **`--no-math-backslash`** — Do not read `\(…\)` and `\[…\]`, even if the configuration
   file does.
 
+- **`--narrow-emoji`** — Draw an emoji whose form is set by a variation selector
+  (`U+FE0F`) in one column rather than two, for a terminal that does the same. Left to
+  itself **mdmost** measures the terminal; see *Emoji width* below.
+
+- **`--wide-emoji`** — Draw such an emoji at the width the standard gives it, without
+  measuring the terminal.
+
+- **`--no-reload`** — Do not re-read the document when the file it came from changes on
+  disk. Watching is on by default; see *Reloading* below.
+
+- **`--reload`** — Re-read the document when its file changes, even if the configuration
+  file turns it off.
+
 - **`--mouse`** — Capture the mouse: the wheel scrolls, the scrollbar drags, a click in
   the contents pane jumps, and a drag over the document copies the Markdown source
   behind it.
@@ -146,6 +159,11 @@ and the status bar name the bindings in effect rather than the defaults.
   configuration file.
 
 - **`-`** — Show or hide code line numbers.
+
+- **`R`** — Start or stop re-reading the document as its file changes; see *Reloading*
+  below. Off and on again is also how to ask for a change straight away, without waiting
+  out the settle window. A document that arrived on standard input has no file to watch,
+  and the key says so.
 
 - **`S`** — Save the current settings for the next run.
 
@@ -247,6 +265,43 @@ becomes `copied`.
 Capturing the mouse takes away the terminal's own drag-select for as long as
 **mdmost** runs.
 
+# RELOADING
+
+A document read from a file is re-read whenever that file changes on disk, so a
+pager left open beside an editor keeps up with what is being written. The
+reading position is kept: **mdmost** remembers which part of the *source* was at
+the top of the screen and puts the viewport back on it, carrying it across the
+edit, so text inserted above what you are reading does not push you off it.
+
+A live search is re-run against the new text, and the contents pane is rebuilt.
+A footnote popup closes, because the marker it points at may have moved.
+
+The file is looked at once every eighth of a second, and a change is acted on
+only once it has stopped changing, so a document is never shown half-written.
+
+How long it must have stopped for depends on what the file was doing before.
+A change that arrives out of a quiet spell is taken up straight away, which is
+the reader who saves in one window and looks over at the other. A change that
+arrives while the file is *already* being written is ridden out instead: an
+editor that saves every second or two would otherwise cost a full re-render and
+a status-bar flash on each save, and every one of those re-reads would be thrown
+away by the next. The document catches up once the writing has stopped for
+`reload_settle` seconds, two by default. A file that is written without pause is
+therefore never taken up after the first change; it holds still until the writing
+stops. Set `reload_settle = 0` to take up every change as soon as it has settled.
+An editor that saves by renaming a new file over the old one leaves a moment
+where the path does not exist; that is a save in progress, not a reason to
+throw away what is on screen. A file that cannot be read, or that is not text,
+is reported in the status bar and leaves the document alone.
+
+Nothing is watched when the document arrived on standard input: there is no file
+to look at. Turn watching off with `--no-reload` or `reload = false`, or with
+**`R`** while the pager runs, which `S` then saves like any other setting.
+
+`R` is also how to ask for a change straight away. What happened while watching
+was off is not thrown away, so switching it back on takes the file up at once
+rather than waiting out the settle window.
+
 # CONFIGURATION
 
 The configuration file is TOML, at *~/.config/mdmost/config.toml*, or in the
@@ -263,6 +318,9 @@ icons        = true      # Nerd Font glyphs; false is plain Unicode; omit to det
 line_numbers = false     # line-number gutter in fenced code blocks
 title_banner = false     # off; true sets a lone `#` title as a wrapped FIGlet banner
 section_numbers = true   # number headings when a document nests three levels or more
+narrow_emoji = false     # emoji-presentation sequences in one column; omit to measure
+reload       = true      # re-read the document when its file changes on disk
+reload_settle = 2        # seconds a file being written must hold still first; 0 for none
 mouse        = false     # wheel scrolls, scrollbar drags, TOC clicks jump, drag copies
                          # source, and code frames and tables get a [copy] button
 scroll_step  = 3         # document lines per mouse-wheel notch
@@ -637,6 +695,41 @@ say nothing about the terminal drawing the pixels.
 Plain and icon glyphs occupy **the same display width**, so nothing shifts and
 nothing reflows either way, and no feature depends on icons. To settle the choice
 by hand instead, see **CONFIGURATION**.
+
+## Emoji width
+
+`U+FE0F` asks for the emoji form of a character that also has a text form — `☸️` is
+`☸` plus that selector — and the standard makes the result two columns wide.
+Several terminals draw it in one and move the cursor by one. Nothing can be
+patched over that afterwards: the width tables say two, and so does the library
+that paints the screen, so on such a terminal every line containing one is drawn
+one column out from there on, and scrolling leaves stale characters behind.
+
+**mdmost** therefore asks the terminal at startup: it draws the sequence at the
+start of a line, reads back where the cursor ended up, and erases what it drew.
+A clear answer of one column makes it draw the base character alone for the rest
+of the session, which is the same glyph on such a terminal, and paint the second
+column as the blank it now is. The sequence still occupies the two columns it was
+laid out for, and every measurement is back on one number. Any other answer —
+including no answer — leaves the screen exactly as it was.
+
+This happens to the *screen*, never to the document. What a drag copies, what a
+`[copy]` button hands over, and what a search matches are all the text the file
+holds, selector included, on every terminal. A terminal that cannot measure the
+sequence is a fact about that terminal, not about the document.
+
+Only a lone character followed by the selector is treated this way, and only when
+the selector is what made it wide. `❤️‍🔥` and other sequences joined with `U+200D`,
+`1️⃣` and the other keycaps, flags, skin tones and anything wide on its own are all
+left as they are: in those the selector sits in the middle, where removing it
+would change *which* glyph is drawn rather than how wide it is. `U+FE0E`, which
+asks for the plain form, is never touched.
+
+The question is not put at all when there is no terminal on both standard input
+and standard output, or when `TERM` is unset, `dumb` or `linux`. To settle it
+without being asked, write `narrow_emoji = true` (or `false`) in the
+configuration file, or pass `--narrow-emoji` / `--wide-emoji`; a flag is saved by
+`S`, a measurement never is.
 
 # DEFAULT MARKDOWN VIEWER
 

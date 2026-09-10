@@ -55,6 +55,8 @@ fn settings() -> Config {
         toc_open: true,
         toc_width: 44,
         mouse: true,
+        reload: false,
+        reload_settle: 9,
         scroll_step: 7,
         body_width: Some(72),
         ..Config::default()
@@ -276,8 +278,10 @@ fn the_key_binding_saves_the_live_settings_and_says_where() {
         Doc::parse("# Title\n\nSome prose.\n"),
         Config::default(),
         AppOptions {
+            source: None,
             title: "x.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             config_path: Some(path.clone()),
@@ -312,8 +316,10 @@ fn saving_reports_a_failure_rather_than_claiming_success() {
         Doc::parse("# Title\n"),
         Config::default(),
         AppOptions {
+            source: None,
             title: "x.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             config_path: Some(path.clone()),

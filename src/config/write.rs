@@ -135,6 +135,25 @@ impl Config {
             },
             Entry {
                 section: None,
+                // Unset for the same reason `icons` is: nobody has said, so the answer
+                // is measured from the terminal, and writing a measurement down would
+                // freeze it for a terminal that later behaves differently. A command
+                // line that *did* say is recorded by `main` before the pager starts.
+                key: "narrow_emoji",
+                value: self.narrow_emoji.map(|narrow| narrow.to_string()),
+            },
+            Entry {
+                section: None,
+                key: "reload",
+                value: Some(self.reload.to_string()),
+            },
+            Entry {
+                section: None,
+                key: "reload_settle",
+                value: Some(self.reload_settle.to_string()),
+            },
+            Entry {
+                section: None,
                 key: "scroll_step",
                 value: Some(self.scroll_step.to_string()),
             },
@@ -211,6 +230,15 @@ impl Config {
         }
         if back.mouse != self.mouse {
             return refuse("mouse");
+        }
+        if back.narrow_emoji != self.narrow_emoji {
+            return refuse("narrow_emoji");
+        }
+        if back.reload != self.reload {
+            return refuse("reload");
+        }
+        if back.reload_settle != self.reload_settle {
+            return refuse("reload_settle");
         }
         if back.scroll_step != self.scroll_step {
             return refuse("scroll_step");

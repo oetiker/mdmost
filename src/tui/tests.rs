@@ -40,15 +40,38 @@ fn pager(source: &str) -> App {
     pager_with(source, Config::default())
 }
 
+/// Builds an app over `source` for a terminal that draws emoji sequences in one column.
+fn pager_narrow(source: &str) -> App {
+    let mut app = App::new(
+        Doc::parse(source),
+        Config::default(),
+        AppOptions {
+            source: None,
+            config_path: None,
+            title: "sample.md".to_string(),
+            icons: false,
+            narrow_emoji: true,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(80, 12);
+    let _ = app.canvas();
+    app
+}
+
 /// Builds an app over `source` at a fixed size, with a given configuration.
 fn pager_with(source: &str, config: Config) -> App {
     let mut app = App::new(
         Doc::parse(source),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -89,9 +112,11 @@ fn the_body_cap_reaches_the_render_through_the_pager() {
         Doc::parse(source),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -231,9 +256,11 @@ fn render_options_follow_the_flags_that_feed_them() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -271,9 +298,11 @@ fn there_is_a_horizontal_offset_only_when_something_is_over_wide() {
         Doc::parse(&over_wide),
         Config::default(),
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: Some(200),
@@ -633,9 +662,11 @@ fn rebinding_a_key_changes_what_it_does() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -671,9 +702,11 @@ fn an_unknown_start_theme_falls_back_without_refusing_to_start() {
         Doc::parse("# x\n"),
         Config::default(),
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "no such theme".to_string(),
             toc_open: false,
             width: None,
@@ -754,9 +787,11 @@ fn a_forced_width_overrides_the_terminal() {
         Doc::parse(SAMPLE),
         Config::default(),
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: Some(40),
@@ -804,9 +839,11 @@ fn pager_named(source: &str, title: &str, width: u16, height: u16) -> App {
         Doc::parse(source),
         Config::default(),
         AppOptions {
+            source: None,
             config_path: None,
             title: title.to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -826,9 +863,11 @@ fn numbered_pager_at(source: &str, width: u16, height: u16) -> App {
             ..Config::default()
         },
         AppOptions {
+            source: None,
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -1933,9 +1972,11 @@ fn a_wide_character_binding_does_not_ragged_edge_the_help_column() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -2310,9 +2351,11 @@ fn the_match_key_hint_names_the_keys_the_reader_actually_bound() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: None,
@@ -2774,8 +2817,10 @@ fn themed_pager(source: &str, theme: &str, width: u16, height: u16) -> App {
         Doc::parse(source),
         Config::default(),
         AppOptions {
+            source: None,
             title: "sample.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: theme.to_string(),
             toc_open: false,
             width: None,
@@ -4600,8 +4645,10 @@ fn a_multi_row_drag_yields_source_line_structure_not_the_renderers() {
         Doc::parse(source),
         Config::default(),
         AppOptions {
+            source: None,
             title: "t.md".to_string(),
             icons: false,
+            narrow_emoji: false,
             theme: "dark".to_string(),
             toc_open: false,
             width: Some(30),
@@ -7524,5 +7571,776 @@ fn a_popup_shows_the_source_of_math_that_will_not_draw() {
     assert!(
         text.contains(r"$\frac{1}$"),
         "a formula that will not draw shows its source, not a hole: {text:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Reading the terminal's answer to `ESC [ 6 n` (`super::probe`).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_cursor_report_is_read_as_a_column() {
+    assert_eq!(super::probe::column_of(b"\x1b[1;3R"), Some(3));
+    assert_eq!(super::probe::column_of(b"\x1b[24;80R"), Some(80));
+}
+
+#[test]
+fn a_report_is_found_among_whatever_else_arrived() {
+    // A keystroke can land in the same read as the reply, and a terminal is free to
+    // answer other things first.
+    assert_eq!(super::probe::column_of(b"q\x1b[1;3R"), Some(3));
+    assert_eq!(super::probe::column_of(b"\x1b[?1;2c\x1b[1;5R"), Some(5));
+}
+
+#[test]
+fn anything_that_is_not_a_report_is_no_answer() {
+    for bytes in [
+        &b""[..],
+        &b"\x1b["[..],
+        &b"\x1b[1;R"[..],
+        &b"\x1b[1;3"[..],
+        &b"hello"[..],
+        &b"\x1b[99999;99999R"[..],
+    ] {
+        assert_eq!(super::probe::column_of(bytes), None, "{bytes:?}");
+    }
+}
+// Reloading a document whose file changed underneath the pager.
+//
+// The state machine touches no file (design spec §13): `super::term` reads and parses,
+// and hands the new document over. What is tested here is everything that happens on
+// this side of that hand-over.
+// ---------------------------------------------------------------------------
+
+/// [`SAMPLE`] with enough filler under it that any of its headings can be scrolled to
+/// the top of a twelve-row viewport, which is what makes a reading position observable.
+fn padded_sample() -> String {
+    format!("{SAMPLE}\n{}", "Filler line of prose.\n\n".repeat(20))
+}
+
+/// The row the heading named `text` was rendered on.
+fn row_of_heading(app: &mut App, text: &str) -> usize {
+    let _ = app.canvas();
+    let index = app
+        .toc()
+        .entries()
+        .iter()
+        .position(|entry| entry.text == text)
+        .unwrap_or_else(|| panic!("no heading called {text}"));
+    app.toc()
+        .row_of(index)
+        .unwrap_or_else(|| panic!("{text} was not rendered"))
+}
+
+#[test]
+fn reloading_keeps_the_reading_position_when_the_edit_is_below_it() {
+    let source = padded_sample();
+    let mut app = pager(&source);
+    let details = row_of_heading(&mut app, "Details");
+    app.scroll_by(details as isize);
+    assert_eq!(
+        app.scroll(),
+        details,
+        "the sample is too short to test this"
+    );
+
+    let mut edited = source.clone();
+    edited.push_str("\n## Afterword\n\nNu xi omicron.\n");
+    app.reload(Doc::parse(&edited));
+
+    assert_eq!(
+        app.scroll(),
+        row_of_heading(&mut app, "Details"),
+        "the reader was left somewhere else by an edit below them"
+    );
+}
+
+#[test]
+fn reloading_keeps_the_reading_position_when_the_edit_is_above_it() {
+    let source = padded_sample();
+    let mut app = pager(&source);
+    let summary = row_of_heading(&mut app, "Summary");
+    app.scroll_by(summary as isize);
+    assert_eq!(
+        app.scroll(),
+        summary,
+        "the sample is too short to test this"
+    );
+
+    // What an editor does most: text appears above what is on screen. The anchor is a
+    // byte offset into the old source, so it has to be carried across the edit rather
+    // than used as it stands, or the reader slides by the size of the insertion.
+    let edited = format!("Preface. One more line of it.\n\n{source}");
+    app.reload(Doc::parse(&edited));
+
+    assert_eq!(
+        app.scroll(),
+        row_of_heading(&mut app, "Summary"),
+        "the reader slid off the section they were reading"
+    );
+}
+
+#[test]
+fn reloading_a_shorter_document_clamps_to_its_end() {
+    let mut app = pager(SAMPLE);
+    app.act(Action::Bottom);
+    assert!(app.scroll() > 0);
+
+    app.reload(Doc::parse("# Tiny\n\nOne line.\n"));
+
+    assert!(
+        app.scroll() <= app.max_scroll(),
+        "scrolled past the end of the new document"
+    );
+}
+
+#[test]
+fn reloading_rebuilds_the_table_of_contents() {
+    let mut app = pager(SAMPLE);
+    app.reload(Doc::parse("# Fresh\n\n## Second\n"));
+    let _ = app.canvas();
+
+    let headings: Vec<&str> = app
+        .toc()
+        .entries()
+        .iter()
+        .map(|entry| entry.text.as_str())
+        .collect();
+    assert_eq!(headings, ["Fresh", "Second"]);
+}
+
+#[test]
+fn reloading_re_runs_the_live_search() {
+    let mut app = pager(SAMPLE);
+    app.act(Action::SearchForward);
+    for ch in "Needle".chars() {
+        app.on_key(Key::char(ch));
+    }
+    app.on_key(Key::plain(KeyCode::Enter));
+    assert_eq!(app.search().len(), 2);
+
+    let edited = format!("{SAMPLE}\nNeedle once more.\n");
+    app.reload(Doc::parse(&edited));
+    let _ = app.canvas();
+
+    assert_eq!(
+        app.search().len(),
+        3,
+        "the search was not re-run against the new document"
+    );
+}
+
+#[test]
+fn reloading_closes_a_footnote_popup() {
+    // The box is anchored to a marker at a position the new render may not have, and a
+    // box pointing at a sentence that has moved is worse than no box (design spec §6).
+    let mut app = open_footnote("a[^n]\n\n[^n]: short\n", 80, 24);
+    app.reload(Doc::parse("b[^n]\n\n[^n]: short\n"));
+    assert!(app.popup().is_none());
+}
+
+#[test]
+fn reloading_says_so_in_the_status_bar() {
+    let mut app = pager(SAMPLE);
+    app.reload(Doc::parse("# Fresh\n"));
+    let notice = app.notice().expect("a reload is worth reporting");
+    assert!(!notice.is_error, "a reload is not a failure");
+    assert!(
+        notice.text.contains("reloaded"),
+        "unexpected notice: {}",
+        notice.text
+    );
+}
+
+#[test]
+fn an_offset_before_an_edit_keeps_its_value() {
+    let old = "alpha\nbeta\n";
+    let new = "alpha\nbeta\ngamma\n";
+    assert_eq!(super::app::remap_offset(old, new, 2), 2);
+}
+
+#[test]
+fn an_offset_after_an_edit_moves_with_it() {
+    let old = "alpha\nbeta\n";
+    let new = "one\ntwo\nalpha\nbeta\n";
+    // "beta" starts at 6 in the old source and at 14 in the new one.
+    assert_eq!(super::app::remap_offset(old, new, 6), 14);
+
+    // And the same in reverse, when the lines above are deleted again.
+    assert_eq!(super::app::remap_offset(new, old, 14), 6);
+}
+
+#[test]
+fn an_offset_inside_an_edit_stays_within_the_new_source() {
+    let old = "alpha\nbeta\ngamma\n";
+    let new = "alpha\nB\ngamma\n";
+    let mapped = super::app::remap_offset(old, new, 8);
+    assert!(mapped <= new.len(), "{mapped} is past the end of {new:?}");
+}
+
+#[test]
+fn an_unchanged_source_maps_every_offset_to_itself() {
+    let text = "alpha\nbeta\n";
+    for offset in 0..=text.len() {
+        assert_eq!(super::app::remap_offset(text, text, offset), offset);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Noticing that the file changed (`super::watch`).
+// ---------------------------------------------------------------------------
+
+/// A directory that removes itself, so a test cannot leak into the developer's home.
+struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> Self {
+        let base = std::env::temp_dir().join(format!(
+            "mdmost-watch-{}-{}-{name}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|since| since.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&base).expect("temp dir");
+        Self(base)
+    }
+
+    fn file(&self, name: &str, content: &str) -> std::path::PathBuf {
+        let path = self.0.join(name);
+        std::fs::write(&path, content).expect("write");
+        path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A pager that knows which file its document came from, so `R` has something to act on.
+fn pager_watching(source: &str, path: &std::path::Path) -> App {
+    let mut app = App::new(
+        Doc::parse(source),
+        Config::default(),
+        AppOptions {
+            source: Some(path.to_path_buf()),
+            config_path: None,
+            title: "doc.md".to_string(),
+            icons: false,
+            narrow_emoji: false,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(80, 24);
+    let _ = app.canvas();
+    app
+}
+
+/// A clock a test drives by hand, so the settle window can be crossed without sleeping.
+///
+/// The watcher is asked what the time is rather than reading it, which is what lets a
+/// test cross a two-second window in a microsecond and get the same answer every run.
+struct Clock(std::time::Instant);
+
+impl Clock {
+    fn new() -> Self {
+        Self(std::time::Instant::now())
+    }
+
+    /// `seconds` after the clock was made.
+    fn at(&self, seconds: f64) -> std::time::Instant {
+        self.0 + std::time::Duration::from_secs_f64(seconds)
+    }
+}
+
+/// The settle window the tests below use, well clear of the fractions they step by.
+const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
+
+#[test]
+fn an_untouched_file_is_never_reported_as_changed() {
+    let clock = Clock::new();
+    let dir = TempDir::new("untouched");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+    for step in 0..5 {
+        assert!(!watcher.changed_at(clock.at(f64::from(step))));
+    }
+}
+
+#[test]
+fn a_change_after_a_quiet_spell_is_taken_up_at_once() {
+    // The reader who saves once and looks over at the pager is the common case, and
+    // waiting out the settle window for them would make the feature feel broken.
+    let clock = Clock::new();
+    let dir = TempDir::new("quiet");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    std::fs::write(&path, "# One\n\nA second paragraph.\n").expect("write");
+    assert!(!watcher.changed_at(clock.at(10.0)));
+    assert!(
+        watcher.changed_at(clock.at(10.2)),
+        "a lone change waited on the settle window it should have skipped"
+    );
+}
+
+#[test]
+fn a_burst_of_writes_is_taken_up_once_it_stops() {
+    // An editor that saves while the reader types produces one of these. Re-reading on
+    // each save costs a full re-render and flashes the status bar, so the burst is
+    // ridden out and the document catches up when the writing stops.
+    let clock = Clock::new();
+    let dir = TempDir::new("burst");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    // The first save comes out of the quiet and is taken up at once.
+    std::fs::write(&path, "# One\na\n").expect("write");
+    assert!(!watcher.changed_at(clock.at(0.0)));
+    assert!(watcher.changed_at(clock.at(0.1)));
+
+    // The rest arrive half a second apart, and none of them is taken up.
+    for (index, at) in [0.5_f64, 1.0, 1.5].into_iter().enumerate() {
+        std::fs::write(&path, format!("# One\n{}\n", "b".repeat(index + 2))).expect("write");
+        assert!(!watcher.changed_at(clock.at(at)));
+        assert!(
+            !watcher.changed_at(clock.at(at + 0.1)),
+            "a change mid-burst was taken up at {at}s"
+        );
+    }
+
+    // Still short of the window measured from the last write, so still nothing.
+    assert!(
+        !watcher.changed_at(clock.at(3.4)),
+        "the burst was taken up before it had been still for the settle window"
+    );
+    assert!(
+        watcher.changed_at(clock.at(3.6)),
+        "the burst was never taken up after it stopped"
+    );
+}
+
+#[test]
+fn a_file_written_without_pause_is_never_taken_up() {
+    // A document being regenerated in a loop. Every re-read would be thrown away by the
+    // next one, so after the first the reader is left with a document that holds still.
+    let clock = Clock::new();
+    let dir = TempDir::new("endless");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    std::fs::write(&path, "# One\nstart\n").expect("write");
+    assert!(!watcher.changed_at(clock.at(0.0)));
+    assert!(watcher.changed_at(clock.at(0.1)));
+
+    for step in 1..120 {
+        let at = f64::from(step) * 0.5;
+        std::fs::write(&path, format!("# One\n{}\n", "x".repeat(step as usize))).expect("write");
+        assert!(!watcher.changed_at(clock.at(at)));
+        assert!(
+            !watcher.changed_at(clock.at(at + 0.1)),
+            "a file still being written was taken up at {at}s"
+        );
+    }
+}
+
+#[test]
+fn a_settle_window_of_zero_takes_up_every_change() {
+    // The escape hatch for a reader who would rather see every write, whatever it costs.
+    let clock = Clock::new();
+    let dir = TempDir::new("no-settle");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, std::time::Duration::ZERO);
+
+    for step in 1..4 {
+        let at = f64::from(step) * 0.5;
+        std::fs::write(&path, format!("# One\n{}\n", "y".repeat(step as usize))).expect("write");
+        assert!(!watcher.changed_at(clock.at(at)));
+        assert!(
+            watcher.changed_at(clock.at(at + 0.1)),
+            "a change was held back although the settle window is zero"
+        );
+    }
+}
+
+#[test]
+fn a_change_is_reported_once_it_has_settled() {
+    let dir = TempDir::new("settled");
+    let path = dir.file("doc.md", "# One\n");
+    let clock = Clock::new();
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    std::fs::write(&path, "# One\n\nAnd a second paragraph.\n").expect("write");
+    assert!(
+        !watcher.changed_at(clock.at(0.0)),
+        "a file seen changing for the first time may still be half written"
+    );
+    assert!(
+        watcher.changed_at(clock.at(0.1)),
+        "the change settled and was not reported"
+    );
+    assert!(
+        !watcher.changed_at(clock.at(0.2)),
+        "the same change was reported twice"
+    );
+}
+
+#[test]
+fn a_file_still_being_written_is_left_alone_until_it_stops() {
+    let clock = Clock::new();
+    let dir = TempDir::new("in-flight");
+    let path = dir.file("doc.md", "# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    std::fs::write(&path, "# One\n\nHalf of a").expect("write");
+    assert!(!watcher.changed_at(clock.at(0.0)));
+    std::fs::write(
+        &path,
+        "# One\n\nHalf of a paragraph, then the rest of it.\n",
+    )
+    .expect("write");
+    assert!(
+        !watcher.changed_at(clock.at(0.05)),
+        "reported a file that was still growing"
+    );
+    assert!(
+        !watcher.changed_at(clock.at(0.15)),
+        "a file that grew twice in a tenth of a second is still being written"
+    );
+    assert!(
+        watcher.changed_at(clock.at(2.2)),
+        "the finished file was never reported"
+    );
+}
+
+#[test]
+fn a_file_that_vanishes_mid_save_is_not_a_change() {
+    // Editors that save by writing a new file and renaming it over the old one leave a
+    // window where the path does not exist. That is a save in progress, not a document
+    // to load, and certainly not a reason to throw away the one on screen.
+    let dir = TempDir::new("renamed");
+    let path = dir.file("doc.md", "# One\n");
+    let clock = Clock::new();
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    std::fs::remove_file(&path).expect("remove");
+    assert!(!watcher.changed_at(clock.at(0.0)));
+    assert!(!watcher.changed_at(clock.at(0.1)));
+
+    std::fs::write(&path, "# One\n\nBack again, with more text.\n").expect("write");
+    assert!(!watcher.changed_at(clock.at(0.2)));
+    assert!(
+        watcher.changed_at(clock.at(0.3)),
+        "the replacement file was never reported"
+    );
+}
+
+#[test]
+fn a_settled_change_reaches_the_document() {
+    let dir = TempDir::new("tick");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager("# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    std::fs::write(&path, "# Two\n\nWith a paragraph.\n").expect("write");
+    super::term::reload_tick(&mut app, &mut watcher);
+    assert_eq!(
+        app.doc().source(),
+        "# One\n",
+        "a change was taken up before it had settled"
+    );
+
+    super::term::reload_tick(&mut app, &mut watcher);
+    assert_eq!(app.doc().source(), "# Two\n\nWith a paragraph.\n");
+    assert_eq!(app.toc().entries()[0].text, "Two");
+}
+
+#[test]
+fn a_file_that_cannot_be_read_keeps_the_document_on_screen() {
+    let dir = TempDir::new("unreadable");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager("# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    // Not text, so reading it back as a document fails where opening it did not.
+    std::fs::write(&path, [0x23, 0x20, 0xff, 0xfe, 0x0a]).expect("write");
+    super::term::reload_tick(&mut app, &mut watcher);
+    super::term::reload_tick(&mut app, &mut watcher);
+
+    assert_eq!(
+        app.doc().source(),
+        "# One\n",
+        "an unreadable file replaced the document that was on screen"
+    );
+    let notice = app.notice().expect("the failure was not reported");
+    assert!(notice.is_error, "unexpected notice: {}", notice.text);
+}
+
+#[test]
+fn the_math_syntax_follows_the_configuration() {
+    let mut config = Config::default();
+    assert!(config.math_syntax().dollars);
+    assert!(!config.math_syntax().backslash);
+
+    config.math_backslash = true;
+    assert!(config.math_syntax().backslash);
+
+    // `math = false` dominates: with the parser off there is nothing for either of the
+    // other two keys to act on.
+    config.math = false;
+    assert!(!config.math_syntax().dollars);
+    assert!(!config.math_syntax().backslash);
+}
+
+#[test]
+fn a_reload_keeps_the_selector_on_a_narrow_terminal_too() {
+    // The measurement is answered in the frame, never in the document, so a re-read has
+    // nothing to reproduce: what the file holds is what the reader gets back from a
+    // drag, a `[copy]` button and a search, whatever this terminal can draw.
+    let dir = TempDir::new("narrow");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager_narrow("# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    std::fs::write(&path, "# Two ☸️ three\n").expect("write");
+    super::term::reload_tick(&mut app, &mut watcher);
+    super::term::reload_tick(&mut app, &mut watcher);
+
+    assert_eq!(app.doc().source(), "# Two ☸️ three\n");
+}
+
+#[test]
+fn a_reload_keeps_the_selector_when_the_terminal_wanted_it() {
+    let dir = TempDir::new("wide");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager("# One\n");
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    std::fs::write(&path, "# Two ☸️ three\n").expect("write");
+    super::term::reload_tick(&mut app, &mut watcher);
+    super::term::reload_tick(&mut app, &mut watcher);
+
+    assert_eq!(app.doc().source(), "# Two ☸️ three\n");
+}
+
+#[test]
+fn r_starts_and_stops_re_reading_the_file() {
+    // On by default, so the first press is the one that stops it.
+    let dir = TempDir::new("toggle");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager_watching("# One\n", &path);
+    assert!(
+        app.config().reload,
+        "auto-reload is on unless asked otherwise"
+    );
+
+    app.on_key(Key::char('R'));
+    assert!(!app.config().reload);
+    let notice = app.notice().expect("a toggle is worth reporting");
+    assert!(!notice.is_error, "unexpected notice: {}", notice.text);
+    assert!(
+        notice.text.contains("off"),
+        "unexpected notice: {}",
+        notice.text
+    );
+
+    app.on_key(Key::char('R'));
+    assert!(app.config().reload);
+    assert!(
+        app.notice().is_some_and(|n| n.text.contains("on")),
+        "turning it back on was not reported"
+    );
+}
+
+#[test]
+fn a_document_with_no_file_behind_it_has_nothing_to_watch() {
+    // Standard input. Reporting "auto-reload off" would name a setting that was never
+    // doing anything here, so the key says what is actually the case and changes nothing.
+    let mut app = pager("# One\n");
+    let before = app.config().reload;
+
+    app.on_key(Key::char('R'));
+    assert_eq!(
+        app.config().reload,
+        before,
+        "a setting with nothing to act on was flipped"
+    );
+    let notice = app.notice().expect("the key said nothing at all");
+    assert!(
+        notice.text.contains("no file"),
+        "unexpected notice: {}",
+        notice.text
+    );
+}
+
+#[test]
+fn a_change_made_while_re_reading_is_off_arrives_when_it_is_switched_on() {
+    // Switching it back on is also how a reader asks for the change they know is there,
+    // so what happened while it was off must not have been quietly consumed.
+    let clock = Clock::new();
+    let dir = TempDir::new("toggle-catch-up");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager_watching("# One\n", &path);
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    app.on_key(Key::char('R'));
+    std::fs::write(&path, "# Two\n\nWritten while nobody was looking.\n").expect("write");
+    for step in 0..4 {
+        super::term::reload_tick_at(&mut app, &mut watcher, clock.at(f64::from(step)));
+    }
+    assert_eq!(
+        app.doc().source(),
+        "# One\n",
+        "the file was re-read although re-reading was switched off"
+    );
+
+    app.on_key(Key::char('R'));
+    super::term::reload_tick_at(&mut app, &mut watcher, clock.at(10.0));
+    super::term::reload_tick_at(&mut app, &mut watcher, clock.at(10.2));
+    assert_eq!(
+        app.doc().source(),
+        "# Two\n\nWritten while nobody was looking.\n",
+        "switching it back on did not pick up the change made while it was off"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Drawing an emoji-presentation sequence on a terminal that measures it narrow
+// (`super::draw`, `crate::text::presentation_base`).
+// ---------------------------------------------------------------------------
+
+/// A document whose only interesting feature is a narrow base plus `U+FE0F`.
+const WHEEL: &str = "# Two \u{2638}\u{fe0f} three\n";
+
+#[test]
+fn a_narrow_terminal_is_handed_the_base_character_alone() {
+    // `unicode-width` says two columns and `ratatui` skips the second cell on that
+    // authority, so a terminal that advances by one is a column out for the rest of the
+    // run it was given -- which is what strewed stale glyphs across a scrolled screen.
+    let mut app = pager_narrow(WHEEL);
+    let painted = framed(&mut app, 40, 8).join("\n");
+
+    assert!(
+        painted.contains('\u{2638}'),
+        "the glyph itself was not drawn: {painted:?}"
+    );
+    assert!(
+        !painted.contains('\u{fe0f}'),
+        "the selector reached a terminal that cannot measure it: {painted:?}"
+    );
+}
+
+#[test]
+fn the_document_keeps_the_selector_the_reader_will_copy() {
+    // The whole point of narrowing at the last step. A drag copies the Markdown source,
+    // and Markdown source that has quietly lost a character is not what was promised.
+    let mut app = pager_narrow(WHEEL);
+    let _ = framed(&mut app, 40, 8);
+
+    assert_eq!(
+        app.doc().source(),
+        WHEEL,
+        "drawing the document changed the document"
+    );
+}
+
+#[test]
+fn a_terminal_that_measures_it_wide_is_handed_the_whole_sequence() {
+    // Lopsided on purpose, as detection is everywhere in this program: only a terminal
+    // that clearly cannot measure the sequence is given anything but the document.
+    let mut app = pager(WHEEL);
+    let painted = framed(&mut app, 40, 8).join("\n");
+
+    assert!(
+        painted.contains('\u{fe0f}'),
+        "a terminal that honours the selector was denied it: {painted:?}"
+    );
+}
+
+#[test]
+fn the_column_a_narrowed_glyph_no_longer_owns_is_a_space() {
+    // Two columns are still laid out for the sequence, because the wrapping and the
+    // table columns were measured that way. `ratatui` reads an empty symbol as "the
+    // cell before me owns this one" and leaves the terminal on whatever stood there;
+    // once the lead is one column wide, that claim is false and the cell has to be
+    // painted like any other.
+    let mut app = pager_narrow(WHEEL);
+    let backend = ratatui::backend::TestBackend::new(40, 8);
+    let mut terminal = ratatui::Terminal::new(backend).expect("a test terminal");
+    terminal
+        .draw(|frame| super::draw::draw(frame, &mut app))
+        .expect("a frame");
+    let buffer = terminal.backend().buffer();
+
+    let mut found = false;
+    for y in 0..8 {
+        for x in 0..39 {
+            let Some(lead) = buffer.cell((x, y)) else {
+                continue;
+            };
+            if lead.symbol() != "\u{2638}" {
+                continue;
+            }
+            found = true;
+            let after = buffer.cell((x + 1, y)).expect("a cell to the right");
+            assert_eq!(
+                after.symbol(),
+                " ",
+                "the cell after a narrowed glyph is still claimed by it"
+            );
+        }
+    }
+    assert!(found, "the glyph was never drawn, so nothing was checked");
+}
+
+#[test]
+fn a_copy_button_hands_over_what_the_file_holds() {
+    // The reason the narrowing happens to the frame and not to the document. This
+    // payload is not a slice of the source -- a code block's is its literal and a
+    // table's is built from the parsed nodes -- so a document narrowed before the
+    // parser would put the terminal's shortcoming into text that leaves the program,
+    // and no amount of translating offsets afterwards would get it back.
+    const CODE: &str = "# Wheel\n\n```text\nsee \u{2638}\u{fe0f} here\n```\n";
+    let mut app = App::new(
+        Doc::parse(CODE),
+        Config::default(),
+        AppOptions {
+            source: None,
+            config_path: None,
+            title: "doc.md".to_string(),
+            icons: false,
+            narrow_emoji: true,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(80, 24);
+    app.set_copy_button(true);
+    let _ = app.canvas();
+
+    let (x, y) = painted_button(&mut app, 80, 24, 0);
+    let (text, _) = copy_payload(click_hotspot(&mut app, x, y).expect("the button fired"));
+    assert!(
+        text.contains('\u{fe0f}'),
+        "the copy button dropped a character the file holds: {text:?}"
+    );
+}
+
+#[test]
+fn a_drag_copies_the_source_the_file_holds() {
+    // The other half of the same promise: the status bar calls this "Markdown source",
+    // and Markdown source that has quietly lost a character is not what was promised.
+    let mut app = pager_narrow("Two \u{2638}\u{fe0f} three\n");
+    let _ = framed(&mut app, 40, 8);
+
+    assert!(
+        app.doc().source().contains('\u{fe0f}'),
+        "a drag would copy source the document no longer holds"
     );
 }

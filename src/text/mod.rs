@@ -52,6 +52,32 @@ pub fn display_width(text: &str) -> usize {
     text.width()
 }
 
+/// The variation selector that asks for the emoji form.
+const EMOJI_PRESENTATION: char = '\u{FE0F}';
+
+/// The base of `cluster`, when the selector is the only reason it is two columns wide.
+///
+/// `U+FE0F` asks for the emoji form of a character that has a text form as well, and the
+/// standard makes the result two columns. Several terminals draw it in one and advance
+/// the cursor by one, which is a disagreement no width table can settle: `unicode-width`
+/// says two, `ratatui` skips the second cell on that authority, and the terminal is then
+/// one column out for the rest of the run it was handed.
+///
+/// Handing such a terminal the base alone is what puts all three back on one number. It
+/// is done to the *frame*, never to the document (see `tui::draw`), so what the reader
+/// copies, searches and exports is the text the file holds.
+///
+/// Only a lone base followed by the selector is answered for, and only when the selector
+/// is what made it wide. A ZWJ sequence and a keycap both carry `U+FE0F` in the middle,
+/// where taking it out would change which glyph is drawn rather than how wide it is.
+pub fn presentation_base(cluster: &str) -> Option<&str> {
+    let base = cluster.strip_suffix(EMOJI_PRESENTATION)?;
+    if base.chars().count() != 1 {
+        return None;
+    }
+    (display_width(base) == 1 && display_width(cluster) == 2).then_some(base)
+}
+
 /// The display width of a **one-cell piece** of text, in `0..=2`.
 ///
 /// A terminal cell holds at most a double-width cluster, so this returns at most `2`.

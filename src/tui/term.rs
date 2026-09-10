@@ -37,6 +37,7 @@ use crate::canvas::HotspotKind;
 use crate::config::{Key, KeyCode, KeyMods};
 
 use super::app::{Activation, App, Focus};
+use super::watch::Watcher;
 use super::{chrome, draw};
 
 /// How long the loop waits for input before checking the termination flag.
@@ -211,7 +212,12 @@ pub fn run(app: &mut App) -> io::Result<()> {
     // restoration has to be part of that order rather than a scope-end surprise.
     let guard = Restore;
 
-    let result = event_loop(app, &mut terminal, &input, &terminate);
+    // Nothing to watch when the document came down a pipe. Whether the reader wants it
+    // watched is asked on every tick instead of here, because `Action::ToggleReload`
+    // can change the answer while the pager runs.
+    let settle = Duration::from_secs(app.config().reload_settle.into());
+    let mut watcher = app.source().map(|path| Watcher::new(path, settle));
+    let result = event_loop(app, &mut terminal, &input, &terminate, watcher.as_mut());
     if result.is_err() {
         // `ratatui`'s `Terminal` complains into standard error from its destructor
         // when it cannot show the cursor — and when a terminal has just died, that
@@ -241,6 +247,7 @@ fn event_loop(
     terminal: &mut ratatui::DefaultTerminal,
     input: &Input,
     terminate: &Arc<AtomicBool>,
+    mut watched: Option<&mut Watcher>,
 ) -> io::Result<()> {
     // Laying out a large document takes real time, and an empty alternate screen is
     // indistinguishable from a hang (usability review B5). One cheap frame first says
@@ -266,6 +273,11 @@ fn event_loop(
         redraw = true;
         if waited == Wait::Gone {
             return Err(terminal_gone());
+        }
+        // Before the events, so that a document which changed under a reader who is
+        // holding a movement key is still re-read rather than starved by the input.
+        if let Some(watcher) = watched.as_deref_mut() {
+            reload_tick(app, watcher);
         }
         // The descriptor was live a moment ago, so `crossterm` may look at it. Zero
         // timeout: the waiting has already been done, and asking even when nothing
@@ -300,6 +312,41 @@ fn event_loop(
         }
     }
     Ok(())
+}
+
+/// Re-reads the document when the file behind it has changed and settled.
+///
+/// Reading and parsing live here rather than in [`App`] because the state machine
+/// touches no file (design spec §13); what it is handed is a parsed document.
+///
+/// A file that cannot be read or is not text is reported in the status bar and changes
+/// nothing else: the document on screen is the last one that *was* readable, which is
+/// more use to the reader than an empty screen. The change is consumed either way, so a
+/// file that stays broken says so once rather than on every tick.
+pub(super) fn reload_tick(app: &mut App, watcher: &mut Watcher) {
+    reload_tick_at(app, watcher, std::time::Instant::now());
+}
+
+/// [`reload_tick`], against a clock the caller supplies, for the tests.
+///
+/// The watcher is not asked anything while re-reading is switched off, so the change it
+/// has not yet reported is still there when the reader switches it back on. That is what
+/// makes the key a way of asking for a change as well as a way of stopping the watching.
+pub(super) fn reload_tick_at(app: &mut App, watcher: &mut Watcher, at: std::time::Instant) {
+    if !app.config().reload || !watcher.changed_at(at) {
+        return;
+    }
+    let path = watcher.path();
+    match std::fs::read_to_string(path) {
+        Ok(source) => app.reload(crate::doc::Doc::parse_auto_with(
+            &source,
+            app.config().math_syntax(),
+        )),
+        Err(error) => app.notify(
+            format!("could not re-read {}: {error}", path.display()),
+            true,
+        ),
+    }
 }
 
 /// Dispatches a key event.

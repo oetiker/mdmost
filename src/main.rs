@@ -104,6 +104,29 @@ struct Cli {
     #[arg(long, conflicts_with = "math_backslash")]
     no_math_backslash: bool,
 
+    /// Draw emoji whose form is set by a variation selector in one column, not two.
+    ///
+    /// For a terminal that ignores `U+FE0F` and advances the cursor by one where the
+    /// standard says two. Left to itself mdmost measures the terminal and only acts on a
+    /// clear answer; this settles it without asking, and is saved by `S`.
+    #[arg(long)]
+    narrow_emoji: bool,
+
+    /// Draw emoji at the width the standard gives them, without measuring the terminal.
+    #[arg(long, conflicts_with = "narrow_emoji")]
+    wide_emoji: bool,
+    /// Do not re-read the document when the file it came from changes on disk.
+    ///
+    /// Watching is on by default and costs one `stat` every eighth of a second. Turn it
+    /// off to keep reading the document as it was when it was opened, whatever the
+    /// writer does to the file in the meantime.
+    #[arg(long)]
+    no_reload: bool,
+
+    /// Re-read the document when its file changes, even if the config file says not to.
+    #[arg(long, conflicts_with = "no_reload")]
+    reload: bool,
+
     /// Capture the mouse: wheel scrolls, the scrollbar drags, clicks jump in the contents
     /// pane, and dragging over the document copies the Markdown source behind it.
     ///
@@ -177,6 +200,38 @@ fn resolve_icons(cli: &Cli, configured: Option<bool>) -> bool {
         return from_env;
     }
     configured.unwrap_or_else(mdmost::nerdfont::detect)
+}
+
+/// Whether an emoji-presentation sequence is to be drawn in one column.
+///
+/// A flag settles it, then the configuration file, and only then is the terminal asked —
+/// `measure` is not called at all when anybody has already answered, because asking
+/// writes to the terminal and waits for a reply.
+///
+/// The measurement is believed only when it is unambiguous. Stripping a selector on a
+/// terminal that honours it would make the document worse, so silence, an impossible
+/// answer and the standard two columns all leave it alone. See
+/// [`mdmost::tui::emoji_columns`] for what is asked and when.
+fn resolve_narrow_emoji(
+    narrow: bool,
+    wide: bool,
+    configured: Option<bool>,
+    measure: impl FnOnce() -> Option<u16>,
+) -> bool {
+    debug_assert!(
+        !(narrow && wide),
+        "clap's conflicts_with should make this unreachable"
+    );
+    if narrow {
+        return true;
+    }
+    if wide {
+        return false;
+    }
+    if let Some(answer) = configured {
+        return answer;
+    }
+    measure() == Some(1)
 }
 
 /// A flag pair overriding a configured boolean: either flag wins over the file, and
@@ -259,11 +314,12 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         return Ok(ExitCode::from(EXIT_USAGE));
     }
 
-    let (source, title) = match read_input(match input {
+    let source_path = match input {
         Input::File(path) => Some(path),
         // `Nothing` returned above, so this is standard input either way.
         Input::Stdin | Input::Nothing => None,
-    }) {
+    };
+    let (source, title) = match read_input(source_path) {
         Ok(pair) => pair,
         Err(error) => {
             let _ = writeln!(io::stderr(), "mdmost: {error}");
@@ -277,14 +333,21 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         cli.no_math_backslash,
         config.math_backslash,
     );
+    config.reload = resolve_flag(cli.reload, cli.no_reload, config.reload);
 
-    let doc = Doc::parse_auto_with(
-        &source,
-        mdmost::doc::MathSyntax {
-            dollars: config.math,
-            backslash: config.math && config.math_backslash,
-        },
+    let narrow_emoji = resolve_narrow_emoji(
+        cli.narrow_emoji,
+        cli.wide_emoji,
+        config.narrow_emoji,
+        mdmost::tui::emoji_columns,
     );
+    // An answer that came from the command line is a statement the reader made, and `S`
+    // should keep it. A measurement is not written down, for the reason `icons` is not:
+    // it is this terminal's answer, not this reader's.
+    if cli.narrow_emoji || cli.wide_emoji {
+        config.narrow_emoji = Some(narrow_emoji);
+    }
+    let doc = Doc::parse_auto_with(&source, config.math_syntax());
 
     let theme_name = cli.theme.clone().unwrap_or_else(|| config.theme.clone());
     let icons = resolve_icons(&cli, config.icons);
@@ -311,6 +374,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             cli.width,
             stdout_is_terminal,
             &options,
+            narrow_emoji,
         );
     }
 
@@ -319,8 +383,10 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         doc,
         config,
         AppOptions {
+            source: source_path.map(Path::to_path_buf),
             title,
             icons,
+            narrow_emoji,
             theme: theme_name,
             // `[toc] open` in the configuration file counts as much as `--toc` does.
             toc_open: cli.toc || config_toc_open,
@@ -373,6 +439,7 @@ fn render_once(
     width: Option<u16>,
     stdout_is_terminal: bool,
     options: &RenderOptions,
+    narrow_emoji: bool,
 ) -> anyhow::Result<ExitCode> {
     let theme = match config.resolve_theme(theme_name) {
         Ok(theme) => theme,
@@ -399,9 +466,9 @@ fn render_once(
     let stdout = io::stdout();
     let mut out = stdout.lock();
     if stdout_is_terminal {
-        dump::write_ansi(&mut out, &canvas, theme.base())?;
+        dump::write_ansi(&mut out, &canvas, theme.base(), narrow_emoji)?;
     } else {
-        dump::write_plain(&mut out, &canvas)?;
+        dump::write_plain(&mut out, &canvas, narrow_emoji)?;
     }
     out.flush()?;
     Ok(ExitCode::SUCCESS)
@@ -465,7 +532,7 @@ fn read_input(file: Option<&Path>) -> Result<(String, String), mdmost::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Input, input_source, resolve_flag};
+    use super::{Input, input_source, resolve_flag, resolve_narrow_emoji};
     use std::path::Path;
 
     #[test]
@@ -500,6 +567,34 @@ mod tests {
         for stdin_is_terminal in [true, false] {
             assert_eq!(input_source(Some(dash), stdin_is_terminal), Input::Stdin);
         }
+    }
+
+    #[test]
+    fn a_flag_settles_the_emoji_width_without_asking_the_terminal() {
+        // The measurement is not merely overridden but never made: it writes to the
+        // terminal and waits for a reply, and someone who has already answered should
+        // not pay for that.
+        let never = || panic!("the terminal must not be asked");
+        assert!(resolve_narrow_emoji(true, false, None, never));
+        assert!(!resolve_narrow_emoji(false, true, Some(true), never));
+    }
+
+    #[test]
+    fn a_written_answer_is_taken_when_no_flag_says_otherwise() {
+        let never = || panic!("the terminal must not be asked");
+        assert!(resolve_narrow_emoji(false, false, Some(true), never));
+        assert!(!resolve_narrow_emoji(false, false, Some(false), never));
+    }
+
+    #[test]
+    fn only_a_clear_one_column_measurement_narrows_anything() {
+        // Lopsided on purpose, as detection is everywhere in this program: stripping a
+        // selector on a terminal that wanted it is the worse mistake, so silence, a
+        // nonsense reply and the standard answer all leave the document alone.
+        assert!(resolve_narrow_emoji(false, false, None, || Some(1)));
+        assert!(!resolve_narrow_emoji(false, false, None, || Some(2)));
+        assert!(!resolve_narrow_emoji(false, false, None, || Some(0)));
+        assert!(!resolve_narrow_emoji(false, false, None, || None));
     }
 
     #[test]

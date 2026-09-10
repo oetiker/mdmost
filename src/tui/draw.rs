@@ -177,6 +177,56 @@ pub fn draw(frame: &mut Frame<'_>, app: &mut App) {
             app,
         );
     }
+
+    // Last, over the finished frame, so that nothing painted above can escape it.
+    if app.narrow_emoji() {
+        narrow_frame(buffer);
+    }
+}
+
+/// Hands a terminal that draws an emoji-presentation sequence in one column the base
+/// character alone, and gives back the column the sequence no longer owns.
+///
+/// # Why the whole frame rather than each place text is written
+///
+/// The alternative is a rule wherever document text reaches `ratatui` — the document
+/// blit, the footnote popup, the contents pane, the status bar's heading and title —
+/// and such a rule is only ever as good as the last place somebody remembered it. One
+/// place that cannot be forgotten is worth a pass over cells that are already in cache.
+///
+/// # Why not the document instead
+///
+/// Because the document is what the reader copies, searches and is shown as *source*.
+/// Narrowing it would put the terminal's shortcoming into text that leaves the program:
+/// a drag reports "Markdown source" and a `[copy]` button hands over a code block, and
+/// neither may quietly lose a character the file holds.
+///
+/// The lead keeps the two columns it was laid out for. `ratatui` reads an empty symbol
+/// as "the cell before me owns this one" and leaves the terminal on whatever stood
+/// there; once the lead is one column wide that claim is false, so the owned cell is
+/// painted as the space it now is.
+fn narrow_frame(buffer: &mut Buffer) {
+    let area = buffer.area;
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            let Some(base) = buffer
+                .cell((x, y))
+                .and_then(|cell| crate::text::presentation_base(cell.symbol()))
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            if let Some(cell) = buffer.cell_mut((x, y)) {
+                cell.set_symbol(&base);
+            }
+            if x + 1 < area.right()
+                && let Some(next) = buffer.cell_mut((x + 1, y))
+                && next.symbol().is_empty()
+            {
+                next.set_symbol(" ");
+            }
+        }
+    }
 }
 
 /// Draws the frame shown while the document is still being laid out.

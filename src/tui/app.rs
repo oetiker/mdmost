@@ -41,6 +41,36 @@ const MAX_REPEAT: usize = 10_000;
 /// the label back. Nothing here schedules a wake-up.
 pub const FLASH_FOR: u64 = 600;
 
+/// Where `offset` in `old` ends up in `new`, for one contiguous edit.
+///
+/// The reading position is remembered as a byte offset into the document source, and an
+/// edit above it moves the bytes it counts. Comparing the two sources from both ends
+/// finds the region that actually changed: an offset before it keeps its value, an
+/// offset after it shifts by however much the document grew or shrank, and an offset
+/// *inside* it has no answer — the text it named is what was edited — so it keeps its
+/// value and the reader lands as near as the render allows.
+///
+/// Exact for the single edited region an editor's save produces, which is the case this
+/// exists for. Several edits at once collapse into the one region that spans them, which
+/// is approximate rather than wrong: only the position is at stake, and the reader can
+/// see where they are.
+pub(super) fn remap_offset(old: &str, new: &str, offset: usize) -> usize {
+    let old = old.as_bytes();
+    let new = new.as_bytes();
+    let common = old.len().min(new.len());
+    let prefix = (0..common).take_while(|&i| old[i] == new[i]).count();
+    if offset < prefix {
+        return offset;
+    }
+    let suffix = (0..common - prefix)
+        .take_while(|&i| old[old.len() - 1 - i] == new[new.len() - 1 - i])
+        .count();
+    if offset >= old.len() - suffix {
+        return (offset + new.len()).saturating_sub(old.len());
+    }
+    offset.min(new.len())
+}
+
 /// Whether `key` is a bare digit, and so part of a repeat count.
 fn is_count_digit(key: Key) -> bool {
     matches!(key.code, KeyCode::Char(ch) if ch.is_ascii_digit()) && key.mods.is_empty()
@@ -207,6 +237,15 @@ pub struct Notice {
 /// How the application was started.
 #[derive(Debug, Clone)]
 pub struct AppOptions {
+    /// The file the document was read from, if it came from one.
+    ///
+    /// Carried so the pager can say whether there is anything to watch: a document that
+    /// arrived on standard input can have `reload` set either way and nothing will come
+    /// of it, and a key that reported otherwise would be lying. `None` is that case.
+    ///
+    /// A path, not an open file. The state machine touches no file (design spec §13);
+    /// `super::term` does the reading.
+    pub source: Option<std::path::PathBuf>,
     /// The name shown in the status bar.
     pub title: String,
     /// Whether Nerd Font glyphs may be drawn.
@@ -216,6 +255,14 @@ pub struct AppOptions {
     /// icons too, not merely the status bar. List bullets are ASCII either way
     /// (see `render::glyphs`).
     pub icons: bool,
+    /// Whether this terminal draws an emoji-presentation sequence in one column.
+    ///
+    /// The answer [`crate::config::Config::narrow_emoji`] resolves to, already settled:
+    /// the binary measures the terminal once, before the document is first parsed. It is
+    /// kept because a *re*-read has to happen under the same answer — see
+    /// [`super::term`] — or the selector would come back on the first reload and the
+    /// screen would start smearing again.
+    pub narrow_emoji: bool,
     /// The theme to start in.
     pub theme: String,
     /// Whether the table-of-contents pane starts open.
@@ -393,6 +440,19 @@ impl App {
     /// The parsed document.
     pub fn doc(&self) -> &Doc {
         &self.doc
+    }
+
+    /// The file the document was read from, or `None` when it came down a pipe.
+    pub fn source(&self) -> Option<&std::path::Path> {
+        self.options.source.as_deref()
+    }
+
+    /// Whether an emoji-presentation sequence is drawn in one column here.
+    ///
+    /// Settled before the first parse and kept for the life of the pager, so that a
+    /// document re-read from a changed file is narrowed exactly as the first read was.
+    pub fn narrow_emoji(&self) -> bool {
+        self.options.narrow_emoji
     }
 
     /// The active configuration.
@@ -856,6 +916,52 @@ impl App {
         self.track_toc();
     }
 
+    /// Replaces the document with a newly parsed one, keeping the reader in place.
+    ///
+    /// The file behind the pager changed and [`super::term`] read it again; the state
+    /// machine touches no file itself (design spec §13), so it is handed the parsed
+    /// result. Everything derived from the old document is rebuilt here rather than
+    /// carried over — the table of contents, the search hits, the render — and
+    /// everything anchored to the *old canvas* is dropped, exactly as a reflow drops it.
+    ///
+    /// The reading position survives the way it survives a resize, through the source
+    /// offset of the topmost visible text; unlike a resize, that offset has to be
+    /// carried across the edit first (see [`remap_offset`]), because the bytes it counts
+    /// have moved.
+    pub fn reload(&mut self, doc: Doc) {
+        self.ensure_rendered();
+        let anchor = self
+            .source_offset_at(self.scroll)
+            .map(|offset| remap_offset(self.doc.source(), doc.source(), offset));
+        // Both are anchored to geometry the new render is about to replace, the same
+        // way a resize invalidates them.
+        self.bar_grab = None;
+        self.popup = None;
+        self.doc = doc;
+        // Rebuilt before the render, because `ensure_rendered` re-attaches the pane's
+        // anchors to the new canvas and would otherwise attach the old pane to it.
+        self.toc = Toc::from_doc(
+            &self.doc,
+            &crate::numbering::Numbering::enabled(&self.doc, self.config.section_numbers),
+        );
+        // Re-run rather than re-located: `ensure_rendered` projects existing hits onto
+        // the new canvas, but the hits themselves came from the old *source* and a
+        // reload is precisely the case where that source changed.
+        if !self.search.query().is_empty() {
+            self.search = Search::new(self.doc.source(), self.search.query(), self.search.mode())
+                .unwrap_or_else(|_| Search::empty());
+        }
+        self.search_index = None;
+        self.ensure_rendered();
+        if let Some(offset) = anchor {
+            self.scroll = self.row_for_source_offset(offset);
+        }
+        self.clamp();
+        self.refilter_toc();
+        self.track_toc();
+        self.notify("reloaded", false);
+    }
+
     /// Renders the document if the cache is stale, then re-attaches anchors and hits.
     ///
     /// Dropping the cache changes nothing visible: everything derived from a render is
@@ -1180,6 +1286,7 @@ impl App {
             Action::ToggleToc => self.toggle_toc(),
             Action::CycleTheme => self.cycle_theme(),
             Action::ToggleLineNumbers => self.toggle_line_numbers(),
+            Action::ToggleReload => self.toggle_reload(),
             Action::SaveConfig => self.save_config(),
             Action::ReportPosition => self.report_position(),
             // Design spec §9: `/` inside the table of contents filters it fuzzily
@@ -1414,6 +1521,27 @@ impl App {
                 "line numbers on"
             } else {
                 "line numbers off"
+            },
+            false,
+        );
+    }
+
+    /// Starts or stops re-reading the document as its file changes.
+    ///
+    /// The setting is one `S` saves, so a reader who turns it off for good can keep it
+    /// that way. A document that came down a pipe has no file to watch, and flipping a
+    /// setting that cannot act would be a worse answer than saying so.
+    fn toggle_reload(&mut self) {
+        if self.options.source.is_none() {
+            self.notify("no file to watch", false);
+            return;
+        }
+        self.config.reload = !self.config.reload;
+        self.notify(
+            if self.config.reload {
+                "auto-reload on"
+            } else {
+                "auto-reload off"
             },
             false,
         );

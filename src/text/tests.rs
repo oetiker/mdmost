@@ -673,3 +673,49 @@ fn truncate_to_width_costs_a_wide_cluster_honestly() {
         WIDE_PLUS_SPACING_MARK
     );
 }
+
+// ---------------------------------------------------------------------------
+// Emoji presentation on a terminal that does not widen it.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_narrow_base_plus_the_selector_answers_with_the_base() {
+    // `unicode-width` gives U+2638 one column and U+2638 U+FE0F two, which is what the
+    // standard asks for and what several terminals do not do. Handing such a terminal
+    // the base alone is what puts every measurement — ours, ratatui's and the
+    // terminal's — back on the same number, and it draws the same glyph there anyway.
+    assert_eq!(presentation_base("\u{2638}\u{fe0f}"), Some("\u{2638}"));
+    assert_eq!(presentation_base("\u{2764}\u{fe0f}"), Some("\u{2764}"));
+    assert_eq!(
+        display_width(presentation_base("\u{2638}\u{fe0f}").unwrap()),
+        1
+    );
+}
+
+#[test]
+fn an_emoji_that_is_wide_on_its_own_has_no_answer() {
+    // No selector, and nobody disagrees about these: every terminal measured gives them
+    // two columns, so there is nothing to put right.
+    for cluster in ["\u{1f4c4}", "\u{1f33e}", "\u{1f464}", "\u{231a}"] {
+        assert_eq!(presentation_base(cluster), None);
+    }
+}
+
+#[test]
+fn a_selector_in_the_middle_of_a_cluster_is_not_answered_for() {
+    // A ZWJ sequence and a keycap both carry U+FE0F somewhere other than the end. How
+    // wide a terminal draws either is its own disagreement, and taking the selector out
+    // would change which glyph is drawn rather than only how wide it is.
+    assert_eq!(
+        presentation_base("\u{1f468}\u{200d}\u{2764}\u{fe0f}\u{200d}\u{1f468}"),
+        None
+    );
+    assert_eq!(presentation_base("1\u{fe0f}\u{20e3}"), None);
+}
+
+#[test]
+fn ordinary_text_has_no_answer() {
+    for cluster in ["a", " ", "\u{2638}", "\u{2638}\u{fe0e}", ""] {
+        assert_eq!(presentation_base(cluster), None);
+    }
+}
