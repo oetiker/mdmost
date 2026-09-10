@@ -70,6 +70,7 @@ writes plain text rather than escape sequences.
 
 - **`--wide-emoji`** — Draw such an emoji at the width the standard gives it, without
   measuring the terminal.
+
 - **`--no-reload`** — Do not re-read the document when the file it came from changes on
   disk. Watching is on by default; see *Reloading* below.
 
@@ -259,27 +260,6 @@ becomes `copied`.
 Capturing the mouse takes away the terminal's own drag-select for as long as
 **mdmost** runs.
 
-## Emoji width
-
-`U+FE0F` asks for the emoji form of a character that also has a text form — `☸️` is
-`☸` plus that selector — and the standard makes the result two columns wide.
-Several terminals draw it in one and move the cursor by one. Nothing can be
-patched over that afterwards: the width tables say two, and so does the library
-that paints the screen, so on such a terminal every line containing one is drawn
-one column out from there on, and scrolling leaves stale characters behind.
-
-**mdmost** therefore asks the terminal at startup: it draws the sequence at the
-start of a line, reads back where the cursor ended up, and erases what it drew.
-A clear answer of one column makes it drop the selector for the rest of the
-session, which draws the same glyph on such a terminal and puts every
-measurement back on one number. Any other answer — including no answer — leaves
-the document exactly as it is.
-
-The question is not put at all when there is no terminal on both standard input
-and standard output, or when `TERM` is unset, `dumb` or `linux`. To settle it
-without being asked, write `narrow_emoji = true` (or `false`) in the
-configuration file, or pass `--narrow-emoji` / `--wide-emoji`; a flag is saved by
-`S`, a measurement never is.
 # RELOADING
 
 A document read from a file is re-read whenever that file changes on disk, so a
@@ -675,6 +655,28 @@ say nothing about the terminal drawing the pixels.
 Plain and icon glyphs occupy **the same display width**, so nothing shifts and
 nothing reflows either way, and no feature depends on icons. To settle the choice
 by hand instead, see **CONFIGURATION**.
+
+## Emoji width
+
+`U+FE0F` asks for the emoji form of a character that also has a text form — `☸️` is
+`☸` plus that selector — and the standard makes the result two columns wide.
+Several terminals draw it in one and move the cursor by one. Nothing can be
+patched over that afterwards: the width tables say two, and so does the library
+that paints the screen, so on such a terminal every line containing one is drawn
+one column out from there on, and scrolling leaves stale characters behind.
+
+**mdmost** therefore asks the terminal at startup: it draws the sequence at the
+start of a line, reads back where the cursor ended up, and erases what it drew.
+A clear answer of one column makes it drop the selector for the rest of the
+session, which draws the same glyph on such a terminal and puts every
+measurement back on one number. Any other answer — including no answer — leaves
+the document exactly as it is.
+
+The question is not put at all when there is no terminal on both standard input
+and standard output, or when `TERM` is unset, `dumb` or `linux`. To settle it
+without being asked, write `narrow_emoji = true` (or `false`) in the
+configuration file, or pass `--narrow-emoji` / `--wide-emoji`; a flag is saved by
+`S`, a measurement never is.
 
 # DEFAULT MARKDOWN VIEWER
 
