@@ -534,3 +534,59 @@ fn a_misspelt_math_key_is_reported_and_dropped() {
     let loaded = Config::parse_str("mathinline = true\n", path());
     assert_eq!(loaded.problems.len(), 1, "{:?}", loaded.problems);
 }
+
+#[test]
+fn the_emoji_width_answer_is_kept_tri_state() {
+    // Unset means nobody has said, and the answer is measured from the terminal — the
+    // same shape as `icons`, and for the same reason: `Some(false)` and "unset" behave
+    // alike today, but only the first must keep behaving that way on a terminal where
+    // the measurement would say otherwise.
+    assert_eq!(Config::default().narrow_emoji, None);
+    assert_eq!(Config::parse_str("", path()).config.narrow_emoji, None);
+
+    let loaded = Config::parse_str("narrow_emoji = true\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.narrow_emoji, Some(true));
+}
+
+#[test]
+fn auto_reload_is_on_unless_the_file_turns_it_off() {
+    // On by default: a document the reader is editing in another window should keep
+    // up without anybody having to ask for it.
+    assert!(Config::default().reload);
+    assert!(Config::parse_str("", path()).config.reload);
+
+    let loaded = Config::parse_str("reload = false\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert!(!loaded.config.reload);
+}
+
+#[test]
+fn the_settle_window_defaults_to_two_seconds_and_can_be_set() {
+    // Whole seconds, because TOML tells `2` and `2.0` apart: a decimal field would turn
+    // the obvious `reload_settle = 2` into a type error.
+    assert_eq!(Config::default().reload_settle, DEFAULT_RELOAD_SETTLE);
+    assert_eq!(
+        Config::parse_str("", path()).config.reload_settle,
+        DEFAULT_RELOAD_SETTLE
+    );
+
+    let loaded = Config::parse_str("reload_settle = 5\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.reload_settle, 5);
+
+    // Zero is the escape hatch, not a mistake: take up every change as it settles.
+    let loaded = Config::parse_str("reload_settle = 0\n", path());
+    assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
+    assert_eq!(loaded.config.reload_settle, 0);
+}
+
+#[test]
+fn re_reading_has_a_default_binding_of_its_own() {
+    let bound = KeyBindings::defaults();
+    assert_eq!(
+        bound.action(&Key::char('R')),
+        Some(Action::ToggleReload),
+        "R is not bound to starting and stopping re-reading"
+    );
+}

@@ -33,6 +33,12 @@ use crate::theme::{Color, Theme};
 
 pub use keys::{Action, ActionGroup, Key, KeyBindings, KeyCode, KeyMods};
 
+/// How long a file being written holds still before it is re-read, in seconds.
+///
+/// Long enough to ride out an editor that saves while the reader types, short enough
+/// that a pause in the writing shows up before the reader wonders whether it will.
+pub const DEFAULT_RELOAD_SETTLE: u16 = 2;
+
 /// The default width of the table-of-contents pane, in columns.
 pub const DEFAULT_TOC_WIDTH: u16 = 30;
 
@@ -144,6 +150,41 @@ pub struct Config {
     /// agree about. `less` does not capture either. Turn it on with `--mouse` or
     /// `mouse = true`.
     pub mouse: bool,
+    /// Whether this terminal draws an emoji-presentation sequence in one column.
+    ///
+    /// `U+FE0F` asks for the emoji form of a character that also has a text form, and
+    /// the standard makes the result two columns wide. Several terminals draw it in one.
+    /// Nothing can reconcile that after the fact — `unicode-width` and `ratatui` both
+    /// measure two — so `true` drops the selector instead, which draws the same glyph on
+    /// such a terminal and puts every measurement back on one number (see
+    /// [`crate::text::narrow_emoji`]).
+    ///
+    /// Tri-state like [`Config::icons`], and for the same reason: `None` — the default —
+    /// means nobody has said, and the answer is measured from the terminal at startup.
+    /// `--narrow-emoji` / `--wide-emoji` override even a value written in the file.
+    pub narrow_emoji: Option<bool>,
+    /// Whether the document is re-read when the file it came from changes on disk.
+    ///
+    /// On by default: a pager pointed at a file somebody is editing in another window
+    /// is expected to keep up, and the reader who wanted a frozen copy of a moving
+    /// file can pipe it in instead. Turn it off with `--no-reload` or `reload = false`.
+    ///
+    /// It has nothing to act on when the document arrived on standard input: there is
+    /// no file to watch, and the setting is ignored rather than being an error.
+    pub reload: bool,
+    /// How long a file that is being written must hold still before it is re-read.
+    ///
+    /// A change that arrives out of a quiet spell is taken up at once, which is the
+    /// reader who saves and looks over. A change that arrives while the file is already
+    /// being written is ridden out instead: an editor saving on every keystroke would
+    /// otherwise cost a full re-render and a status-bar flash apiece, and every one of
+    /// those re-reads would be thrown away by the next. The document catches up once
+    /// the writing has stopped for this long.
+    ///
+    /// In whole seconds, because TOML tells `2` and `2.0` apart and a reader writing the
+    /// obvious `reload_settle = 2` for a decimal field would get a type error. `0` takes
+    /// up every change as soon as it has settled.
+    pub reload_settle: u16,
     /// How many document lines one mouse-wheel notch scrolls.
     pub scroll_step: u16,
     /// The widest the document body is laid out, however wide the terminal is.
@@ -176,6 +217,9 @@ impl Default for Config {
             toc_open: false,
             toc_width: DEFAULT_TOC_WIDTH,
             mouse: false,
+            narrow_emoji: None,
+            reload: true,
+            reload_settle: DEFAULT_RELOAD_SETTLE,
             scroll_step: 3,
             body_width: Some(DEFAULT_BODY_WIDTH),
             keys: KeyBindings::defaults(),
@@ -207,6 +251,19 @@ impl Loaded {
 }
 
 impl Config {
+    /// Which math delimiters a document should be parsed with.
+    ///
+    /// Lives here because two callers need the same answer — the binary at startup and
+    /// the pager when it re-reads a file that changed — and two derivations of it are
+    /// two chances to disagree about what `math = false` covers.
+    pub fn math_syntax(&self) -> crate::doc::MathSyntax {
+        crate::doc::MathSyntax {
+            dollars: self.math,
+            // `math` dominates: with the parser off there is nothing to extend.
+            backslash: self.math && self.math_backslash,
+        }
+    }
+
     /// The path configuration is read from when none is given on the command line.
     ///
     /// Returns `None` when the platform has no home directory to speak of.
@@ -350,6 +407,9 @@ struct RawConfig {
     title_banner: Option<bool>,
     section_numbers: Option<bool>,
     mouse: Option<bool>,
+    narrow_emoji: Option<bool>,
+    reload: Option<bool>,
+    reload_settle: Option<u16>,
     scroll_step: Option<u16>,
     body_width: Option<u16>,
     #[serde(default)]
@@ -398,10 +458,11 @@ impl RawConfig {
     /// Validates the raw file into a [`Config`], collecting per-entry problems.
     fn into_config(self, text: &str, path: &Path, problems: &mut Vec<ConfigError>) -> Config {
         let mut config = Config {
-            // Carried straight across as an `Option`, unlike every setting below it: an
-            // absent `icons` key must stay absent so it reaches detection, rather than
-            // being resolved here to a fixed answer.
+            // Carried straight across as an `Option`, unlike every setting below them:
+            // an absent `icons` or `narrow_emoji` key must stay absent so it reaches
+            // detection, rather than being resolved here to a fixed answer.
             icons: self.icons,
+            narrow_emoji: self.narrow_emoji,
             ..Config::default()
         };
 
@@ -425,6 +486,12 @@ impl RawConfig {
         }
         if let Some(mouse) = self.mouse {
             config.mouse = mouse;
+        }
+        if let Some(reload) = self.reload {
+            config.reload = reload;
+        }
+        if let Some(settle) = self.reload_settle {
+            config.reload_settle = settle;
         }
         if let Some(step) = self.scroll_step {
             if step == 0 {
@@ -627,6 +694,9 @@ const KNOWN_KEYS: &[&str] = &[
     "title_banner",
     "section_numbers",
     "mouse",
+    "narrow_emoji",
+    "reload",
+    "reload_settle",
     "scroll_step",
     "body_width",
     "toc",

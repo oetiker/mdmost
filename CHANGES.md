@@ -20,6 +20,17 @@ minor bump rather than a patch.
   spec §10). `SearchSpan` has no constructor and is not `#[non_exhaustive]`, so any
   consumer building one by struct literal — as this crate itself does, in sixteen places —
   stops compiling until the new field is added.
+- `AppOptions` gained `source: Option<PathBuf>` — the file the document was read from,
+  which the pager watches for changes and which `Action::ToggleReload` needs in order to
+  say whether there is anything to watch. `None` is a document that did not come from a
+  file. `mdmost::tui::run` keeps its single parameter: the path travels with the rest of
+  the startup answers rather than beside them, so the two cannot disagree.
+- `Action` gained `ToggleReload`, bound to `R`. A `match` over `Action` that is not
+  `#[non_exhaustive]`-tolerant stops compiling until the arm is added.
+- `Config` gained a public field, `reload: bool` (default `true`), and a method,
+  `Config::math_syntax`, which is the one place `math` and `math_backslash` are turned
+  into a `MathSyntax`. As with the fields below, only a caller building a `Config` by
+  struct literal has to change.
 - `RenderOptions` gained a public field, `math_inline: bool`, and `Config` gained three,
   `math: bool`, `math_inline: bool` and `math_backslash: bool`. Both types already had a
   builder (`RenderOptions::with_math_inline` is new alongside it) and `Default`, so an
@@ -32,6 +43,34 @@ minor bump rather than a patch.
   old behaviour.
 
 ### New
+
+- A document read from a file is re-read while the pager is open, so **mdmost** left
+  beside an editor keeps up with what is being written. The reading position survives
+  the edit: the source offset at the top of the screen is carried across the changed
+  region, so text inserted above what you are reading does not push you off it. A live
+  search is re-run, the contents pane is rebuilt, and a footnote popup closes because
+  the marker it points at may have moved. The file is looked at once every eighth of a
+  second — one `stat`, no new dependency — and a change is acted on only once it has
+  stopped changing, so a half-written save is never shown; a path that momentarily
+  vanishes, which is how many editors save, is waited out rather than treated as an
+  empty document. Standard input is watched for nothing, there being no file. On by
+  default; `--no-reload`, `--reload` and `reload = false` control it.
+
+  How long a change must have settled for depends on what the file was doing before it.
+  One that arrives out of a quiet spell is taken up at once — the reader who saves and
+  looks over. One that arrives while the file is already being written is ridden out,
+  because each re-read costs a full re-render and a status-bar flash and would be thrown
+  away by the next write; the document catches up once the writing has stopped for
+  `reload_settle` seconds, two by default. A file written without pause therefore holds
+  still after the first change. `reload_settle = 0` takes up every settled change.
+  `Config` gained the field, which is an API break for a caller building one by struct
+  literal.
+
+  **`R`** starts and stops the watching while the pager runs, and `S` saves the answer.
+  Off and on again is also how to ask for a change straight away: what happened while
+  watching was off is not thrown away, so switching it back on takes the file up without
+  waiting out the settle window. A document that arrived on standard input has no file
+  to watch, and the key says so rather than flipping a setting that cannot act.
 
 - `$E = mc^2$` reads as `E = mc²` on the line, wherever inline math appears in a
   document: a paragraph, a table cell, a list item, a footnote. Scripts are Unicode
@@ -47,6 +86,19 @@ minor bump rather than a patch.
   `$` as ordinary text, exactly as before this existed.
 
 ### Fixed
+
+- A terminal that draws an emoji-presentation sequence such as `☸️` (a narrow character
+  plus `U+FE0F`) in one column no longer leaves stale characters strewn across the screen
+  when the document is scrolled. The standard makes such a sequence two columns wide,
+  `unicode-width` and `ratatui` both measure two, and a terminal that advances by one is
+  then one column out for the whole run of cells it was handed — which is why the damage
+  spread well beyond the line the emoji was on. mdmost now asks the terminal at startup
+  how wide it draws one, and on a clear answer of one column drops the selector, which
+  draws the same glyph there and puts every measurement back on one number. `narrow_emoji`
+  in the configuration file and `--narrow-emoji` / `--wide-emoji` settle it without
+  measuring, and a document re-read from a changed file is narrowed exactly as the first
+  read was. `Config` gained the field and `AppOptions` gained `narrow_emoji: bool`, which
+  is an API break for a caller building either by struct literal.
 
 - A Mermaid diagram's degraded-code caption is no longer corrupted where the
   line-number gutter's bottom-edge junction crosses it — "not a diagram type" no
