@@ -126,7 +126,7 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
             // A negative baseline is a row above the canvas, reachable only after a `u16`
             // saturation upstream; skipping the draw clips it as the canvas would.
             if let Ok(row) = usize::try_from(baseline) {
-                canvas.write_str(row, usize::from(col), s, theme.base());
+                canvas.write_str(row, usize::from(col), s, theme.math.atom);
             }
         }
         BoxContent::Row(parts) => {
@@ -145,7 +145,7 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                     usize::from(col),
                     usize::from(b.width),
                     "─",
-                    theme.base(),
+                    theme.math.rule,
                 );
             }
             place(
@@ -256,7 +256,7 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                 // The overline spans the radicand alone: drawn to `b.width` it would
                 // reach back over the sign itself.
                 if let Ok(row) = usize::try_from(baseline) {
-                    canvas.write_str(row, usize::from(stroke), "√", theme.base());
+                    canvas.write_str(row, usize::from(stroke), "√", theme.math.rule);
                 }
                 if let Ok(row) = usize::try_from(stroke_top) {
                     canvas.hline(
@@ -264,7 +264,7 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                         usize::from(stroke.saturating_add(2)),
                         usize::from(radicand.width),
                         "─",
-                        theme.base(),
+                        theme.math.rule,
                     );
                 }
                 stroke.saturating_add(2)
@@ -278,27 +278,27 @@ fn place(b: &MathBox, canvas: &mut Canvas, baseline: i32, col: u16, theme: &Them
                 // at the gap, not `radicand.width` as in the one-row form above.
                 let stem = stroke.saturating_add(2);
                 if let Ok(row) = usize::try_from(stroke_top) {
-                    canvas.write_str(row, usize::from(stem), "┌", theme.base());
+                    canvas.write_str(row, usize::from(stem), "┌", theme.math.rule);
                     canvas.hline(
                         row,
                         usize::from(stem.saturating_add(1)),
                         usize::from(radicand.width).saturating_add(1),
                         "─",
-                        theme.base(),
+                        theme.math.rule,
                     );
                 }
                 for r in stroke_top.saturating_add(1)..=bottom {
                     if let Ok(row) = usize::try_from(r) {
-                        canvas.write_str(row, usize::from(stem), "│", theme.base());
+                        canvas.write_str(row, usize::from(stem), "│", theme.math.rule);
                     }
                 }
                 if let Ok(row) = usize::try_from(bottom) {
-                    canvas.write_str(row, usize::from(stroke), "‾", theme.base());
+                    canvas.write_str(row, usize::from(stroke), "‾", theme.math.rule);
                     canvas.write_str(
                         row,
                         usize::from(stroke.saturating_add(1)),
                         "╲",
-                        theme.base(),
+                        theme.math.rule,
                     );
                 }
                 stroke.saturating_add(4)
@@ -390,7 +390,7 @@ fn write_delimiter(
             row,
             usize::from(col),
             piece.encode_utf8(&mut buf),
-            theme.base(),
+            theme.math.rule,
         );
     }
 }
@@ -452,6 +452,36 @@ mod tests {
         canvas
             .check_invariants()
             .expect("exactly width columns on every row");
+    }
+
+    /// The symbols wear `theme.math.atom` and the rule wears `theme.math.rule`.
+    ///
+    /// Design spec §11: the `a` is what the author wrote and the bar is what mdmost drew
+    /// to arrange it, and a reader has to be able to tell at a glance. A piped dump is
+    /// plain text, so this is the one automated place the wiring can be seen. The
+    /// coordinates are read off the drawn canvas `a_fraction_draws_the_rule_on_the_baseline_with_both_parts_centred`
+    /// shows — the numerator on row 0, the rule on row 1 — not derived.
+    #[test]
+    fn a_fractions_symbols_wear_atom_and_its_rule_wears_rule() {
+        let theme = Theme::default();
+        let b = fraction(text("a"), text("b"));
+        let canvas = to_canvas(&b, b.width, &theme);
+        assert_eq!(rows(&canvas), vec!["a", "─", "b"]);
+        let cell = |row: usize, col: usize| canvas.row(row).expect("row exists")[col].clone();
+        assert_eq!(cell(0, 0).text(), "a");
+        assert_eq!(
+            cell(0, 0).style(),
+            theme.math.atom,
+            "the numerator is the author's"
+        );
+        assert_eq!(cell(1, 0).text(), "─");
+        assert_eq!(cell(1, 0).style(), theme.math.rule, "the rule is ours");
+        assert_eq!(cell(2, 0).text(), "b");
+        assert_eq!(
+            cell(2, 0).style(),
+            theme.math.atom,
+            "the denominator is the author's"
+        );
     }
 
     #[test]

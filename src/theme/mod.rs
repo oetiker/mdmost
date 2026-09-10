@@ -259,6 +259,21 @@ pub struct DiagramStyles {
     pub milestone: Style,
 }
 
+/// How a drawn formula is coloured (design spec §11).
+///
+/// Two entries and not thirteen. Everything a formula draws is either a character the
+/// author asked for — `\alpha` is as much theirs as a typed `α` — or a mark mdmost
+/// invented to arrange those characters in two dimensions: the fraction rule, the
+/// delimiter pieces, the radical stroke, the overline. A reader has to be able to tell
+/// those apart at a glance, and no finer distinction inside a formula earns its own slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MathStyles {
+    /// The symbols, numbers and operators the author wrote. Follows body text.
+    pub atom: Style,
+    /// Fraction bars, delimiters, radical strokes, the overline.
+    pub rule: Style,
+}
+
 /// Styles for chrome: status bar, TOC pane, help overlay and search.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UiStyles {
@@ -360,6 +375,8 @@ pub struct Theme {
     pub table: TableStyles,
     /// Diagram styles.
     pub diagram: DiagramStyles,
+    /// Formula styles.
+    pub math: MathStyles,
     /// Chrome styles.
     pub ui: UiStyles,
 }

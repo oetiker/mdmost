@@ -5,8 +5,8 @@
 //! guaranteed to define exactly the same slots and cannot drift apart.
 
 use super::{
-    BlockStyles, CodeStyles, Color, DiagramStyles, Palette, TableStyles, TextStyles, Theme,
-    UiStyles,
+    BlockStyles, CodeStyles, Color, DiagramStyles, MathStyles, Palette, TableStyles, TextStyles,
+    Theme, UiStyles,
 };
 use crate::theme::style::Style;
 
@@ -262,6 +262,26 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             task_active: base.fg(p.blue),
             task_crit: base.fg(p.red),
             milestone: base.fg(p.yellow).bold(),
+        },
+        math: MathStyles {
+            // The author's own characters, so they sit exactly where body text does: a
+            // `\alpha` is as much theirs as a typed `α`, and a formula must not look
+            // like a quotation from somewhere else.
+            atom: base,
+            // The marks mdmost drew to arrange those characters — the fraction bar, the
+            // delimiter pieces, the radical stroke, the overline — are structure, the
+            // same argument `heading_number` makes above: the reader has to be able to
+            // tell at a glance which marks are theirs and which are ours. So the rule is
+            // a line, in the ink a diagram's lines use, at the same blend: a fraction
+            // bar and a flowchart edge are one kind of mark. Not the bare border, which
+            // clears the 3:1 graphic floor by a hair (3.27:1 dark, 3.45:1 light) and
+            // would make the bar the faintest ink on the page — a fraction the reader
+            // has to take on trust reads as two lines of text, not one formula. And not
+            // `muted`, which is the grey annotations and gutter numbers are written in:
+            // a rule is drawn, not read. Measured against the page: 8.16:1 dark and
+            // 7.51:1 light, under the symbols' 13.27:1 and 13.07:1, so the structure
+            // recedes without going faint; `tests/theme_contrast.rs` pins both halves.
+            rule: base.fg(p.border.blend(p.fg, 0.6)),
         },
         ui: UiStyles {
             status_bar: Style::new().fg(p.fg).bg(p.overlay),

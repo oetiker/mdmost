@@ -464,3 +464,32 @@ fn the_hovered_link_stays_legible_in_every_theme() {
         }
     }
 }
+
+/// A formula's symbols are text and its rules are structure — and the structure is ours.
+///
+/// Same two requirements as `section_numbers_are_readable_but_quieter_than_every_heading`:
+/// the symbols clear the text floor because the reader reads them; the rules clear the
+/// graphic floor because a fraction bar the reader has to take on trust is a bug; and the
+/// rules stay quieter than the symbols, because if they were as loud the split would be
+/// two names for one colour and should be removed instead.
+///
+/// Measured on the built-ins when this was written, against the page: the symbols at
+/// 13.27:1 (dark) and 13.07:1 (light), the rules at 8.16:1 and 7.51:1 — the same blend
+/// `diagram.line` uses, so a fraction bar and a flowchart edge are one kind of ink.
+#[test]
+fn a_formulas_rules_are_visible_but_quieter_than_its_symbols() {
+    for theme in themes() {
+        let name = &theme.name;
+        let page = theme.palette.bg;
+        let atom = fg("math.atom", theme.math.atom);
+        let rule = fg("math.rule", theme.math.rule);
+        at_least(name, "math.atom", atom, page, TEXT_FLOOR);
+        at_least(name, "math.rule", rule, page, GRAPHIC_FLOOR);
+        let (atom, rule) = (contrast(atom, page), contrast(rule, page));
+        assert!(
+            rule < atom,
+            "{name}: the structure must recede — math.rule {rule:.2}:1 is not quieter than \
+             math.atom {atom:.2}:1"
+        );
+    }
+}
