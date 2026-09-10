@@ -46,6 +46,7 @@ fn pager_narrow(source: &str) -> App {
         Doc::parse(source),
         Config::default(),
         AppOptions {
+            source: None,
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
@@ -66,6 +67,7 @@ fn pager_with(source: &str, config: Config) -> App {
         Doc::parse(source),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
@@ -110,6 +112,7 @@ fn the_body_cap_reaches_the_render_through_the_pager() {
         Doc::parse(source),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
@@ -253,6 +256,7 @@ fn render_options_follow_the_flags_that_feed_them() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
@@ -294,6 +298,7 @@ fn there_is_a_horizontal_offset_only_when_something_is_over_wide() {
         Doc::parse(&over_wide),
         Config::default(),
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
@@ -657,6 +662,7 @@ fn rebinding_a_key_changes_what_it_does() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
@@ -696,6 +702,7 @@ fn an_unknown_start_theme_falls_back_without_refusing_to_start() {
         Doc::parse("# x\n"),
         Config::default(),
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
@@ -780,6 +787,7 @@ fn a_forced_width_overrides_the_terminal() {
         Doc::parse(SAMPLE),
         Config::default(),
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
@@ -831,6 +839,7 @@ fn pager_named(source: &str, title: &str, width: u16, height: u16) -> App {
         Doc::parse(source),
         Config::default(),
         AppOptions {
+            source: None,
             config_path: None,
             title: title.to_string(),
             icons: false,
@@ -854,6 +863,7 @@ fn numbered_pager_at(source: &str, width: u16, height: u16) -> App {
             ..Config::default()
         },
         AppOptions {
+            source: None,
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
@@ -1962,6 +1972,7 @@ fn a_wide_character_binding_does_not_ragged_edge_the_help_column() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "x".to_string(),
             icons: false,
@@ -2340,6 +2351,7 @@ fn the_match_key_hint_names_the_keys_the_reader_actually_bound() {
         Doc::parse(SAMPLE),
         config,
         AppOptions {
+            source: None,
             config_path: None,
             title: "sample.md".to_string(),
             icons: false,
@@ -2805,6 +2817,7 @@ fn themed_pager(source: &str, theme: &str, width: u16, height: u16) -> App {
         Doc::parse(source),
         Config::default(),
         AppOptions {
+            source: None,
             title: "sample.md".to_string(),
             icons: false,
             narrow_emoji: false,
@@ -4544,6 +4557,7 @@ fn a_multi_row_drag_yields_source_line_structure_not_the_renderers() {
         Doc::parse(source),
         Config::default(),
         AppOptions {
+            source: None,
             title: "t.md".to_string(),
             icons: false,
             narrow_emoji: false,
@@ -7718,6 +7732,27 @@ impl Drop for TempDir {
     }
 }
 
+/// A pager that knows which file its document came from, so `R` has something to act on.
+fn pager_watching(source: &str, path: &std::path::Path) -> App {
+    let mut app = App::new(
+        Doc::parse(source),
+        Config::default(),
+        AppOptions {
+            source: Some(path.to_path_buf()),
+            config_path: None,
+            title: "doc.md".to_string(),
+            icons: false,
+            narrow_emoji: false,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(80, 24);
+    let _ = app.canvas();
+    app
+}
+
 /// A clock a test drives by hand, so the settle window can be crossed without sleeping.
 ///
 /// The watcher is asked what the time is rather than reading it, which is what lets a
@@ -7740,11 +7775,12 @@ const SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[test]
 fn an_untouched_file_is_never_reported_as_changed() {
+    let clock = Clock::new();
     let dir = TempDir::new("untouched");
     let path = dir.file("doc.md", "# One\n");
     let mut watcher = super::watch::Watcher::new(&path, SETTLE);
-    for _ in 0..5 {
-        assert!(!watcher.changed());
+    for step in 0..5 {
+        assert!(!watcher.changed_at(clock.at(f64::from(step))));
     }
 }
 
@@ -7848,15 +7884,22 @@ fn a_settle_window_of_zero_takes_up_every_change() {
 fn a_change_is_reported_once_it_has_settled() {
     let dir = TempDir::new("settled");
     let path = dir.file("doc.md", "# One\n");
+    let clock = Clock::new();
     let mut watcher = super::watch::Watcher::new(&path, SETTLE);
 
     std::fs::write(&path, "# One\n\nAnd a second paragraph.\n").expect("write");
     assert!(
-        !watcher.changed(),
+        !watcher.changed_at(clock.at(0.0)),
         "a file seen changing for the first time may still be half written"
     );
-    assert!(watcher.changed(), "the change settled and was not reported");
-    assert!(!watcher.changed(), "the same change was reported twice");
+    assert!(
+        watcher.changed_at(clock.at(0.1)),
+        "the change settled and was not reported"
+    );
+    assert!(
+        !watcher.changed_at(clock.at(0.2)),
+        "the same change was reported twice"
+    );
 }
 
 #[test]
@@ -7894,15 +7937,19 @@ fn a_file_that_vanishes_mid_save_is_not_a_change() {
     // to load, and certainly not a reason to throw away the one on screen.
     let dir = TempDir::new("renamed");
     let path = dir.file("doc.md", "# One\n");
+    let clock = Clock::new();
     let mut watcher = super::watch::Watcher::new(&path, SETTLE);
 
     std::fs::remove_file(&path).expect("remove");
-    assert!(!watcher.changed());
-    assert!(!watcher.changed());
+    assert!(!watcher.changed_at(clock.at(0.0)));
+    assert!(!watcher.changed_at(clock.at(0.1)));
 
     std::fs::write(&path, "# One\n\nBack again, with more text.\n").expect("write");
-    assert!(!watcher.changed());
-    assert!(watcher.changed(), "the replacement file was never reported");
+    assert!(!watcher.changed_at(clock.at(0.2)));
+    assert!(
+        watcher.changed_at(clock.at(0.3)),
+        "the replacement file was never reported"
+    );
 }
 
 #[test]
@@ -7991,4 +8038,85 @@ fn a_reload_keeps_the_selector_when_the_terminal_wanted_it() {
     super::term::reload_tick(&mut app, &mut watcher);
 
     assert_eq!(app.doc().source(), "# Two ☸️ three\n");
+}
+
+#[test]
+fn r_starts_and_stops_re_reading_the_file() {
+    // On by default, so the first press is the one that stops it.
+    let dir = TempDir::new("toggle");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager_watching("# One\n", &path);
+    assert!(
+        app.config().reload,
+        "auto-reload is on unless asked otherwise"
+    );
+
+    app.on_key(Key::char('R'));
+    assert!(!app.config().reload);
+    let notice = app.notice().expect("a toggle is worth reporting");
+    assert!(!notice.is_error, "unexpected notice: {}", notice.text);
+    assert!(
+        notice.text.contains("off"),
+        "unexpected notice: {}",
+        notice.text
+    );
+
+    app.on_key(Key::char('R'));
+    assert!(app.config().reload);
+    assert!(
+        app.notice().is_some_and(|n| n.text.contains("on")),
+        "turning it back on was not reported"
+    );
+}
+
+#[test]
+fn a_document_with_no_file_behind_it_has_nothing_to_watch() {
+    // Standard input. Reporting "auto-reload off" would name a setting that was never
+    // doing anything here, so the key says what is actually the case and changes nothing.
+    let mut app = pager("# One\n");
+    let before = app.config().reload;
+
+    app.on_key(Key::char('R'));
+    assert_eq!(
+        app.config().reload,
+        before,
+        "a setting with nothing to act on was flipped"
+    );
+    let notice = app.notice().expect("the key said nothing at all");
+    assert!(
+        notice.text.contains("no file"),
+        "unexpected notice: {}",
+        notice.text
+    );
+}
+
+#[test]
+fn a_change_made_while_re_reading_is_off_arrives_when_it_is_switched_on() {
+    // Switching it back on is also how a reader asks for the change they know is there,
+    // so what happened while it was off must not have been quietly consumed.
+    let clock = Clock::new();
+    let dir = TempDir::new("toggle-catch-up");
+    let path = dir.file("doc.md", "# One\n");
+    let mut app = pager_watching("# One\n", &path);
+    let mut watcher = super::watch::Watcher::new(&path, SETTLE);
+
+    app.on_key(Key::char('R'));
+    std::fs::write(&path, "# Two\n\nWritten while nobody was looking.\n").expect("write");
+    for step in 0..4 {
+        super::term::reload_tick_at(&mut app, &mut watcher, clock.at(f64::from(step)));
+    }
+    assert_eq!(
+        app.doc().source(),
+        "# One\n",
+        "the file was re-read although re-reading was switched off"
+    );
+
+    app.on_key(Key::char('R'));
+    super::term::reload_tick_at(&mut app, &mut watcher, clock.at(10.0));
+    super::term::reload_tick_at(&mut app, &mut watcher, clock.at(10.2));
+    assert_eq!(
+        app.doc().source(),
+        "# Two\n\nWritten while nobody was looking.\n",
+        "switching it back on did not pick up the change made while it was off"
+    );
 }

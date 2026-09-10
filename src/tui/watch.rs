@@ -73,22 +73,15 @@ impl Watcher {
 
     /// Whether the file has changed and settled since the last time this said so.
     ///
-    /// One `stat`. A stamp that differs from the document on screen is remembered and
-    /// reported only when the *next* call finds it unchanged, which is what keeps a
-    /// file that is still being written from being read: a write in progress moves the
-    /// stamp again and the wait starts over.
+    /// One `stat`. The time is passed in rather than read here so that a test can cross
+    /// the settle window in a microsecond and get the same answer on every run.
     ///
-    /// A path that cannot be looked at — the window between the temporary file and the
-    /// rename that editors save through — is not a change and is not an error. The
-    /// document stays as it is and the next tick looks again.
-    pub(super) fn changed(&mut self) -> bool {
-        self.changed_at(Instant::now())
-    }
-
-    /// [`Watcher::changed`], against a clock the caller supplies.
-    ///
-    /// The time is passed in rather than read here so that a test can cross the settle
-    /// window in a microsecond and get the same answer on every run.
+    /// A stamp that differs from the document on screen is remembered and reported only
+    /// when a later call finds it unchanged, which is what keeps a file that is still
+    /// being written from being read. A path that cannot be looked at — the window
+    /// between the temporary file and the rename that editors save through — is not a
+    /// change and is not an error: the document stays as it is and the next tick looks
+    /// again.
     ///
     /// Settling is two questions, not one. The first is whether the file is *momentarily*
     /// still — the same stamp two looks running — which is what keeps a half-written save

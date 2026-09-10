@@ -23,7 +23,6 @@
 //! than open-coded anywhere.
 
 use std::io::{self, Write};
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -180,7 +179,7 @@ impl Input {
 ///
 /// Returns any I/O failure from the terminal, including [`terminal_gone`] when the
 /// terminal is hung up under the pager. The terminal is restored either way.
-pub fn run(app: &mut App, source: Option<&Path>) -> io::Result<()> {
+pub fn run(app: &mut App) -> io::Result<()> {
     install_panic_hook();
     // Declared before the `Restore` guard so that it is dropped after it: what a
     // library complained about is printed once the terminal is the reader's again, not
@@ -213,12 +212,11 @@ pub fn run(app: &mut App, source: Option<&Path>) -> io::Result<()> {
     // restoration has to be part of that order rather than a scope-end surprise.
     let guard = Restore;
 
-    // Nothing to watch when the document came down a pipe, and nothing to watch when
-    // the reader turned it off.
+    // Nothing to watch when the document came down a pipe. Whether the reader wants it
+    // watched is asked on every tick instead of here, because `Action::ToggleReload`
+    // can change the answer while the pager runs.
     let settle = Duration::from_secs(app.config().reload_settle.into());
-    let mut watcher = source
-        .filter(|_| app.config().reload)
-        .map(|path| Watcher::new(path, settle));
+    let mut watcher = app.source().map(|path| Watcher::new(path, settle));
     let result = event_loop(app, &mut terminal, &input, &terminate, watcher.as_mut());
     if result.is_err() {
         // `ratatui`'s `Terminal` complains into standard error from its destructor
@@ -326,7 +324,16 @@ fn event_loop(
 /// more use to the reader than an empty screen. The change is consumed either way, so a
 /// file that stays broken says so once rather than on every tick.
 pub(super) fn reload_tick(app: &mut App, watcher: &mut Watcher) {
-    if !watcher.changed() {
+    reload_tick_at(app, watcher, std::time::Instant::now());
+}
+
+/// [`reload_tick`], against a clock the caller supplies, for the tests.
+///
+/// The watcher is not asked anything while re-reading is switched off, so the change it
+/// has not yet reported is still there when the reader switches it back on. That is what
+/// makes the key a way of asking for a change as well as a way of stopping the watching.
+pub(super) fn reload_tick_at(app: &mut App, watcher: &mut Watcher, at: std::time::Instant) {
+    if !app.config().reload || !watcher.changed_at(at) {
         return;
     }
     let path = watcher.path();

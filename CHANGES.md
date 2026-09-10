@@ -20,9 +20,13 @@ minor bump rather than a patch.
   spec §10). `SearchSpan` has no constructor and is not `#[non_exhaustive]`, so any
   consumer building one by struct literal — as this crate itself does, in sixteen places —
   stops compiling until the new field is added.
-- `mdmost::tui::run` gained a second parameter, `source: Option<&Path>` — the file the
-  document was read from, which the pager now watches for changes. Pass `None` for a
-  document that did not come from a file, which is what the old signature meant.
+- `AppOptions` gained `source: Option<PathBuf>` — the file the document was read from,
+  which the pager watches for changes and which `Action::ToggleReload` needs in order to
+  say whether there is anything to watch. `None` is a document that did not come from a
+  file. `mdmost::tui::run` keeps its single parameter: the path travels with the rest of
+  the startup answers rather than beside them, so the two cannot disagree.
+- `Action` gained `ToggleReload`, bound to `R`. A `match` over `Action` that is not
+  `#[non_exhaustive]`-tolerant stops compiling until the arm is added.
 - `Config` gained a public field, `reload: bool` (default `true`), and a method,
   `Config::math_syntax`, which is the one place `math` and `math_backslash` are turned
   into a `MathSyntax`. As with the fields below, only a caller building a `Config` by
@@ -61,6 +65,12 @@ minor bump rather than a patch.
   still after the first change. `reload_settle = 0` takes up every settled change.
   `Config` gained the field, which is an API break for a caller building one by struct
   literal.
+
+  **`R`** starts and stops the watching while the pager runs, and `S` saves the answer.
+  Off and on again is also how to ask for a change straight away: what happened while
+  watching was off is not thrown away, so switching it back on takes the file up without
+  waiting out the settle window. A document that arrived on standard input has no file
+  to watch, and the key says so rather than flipping a setting that cannot act.
 
 - `$E = mc^2$` reads as `E = mc²` on the line, wherever inline math appears in a
   document: a paragraph, a table cell, a list item, a footnote. Scripts are Unicode

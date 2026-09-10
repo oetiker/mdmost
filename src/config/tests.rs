@@ -580,3 +580,13 @@ fn the_settle_window_defaults_to_two_seconds_and_can_be_set() {
     assert!(loaded.problems.is_empty(), "{:?}", loaded.problems);
     assert_eq!(loaded.config.reload_settle, 0);
 }
+
+#[test]
+fn re_reading_has_a_default_binding_of_its_own() {
+    let bound = KeyBindings::defaults();
+    assert_eq!(
+        bound.action(&Key::char('R')),
+        Some(Action::ToggleReload),
+        "R is not bound to starting and stopping re-reading"
+    );
+}

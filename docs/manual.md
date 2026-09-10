@@ -160,6 +160,11 @@ and the status bar name the bindings in effect rather than the defaults.
 
 - **`-`** — Show or hide code line numbers.
 
+- **`R`** — Start or stop re-reading the document as its file changes; see *Reloading*
+  below. Off and on again is also how to ask for a change straight away, without waiting
+  out the settle window. A document that arrived on standard input has no file to watch,
+  and the key says so.
+
 - **`S`** — Save the current settings for the next run.
 
 - **`h`, `F1`** — Show or hide the help overlay.
@@ -290,7 +295,12 @@ throw away what is on screen. A file that cannot be read, or that is not text,
 is reported in the status bar and leaves the document alone.
 
 Nothing is watched when the document arrived on standard input: there is no file
-to look at. Turn watching off with `--no-reload` or `reload = false`.
+to look at. Turn watching off with `--no-reload` or `reload = false`, or with
+**`R`** while the pager runs, which `S` then saves like any other setting.
+
+`R` is also how to ask for a change straight away. What happened while watching
+was off is not thrown away, so switching it back on takes the file up at once
+rather than waiting out the settle window.
 
 # CONFIGURATION
 

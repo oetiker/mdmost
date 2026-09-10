@@ -51,17 +51,17 @@ pub use app::{App, AppOptions, Focus, Overlay, PromptKind};
 
 /// Runs the pager to completion.
 ///
-/// `source` is the file the document was read from, if it came from one: the pager
-/// re-reads it while it runs whenever the reader has left `reload` on. `None` — a
-/// document that arrived on standard input — is watched for nothing.
+/// The file the document was read from travels in [`AppOptions::source`]: the pager
+/// re-reads it while it runs whenever the reader has left `reload` on, and a document
+/// that arrived on standard input is watched for nothing.
 ///
 /// The terminal is restored on every exit path, including panics and `SIGTERM`.
 ///
 /// # Errors
 ///
 /// Returns any I/O failure raised by the terminal.
-pub fn run(app: &mut App, source: Option<&std::path::Path>) -> std::io::Result<()> {
-    term::run(app, source)
+pub fn run(app: &mut App) -> std::io::Result<()> {
+    term::run(app)
 }
 
 /// How many columns this terminal gives an emoji-presentation sequence, if it will say.

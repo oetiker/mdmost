@@ -390,6 +390,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         doc,
         config,
         AppOptions {
+            source: source_path.map(Path::to_path_buf),
             title,
             icons,
             narrow_emoji,
@@ -403,7 +404,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             width: cli.width,
         },
     );
-    tui::run(&mut app, source_path)?;
+    tui::run(&mut app)?;
     Ok(ExitCode::SUCCESS)
 }
 

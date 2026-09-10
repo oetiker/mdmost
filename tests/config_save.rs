@@ -278,6 +278,7 @@ fn the_key_binding_saves_the_live_settings_and_says_where() {
         Doc::parse("# Title\n\nSome prose.\n"),
         Config::default(),
         AppOptions {
+            source: None,
             title: "x.md".to_string(),
             icons: false,
             narrow_emoji: false,
@@ -315,6 +316,7 @@ fn saving_reports_a_failure_rather_than_claiming_success() {
         Doc::parse("# Title\n"),
         Config::default(),
         AppOptions {
+            source: None,
             title: "x.md".to_string(),
             icons: false,
             narrow_emoji: false,

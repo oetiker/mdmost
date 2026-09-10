@@ -237,6 +237,15 @@ pub struct Notice {
 /// How the application was started.
 #[derive(Debug, Clone)]
 pub struct AppOptions {
+    /// The file the document was read from, if it came from one.
+    ///
+    /// Carried so the pager can say whether there is anything to watch: a document that
+    /// arrived on standard input can have `reload` set either way and nothing will come
+    /// of it, and a key that reported otherwise would be lying. `None` is that case.
+    ///
+    /// A path, not an open file. The state machine touches no file (design spec §13);
+    /// `super::term` does the reading.
+    pub source: Option<std::path::PathBuf>,
     /// The name shown in the status bar.
     pub title: String,
     /// Whether Nerd Font glyphs may be drawn.
@@ -431,6 +440,11 @@ impl App {
     /// The parsed document.
     pub fn doc(&self) -> &Doc {
         &self.doc
+    }
+
+    /// The file the document was read from, or `None` when it came down a pipe.
+    pub fn source(&self) -> Option<&std::path::Path> {
+        self.options.source.as_deref()
     }
 
     /// Whether an emoji-presentation sequence is drawn in one column here.
@@ -1272,6 +1286,7 @@ impl App {
             Action::ToggleToc => self.toggle_toc(),
             Action::CycleTheme => self.cycle_theme(),
             Action::ToggleLineNumbers => self.toggle_line_numbers(),
+            Action::ToggleReload => self.toggle_reload(),
             Action::SaveConfig => self.save_config(),
             Action::ReportPosition => self.report_position(),
             // Design spec §9: `/` inside the table of contents filters it fuzzily
@@ -1506,6 +1521,27 @@ impl App {
                 "line numbers on"
             } else {
                 "line numbers off"
+            },
+            false,
+        );
+    }
+
+    /// Starts or stops re-reading the document as its file changes.
+    ///
+    /// The setting is one `S` saves, so a reader who turns it off for good can keep it
+    /// that way. A document that came down a pipe has no file to watch, and flipping a
+    /// setting that cannot act would be a worse answer than saying so.
+    fn toggle_reload(&mut self) {
+        if self.options.source.is_none() {
+            self.notify("no file to watch", false);
+            return;
+        }
+        self.config.reload = !self.config.reload;
+        self.notify(
+            if self.config.reload {
+                "auto-reload on"
+            } else {
+                "auto-reload off"
             },
             false,
         );
