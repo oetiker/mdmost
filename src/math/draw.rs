@@ -484,6 +484,81 @@ mod tests {
         );
     }
 
+    /// Every mark mdmost invented wears `rule`; every character the author wrote wears
+    /// `atom` — through both radical forms and a tall fence, not only the fraction.
+    ///
+    /// The fraction test above cannot see a radical, and a mutation that handed the
+    /// one-row `√` back to the body style went unnoticed by it (task 13, M2). So each
+    /// of the nine structure sites in `place` and `write_delimiter` has a cell here, and
+    /// the two radical forms are checked side by side because spec §11's argument for
+    /// the split is exactly that both draw their sign alike. Coordinates are read off
+    /// the canvases the layout tests draw (`a_one_row_root_index_sits_over_the_sign`,
+    /// `a_tall_root_index_sits_over_the_tick`,
+    /// `a_tall_fence_grows_box_art_and_pads_off_the_content`).
+    #[test]
+    fn every_structural_mark_wears_rule_and_every_symbol_wears_atom() {
+        let theme = Theme::default();
+        let one_row = radical(text("x"), Some(text("3")));
+        let tall = radical(fraction(text("a"), text("b")), Some(text("3")));
+        let fence = fenced(Some('('), Some(')'), fraction(text("a"), text("b")));
+        for (what, b, drawn, cells) in [
+            (
+                "a one-row radical",
+                one_row,
+                vec!["3 ─", "√ x"],
+                vec![
+                    (1, 0, "√", theme.math.rule),
+                    (0, 2, "─", theme.math.rule),
+                    (0, 0, "3", theme.math.atom),
+                    (1, 2, "x", theme.math.atom),
+                ],
+            ),
+            (
+                "a tall radical",
+                tall,
+                vec!["  ┌──", "  │ a", "3 │ ─", "‾╲│ b"],
+                vec![
+                    (0, 2, "┌", theme.math.rule),
+                    (0, 3, "─", theme.math.rule),
+                    (1, 2, "│", theme.math.rule),
+                    (3, 0, "‾", theme.math.rule),
+                    (3, 1, "╲", theme.math.rule),
+                    (2, 4, "─", theme.math.rule),
+                    (2, 0, "3", theme.math.atom),
+                    (1, 4, "a", theme.math.atom),
+                    (3, 4, "b", theme.math.atom),
+                ],
+            ),
+            (
+                "a tall fence",
+                fence,
+                vec!["╭ a ╮", "│ ─ │", "╰ b ╯"],
+                vec![
+                    (0, 0, "╭", theme.math.rule),
+                    (1, 0, "│", theme.math.rule),
+                    (2, 4, "╯", theme.math.rule),
+                    (0, 2, "a", theme.math.atom),
+                ],
+            ),
+        ] {
+            let canvas = to_canvas(&b, b.width, &theme);
+            assert_eq!(
+                rows(&canvas),
+                drawn,
+                "{what} is not drawn where this test looks"
+            );
+            for (row, col, glyph, style) in cells {
+                let cell = &canvas.row(row).expect("row exists")[col];
+                assert_eq!(cell.text(), glyph, "{what}: the cell at ({row}, {col})");
+                assert_eq!(
+                    cell.style(),
+                    style,
+                    "{what}: {glyph:?} at ({row}, {col}) wears the wrong slot"
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_rule_spans_the_denominator_when_that_is_the_wider_part() {
         // The other fraction asserts here all have the wider part on top, where the rule
