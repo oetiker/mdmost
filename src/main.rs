@@ -347,14 +347,6 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     if cli.narrow_emoji || cli.wide_emoji {
         config.narrow_emoji = Some(narrow_emoji);
     }
-    // Before the parser, so that every measurement downstream — wrapping, table columns,
-    // the canvas, `ratatui`'s own diff — is taken from text all of them agree about.
-    let source = if narrow_emoji {
-        mdmost::text::narrow_emoji(&source).into_owned()
-    } else {
-        source
-    };
-
     let doc = Doc::parse_auto_with(&source, config.math_syntax());
 
     let theme_name = cli.theme.clone().unwrap_or_else(|| config.theme.clone());
@@ -382,6 +374,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             cli.width,
             stdout_is_terminal,
             &options,
+            narrow_emoji,
         );
     }
 
@@ -446,6 +439,7 @@ fn render_once(
     width: Option<u16>,
     stdout_is_terminal: bool,
     options: &RenderOptions,
+    narrow_emoji: bool,
 ) -> anyhow::Result<ExitCode> {
     let theme = match config.resolve_theme(theme_name) {
         Ok(theme) => theme,
@@ -472,9 +466,9 @@ fn render_once(
     let stdout = io::stdout();
     let mut out = stdout.lock();
     if stdout_is_terminal {
-        dump::write_ansi(&mut out, &canvas, theme.base())?;
+        dump::write_ansi(&mut out, &canvas, theme.base(), narrow_emoji)?;
     } else {
-        dump::write_plain(&mut out, &canvas)?;
+        dump::write_plain(&mut out, &canvas, narrow_emoji)?;
     }
     out.flush()?;
     Ok(ExitCode::SUCCESS)

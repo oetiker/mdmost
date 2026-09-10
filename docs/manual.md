@@ -689,10 +689,23 @@ one column out from there on, and scrolling leaves stale characters behind.
 
 **mdmost** therefore asks the terminal at startup: it draws the sequence at the
 start of a line, reads back where the cursor ended up, and erases what it drew.
-A clear answer of one column makes it drop the selector for the rest of the
-session, which draws the same glyph on such a terminal and puts every
-measurement back on one number. Any other answer — including no answer — leaves
-the document exactly as it is.
+A clear answer of one column makes it draw the base character alone for the rest
+of the session, which is the same glyph on such a terminal, and paint the second
+column as the blank it now is. The sequence still occupies the two columns it was
+laid out for, and every measurement is back on one number. Any other answer —
+including no answer — leaves the screen exactly as it was.
+
+This happens to the *screen*, never to the document. What a drag copies, what a
+`[copy]` button hands over, and what a search matches are all the text the file
+holds, selector included, on every terminal. A terminal that cannot measure the
+sequence is a fact about that terminal, not about the document.
+
+Only a lone character followed by the selector is treated this way, and only when
+the selector is what made it wide. `❤️‍🔥` and other sequences joined with `U+200D`,
+`1️⃣` and the other keycaps, flags, skin tones and anything wide on its own are all
+left as they are: in those the selector sits in the middle, where removing it
+would change *which* glyph is drawn rather than how wide it is. `U+FE0E`, which
+asks for the plain form, is never touched.
 
 The question is not put at all when there is no terminal on both standard input
 and standard output, or when `TERM` is unset, `dumb` or `linux`. To settle it

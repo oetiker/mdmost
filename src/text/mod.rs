@@ -52,50 +52,25 @@ pub fn display_width(text: &str) -> usize {
     text.width()
 }
 
-/// `text` with the emoji-presentation selector dropped where a terminal ignores it.
-///
-/// `U+FE0F` asks for the emoji form of a character that has a text form as well, and
-/// the standard makes the result two columns wide. Several terminals draw it in one
-/// and advance the cursor by one, which is a disagreement no width table can settle:
-/// `unicode-width` says two, `ratatui` skips the second cell on that authority, and
-/// the terminal is then one column out for the rest of everything it was handed —
-/// leaving stale glyphs behind wherever the frame was updated in place.
-///
-/// Dropping the selector is what puts all three back on one number. The pixels do not
-/// change on a terminal that was ignoring the selector; on one that honours it, this
-/// is never applied (see `Config::narrow_emoji`).
-///
-/// Only a lone base character followed by the selector is touched, and only when the
-/// selector is what made it wide. A ZWJ sequence is several emoji glued together, and
-/// taking a selector out of the middle of one would change which glyph is drawn rather
-/// than how wide it is.
-pub fn narrow_emoji(text: &str) -> std::borrow::Cow<'_, str> {
-    if !text.contains(EMOJI_PRESENTATION) {
-        return std::borrow::Cow::Borrowed(text);
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut dropped = false;
-    for cluster in graphemes(text) {
-        match narrowed(cluster) {
-            Some(base) => {
-                out.push_str(base);
-                dropped = true;
-            }
-            None => out.push_str(cluster),
-        }
-    }
-    if dropped {
-        std::borrow::Cow::Owned(out)
-    } else {
-        std::borrow::Cow::Borrowed(text)
-    }
-}
-
 /// The variation selector that asks for the emoji form.
 const EMOJI_PRESENTATION: char = '\u{FE0F}';
 
 /// The base of `cluster`, when the selector is the only reason it is two columns wide.
-fn narrowed(cluster: &str) -> Option<&str> {
+///
+/// `U+FE0F` asks for the emoji form of a character that has a text form as well, and the
+/// standard makes the result two columns. Several terminals draw it in one and advance
+/// the cursor by one, which is a disagreement no width table can settle: `unicode-width`
+/// says two, `ratatui` skips the second cell on that authority, and the terminal is then
+/// one column out for the rest of the run it was handed.
+///
+/// Handing such a terminal the base alone is what puts all three back on one number. It
+/// is done to the *frame*, never to the document (see `tui::draw`), so what the reader
+/// copies, searches and exports is the text the file holds.
+///
+/// Only a lone base followed by the selector is answered for, and only when the selector
+/// is what made it wide. A ZWJ sequence and a keycap both carry `U+FE0F` in the middle,
+/// where taking it out would change which glyph is drawn rather than how wide it is.
+pub fn presentation_base(cluster: &str) -> Option<&str> {
     let base = cluster.strip_suffix(EMOJI_PRESENTATION)?;
     if base.chars().count() != 1 {
         return None;

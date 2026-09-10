@@ -8010,10 +8010,10 @@ fn the_math_syntax_follows_the_configuration() {
 }
 
 #[test]
-fn a_reload_narrows_emoji_the_way_the_first_read_did() {
-    // The answer was measured once, before the document was first parsed. A file that
-    // changes underneath must be read under the same answer, or the selector comes back
-    // on the reload and the screen starts smearing again.
+fn a_reload_keeps_the_selector_on_a_narrow_terminal_too() {
+    // The measurement is answered in the frame, never in the document, so a re-read has
+    // nothing to reproduce: what the file holds is what the reader gets back from a
+    // drag, a `[copy]` button and a search, whatever this terminal can draw.
     let dir = TempDir::new("narrow");
     let path = dir.file("doc.md", "# One\n");
     let mut app = pager_narrow("# One\n");
@@ -8023,7 +8023,7 @@ fn a_reload_narrows_emoji_the_way_the_first_read_did() {
     super::term::reload_tick(&mut app, &mut watcher);
     super::term::reload_tick(&mut app, &mut watcher);
 
-    assert_eq!(app.doc().source(), "# Two ☸ three\n");
+    assert_eq!(app.doc().source(), "# Two ☸️ three\n");
 }
 
 #[test]
@@ -8118,5 +8118,141 @@ fn a_change_made_while_re_reading_is_off_arrives_when_it_is_switched_on() {
         app.doc().source(),
         "# Two\n\nWritten while nobody was looking.\n",
         "switching it back on did not pick up the change made while it was off"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Drawing an emoji-presentation sequence on a terminal that measures it narrow
+// (`super::draw`, `crate::text::presentation_base`).
+// ---------------------------------------------------------------------------
+
+/// A document whose only interesting feature is a narrow base plus `U+FE0F`.
+const WHEEL: &str = "# Two \u{2638}\u{fe0f} three\n";
+
+#[test]
+fn a_narrow_terminal_is_handed_the_base_character_alone() {
+    // `unicode-width` says two columns and `ratatui` skips the second cell on that
+    // authority, so a terminal that advances by one is a column out for the rest of the
+    // run it was given -- which is what strewed stale glyphs across a scrolled screen.
+    let mut app = pager_narrow(WHEEL);
+    let painted = framed(&mut app, 40, 8).join("\n");
+
+    assert!(
+        painted.contains('\u{2638}'),
+        "the glyph itself was not drawn: {painted:?}"
+    );
+    assert!(
+        !painted.contains('\u{fe0f}'),
+        "the selector reached a terminal that cannot measure it: {painted:?}"
+    );
+}
+
+#[test]
+fn the_document_keeps_the_selector_the_reader_will_copy() {
+    // The whole point of narrowing at the last step. A drag copies the Markdown source,
+    // and Markdown source that has quietly lost a character is not what was promised.
+    let mut app = pager_narrow(WHEEL);
+    let _ = framed(&mut app, 40, 8);
+
+    assert_eq!(
+        app.doc().source(),
+        WHEEL,
+        "drawing the document changed the document"
+    );
+}
+
+#[test]
+fn a_terminal_that_measures_it_wide_is_handed_the_whole_sequence() {
+    // Lopsided on purpose, as detection is everywhere in this program: only a terminal
+    // that clearly cannot measure the sequence is given anything but the document.
+    let mut app = pager(WHEEL);
+    let painted = framed(&mut app, 40, 8).join("\n");
+
+    assert!(
+        painted.contains('\u{fe0f}'),
+        "a terminal that honours the selector was denied it: {painted:?}"
+    );
+}
+
+#[test]
+fn the_column_a_narrowed_glyph_no_longer_owns_is_a_space() {
+    // Two columns are still laid out for the sequence, because the wrapping and the
+    // table columns were measured that way. `ratatui` reads an empty symbol as "the
+    // cell before me owns this one" and leaves the terminal on whatever stood there;
+    // once the lead is one column wide, that claim is false and the cell has to be
+    // painted like any other.
+    let mut app = pager_narrow(WHEEL);
+    let backend = ratatui::backend::TestBackend::new(40, 8);
+    let mut terminal = ratatui::Terminal::new(backend).expect("a test terminal");
+    terminal
+        .draw(|frame| super::draw::draw(frame, &mut app))
+        .expect("a frame");
+    let buffer = terminal.backend().buffer();
+
+    let mut found = false;
+    for y in 0..8 {
+        for x in 0..39 {
+            let Some(lead) = buffer.cell((x, y)) else {
+                continue;
+            };
+            if lead.symbol() != "\u{2638}" {
+                continue;
+            }
+            found = true;
+            let after = buffer.cell((x + 1, y)).expect("a cell to the right");
+            assert_eq!(
+                after.symbol(),
+                " ",
+                "the cell after a narrowed glyph is still claimed by it"
+            );
+        }
+    }
+    assert!(found, "the glyph was never drawn, so nothing was checked");
+}
+
+#[test]
+fn a_copy_button_hands_over_what_the_file_holds() {
+    // The reason the narrowing happens to the frame and not to the document. This
+    // payload is not a slice of the source -- a code block's is its literal and a
+    // table's is built from the parsed nodes -- so a document narrowed before the
+    // parser would put the terminal's shortcoming into text that leaves the program,
+    // and no amount of translating offsets afterwards would get it back.
+    const CODE: &str = "# Wheel\n\n```text\nsee \u{2638}\u{fe0f} here\n```\n";
+    let mut app = App::new(
+        Doc::parse(CODE),
+        Config::default(),
+        AppOptions {
+            source: None,
+            config_path: None,
+            title: "doc.md".to_string(),
+            icons: false,
+            narrow_emoji: true,
+            theme: "dark".to_string(),
+            toc_open: false,
+            width: None,
+        },
+    );
+    app.resize(80, 24);
+    app.set_copy_button(true);
+    let _ = app.canvas();
+
+    let (x, y) = painted_button(&mut app, 80, 24, 0);
+    let (text, _) = copy_payload(click_hotspot(&mut app, x, y).expect("the button fired"));
+    assert!(
+        text.contains('\u{fe0f}'),
+        "the copy button dropped a character the file holds: {text:?}"
+    );
+}
+
+#[test]
+fn a_drag_copies_the_source_the_file_holds() {
+    // The other half of the same promise: the status bar calls this "Markdown source",
+    // and Markdown source that has quietly lost a character is not what was promised.
+    let mut app = pager_narrow("Two \u{2638}\u{fe0f} three\n");
+    let _ = framed(&mut app, 40, 8);
+
+    assert!(
+        app.doc().source().contains('\u{fe0f}'),
+        "a drag would copy source the document no longer holds"
     );
 }
