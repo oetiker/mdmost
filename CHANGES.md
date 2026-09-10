@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### New
+
+### Changed
+
+### Fixed
+
+## 0.3.0 - 2026-09-10
+
 ### Breaking
 
 No format for this existed in this file before now; entries here are API breaks a
