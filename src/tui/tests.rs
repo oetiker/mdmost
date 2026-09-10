@@ -4104,6 +4104,169 @@ fn a_press_anywhere_in_a_formula_copies_all_of_it() {
     }
 }
 
+/// Presses every drawn row of `formula` at column `col` of its atom and returns, per
+/// press, the clipboard text and the wash of every row the atom owns.
+///
+/// The shape both whole-formula tests need: the claim is that *all* presses agree, so
+/// the assertion has to compare presses against each other, not each against a constant.
+fn presses_down_a_formula(source: &str) -> Vec<(String, Vec<Vec<std::ops::Range<u16>>>)> {
+    let mut app = pager(source);
+    let canvas = app.canvas().clone();
+    let atom = canvas
+        .atoms()
+        .first()
+        .expect("a drawn formula records an atom")
+        .clone();
+    let rows: Vec<usize> = (atom.row..atom.row + atom.rows).collect();
+    assert!(
+        rows.len() >= 3,
+        "the fixture must draw at least three rows, drew {}:\n{}",
+        rows.len(),
+        canvas.plain_text()
+    );
+    rows.iter()
+        .map(|&row| {
+            let press = drag(Pos::new(row, atom.col), Pos::new(row, atom.col));
+            let extract =
+                select::extract(&canvas, source, press).expect("the press was on a drawn cell");
+            let wash = rows
+                .iter()
+                .map(|&lit| select::highlighted_columns(&canvas, source, press, lit))
+                .collect();
+            (extract.text, wash)
+        })
+        .collect()
+}
+
+/// A press on **any** row of a quoted display formula washes the whole rectangle.
+///
+/// The block-quoted, multi-line fixture first, because it is the one that notices atom
+/// mistakes: its source lines carry `> `, so an answer that never reaches the atom shows
+/// up twice over — the wash shrinks to the one row the `SearchSpan` sits on, *and* the
+/// clipboard keeps the quote markers, because the prefix comes off in the atom branch.
+///
+/// Before the guard, pressing row 0 — the row carrying the span — washed `[37..38]` on
+/// row 0 and nothing on rows 1 and 2, and copied `$$\n> \frac{a}{b}\n> $$`. Pressing row
+/// 1 or row 2 washed all three rows and copied clean LaTeX. Spec §10: a formula is an
+/// atom with no interior position, so where the reader pressed cannot change either
+/// answer.
+#[test]
+fn a_press_on_any_row_of_a_quoted_formula_washes_all_of_it() {
+    let source = "> $$\n> \\frac{a}{b}\n> $$\n";
+    let presses = presses_down_a_formula(source);
+    let (first_text, first_wash) = presses.first().expect("three presses").clone();
+    assert_eq!(
+        first_text, "$$\n\\frac{a}{b}\n$$",
+        "the first row's press copies clean LaTeX, quote markers off"
+    );
+    // Every row of the rectangle lit, and lit identically — the wash follows the
+    // clipboard, and the clipboard is the whole formula.
+    for row_wash in &first_wash {
+        assert!(
+            !row_wash.is_empty(),
+            "a press on the first drawn row left a row of the rectangle dark: {first_wash:?}"
+        );
+    }
+    for (index, (text, wash)) in presses.iter().enumerate() {
+        assert_eq!(
+            *text, first_text,
+            "press on drawn row {index} copied something else"
+        );
+        assert_eq!(
+            *wash, first_wash,
+            "press on drawn row {index} washed a different rectangle"
+        );
+    }
+}
+
+/// The same, at the top level and wider than one column.
+///
+/// The width matters: `\frac{a}{b}` draws a one-column rectangle, so a wash of the wrong
+/// *columns* would pass the quoted test above. `\frac{a+b}{c}` draws three columns, and
+/// the whole three must light on every press.
+#[test]
+fn a_press_on_any_row_of_a_top_level_formula_washes_all_of_it() {
+    let source = "$$\n\\frac{a+b}{c}\n$$\n";
+    let presses = presses_down_a_formula(source);
+    let (first_text, first_wash) = presses.first().expect("three presses").clone();
+    assert_eq!(first_text, "$$\n\\frac{a+b}{c}\n$$");
+    let widest = first_wash
+        .iter()
+        .flatten()
+        .map(|range| range.end - range.start)
+        .max()
+        .expect("the press washed something");
+    assert!(
+        widest >= 3,
+        "the rule of a three-column fraction washes three columns, got {first_wash:?}"
+    );
+    for row_wash in &first_wash {
+        assert_eq!(
+            *row_wash, first_wash[0],
+            "the rectangle is washed to the same columns on every row: {first_wash:?}"
+        );
+    }
+    for (index, (text, wash)) in presses.iter().enumerate() {
+        assert_eq!(
+            *text, first_text,
+            "press on drawn row {index} copied something else"
+        );
+        assert_eq!(
+            *wash, first_wash,
+            "press on drawn row {index} washed a different rectangle"
+        );
+    }
+}
+
+/// The guard must not widen to every atom: a press inside a Mermaid label still takes
+/// the label alone.
+///
+/// The `copied: false` exemption is stated on the span, so a diagram's labels — which are
+/// `copied: true` and *do* have interior positions — keep case 2 of [`select::resolve`]:
+/// the hull exactly as it stands, with the rest of the box dark. Without this the fix
+/// would trade one see/get divergence for another.
+#[test]
+fn a_press_inside_a_mermaid_label_still_washes_only_the_label() {
+    let mut app = pager(FITTING_FENCE);
+    let canvas = app.canvas().clone();
+    let (row, col, cols) = drawn(&canvas, "Read");
+    let atom = canvas
+        .atoms()
+        .first()
+        .expect("the diagram records an atom")
+        .clone();
+    let inside = drag(Pos::new(row, col), Pos::new(row, col + 1));
+    assert_eq!(
+        select::extract(&canvas, FITTING_FENCE, inside)
+            .expect("the drag covered a label")
+            .text,
+        "Re",
+        "half a label is still half a label"
+    );
+    assert_eq!(
+        select::highlighted_columns(&canvas, FITTING_FENCE, inside, row),
+        vec![col..col + 2],
+        "the wash is the two cells dragged over, not the box and not the chart"
+    );
+    let whole = drag(Pos::new(row, col), Pos::new(row, col + cols - 1));
+    assert_eq!(
+        select::highlighted_columns(&canvas, FITTING_FENCE, whole, row),
+        vec![col..col + cols],
+        "the whole label washes the label, not the diagram"
+    );
+    // And the rows the diagram owns above and below the label stay dark, which is what
+    // "not the chart" means when the label happens to span the drawing's full width.
+    for other in atom.row..atom.row + atom.rows {
+        if other == row {
+            continue;
+        }
+        assert!(
+            select::highlighted_columns(&canvas, FITTING_FENCE, inside, other).is_empty(),
+            "row {other} of the diagram lit for a press inside one label"
+        );
+    }
+}
+
 /// The mirror of [`the_prefix_comes_off_the_diagram_and_not_off_the_prose_beside_it`]:
 /// quoted prose *above*, dragged down into the diagram.
 ///
