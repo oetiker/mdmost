@@ -54,6 +54,14 @@ impl Limits {
     pub(crate) const fn new(width: u16, probes: u8) -> Self {
         Self { width, probes }
     }
+
+    /// The widest canvas the caller will accept.
+    ///
+    /// [`diagram`] enforces this by walking `at` up towards it and never needed an
+    /// accessor; [`formula`](super::math::formula) measures once and compares, so it does.
+    pub(crate) const fn width(self) -> u16 {
+        self.width
+    }
 }
 
 /// The diagram this block draws, and the width it needed, at the narrowest width of at

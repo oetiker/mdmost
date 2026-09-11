@@ -18,7 +18,7 @@ use crate::text::{Align, Line, Span, display_width, pad_to_width, repeat_to_widt
 use crate::theme::{Style, Theme};
 
 use super::inline::{HTML_MARKER, render_inline};
-use super::{Ctx, MAX_TABLE_DEPTH, RenderOptions, code, inline, table};
+use super::{Ctx, MAX_TABLE_DEPTH, RenderOptions, bridge, code, inline, math, table};
 
 /// The vertical bar drawn to the left of a block quote.
 pub(crate) const QUOTE_BAR: &str = "▌";
@@ -72,12 +72,19 @@ pub fn render_block(node: &Node, width: u16, theme: &Theme, options: &RenderOpti
 ///
 /// The same as [`render_block`] except that a heading in `numbers` is drawn with its
 /// number in front of it. This is what a caller assembling the top level block by block
-/// — the pager's [`crate::render::render_document`] — needs: the numbering is a
-/// property of the whole document, so it is computed there, once, and handed down.
+/// needs: the numbering is a property of the whole document, so it is computed there,
+/// once, and handed down.
 ///
 /// `source` is the whole document text, carried the same way `numbers` is: computed
 /// once by the caller that has the whole document in view, and handed to every block so
 /// a formula that will not draw can fall back to its own bytes of it (design spec §5.3).
+///
+/// The document's macro definitions (design spec §16) are *not* carried: the pager's
+/// [`crate::render::render_document`] builds its own [`Ctx`] with them and renders through
+/// [`render_block_ctx`], so a formula there sees the definitions before it, while a block
+/// rendered through this entry point sees only what it defines itself. Widening this
+/// signature instead would have been one more argument on a `pub` function already at
+/// clippy's limit, for a caller that does not exist.
 pub fn render_block_numbered(
     node: &Node,
     width: u16,
@@ -254,15 +261,15 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         }
         NodeKind::Image { url, .. } => image(node, url, width, ctx),
         NodeKind::SkippedHtml { .. } => html_marker(width, ctx),
-        // Display math is not laid out in this stage. The framed source is not a
-        // placeholder: it is the permanent failure path (design spec §9), reached here
-        // for the temporary reason that nothing can lay it out yet — so the reader sees
-        // the same thing for "cannot be drawn yet" and "cannot be drawn", which is the
-        // truth in both cases.
+        // A display formula is drawn where it can be and shown as its own framed source
+        // where it cannot. The framed source is not a placeholder: it is the permanent
+        // failure path of design spec §9, and a formula that will not parse or will not
+        // fit reaches it for a reason that will not go away by itself. The caption is
+        // the `MathError`'s own `Display`, so the reader is told which reason.
         //
         // No line origins: spec §10 gives a formula one span over the whole construct,
-        // and stage 2 is what draws the cells that span can name. Recording per-line
-        // spans of the source dump would be a different, wrong answer.
+        // which Task 12 adds to the drawn canvas. Per-line spans of a source dump would
+        // be a different, wrong answer.
         //
         // `trim_matches('\n')`: a `$$…$$` literal is everything between the two lines
         // of dollars, so it opens with the newline right after the first `$$` and
@@ -278,14 +285,47 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         NodeKind::Math {
             literal,
             display: true,
-        } => code::fallback(
-            literal.trim_matches('\n'),
-            Some("math"),
-            &"display math is not laid out yet",
-            &[],
-            width,
-            ctx,
-        ),
+        } => {
+            let source = literal.trim_matches('\n');
+            // Drawn at its own width, not padded out to `width`, because there is nothing
+            // to centre in a canvas that already fills the measure — see
+            // `math::render_display_natural`. `width` is still the cap: a formula wider
+            // than it takes the framed source here, and the *document* renderer is the
+            // only caller that can offer it more room than the measure
+            // (`super::math::formula`).
+            // Under the document's macro preamble (design spec §16), which is empty
+            // for a block rendered on its own.
+            let preamble = ctx.preamble(node.source.start);
+            match bridge::math_natural(&preamble, source, width, ctx.theme) {
+                // Design spec §16.3: a block whose layout draws nothing contributes no
+                // rows. Returned before `resize_width` so it stays genuinely empty —
+                // `resize_width` would make it one zero-height canvas of `width`
+                // columns, still zero rows today, but the early return states the
+                // intent and a later change there cannot quietly put a row back.
+                Ok(canvas) if canvas.is_empty() => return canvas,
+                // Design spec §7, the only centring in this program. The frame is `width`
+                // itself: this path lays a formula out inside a table cell, a quote or a
+                // list item, and there the measure it is given *is* the column of prose it
+                // belongs to. The document renderer is the one caller with a prose cap
+                // narrower than the width it lays out across, and it centres through
+                // `math::formula` instead, against that cap.
+                //
+                // Spec §10's one span and one atom go on last, over the centred canvas:
+                // `drawn_bounds` measures the drawn rectangle *inside* the padding, which
+                // is where the formula actually is. `source` and not `literal` — the
+                // trimmed text is what a paste has to match line for line
+                // (`code::math_block`). The framed-source arms below and above get
+                // neither: a source dump is a code block, not a formula's atom.
+                Ok(canvas) => code::math_block(
+                    math::centred(&canvas, width, width, ctx.base),
+                    width,
+                    source,
+                    node.source,
+                    ctx,
+                ),
+                Err(err) => code::fallback(source, Some("math"), &err, &[], width, ctx),
+            }
+        }
         // Anything else in a block position is inline content: a bare text run in a
         // table cell, for instance.
         _ => render_inline(std::slice::from_ref(node), width, ctx.base, ctx),
@@ -372,8 +412,8 @@ fn paragraph(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
     // with other content beside its `$$…$$` (`hoist_display_math` in `doc::convert`
     // only lifts a paragraph whose *sole* child is display math) keeps that formula as
     // prose, shown as its own source mid-sentence — going through `render_sequence`
-    // would instead have split it into a framed block followed by a second, orphaned
-    // inline run for the rest of the sentence.
+    // would instead have split it into a block of its own followed by a second,
+    // orphaned inline run for the rest of the sentence.
     render_inline(&node.children, width, ctx.base, ctx)
 }
 

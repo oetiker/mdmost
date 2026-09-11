@@ -1,0 +1,47 @@
+# Vendored, not ours. See VENDORED.md for the upstream commit, the four patches this
+# tree carries, and the conditions under which the whole `vendor/` directory goes away.
+#
+# This file is NOT upstream's verbatim. It is upstream's manifest with everything that
+# only served a full checkout removed: the benches, the example, the six test targets
+# that need a `libtest-mimic` harness or a browser driver, and the dev-dependencies
+# those needed. What is left is the library, its one dependency, and the three test
+# files that run under the standard harness with no dev-dependency at all.
+[package]
+name = "pulldown-latex"
+version = "0.8.0"
+authors = ["Charles Edward Gagnon"]
+edition = "2021"
+description = "Pull parser to convert LaTeX equations to MathML"
+repository = "https://github.com/Carlosted/pulldown-latex"
+readme = "README.md"
+license = "MIT"
+keywords = ["latex", "mathml", "parser"]
+categories = ["parsing", "parser-implementations", "mathematics"]
+rust-version = "1.74.1"
+# A path dependency cannot be published, and mdmost no longer publishes either. This
+# says so out loud rather than leaving it to `cargo publish` to discover.
+publish = false
+
+[dependencies]
+bumpalo = { version = "3.16", features = ["collections"] }
+
+# Vendored code is held to upstream's standards, not to ours.
+#
+# Measured on 2026-08-24 with rustc/clippy 1.96.0: this tree is clean under
+# `cargo clippy --all-targets --workspace -- -D warnings` even with this table removed --
+# upstream runs clippy in its own CI. So the table fixes nothing today. It is here for
+# the toolchain bump that introduces a lint nobody in this repository is going to fix in
+# someone else's frozen code, which for a vendored tree is a matter of when.
+#
+# The other half of the split is that mdmost's gate names its package:
+# `cargo clippy --all-targets -p mdmost -- -D warnings`. Trailing args reach only the
+# selected package, so `-D warnings` never applies here, and it is that scoping -- not
+# this table -- that is load-bearing. Neither half can reach mdmost's own code: a
+# `[lints]` table applies to the package that declares it.
+#
+# If this tree ever stops being read-only, delete this table rather than the scoping.
+[lints.rust]
+warnings = "allow"
+
+[lints.clippy]
+all = "allow"

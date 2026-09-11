@@ -45,12 +45,14 @@ sudo install -Dm755 mdmost/mdmost       /usr/local/bin/mdmost
 sudo install -Dm644 mdmost/man/mdmost.1 /usr/local/share/man/man1/mdmost.1
 ```
 
-**Rust** — `cargo install mdmost`, or `cargo build --release` from a checkout. Neither
-route installs a man page: `cargo install` does not handle man pages at all, and the page
-is generated rather than shipped. Run `make man` in a checkout to build one; it needs
-pandoc. Rust 2024 edition, and no system dependencies beyond a terminal that speaks ANSI
-truecolour. The build needs no C compiler, which is why the regex engine behind the
-highlighter is `fancy-regex` rather than oniguruma.
+**Rust** — `cargo install --git https://github.com/oetiker/mdmost`, or `cargo build
+--release` from a checkout. mdmost is not published on crates.io — the three early
+releases there are yanked — so `cargo install mdmost` will not work. Neither route
+installs a man page: `cargo install` does not handle man pages at all, and the page is
+generated rather than shipped. Run `make man` in a checkout to build
+one; it needs pandoc. Rust 2024 edition, and no system dependencies beyond a terminal that
+speaks ANSI truecolour. The build needs no C compiler, which is why the regex engine
+behind the highlighter is `fancy-regex` rather than oniguruma.
 
 Two caveats. The **macOS** tarball binaries are neither signed nor notarised, so
 Gatekeeper will quarantine them; `brew install` is the path of least resistance. The
@@ -179,11 +181,18 @@ effect rather than the defaults.
 ## Development
 
 ```sh
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
+cargo fmt --check -p mdmost
+cargo clippy --all-targets -p mdmost -- -D warnings
+cargo test -p mdmost
+cargo test -p pulldown-latex   # the vendored parser's own tests
 make man          # build man/mdmost.1 from docs/manual.md; needs pandoc
 ```
+
+Every command names its package because this is a workspace, and its other member —
+`vendor/pulldown-latex` — is a vendored copy of someone else's crate. It is not held to
+our formatting or our lints, but its tests do run: they are what tells us the four
+patches mdmost depends on are still in place. `vendor/pulldown-latex/VENDORED.md`
+explains the arrangement and how it ends.
 
 Snapshot tests use [`insta`](https://insta.rs); property tests use `proptest`. The man
 page is generated and is not in git. Design specs live in `docs/superpowers/specs/`.
@@ -199,3 +208,8 @@ permissive notice or the Unlicense. The MIT, BSD and Apache-2.0 ones among them 
 their notices to be reproduced in binary distributions, and `mdmost --licenses` prints
 them. The TOML and Dockerfile definitions in `assets/syntaxes/` are `mdmost`'s own, MIT
 like the rest.
+
+`vendor/pulldown-latex/` is a copy of
+[`pulldown-latex`](https://github.com/carloskiki/pulldown-latex) by Charles Edward
+Gagnon, MIT, carried here at a fork commit with four fixes. Its own `LICENSE` sits beside
+it, and `vendor/pulldown-latex/VENDORED.md` says what was changed and why it is there.

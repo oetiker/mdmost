@@ -86,7 +86,7 @@
 
 use std::ops::Range;
 
-use crate::canvas::{Atom, Canvas};
+use crate::canvas::{Atom, Canvas, SearchSpan};
 use crate::text::{display_width, graphemes};
 
 /// A position in document-canvas coordinates.
@@ -392,7 +392,10 @@ fn line_end(source: &str, at: usize, end: usize) -> usize {
 ///    That exclusion is the whole of the case — a partial hull inside a label is already
 ///    the right answer, and widening it is the only thing that could spoil it. Nor is
 ///    anything washed beyond the spans the hull covers, so the untouched half of a label
-///    stays dark.
+///    stays dark. **A `copied: false` span is not such a label** and is excluded: it has
+///    no interior position ([`SearchSpan::copied`]), so "the hull exactly as it stands"
+///    would be a sub-range of something that has no sub-ranges. A formula falls through
+///    to case 3 instead, and is taken whole from any row (design spec §10).
 /// 3. **The hull touches a diagram and is wider than one of its labels.** Crossing from
 ///    one label into another, or leaving the diagram entirely: the diagram contributes
 ///    its whole fenced block, fence lines included, and the drag's own hull contributes
@@ -435,16 +438,30 @@ pub(crate) fn resolve(canvas: &Canvas, source: &str, selection: Selection) -> Op
         (None, None) => return None,
     };
     if pressed_on.is_none() {
-        let mut labels: Vec<(usize, usize)> = canvas
+        let inside: Vec<&SearchSpan> = canvas
             .spans()
             .iter()
             .filter(|span| span.source_end > lo && span.source_start < hi)
             .filter(|span| canvas.atoms().iter().any(|atom| atom.contains_span(span)))
+            .collect();
+        let mut labels: Vec<(usize, usize)> = inside
+            .iter()
             .map(|span| span.unit.unwrap_or((span.source_start, span.source_end)))
             .collect();
         labels.sort_unstable();
         labels.dedup();
-        if let [(start, end)] = labels[..]
+        // A `copied: false` span has **no interior position** (`SearchSpan::copied`), so
+        // it is not a label a hull can lie *inside* — a formula's cells say `a ─ b` where
+        // its bytes say `$$\n\frac{a}{b}\n$$`, and there is no sub-range of the one that
+        // names a sub-range of the other. Case 2 would nonetheless swallow it: the hull
+        // of a press on such a span *is* the whole unit, so `lo >= start && hi <= end`
+        // holds by construction and the atom never reaches `washed`. The reader then got
+        // the whole formula on the clipboard while one row of it lit — and, in a block
+        // quote, got it with the `> ` markers still on, because the prefix comes off in
+        // the atom branch this returned before. Such a span is only ever taken whole,
+        // which is what the wash branch below already does for a press on any other row.
+        if inside.iter().all(|span| span.copied)
+            && let [(start, end)] = labels[..]
             && lo >= start
             && hi <= end
         {

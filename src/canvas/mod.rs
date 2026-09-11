@@ -548,6 +548,8 @@ impl Canvas {
     /// Writes `text` at `(row, col)` and returns how many columns were written.
     ///
     /// * Out-of-range rows and columns are ignored (nothing is written, `0` returned).
+    ///   A column exactly at the right edge is not out of range: it places no spacing
+    ///   cluster, but a zero-width one still reaches the cell to its left.
     /// * Writing stops at the right edge; a double-width cluster that would straddle
     ///   the edge is dropped rather than split.
     /// * Zero-width clusters (combining marks, joiners) are appended to the previous
@@ -566,7 +568,12 @@ impl Canvas {
         let Some(cells) = self.rows.get_mut(row) else {
             return 0;
         };
-        if col >= width {
+        // `>`, not `>=`: a write that starts exactly at the right edge places no spacing
+        // cluster — the cap below stops every one of them — but a *zero-width* cluster
+        // starting there still has a character to its left to strike, and dropping it
+        // would lose the overlay of a formula that ends in a negation. Past the edge
+        // there is no such character and nothing to do.
+        if col > width {
             return 0;
         }
         let mut cursor = col;
@@ -578,7 +585,20 @@ impl Canvas {
         for cluster in cell_clusters(text) {
             let cluster_width = usize::from(grapheme_width(cluster));
             if cluster_width == 0 {
-                if let Some(index) = last_written {
+                // A combining mark belongs on the character it strikes. Within this call
+                // that character is `last_written`; on the first cluster there is none,
+                // and the character is then whatever is already on the canvas to the
+                // left — which is what the contract above has always said, and what this
+                // branch did not do. It is not a hypothetical case: `math::draw::place`
+                // writes a row part by part, and `\not=` builds the overlay as its own
+                // zero-width box, so it arrives here alone, immediately after the `=`.
+                // Dropping it drew `a = b` for `a \not= b`.
+                //
+                // A blank cell to the left, or no cell at all, still means there is
+                // nothing to strike, and the mark is still dropped rather than stealing a
+                // column of its own.
+                let anchor = last_written.or_else(|| left_anchor(cells, col));
+                if let Some(index) = anchor {
                     cells[index].append_zero_width(cluster);
                 }
                 continue;
@@ -777,9 +797,27 @@ pub(crate) fn align_offset(field_width: usize, content_width: usize, align: Alig
     }
 }
 
+/// The cell a combining mark written at `col` strikes, when the write itself has put
+/// nothing down yet.
+///
+/// The cell immediately to the left, unless it is blank — a mark with nothing before it
+/// has nothing to strike and is dropped, which is
+/// `a_leading_combining_mark_is_dropped_rather_than_stealing_a_column`. A continuation
+/// cell counts as blank, its text being empty, so the search steps back over the trailing
+/// half of a double-width character onto the character itself rather than hanging the
+/// mark on a half that draws nothing.
+fn left_anchor(cells: &[Cell], col: usize) -> Option<usize> {
+    let mut index = col.checked_sub(1)?;
+    if cells[index].is_continuation() {
+        index = index.checked_sub(1)?;
+    }
+    (!cells[index].is_blank()).then_some(index)
+}
+
 /// Places `cell` at `col`, repairing any double-width cell it cuts in half.
 ///
-/// The caller guarantees `col + cell.width() <= cells.len()` and `cell.width() >= 1`.
+/// The caller guarantees `col + cell.width() <= cells.len()` and `cell.width() >= 1`;
+/// every index below is unchecked on that promise.
 fn overwrite(cells: &mut [Cell], col: usize, cell: Cell) {
     let style = cell.style();
     // We are covering the right half of a wide cell: blank out its orphaned left half.

@@ -134,11 +134,13 @@ of `bugfix`, `feature` or `major`. It must be run from `main`, and it refuses ot
 Before the first release:
 
 1. Create `https://github.com/oetiker/mdmost` and push `main`.
-2. Add the `CRATES_IO_TOKEN` repository secret (Settings → Secrets and variables →
-   Actions). It is the only secret this project uses.
-3. Settings → Actions → General → Workflow permissions: allow read and write. The
+2. Settings → Actions → General → Workflow permissions: allow read and write. The
    `version` job pushes a commit and a tag, and the `homebrew` job pushes the rewritten
    formula.
+
+The project uses **no repository secrets**. It used to need `CRATES_IO_TOKEN`; the
+`publish-crate` job is gone and so is the token. If one is still set on the repository,
+revoke it on crates.io rather than leaving a credential in place that nothing reads.
 
 Each release:
 
@@ -146,9 +148,22 @@ Each release:
    into a dated section and uses it verbatim as the release notes — nothing else writes
    them.
 2. Run the workflow. It bumps `Cargo.toml`, tags, builds five targets, packages `.deb`
-   and `.rpm` for the two musl targets, publishes the crate, and rewrites
-   `Formula/mdmost.rb` with the new checksums.
+   and `.rpm` for the two musl targets, and rewrites `Formula/mdmost.rb` with the new
+   checksums. It does not publish to crates.io; mdmost is not published there, and the
+   three early releases that are (0.1.0, 0.1.2, 0.2.0) are all yanked (`CHANGES.md`,
+   Unreleased, says why).
 3. `git pull` afterwards: the workflow has pushed two commits and a tag to `main`.
+
+**Open question, unsettled: whether `CHANGES.md`'s `### Breaking` section still earns its
+keep.** 0.3.0 introduced it to record API breaks a `cargo publish` consumer of the library
+crate would feel, and that premise is gone — the crate is `publish = false` and mdmost is
+not on crates.io. Whoever builds against `mdmost` as a git dependency still feels the
+breaks, so the entries are not worthless; but nothing downstream can be broken in the
+sense the section was written for, and a section justifying a minor bump is a different
+thing from a section recording what moved. It needs an owner's ruling. It is recorded
+here because the question belongs to the maintainer, not to a reader of the changelog:
+it was briefly written into the *released* `## 0.3.0` section instead, whose text the
+release workflow had already published verbatim as the 0.3.0 release notes.
 
 What is deliberately not automated, and why, is in
 `docs/superpowers/specs/2026-08-09-publishing-design.md` §1 — there is no apt/yum
@@ -500,3 +515,161 @@ exactly where a walk like this one produces one.
 section, not the recipe above it. Day-to-day, verifying the beat is just steps 5 and 6
 of the regeneration recipe: open the theme frame and confirm it is light, then confirm
 the tour's closing frame is dark.
+
+## What LaTeX math stage 2 deliberately did not do
+
+Four things, recorded so the next reader does not have to rediscover them.
+
+**The two clipboard flavours still disagree about math.** `src/export/html.rs` branches on
+`display`: an inline formula pastes what it drew, a display formula pastes its LaTeX
+source (owner ruling, 2026-09-11). `src/export/tsv.rs` branches on nothing — it goes
+through `Node::plain_text()`, which pushes the raw literal for both kinds. So one copy
+operation still produces two different pastes for inline math, and reconciling them needs
+a ruling on what a copied formula *is* rather than a layout decision. What changed at this
+stage is that there is now something to be consistent about: a display formula has a real
+drawn form, and pasting a one-row linearisation of it was defensible only while the screen
+drew one row too.
+
+**Grids are stage 3.** Matrices, `cases`, `align`, `alignat`, `gathered` and `array` reach
+`MathError::NotDrawable` by name and show their framed source. Design spec §6.5 describes
+them as one mechanism laid over the width negotiation `src/render/table.rs` already
+performs, so the work is a bridge rather than a new layout engine.
+
+**`\boldsymbol` is half closed.** `build::atom` collapses `BoldSymbol` to `Bold` for a
+`Content::Number`, which is what the parser's own renderer does
+(`vendor/pulldown-latex/src/mathml.rs:628`) and is unconditional, so `\boldsymbol{123}`
+draws bold digits. Letters are not closed: choosing between `Bold` and `BoldItalic` for a
+letter needs the parser's config-dependent `should_be_upright`, which this crate does not
+consult, so `\boldsymbol{x}` draws a plain `x`. Closing it means either reaching that rule
+through another vendor patch or restating it here, and restating it would put a second
+copy of an uprightness policy in the tree.
+
+**A display formula's width bands are not monotone, and no code change fixes that.** The
+caption half of this was fixed — `MathError::TooWide`'s message was shortened so the number
+survives the frame's elision — and the band structure itself stands, by ruling of
+2026-09-12: `MIN_SURPLUS` keeps its value and the surprise is answered by the caption, not
+by the layout. Measured on the built binary with
+`$$\frac{a + b + c + d + e + f + g}{2}$$`, which draws at 25 columns:
+
+| terminal | body | what the reader gets | why |
+|---|---|---|---|
+| ≤ 10 | ≤ 8 | framed source | past the `VIEWPORTS` ceiling: 3 × body < 25 |
+| 11 … 19 | 9 … 17 | **drawn**, side-scrolling | overrun ≥ `MIN_SURPLUS` (8) |
+| 20 … 26 | 18 … 24 | framed source | overrun 1 … 7, under `MIN_SURPLUS` |
+| ≥ 27 | ≥ 25 | **drawn**, centred | it fits |
+
+Widening the terminal from 19 to 20 *loses* the formula, which reads as a bug to anyone
+who resizes. It is not one: it is what `MIN_SURPLUS` says, applied honestly.
+
+**The shape is structural.** A rule that refuses in a middle band cannot be monotone in the
+body width. To remove the 19 → 20 edge the middle band has to go, and there are only two
+ways to make it go: draw at an overrun of 1 … 7, which is the thing `MIN_SURPLUS` exists to
+prevent (a horizontal scrollbar, a chevron on every row and an `↔ 1/1` readout for the sake
+of three columns); or never side-scroll a formula at all, which contradicts design spec §7
+and the manual. `VIEWPORTS` puts a second edge at the narrow end by the same argument. Both
+are rulings, not code, and both were declined on 2026-09-12: three columns of formula do
+not buy a scrollbar, and a formula that side-scrolls is spec §7.
+
+What the caption fix does buy: inside the 20 … 26 band the reader is now told `needs 25
+columns`, elided to `needs 25 …` at the narrow end of it, where before they got `this
+form…` and no number at all. **The narrow band keeps no number, and cannot.** At terminal
+9 … 10 the frame leaves 4 … 6 columns for a 16-character message, so it elides to nothing
+whatever the message says; `the_caption_keeps_its_number_at_every_width_that_refuses_to_draw`
+walks the `MIN_SURPLUS` band only, and that is the whole of what it claims. So the rule stays surprising, but it is no longer silent —
+which is what the 2026-08-29 placement ruling asked for.
+`the_caption_keeps_its_number_at_every_width_that_refuses_to_draw` (`src/render/math.rs`)
+walks the whole band rather than one point in it.
+
+**The 2048-byte cap is per parse, not per formula, and the macro preamble spends it.**
+`MAX_SOURCE_BYTES` (`src/math/build.rs`) is applied to whatever `bridge::with_preamble`
+assembled, and that is `preamble + 1 + formula` for any document that defines a macro. The
+cap was written when a pager parsed one formula at a time; design spec §16's global macros
+changed what is parsed, and the constant's doc comment said "per formula and not per
+document" until this was found. Measured on the built binary, with a definition-only block
+of `L` bytes followed by `$$x = 1$$`:
+
+| `L` | what the reader gets |
+|---|---|
+| ≤ 2042 | `x = 1` draws — 2042 + 1 + 5 is the cap exactly |
+| 2043 … 2048 | `$$x = 1$$` refused: the block is kept, so the join is over the cap |
+| ≥ 2049 | `x = 1` draws again |
+
+Two things fall out, and the owner ruled the behaviour kept and the caption corrected
+rather than either of them fixed.
+
+**The window is six bytes wide and the failure is non-monotonic.** Past 2048 the
+definition block is itself over the cap, so `definitions()` never keeps it — it keeps a
+candidate only if it comes back `Ok` and empty, and an over-cap candidate returns `Err` —
+the preamble stays empty, and the formula below recovers. *Adding* a character to a macro
+definition therefore fixes the formula under it. Anyone reasoning about this from the
+constant alone will get it backwards.
+
+**The preamble self-limits, and the caption for that case is misleading in a second way.**
+Because an over-cap candidate is dropped rather than kept, the preamble can never exceed
+about 2048 bytes: a macro defined late in a long document is silently not exported. What
+the reader sees is not silence but the wrong sentence. With a 2018-byte definition block
+first, a later `$$\newcommand{\bee}{\frac{1}{2}}$$` — thirty bytes — is captioned *a
+formula and its macros over 2048 bytes*, and `$$\bee$$` below it is then captioned
+*parsing error: unknown primitive command found*, with the `\newcommand` for it visible on
+the same screen two blocks up. The message now at least names the macros; it still cannot
+name the two sizes separately, because `MathError::NotDrawable` carries a `&'static str`.
+
+Both captions above are quoted from a render, not predicted. So is the band:
+`the_macro_preamble_spends_the_byte_cap_and_the_caption_says_so` (`src/render/tests.rs`)
+pins all three points — 2042 draws, 2043 refuses naming the macros, and past the far edge
+the block is refused on its own account so the formula under it draws again. The far-edge
+point asks whether the formula DREW. It used to ask whether the text after the block's own
+caption mentions the cap, which is true whatever the cap does — `rsplit_once` returns the
+text after the LAST occurrence — so that point pinned nothing until 2026-09-12.
+
+**`tests/glyph_inventory.rs` cannot attribute a macro's expansion.** The inventory
+subtracts the characters a math node's own commands resolved to, via `math::symbols`,
+which is handed one formula's literal and nothing else. A macro defined in one block and
+used in another is therefore unknown to it: `symbols(r"\Q")` fails with *unknown primitive
+command* and every character the macro expanded to is credited to this crate instead of to
+the document. A corpus fixture defining `\newcommand{\Q}{\mathbb{Q}}` in one block and
+using `$\Q$` in the next makes the inventory demand a Letterlike Symbols entry for ℚ —
+which design spec §13 says is the author's character, not ours. The corpus works around it:
+its cross-block macro is `\half`, which expands to a fraction, whose rule this crate does
+own.
+
+The walk no longer *swallows* the error. `collect_math_symbols` records every literal that
+did not resolve, and the assertion message lists them and tells the reader to decide whose
+character it is before adding anything — the old message said "Add them to INVENTORY here
+and to the manual's TERMINAL SETUP section", which instructs the one repair this test
+exists to prevent. That is the reporting half only; the attribution is still wrong, and an
+unresolved literal is deliberately not an assertion of its own, because the corpus has four
+of them today and is correct. `\half` is among them, so the workaround is now visible in
+the failure rather than only recorded here.
+
+The real fix is an entry point that resolves a formula under the document's macro preamble,
+which is what `render::math::formula` already does with `ctx.preamble` and what `symbols`
+has no parameter for. **It is more than a parameter.** `tests/` sees only the public API,
+and everything needed to build a preamble is `pub(crate)` — `render::macros`
+(`src/render/mod.rs`), and `Definition`, `definitions()` and `preamble()`
+(`src/render/macros.rs`). So the honest shape is a new public document-level entry point,
+or moving the inventory test inside the crate. Both are design decisions; scheduled for
+stage 3, where the corpus is reshaped for grids anyway.
+
+**The two walks disagree on a row that opens with a zero-width box, and only `\not{}`
+builds one.** `Visual::Negation` builds `row([operand, U+0338])`, so the mark is second and
+the walks agree — unless the operand is itself empty, which `\not{}` and `\not{{}}` are.
+Then the row opens with a zero-width part, and the two renderings part company:
+
+| source | what the reader gets |
+|---|---|
+| `see $\not{}x$ here` | `see ̸x here` — the mark is kept and strikes the space before it |
+| `$$\not{}x$$` | `x` — the mark is dropped |
+| `see $a\not{}b$ here` | `a̸b` — agrees, the mark has `a` to strike |
+| `$$a\not{}b$$` | `a̸b` — agrees |
+
+The canvas walk is the one obeying `Canvas::write_str`'s documented contract: a mark that
+opens a write with blank to its left has nothing to strike and is dropped. The flat walk
+concatenates the row into one string and lets the terminal compose it, so the mark reaches
+the preceding cell — a space, or in inline math the prose before the formula.
+
+`the_flat_walk_and_the_canvas_walk_render_the_same_cells` does **not** carry this case; a
+comment there says why. Adding it turns the test red. Which walk should change is a
+placement question — drop the mark in the flat walk too, or let the canvas keep it — and
+neither is a defect in the sense the ONE ENGINE guard was built to catch, since the input is
+a negation of nothing. Recorded rather than fixed.

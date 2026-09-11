@@ -2,9 +2,80 @@
 
 ## Unreleased
 
+### Breaking
+
+0.3.0 wrote these entries as API breaks a `cargo publish` consumer of the library crate
+would feel. That premise no longer holds: mdmost is not published to crates.io (see
+Changed, below) and the crate is `publish = false`, so the audience for this section is
+whoever builds against `mdmost` as a git dependency, and anyone reading it to understand
+what moved. The entries are a record, not a compatibility promise.
+
+- `math::render_display` is gone. It drew a formula into a column of a given width, padding
+  the canvas out to it; `math::render_display_natural` does the same walk and hands back the
+  width the formula itself drew at. Nothing in this repository had called the padded form
+  since display math learned to centre itself, because the renderer needs the natural width
+  to centre by and to measure a table column with. A caller that wants a canvas filling a
+  fixed measure pads it with `Canvas::resize_width`, which is all the retired function did.
+- `Theme::math`, a new public field on `Theme` carrying the styles a formula's structure is
+  drawn in. A caller building a `Theme` by struct literal has to add it.
+- `Search::locate` takes `&Canvas` where it took `&[SearchSpan]`. A hit inside a construct
+  with no interior position — a drawn formula — is answered by the construct's rectangle
+  rather than by the span that names it, and the rectangle is on the canvas and not on any
+  span.
+
 ### New
 
+- **Display math is laid out in two dimensions.** `$$…$$` and ```` ```math ```` blocks are
+  drawn as rows of box art — a fraction over its rule, limits above and below a big
+  operator, a radical with an overbar sized to what is under it, delimiters stretched to
+  the height of what they enclose — where stage 1 wrote them on one line or not at all. A
+  formula is centred in the column of prose it belongs to; one wider than that is drawn at
+  its own width for the page to scroll sideways to.
+- `MathError::TooWide`, and the caption it reaches the reader as: a formula that overruns
+  the body by less than the surplus a horizontal scrollbar would cost is shown as its
+  framed source, captioned with the width it needs (`needs 43 columns`).
+  `MathError` is `#[non_exhaustive]`, so the new variant breaks no `match`.
+- **Macros are global to a document.** A macro defined in one formula is in scope for every
+  formula after it, inline and display alike, and a display block that holds nothing but
+  definitions draws no rows and leaves no gap. A block that also has content to draw keeps
+  its definitions to itself.
+- `\binom`, drawn as a display construct. It has no one-row form, so an inline
+  `$\binom{n}{k}$` shows its source.
+- `\mathbb`, `\mathcal`, `\mathfrak`, `\mathbf`, `\mathit`, `\mathsf`, `\mathtt` and the
+  parser's other font commands draw the character Unicode encodes for that alphabet —
+  `\mathbb{R}` is ℝ, `\mathcal{L}` is ℒ — using the parser's own table rather than an
+  offset, so the letters Unicode placed in Letterlike Symbols come out right. `\boldsymbol`
+  draws bold digits; over letters it still draws the plain letter.
+- A drag anywhere inside a drawn formula washes the whole formula, not the row it started
+  on. Design spec §10: a formula is selectable as a whole, and the wash now says so.
+
 ### Changed
+
+- **mdmost is no longer published to crates.io.** `cargo install mdmost` will not find
+  it; the Rust route is now `cargo install --git https://github.com/oetiker/mdmost`, and
+  the release tarballs, the Homebrew tap and the `.deb`/`.rpm` packages are unchanged.
+  The reason is the LaTeX parser: `pulldown-latex` 0.8.0 has four defects mdmost hits
+  with ordinary documents, two of which abort the whole process on a stack overflow
+  rather than panicking. The fixes are ours, they are open as pull requests upstream, and
+  one of the four has already been closed unmerged — so a release that waits for them is
+  a release with no date. Publishing was the only thing that stood in the way of carrying
+  the fixed parser in this repository, and it is the cheaper of the two to give up.
+- **The parser is vendored, at `vendor/pulldown-latex/`.** It was a git dependency on a
+  fork pinned by revision; it is now a workspace member with a path dependency, so a
+  clean checkout builds the code you can read, without fetching a second repository.
+  `vendor/pulldown-latex/VENDORED.md` records the upstream commit, the four patches with
+  their pull-request numbers, what was left behind from the upstream tree, and what has
+  to be true before the whole directory is deleted again. It is meant to be temporary:
+  when upstream releases with these fixes, `vendor/` goes and the crates.io question
+  reopens.
+- `-\sin x` renders `−sin x`. The minus is the Unicode minus and the function name is set
+  as a name rather than as three letters in a row.
+- A fraction or a radical may be the base of a script, so `\frac{a}{b}^2` and `\sqrt{x}^2`
+  draw with the script against the construct instead of falling back to the source.
+- A **display** formula copied in the rich-HTML flavour pastes as its LaTeX source. It used
+  to go through the inline engine, which pasted `$$\frac{a}{b}$$` as `a/b` — a linearisation
+  the reader never saw, once the screen began drawing the formula in two dimensions. Inline
+  math is unchanged: it still pastes what it drew.
 
 ### Fixed
 

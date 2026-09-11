@@ -37,7 +37,74 @@ Document
     Math
     Text(".")
   Paragraph
-    Text("Display math is not laid out yet:")
+    Text("Display math is drawn as box art:")
   Math
   Paragraph
     Text("Currency is not math: it costs $5 and $1…")
+  Heading(h2, #display-a-fraction)
+    Text("Display: a fraction")
+  Math
+  Heading(h2, #display-limits-on-a-big-operator)
+    Text("Display: limits on a big operator")
+  Math
+  Heading(h2, #display-tall-delimiters)
+    Text("Display: tall delimiters")
+  Math
+  Heading(h2, #display-an-indexed-root)
+    Text("Display: an indexed root")
+  Math
+  Heading(h2, #display-a-formula-wider-than-forty-columns)
+    Text("Display: a formula wider than forty colu…")
+  Math
+  Heading(h2, #display-a-block-that-only-defines-macros)
+    Text("Display: a block that only defines macro…")
+  Math
+  Paragraph
+    Text("That block draws nothing and leaves no g…")
+    SoftBreak
+    Text("scope for every formula after it, inline…")
+    Math
+    Text(" — and displayed:")
+  Math
+  Heading(h2, #display-a-mixed-block-keeps-its-macros-to-itself)
+    Text("Display: a mixed block keeps its macros …")
+  Math
+  Paragraph
+    Text("Outside that block ")
+    Math
+    Text(" is undefined, so it reaches the reader …")
+  Heading(h2, #display-a-double-bar-stretched-around-a-fraction)
+    Text("Display: a double bar stretched around a…")
+  Math
+  Heading(h2, #display-a-double-bar-around-a-single-row)
+    Text("Display: a double bar around a single ro…")
+  Math
+  Heading(h2, #display-a-binomial-coefficient-which-has-no-inline-form)
+    Text("Display: a binomial coefficient, which h…")
+  Math
+  Paragraph
+    Text("Written inline, ")
+    Math
+    Text(" reaches the reader as its source too.")
+  Heading(h2, #display-blackboard-letters)
+    Text("Display: blackboard letters")
+  Math
+  Heading(h2, #display-a-block-inside-a-block-quote)
+    Text("Display: a block inside a block quote")
+  BlockQuote
+    Paragraph
+      Text("The quote bar runs beside every drawn ro…")
+    Math
+  Heading(h2, #display-a-block-inside-a-list-item)
+    Text("Display: a block inside a list item")
+  List(ordered=true)
+    Item
+      Paragraph
+        Text("The formula is laid out in the item's ow…")
+      Math
+    Item
+      Paragraph
+        Text("The list continues underneath it.")
+  Heading(h2, #display-a-formula-that-does-not-parse)
+    Text("Display: a formula that does not parse")
+  Math

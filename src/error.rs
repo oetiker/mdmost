@@ -215,13 +215,47 @@ pub enum MathError {
         message: String,
     },
 
-    /// Well-formed, but it needs more than one row and the caller had one.
+    /// Well-formed, but this engine will not draw it where the caller asked.
     ///
-    /// This blames neither the author nor the parser: a matrix inline is a perfectly
-    /// good formula in the wrong place, and the reader is shown its source rather than
+    /// Two families reach here. One is refused in **either** mode, some of it before the
+    /// mode is consulted at all: a source past `build`'s length or command-run cap, a
+    /// formula nested past `MAX_DEPTH`, an unfinished construct. The other is refused
+    /// **inline only**: a grid, or a construct with no honest one-row form, which display
+    /// will draw once stage 3 lands.
+    ///
+    /// That split is why the message says "here" and not what is wrong with the formula.
+    /// A matrix inline is a perfectly good formula in the wrong place, so this blames
+    /// neither the author nor the parser, and the reader is shown the source rather than
     /// an error. The payload names the construct so the caption can be specific.
-    #[error("{0} cannot be drawn on one row")]
-    NotInline(&'static str),
+    #[error("{0} cannot be drawn here")]
+    NotDrawable(&'static str),
+
+    /// Drawn, but wider than the caller can show.
+    ///
+    /// The counterpart to `MermaidError::TooNarrow`, and the reason the caller may choose
+    /// a wider canvas and let the reader scroll (design spec §7). Unlike a diagram, a
+    /// formula has exactly one width: `needed` is not a hint to search from, it is the
+    /// answer.
+    ///
+    /// **The message is short because of where it is shown and how narrow that place is.**
+    /// It reaches a reader only as the bottom edge of a framed source (design spec §9),
+    /// elided to the frame's width less four (`render::code::fallback`), and that frame is
+    /// by construction *narrower than the formula* — being too narrow is why the formula
+    /// was refused. The message used to read "this formula needs {needed} columns": 29
+    /// characters for a two-digit width, so it needed a 33-column body, and for any
+    /// formula under about 34 columns the two conditions cannot both hold. A 25-column
+    /// formula was captioned `this form…` at terminal width 20 and `this formula ne…` at
+    /// 26 — every width in its refusal band elided the number away. The caption is the
+    /// whole compensation for refusing to draw, so that left the reader with nothing.
+    ///
+    /// The frame's top edge already reads `math`, so the subject does not need restating.
+    /// What the reader cannot get anywhere else is the number, and it now comes early
+    /// enough in the string to survive the elision.
+    #[error("needs {needed} columns")]
+    TooWide {
+        /// The width the formula draws at.
+        needed: u16,
+    },
 }
 
 /// Failures raised by canvas operations that would break the canvas contract.
@@ -251,8 +285,31 @@ mod math_error_tests {
     }
 
     #[test]
-    fn a_construct_that_needs_two_rows_says_so_without_blaming_the_author() {
-        let err = MathError::NotInline("a matrix");
-        assert_eq!(err.to_string(), "a matrix cannot be drawn on one row");
+    fn a_construct_the_engine_will_not_draw_says_so_without_blaming_the_author() {
+        // Both families of payload, because one wording has to serve both and only the
+        // word "here" makes that possible. A matrix is refused inline and will draw in
+        // display once stage 3 lands; a nesting past the cap is refused in either mode.
+        // "cannot be drawn on one row" was true of the first and false of the second.
+        let inline_only = MathError::NotDrawable("a matrix");
+        assert_eq!(inline_only.to_string(), "a matrix cannot be drawn here");
+
+        let either_mode = MathError::NotDrawable("a formula nested too deeply");
+        assert_eq!(
+            either_mode.to_string(),
+            "a formula nested too deeply cannot be drawn here"
+        );
+    }
+
+    #[test]
+    fn a_formula_too_wide_to_show_says_how_many_columns_it_needs() {
+        // The number is in the message because the message is what the reader sees: design
+        // spec §9 puts it in the bottom edge of the framed source, and "this formula is too
+        // wide" without the width tells a reader nothing they cannot already see.
+        //
+        // It is also early in the message, which is the other half of the same argument:
+        // the bottom edge is elided from the right, and a number the elision eats is a
+        // number the reader does not get either. See the variant's doc comment.
+        let err = MathError::TooWide { needed: 97 };
+        assert_eq!(err.to_string(), "needs 97 columns");
     }
 }

@@ -483,9 +483,53 @@ A formula that fails to parse, or that needs more than one row to lay out — a
 matrix, for instance — falls back to the same verbatim-source rendering as
 `math_inline = false`.
 
-`$$…$$` and ```` ```math ```` blocks are display math. They are not laid out in
-this version: shown as a framed, syntax-highlighted code block with the reason
-in its bottom edge, the same as an unsupported Mermaid diagram.
+Two limits are applied to the source before it is parsed. A formula may be at
+most 2048 bytes long, counting the macro definitions in scope for it, and may
+contain at most 32 commands in an unbroken chain —
+commands with no brace, letter or digit between them, as in `\sqrt\sqrt\sqrt x`.
+Whitespace does not break a chain; a brace does, so `\sqrt{\sqrt{x}}` is not one.
+A formula past either limit falls back the same way.
+
+`$$…$$` and ```` ```math ```` blocks are display math, drawn as rows of box
+art. One that does not parse, or that this version does not draw, is shown as a
+framed, syntax-highlighted code block with the reason in its bottom edge, the
+same as an unsupported Mermaid diagram.
+
+A display formula is centred in the column of prose it belongs to. One too wide
+for that column is left-aligned and laid out across the whole body, which is
+wider than the prose column wherever `body_width` is capping it; the page does
+not scroll. One too wide for the body as well is drawn at its own width and the
+page scrolls sideways to the rest of it, where it overruns the body by eight
+columns or more. One that overruns the body by one to seven columns is not
+drawn at all: it is shown as its framed source, captioned with the width it
+needs, as in `needs 43 columns`. That number counts body columns,
+and the body is two columns narrower than the terminal: widening the terminal to
+two columns past that number draws it.
+
+A macro is in scope for every formula after the one that defines it, inline and
+display alike. A display block holding nothing but definitions draws no rows and
+leaves no gap where it stands. `\newcommand` on a name that is already defined
+is an error, and that block shows its source captioned `parsing error: macro
+already defined`; `\def` redefines without complaint. A macro defined in a block
+that also has content to draw is not in scope afterwards.
+
+A binomial coefficient has no inline form: `$\binom{n}{k}$` shows its source,
+while `$$\binom{n}{k}$$` draws.
+
+`\mathbb`, `\mathcal`, `\mathfrak`, `\mathbf`, `\mathit`, `\mathsf`, `\mathtt`
+and the parser's other font commands draw the character Unicode encodes for that
+alphabet: `\mathbb{R}` is ℝ, `\mathcal{L}` is ℒ. Most of those characters are in
+Mathematical Alphanumeric Symbols (U+1D400-U+1D7FF) and a few in Letterlike
+Symbols (U+2100-U+214F); a font covering the blocks under **TERMINAL SETUP**
+need not cover either, and these are the document's characters rather than this
+program's, so they are not listed there. `\mathrm` draws the plain letter, a
+terminal having one face; so does `\boldsymbol` over letters, though over digits
+it draws the bold ones.
+
+Colour follows the theme. The structure a formula draws — the fraction rule, the
+delimiter pieces, the radical strokes, the overline — takes the ink a diagram's
+lines take: the `border` colour blended towards body text, not `border` itself.
+The symbols take the colour of body text.
 
 ## Mermaid
 
@@ -562,18 +606,30 @@ protocol.
 a fallback behind it, has to cover them. Any font or font chain with that
 coverage will do.
 
-- **Box Drawing (U+2500-U+257F)** — Every table border, code frame and diagram box.
+- **Box Drawing (U+2500-U+257F)** — Every table border, code frame and diagram box,
+  and math's tall delimiters.
 
 - **Block Elements (U+2580-U+259F)** — Zebra stripes, the scrollbar, gantt bars.
 
 - **Geometric Shapes (U+25A0-U+25FF)** — Heading marks, diagram node shapes, arrowheads.
 
-- **General Punctuation (U+2000-U+206F)** — The elision marker.
+- **General Punctuation (U+2000-U+206F)** — The elision marker, the mark on a framed
+  block whose content is wider than its frame, the tick on a tall radical, and math's
+  double bar.
 
 - **Mathematical Operators (U+2200-U+22FF)** — Class-diagram relations, and math's
   radical sign (`\sqrt`).
 
-- **Misc Mathematical Symbols-A (U+27C0-U+27EF)** — Class-diagram generics.
+- **Misc Mathematical Symbols-A (U+27C0-U+27EF)** — Class-diagram generics, and math's
+  angle, white-square and flattened-round delimiters.
+
+- **Arrows (U+2190-U+21FF)** — Math's arrow delimiters.
+
+- **Miscellaneous Technical (U+2300-U+23FF)** — Math's ceiling, floor and moustache
+  delimiters.
+
+- **Misc Mathematical Symbols-B (U+2980-U+29FF)** — Math's white-brace and
+  double-parenthesis delimiters.
 
 - **Dingbats (U+2700-U+27BF)** — The marker on a degraded diagram's caption.
 

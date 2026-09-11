@@ -89,16 +89,36 @@ fn inline(node: &Node, out: &mut String) {
         }
         NodeKind::LineBreak => out.push_str("<br>"),
         NodeKind::SoftBreak => out.push(' '),
-        // Drawn the same way the screen draws it — "E = mc²" rather than the raw LaTeX
-        // — so a sighted reader pastes what they saw, not the source behind it. There is
-        // no whole-document source to fall back to here (unlike `render::inline`, this
-        // module never receives one), so a formula that will not draw falls back to its
-        // bare literal instead of its delimited source; that is the one place this
-        // rich-copy path and the terminal's fallback deliberately differ.
-        NodeKind::Math { literal, .. } => match crate::math::render_inline(literal) {
-            Ok(drawn) => escape_into(&drawn, out),
-            Err(_) => escape_into(literal, out),
-        },
+        // Inline math is drawn the same way the screen draws it — "E = mc²" rather than
+        // the raw LaTeX — so a sighted reader pastes what they saw, not the source behind
+        // it. There is no whole-document source to fall back to here (unlike
+        // `render::inline`, this module never receives one), so a formula that will not
+        // draw falls back to its bare literal instead of its delimited source; that is
+        // the one place this rich-copy path and the terminal's fallback deliberately
+        // differ.
+        //
+        // Display math does not go through `render_inline` at all. Until Task 10 it did,
+        // and the sentence above was written to cover both kinds; once the screen began
+        // drawing a display formula as rows of box art, "the same way the screen draws
+        // it" stopped being something one row of text could say. Asked for that row
+        // anyway, `render_inline` answers with a linearisation the reader never saw —
+        // `$$\frac{a}{b}$$` pasted as `a/b` — or refuses outright, for a construct such
+        // as `\binom` that has no one-row form, and the literal is pasted regardless.
+        // Ruled 2026-09-11 (owner): a display formula pastes as its LaTeX source, which
+        // the receiving application can lay out for itself.
+        //
+        // `export::tsv` pushes the raw literal for both kinds, so the two clipboard
+        // flavours still disagree about inline math; see `docs/maintainer-notes.md`.
+        NodeKind::Math { literal, display } => {
+            if *display {
+                escape_into(literal, out);
+            } else {
+                match crate::math::render_inline(literal) {
+                    Ok(drawn) => escape_into(&drawn, out),
+                    Err(_) => escape_into(literal, out),
+                }
+            }
+        }
         _ => escape_into(&node.plain_text(), out),
     }
 }

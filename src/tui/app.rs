@@ -987,8 +987,7 @@ impl App {
         );
         if stale {
             self.toc.attach_anchors(self.cache.canvas().anchors());
-            self.search
-                .locate(self.doc.source(), self.cache.canvas().spans());
+            self.search.locate(self.doc.source(), self.cache.canvas());
             // A mouse selection is a rectangle of *cells*, and a new render is a new
             // set of cells: rendering is a pure function of width (design spec §3), so
             // a reflow moves every row and the cells the reader picked out now hold
@@ -1945,7 +1944,7 @@ impl App {
         self.ensure_rendered();
         match Search::new(self.doc.source(), query, self.search_mode) {
             Ok(mut search) => {
-                search.locate(self.doc.source(), self.cache.canvas().spans());
+                search.locate(self.doc.source(), self.cache.canvas());
                 self.search = search;
                 self.search_index = None;
                 if self.search.is_empty() {

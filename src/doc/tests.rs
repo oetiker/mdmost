@@ -1100,3 +1100,44 @@ fn plain_paragraph_backslash_math_is_unaffected_by_the_boundary_fix() {
         "regression: plain paragraph math stopped working"
     );
 }
+
+/// Design spec §16: the document collects the display blocks that *may* define macros.
+///
+/// A textual pre-filter, in document order, from every display node however it was made —
+/// `$$…$$`, a ```` ```math ```` fence, and `\[…\]` from the backslash pass. Whether a
+/// candidate really exports is the renderer's decision (a block that draws nothing does,
+/// spec §16.3); a mixed block is still a candidate here.
+#[test]
+fn a_document_collects_its_macro_candidates_in_order() {
+    let doc = Doc::parse("$x^2$ and $$y^2$$\n");
+    assert!(
+        doc.macro_candidates().is_empty(),
+        "no definitions, nothing collected"
+    );
+
+    let source = "Intro.\n\n$$\\newcommand{\\R}{\\mathbb{R}}$$\n\n$$x \\in \\R$$\n\n```math\n\\def\\Q{\\mathbb{Q}} \\quad z\n```\n";
+    let doc = Doc::parse(source);
+    let candidates = doc.macro_candidates();
+    assert_eq!(candidates.len(), 2, "{candidates:?}");
+    assert_eq!(candidates[0].literal, "\\newcommand{\\R}{\\mathbb{R}}");
+    assert_eq!(
+        candidates[0].start,
+        source.find("$$").expect("the first block")
+    );
+    assert_eq!(candidates[1].literal, "\\def\\Q{\\mathbb{Q}} \\quad z");
+    assert_eq!(candidates[1].start, source.find("```").expect("the fence"));
+    assert!(candidates[0].start < candidates[1].start, "document order");
+
+    let backslash = Doc::parse_with(
+        "\\[\\newcommand{\\R}{\\mathbb{R}}\\]\n",
+        MathSyntax {
+            dollars: true,
+            backslash: true,
+        },
+    );
+    assert_eq!(
+        backslash.macro_candidates().len(),
+        1,
+        "the backslash pass makes display nodes too"
+    );
+}

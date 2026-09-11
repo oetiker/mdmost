@@ -45,6 +45,8 @@ pub mod document;
 pub(crate) mod glyphs;
 pub mod inline;
 mod link;
+pub(crate) mod macros;
+pub(crate) mod math;
 pub mod table;
 
 #[cfg(test)]
@@ -218,6 +220,15 @@ pub(crate) struct Ctx<'a> {
     /// shows a hole instead of its source. Nothing about math may panic; that is the
     /// deliberate trade against widening every such entry point to carry a source too.
     pub source: &'a str,
+    /// The macro definitions of the document being rendered, in document order
+    /// (design spec §16): the display blocks that drew nothing, decided once per
+    /// document by [`macros::definitions`] and handed to every block the way `numbers`
+    /// is. A formula takes the ones before it as a preamble — see [`Ctx::preamble`].
+    ///
+    /// Empty for the standalone entry points — a block, a table or a footnote popup
+    /// rendered on its own — the same trade `source` documents: a formula there sees
+    /// only what it defines itself.
+    pub macros: &'a [macros::Definition],
 }
 
 /// The deepest table nesting that is rendered; deeper tables degrade to their text.
@@ -239,6 +250,7 @@ impl<'a> Ctx<'a> {
             table_depth: 0,
             numbers: None,
             source: "",
+            macros: &[],
         }
     }
 
@@ -253,6 +265,19 @@ impl<'a> Ctx<'a> {
     /// The same context, carrying the whole document source a formula falls back to.
     pub(crate) fn with_source(self, source: &'a str) -> Self {
         Self { source, ..self }
+    }
+
+    /// The same context, carrying the document's macro definitions (design spec §16).
+    pub(crate) fn with_macros(self, macros: &'a [macros::Definition]) -> Self {
+        Self { macros, ..self }
+    }
+
+    /// The macro preamble for a formula starting at byte `before` of the source.
+    ///
+    /// The definitions strictly before it, joined for prepending — [`macros::preamble`]
+    /// over this context's list. Empty, and free, when the document defines nothing.
+    pub(crate) fn preamble(&self, before: usize) -> String {
+        macros::preamble(self.macros, before)
     }
 
     /// The context for content one list level deeper.
@@ -321,9 +346,12 @@ pub(crate) fn render_flat(doc: &Doc, width: u16, theme: &Theme, options: &Render
     // Computed once, here, from the whole document — never at parse time (design spec
     // §3), and never per block, which could not answer the question anyway.
     let numbers = Numbering::enabled(doc, options.section_numbers);
+    // The other whole-document decision (design spec §16), taken the same way.
+    let macros = macros::definitions(doc, theme);
     let ctx = Ctx::new(theme, options)
         .numbered(&numbers)
-        .with_source(doc.source());
+        .with_source(doc.source())
+        .with_macros(&macros);
     let margin = margins(width);
     let body_width = width - 2 * margin;
     let blocks = &doc.root().children;

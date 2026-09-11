@@ -20,9 +20,111 @@ expression: canvas.plain_text()
  $\frac{a}{b}$, $\sqrt{x}$, and         
  $\sum_{i=1}^{n} i$.                    
                                         
- Display math is not laid out yet:      
+ Display math is drawn as box art:      
                                         
  $$ \frac{-b \pm \sqrt{b^2-4ac}}{2a} $$ 
                                         
  Currency is not math: it costs $5 and  
- $10 in total.
+ $10 in total.                          
+                                        
+ Display: a fraction                    
+ ────────────────────────────────────── 
+                                        
+ $$x = \frac{-b \pm \sqrt{b^2 -         
+ 4ac}}{2a}$$                            
+                                        
+ Display: limits on a big operator      
+ ────────────────────────────────────── 
+                                        
+ $$\sum_{i=1}^{n} i^2 =                 
+ \frac{n(n+1)(2n+1)}{6}$$               
+                                        
+ Display: tall delimiters               
+ ────────────────────────────────────── 
+                                        
+ $$\left( \frac{a}{b} \right)^2$$       
+                                        
+ Display: an indexed root               
+ ────────────────────────────────────── 
+                                        
+ $$\sqrt[3]{x + 1}$$                    
+                                        
+ Display: a formula wider than forty    
+ columns                                
+ ────────────────────────────────────── 
+                                        
+ $$f(x) = a_0 + a_1 x + a_2 x^2 + a_3   
+ x^3 + a_4 x^4 + a_5 x^5$$              
+                                        
+ Display: a block that only defines     
+ macros                                 
+ ────────────────────────────────────── 
+                                        
+ $$\newcommand{\half}{\frac{1}{2}}$$    
+                                        
+ That block draws nothing and leaves no 
+ gap behind it. What it defined is in   
+ scope for every formula after it,      
+ inline — $\half$ — and displayed:      
+                                        
+ $$x = \half + \half$$                  
+                                        
+ Display: a mixed block keeps its       
+ macros to itself                       
+ ────────────────────────────────────── 
+                                        
+ $$\newcommand{\N}{\mathbb{N}} \N       
+ \subset \mathbb{Z}$$                   
+                                        
+ Outside that block $\N$ is undefined,  
+ so it reaches the reader as its        
+ source.                                
+                                        
+ Display: a double bar stretched around 
+ a fraction                             
+ ────────────────────────────────────── 
+                                        
+ $$\left| \frac{a}{b} \right|$$         
+                                        
+ Display: a double bar around a single  
+ row                                    
+ ────────────────────────────────────── 
+                                        
+ $$\left|x\right|$$                     
+                                        
+ Display: a binomial coefficient, which 
+ has no inline form                     
+ ────────────────────────────────────── 
+                                        
+ $$\binom{n}{k}$$                       
+                                        
+ Written inline, $\binom{n}{k}$ reaches 
+ the reader as its source too.          
+                                        
+ Display: blackboard letters            
+ ────────────────────────────────────── 
+                                        
+ $$\mathbb{R} \subset \mathbb{C}$$      
+                                        
+ Display: a block inside a block quote  
+ ────────────────────────────────────── 
+                                        
+ ▌ The quote bar runs beside every      
+ ▌ drawn row:                           
+ ▌                                      
+ ▌ $$ \frac{a}{b} $$                    
+                                        
+ Display: a block inside a list item    
+ ────────────────────────────────────── 
+                                        
+ 1. The formula is laid out in the      
+    item's own column:                  
+                                        
+    $$ \frac{a}{b} $$                   
+                                        
+ 2. The list continues underneath it.   
+                                        
+ Display: a formula that does not parse 
+ ────────────────────────────────────── 
+                                        
+ $$\frac{$$

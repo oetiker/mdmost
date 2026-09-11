@@ -734,6 +734,38 @@ fn measure_block(node: &Node, ctx: Ctx<'_>) -> (usize, usize) {
             let marker = display_width(inline::HTML_MARKER);
             (marker, marker)
         }
+        // Display math in a cell draws as box art, so it is measured as box art. Stage 1
+        // measured it as an inline run — the catch-all below — while drawing it as a
+        // framed block; the column negotiation happened to give it enough room, which made
+        // a real disagreement between measurement and rendering invisible.
+        //
+        // No cap on the ask: a measurement is taken before there is a column for it to be
+        // too wide for, and the negotiation this feeds is what decides whether the answer
+        // is affordable. Minimum and natural are the same number because a drawn formula
+        // cannot be squeezed — it has exactly one width (design spec §7), which is the
+        // whole reason this cannot stay an inline measurement.
+        NodeKind::Math {
+            literal,
+            display: true,
+        } => {
+            let source = literal.trim_matches('\n');
+            // Under the same macro preamble the cell is drawn with (design spec §16), or
+            // a formula using a macro is measured at its framed source's width and drawn
+            // at the macro's — the disagreement this arm exists to prevent.
+            let preamble = ctx.preamble(node.source.start);
+            match super::bridge::math_natural(&preamble, source, u16::MAX, ctx.theme) {
+                Ok(canvas) => {
+                    let drawn = usize::from(canvas.width());
+                    (drawn, drawn)
+                }
+                // It will not draw, so the cell shows the framed source — which is a code
+                // block, and is measured by the rule code blocks are measured by.
+                Err(_) => (
+                    super::code::chrome_width(),
+                    super::code::natural_width(source, ctx),
+                ),
+            }
+        }
         // Anything else measured in a block position is inline content.
         _ => measure_inline(std::slice::from_ref(node), ctx),
     }
@@ -770,4 +802,41 @@ fn measure_inline(nodes: &[Node], ctx: Ctx<'_>) -> (usize, usize) {
 /// Adds a fixed gutter to a measurement.
 fn offset_by(measurement: (usize, usize), gutter: usize) -> (usize, usize) {
     (measurement.0 + gutter, measurement.1 + gutter)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::doc::Doc;
+
+    /// The math node inside the first cell of `doc`'s first table.
+    ///
+    /// A cell's math node is not `children[0]` of the document — it is three levels down,
+    /// and a test that reached for the wrong node would measure a table and still pass.
+    fn cell_math(node: &Node) -> Option<&Node> {
+        if matches!(node.kind, NodeKind::Math { display: true, .. }) {
+            return Some(node);
+        }
+        node.children.iter().find_map(cell_math)
+    }
+
+    #[test]
+    fn a_display_formula_in_a_cell_is_measured_as_it_draws() {
+        // Stage 1 measured this as an inline run while drawing it as a framed block: the
+        // measurement and the rendering disagreed. Now it draws as box art, so the
+        // measurement has to be the box art's own width.
+        let doc = Doc::parse("| a |\n|---|\n| $$\\frac{abc}{d}$$ |");
+        let table = &doc.root().children[0];
+        let math = cell_math(table).expect(
+            "the premise of this test: the cell holds a node the renderer sees as display math",
+        );
+        let theme = Theme::default();
+        let options = RenderOptions::default();
+        let (min, natural) = measure_block(math, Ctx::new(&theme, &options));
+        assert_eq!(natural, 3, "the fraction is as wide as its numerator");
+        assert_eq!(
+            min, natural,
+            "box art cannot be squeezed, so it has one width, not a range"
+        );
+    }
 }

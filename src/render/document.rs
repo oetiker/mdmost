@@ -38,10 +38,11 @@
 use crate::canvas::{Canvas, Cell};
 use crate::doc::{Doc, Node, NodeKind};
 use crate::numbering::Numbering;
-use crate::render::{Limits, RenderOptions, margins, render_block_numbered, render_flat};
+use crate::render::{Ctx, Limits, RenderOptions, margins, render_flat};
 use crate::theme::Theme;
 
 use super::block;
+use super::macros;
 
 /// The glyph the renderers paint in a row's last column when content is cut off.
 ///
@@ -56,10 +57,16 @@ pub(crate) use super::code::OVERFLOW_MARKER;
 pub(crate) use super::block::QUOTE_BAR;
 
 /// The whole-document inputs every block is rendered against, bundled so the functions
-/// that thread them down to [`render_block_numbered`] stay under clippy's argument limit.
+/// that thread them down stay under clippy's argument limit.
 ///
 /// `Copy` for the same reason [`super::Ctx`] is: every block in the loop takes its own
 /// copy rather than sharing a borrow that would have to outlive the loop body.
+///
+/// Blocks are rendered through [`block::render_block_ctx`] with the [`Ctx`] this builds,
+/// not through the public [`super::render_block_numbered`]: that signature carries
+/// numbers and source but not the macro definitions, and widening a `pub` function
+/// already at clippy's argument limit for the one caller that lives beside it is the
+/// wrong trade. Everything a block needs from the whole document is here, once.
 #[derive(Debug, Clone, Copy)]
 struct DocCtx<'a> {
     theme: &'a Theme,
@@ -67,6 +74,18 @@ struct DocCtx<'a> {
     numbers: &'a Numbering,
     /// The whole document text, for a formula that will not draw (design spec §5.3).
     source: &'a str,
+    /// The display blocks that define macros and draw nothing (design spec §16).
+    macros: &'a [macros::Definition],
+}
+
+impl<'a> DocCtx<'a> {
+    /// The rendering context every block of this document starts from.
+    fn ctx(self) -> Ctx<'a> {
+        Ctx::new(self.theme, self.options)
+            .numbered(self.numbers)
+            .with_source(self.source)
+            .with_macros(self.macros)
+    }
 }
 
 /// The widest a single block is ever grown to.
@@ -118,11 +137,16 @@ pub fn render_document(
     // deeply enough to want numbers. Computed once here and handed to every block, so
     // the pager and the piped renderer number identically.
     let numbers = Numbering::enabled(doc, options.section_numbers);
+    // And the macro definitions (design spec §16) are the third: which candidate blocks
+    // draw nothing is decided here, once, so a formula never re-renders a block to find
+    // out and a table cell is measured with the same definitions it is drawn with.
+    let macros = macros::definitions(doc, theme);
     let doc_ctx = DocCtx {
         theme,
         options,
         numbers: &numbers,
         source: doc.source(),
+        macros: &macros,
     };
     for (index, node) in blocks.iter().enumerate() {
         let part = match banner.take() {
@@ -226,14 +250,25 @@ fn is_exempt(node: &Node) -> bool {
         NodeKind::CodeBlock { language, .. } => {
             crate::render::code::is_mermaid(language.as_deref())
         }
+        // A display formula has exactly one width (design spec §7) — the same reason a
+        // Mermaid diagram is exempt just above. Without this arm the prose cap squeezes
+        // it and the clip test then widens it back, which costs a second layout and
+        // reads as a flicker on a narrow terminal.
+        //
+        // This governs the width the formula is *laid out* at, and nothing else. What it
+        // is *centred* in is `measure.prose`, which [`render_widened`] passes on
+        // separately — so a 90-column formula draws at 90 instead of being squeezed to
+        // the cap, and still shares its left edge with the prose it belongs to.
+        NodeKind::Math { display: true, .. } => true,
         _ => false,
     }
 }
 
 /// Renders one block at the width its kind earns, and places it in the body.
 ///
-/// `doc.source` is threaded down to [`render_block_numbered`] so a formula that will not
-/// draw can fall back to its own bytes of it — see [`super::Ctx::source`].
+/// `doc` is threaded down as the block's [`Ctx`] so a formula that will not draw can
+/// fall back to its own bytes of the source — see [`super::Ctx::source`] — and a formula
+/// that uses a macro sees the definitions before it — see [`super::Ctx::macros`].
 fn render_placed(
     node: &Node,
     measure: Measure,
@@ -244,23 +279,16 @@ fn render_placed(
     // Nothing to place: with no cap the body is the full width, and every block was laid
     // out at it.
     if !measure.is_capped() {
-        return render_widened(node, measure.full, doc, clip);
+        return render_widened(node, measure, doc, clip);
     }
     let canvas = if is_exempt(node) {
-        render_widened(node, measure.full, doc, clip)
+        render_widened(node, measure, doc, clip)
     } else {
-        let capped = render_block_numbered(
-            node,
-            measure.prose,
-            doc.theme,
-            doc.options,
-            doc.numbers,
-            doc.source,
-        );
+        let capped = block::render_block_ctx(node, measure.prose, doc.ctx());
         if clip.is_clipped(&capped) {
             // The cap would cut this block short, so it takes the whole body — and
             // beyond it, if the whole body is not enough either.
-            render_widened(node, measure.full, doc, clip)
+            render_widened(node, measure, doc, clip)
         } else {
             capped
         }
@@ -318,7 +346,13 @@ fn placed(mut canvas: Canvas, measure: Measure, fill: crate::theme::Style) -> Ca
 /// a horizontal scrollbar, a chevron on every row and an `↔ 1/1` readout for. Below this
 /// it takes the fit ladder's answer instead, squeezed or dumped — the same thing it got
 /// before diagrams could scroll at all.
-const MIN_SURPLUS: u16 = 8;
+///
+/// The rule is the same for a formula, but it is applied in a different place. A diagram
+/// answers `None` when it does not want the room, so the guard below can hold it; a
+/// formula that does not want the room must still answer, or the clip search widens it
+/// regardless — so [`super::math::formula`] applies this itself and is why it is visible
+/// to a sibling module rather than private here.
+pub(super) const MIN_SURPLUS: u16 = 8;
 
 /// How many viewports wide a diagram may be laid out.
 ///
@@ -331,14 +365,22 @@ const VIEWPORTS: u16 = 3;
 /// The most layouts the width search may spend on one diagram.
 const DIAGRAM_PROBES: u8 = 8;
 
-/// Renders one block, at its own width if `width` would clip it.
+/// Renders one block, at its own width if `measure.full` would clip it.
 ///
 /// A Mermaid fence is asked first, because "this does not fit" reaches the clip hunt as
 /// a *dump of Mermaid source* — a block that is not clipped at all and would never be
 /// widened, only side-scrolled as raw text if some other line in it happened to be long.
 /// [`crate::render::diagram`] answers with the diagram itself, at the narrowest width
 /// that draws it, and that width is what the block is laid out at.
-fn render_widened(node: &Node, width: u16, doc: DocCtx<'_>, clip: &ClipTest) -> Canvas {
+///
+/// A display formula is asked next and for the same reason — "this does not fit" reaches
+/// the clip hunt as a *dump of LaTeX*, and the search would then widen the block until the
+/// formula drew, at any surplus at all. [`super::math::formula`] answers for every formula
+/// that builds, so a formula never reaches the search; it is the one that applies
+/// [`MIN_SURPLUS`], and it is handed `measure.prose` because a formula is centred in the
+/// column of prose it belongs to rather than in the body it is laid out across.
+fn render_widened(node: &Node, measure: Measure, doc: DocCtx<'_>, clip: &ClipTest) -> Canvas {
+    let width = measure.full;
     let limits = Limits::new(
         MAX_BLOCK_WIDTH.min(width.saturating_mul(VIEWPORTS)),
         DIAGRAM_PROBES,
@@ -348,14 +390,18 @@ fn render_widened(node: &Node, width: u16, doc: DocCtx<'_>, clip: &ClipTest) -> 
     {
         return canvas;
     }
-    let narrow =
-        render_block_numbered(node, width, doc.theme, doc.options, doc.numbers, doc.source);
+    if let Some((_, canvas)) = super::math::formula(node, width, measure.prose, limits, doc.ctx()) {
+        // No guard: `formula` has already applied `MIN_SURPLUS` and answers with the
+        // block to draw either way. Re-testing `at` here would be a second rule deciding
+        // one width, and the range the two disagreed in is where the defect lived.
+        return canvas;
+    }
+    let narrow = block::render_block_ctx(node, width, doc.ctx());
     let is_clipped = |canvas: &Canvas| clip.is_clipped(canvas);
     if !is_clipped(&narrow) || width >= MAX_BLOCK_WIDTH {
         return narrow;
     }
-    let render =
-        |at: u16| render_block_numbered(node, at, doc.theme, doc.options, doc.numbers, doc.source);
+    let render = |at: u16| block::render_block_ctx(node, at, doc.ctx());
 
     // Double until the block fits, which bounds the search; then bisect for the
     // narrowest width that still fits, so the scrollable extent matches the content
@@ -544,5 +590,70 @@ impl ClipTest {
             .iter()
             .flatten()
             .any(|cell| cell.text() == OVERFLOW_MARKER && self.styles.contains(&cell.style()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The stage-1 insurance: without an arm in [`is_exempt`] a wide formula is squeezed
+    /// to the body-width cap and clipped, exactly as a Mermaid diagram would be. This is
+    /// the fourth hand-written `NodeKind` list on this codebase to go stale, and the
+    /// previous three each shipped a visible defect.
+    #[test]
+    fn a_display_formula_is_exempt_from_the_prose_cap() {
+        let doc = Doc::parse("$$\\frac{a + b + c + d + e + f}{2}$$");
+        assert!(is_exempt(&doc.root().children[0]));
+    }
+
+    #[test]
+    fn an_inline_formula_is_not_exempt() {
+        // The exemption is about a block that has exactly one width. An inline formula is
+        // part of a sentence and reflows with it, so it is capped like the prose it sits
+        // in — and the node here is the paragraph, not the formula.
+        let doc = Doc::parse("Some $x^2$ prose.");
+        assert!(!is_exempt(&doc.root().children[0]));
+    }
+
+    /// A guard on the decoupling the owner ruled: exemption governs the width a formula is
+    /// *laid out* at, and says nothing about what it is *centred* in. If this pair ever
+    /// disagrees, one of the two rules has absorbed the other.
+    #[test]
+    fn a_wide_body_lays_a_formula_out_past_the_prose_cap_and_still_centres_it_in_the_cap() {
+        let doc = Doc::parse("$$\\frac{a}{b}$$");
+        let theme = Theme::default();
+        let canvas = render_document(&doc, 120, Some(72), &theme, &RenderOptions::default());
+        let rule = (0..canvas.height())
+            .find(|row| canvas.row_text(*row).contains('─'))
+            .expect("a rule row");
+        let text = canvas.row_text(rule);
+        let left = text.len() - text.trim_start().len();
+        // 118 columns of body inside a 120-column terminal, one column of margin each
+        // side; the formula is one column wide and centred in the 72-column text column,
+        // so 1 + (72 - 1) / 2 = 36. Centred in the body it would be 1 + 58 = 59.
+        assert_eq!(left, 36, "centred in the prose cap, not in the body");
+    }
+
+    /// The other half of the decoupling, and the half `is_exempt` is actually for: a
+    /// formula wider than the cap is *drawn* at the body width instead of being squeezed
+    /// into the cap and dumped as its own source.
+    ///
+    /// The macro is what makes this observable. A formula's drawn width and its source
+    /// length are unrelated, and the cap only dumps a formula it cannot draw — so with a
+    /// long source the dump is itself clipped, the clip test widens the block, and the
+    /// formula comes back drawn anyway with the missing arm invisible. Forty characters
+    /// of source drawing seventy-four columns is a dump that fits at the cap, which is
+    /// the only shape in which the defect reaches a reader.
+    #[test]
+    fn a_formula_wider_than_the_cap_is_drawn_at_the_body_width_not_dumped_at_the_cap() {
+        let doc = Doc::parse("$$\\newcommand{\\q}{a+b+c+d+e+f+g+h+i+j}\\q\\q$$");
+        let theme = Theme::default();
+        let canvas = render_document(&doc, 120, Some(72), &theme, &RenderOptions::default());
+        let text = canvas.plain_text();
+        assert!(
+            !text.contains("newcommand"),
+            "drawn, not dumped as its own source: {text}"
+        );
     }
 }
