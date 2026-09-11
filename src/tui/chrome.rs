@@ -260,6 +260,12 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     // dropped, and given up altogether only when eliding it away is still not enough.
     // Segments cheaper than that — a breadcrumb, a search chip, the meter — go first,
     // because each of them is restated somewhere the reader can already see.
+    //
+    // Before any of that, the name is capped at a share of the bar. A forty-character
+    // name on an eighty-column terminal used to keep every one of its characters while
+    // the breadcrumb and then the meter were dropped around it — the tail of a name the
+    // reader chose themselves, kept at the cost of what is on screen right now.
+    let cap = (usize::from(area.width) / TITLE_SHARE).max(TITLE_FLOOR);
     left.push(Segment::new(
         Drop::Title,
         vec![
@@ -268,7 +274,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
                 term_style(theme.ui.status_accent),
             ),
             TermSpan::styled(
-                app.title().to_string(),
+                fit(app.title(), cap),
                 term_style(theme.ui.status_accent.bold()),
             ),
         ],
@@ -393,7 +399,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         // goes through the same substitution as the hovered URL above rather than
         // trusting each `notify` caller to remember which kind it produced.
         spans.push(TermSpan::styled(sanitized(&notice.text), term_style(style)));
-        left.push(Segment::new(Drop::Context, spans));
+        left.push(Segment::new(Drop::Notice, spans));
     } else if let Some(index) = app.current_heading()
         && let Some(entry) = app.toc().entries().get(index)
     {
@@ -484,6 +490,16 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
 /// The width of the status bar's progress meter, in cells.
 const METER_WIDTH: usize = 8;
 
+/// The file name takes at most this fraction of the bar: a quarter, twenty columns of
+/// an eighty-column terminal, which leaves the position, the meter and a breadcrumb of
+/// ordinary length beside it.
+const TITLE_SHARE: usize = 4;
+
+/// The fewest columns the cap ever leaves the name, so that a narrow terminal shows a
+/// recognisable name rather than a dozen characters of nothing. The width-driven
+/// elision in [`lay_out`] can still shorten it past this when nothing else will fit.
+const TITLE_FLOOR: usize = 12;
+
 /// What the status bar says about stepping between matches.
 ///
 /// Two chips rather than one sentence, because they are given up at different widths:
@@ -546,7 +562,7 @@ fn match_hint(app: &App) -> MatchHint {
 /// Ordered least valuable first, which is the order they are dropped in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Drop {
-    /// The heading, or the transient notice standing in for it.
+    /// The heading breadcrumb.
     Context,
     /// The second way of stepping between matches — the modified arrows, by default.
     /// Cheaper than the hint that carries the words, because a reader who has the primary
@@ -572,6 +588,16 @@ enum Drop {
     /// name and the position, which say what is on screen at all times rather than
     /// only while the pointer rests on a control.
     Url,
+    /// The transient notice — `auto-reload on`, `reloaded`, a file that could not be
+    /// re-read. It used to share the breadcrumb's slot and so was the first thing a
+    /// narrow bar gave up, which left a reader on a sixty-column terminal pressing a key
+    /// and seeing nothing happen. The breadcrumb can go first because the heading is on
+    /// the page a few rows up; a notice is said nowhere else and is gone again in a
+    /// moment. It outranks the hovered URL only because the two never share the bar
+    /// for long: a notice is a reply to something the reader just did, and the reply
+    /// is what they are looking for. It stays below the file name and the position,
+    /// which the name is elided, not dropped, to keep.
+    Notice,
     /// The file name, which is elided before it is given up altogether.
     Title,
     /// The position and the way out.
@@ -590,6 +616,10 @@ enum Drop {
 /// spends thirteen columns of a file name to keep an eight-column gauge whose percentage
 /// is already on screen.
 const ELIDE_TO_KEEP: Drop = Drop::Hscroll;
+
+/// The segments that lose their tail rather than go whole, in the order they are asked
+/// to: the notice is a reply to what the reader just did, so the URL pays first.
+const SHRINK_AT_END: [Drop; 2] = [Drop::Url, Drop::Notice];
 
 /// One status-bar segment, dropped or kept whole.
 struct Segment {
@@ -631,26 +661,33 @@ fn lay_out(
     bar: TermStyle,
 ) -> Vec<TermSpan<'static>> {
     let total = |segments: &[Segment]| -> usize { segments.iter().map(|s| s.width).sum() };
-    // What the file name and the hovered URL could each give up if elided away
-    // entirely, measured through `fit`/`ellipsize` so this cannot drift from what the
-    // elision below actually reclaims. Both are shrunk rather than dropped whole, the
-    // URL because design spec §8 leans on it in place of a confirmation prompt — a
-    // safeguard that silently disappears the moment a name is a little too long would
-    // fail exactly when the reader needed it.
+    // What the file name, the hovered URL and the notice could each give up if elided
+    // away entirely, measured through `fit`/`ellipsize` so this cannot drift from what
+    // the elision below actually reclaims. All three are shrunk rather than dropped
+    // whole: the URL because design spec §8 leans on it in place of a confirmation
+    // prompt — a safeguard that silently disappears the moment a name is a little too
+    // long would fail exactly when the reader needed it — and the notice because a
+    // `could not re-read /some/path: No such file or directory` is wider than a
+    // sixty-column bar has to give, and a reader shown nothing at all is back to a
+    // stale document with no word of why.
     let elidable = |left: &[Segment], right: &[Segment]| -> usize {
         let title_slack = title(left).map_or(0, |name| {
             display_width(name).saturating_sub(display_width(&fit(name, 0)))
         });
-        let url_slack = left
+        let tail_slack: usize = SHRINK_AT_END
             .iter()
-            .chain(right.iter())
-            .find(|segment| segment.priority == Drop::Url)
-            .and_then(|segment| segment.spans.last())
-            .map_or(0, |span| {
+            .filter_map(|priority| {
+                left.iter()
+                    .chain(right.iter())
+                    .find(|segment| segment.priority == *priority)
+                    .and_then(|segment| segment.spans.last())
+            })
+            .map(|span| {
                 display_width(&span.content)
                     .saturating_sub(display_width(&crate::text::ellipsize(&span.content, 0)))
-            });
-        title_slack + url_slack
+            })
+            .sum();
+        title_slack + tail_slack
     };
     // One column of clear air between the two halves, always — hence the strict `<`.
     // `slack` is what the file name and the hovered URL are willing to give up, when
@@ -697,22 +734,25 @@ fn lay_out(
         used -= display_width(&name.content) - display_width(&short);
         name.content = short.into();
     }
-    // The hovered URL is the safeguard design spec §8 leans on in place of a
-    // confirmation prompt, so it is shrunk rather than silently dropped, the same
+    // The hovered URL and the notice are shrunk rather than silently dropped, the same
     // way the file name is above. Elided *at the end* — `crate::text::ellipsize`,
-    // never `elide_middle` — so the host, the part a reader actually checks before
-    // committing, is the part left standing.
-    if used + 1 > width
-        && let Some(target) = left
+    // never `elide_middle` — so the URL's host, the part a reader actually checks
+    // before committing, and the notice's verb are what is left standing.
+    for priority in SHRINK_AT_END {
+        if used < width {
+            break;
+        }
+        if let Some(target) = left
             .iter_mut()
             .chain(right.iter_mut())
-            .find(|segment| segment.priority == Drop::Url)
+            .find(|segment| segment.priority == priority)
             .and_then(|segment| segment.spans.last_mut())
-    {
-        let room = display_width(&target.content).saturating_sub(used + 1 - width);
-        let short = crate::text::ellipsize(&target.content, room);
-        used -= display_width(&target.content) - display_width(&short);
-        target.content = short.into();
+        {
+            let room = display_width(&target.content).saturating_sub(used + 1 - width);
+            let short = crate::text::ellipsize(&target.content, room);
+            used -= display_width(&target.content) - display_width(&short);
+            target.content = short.into();
+        }
     }
     let gap = width.saturating_sub(used);
     let mut spans: Vec<TermSpan<'static>> = Vec::new();

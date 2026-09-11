@@ -6,8 +6,8 @@
 //! terminal, which is precisely the path design spec §11 requires to produce plain
 //! text rather than escape sequences.
 
-use std::io::Write;
-use std::process::{Command, Output, Stdio};
+use std::io::{ErrorKind, Write};
+use std::process::{Child, Command, Output, Stdio};
 
 /// The document every test renders unless it says otherwise.
 const SAMPLE: &str = "\
@@ -55,15 +55,32 @@ fn run_with_stdin(args: &[&str], input: &str) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("the binary should be runnable");
+    write_stdin(&mut child, input);
     child
+        .wait_with_output()
+        .expect("the child should terminate")
+}
+
+/// Writes `input` to the child's standard input.
+///
+/// A broken pipe is the child answering before it reads, not a fault in the test: a
+/// usage error such as `--width 0` is decided in `main` before standard input is
+/// touched, so the pipe can close while the parent is still writing. Whether the write
+/// wins that race depends on how loaded the machine is, which is why tolerating it here
+/// is what keeps the suite from failing at random. The exit status and output the caller
+/// asserts on remain the real check, and the binary treats a broken pipe the same way
+/// (`is_broken_pipe` in `src/main.rs`).
+fn write_stdin(child: &mut Child, input: &str) {
+    match child
         .stdin
         .as_mut()
         .expect("stdin was piped")
         .write_all(input.as_bytes())
-        .expect("writing to the child should succeed");
-    child
-        .wait_with_output()
-        .expect("the child should terminate")
+    {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::BrokenPipe => {}
+        Err(error) => panic!("writing to the child should succeed: {error:?}"),
+    }
 }
 
 /// Writes `SAMPLE` to a temporary file and returns its path.
@@ -401,4 +418,37 @@ fn the_help_and_version_flags_succeed() {
         assert!(output.status.success(), "{flag} should exit 0");
         assert!(!output.stdout.is_empty(), "{flag} should print something");
     }
+}
+
+#[test]
+fn a_child_that_answers_before_reading_stdin_is_not_a_test_failure() {
+    // `--width 0` is decided in `main` before standard input is touched, so the child
+    // is gone while the parent is still writing. Waiting for it here makes that
+    // ordering certain; on a loaded runner it happens by chance, and the test helper
+    // must not report the broken pipe as a failure of its own.
+    let mut child = command()
+        .args(["--render-once", "--width", "0"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary should be runnable");
+    // `Child::wait` closes standard input, which would hide the very race under test,
+    // so poll instead. The bound turns a hang into a failure rather than a spin.
+    let mut status = None;
+    for _ in 0..500 {
+        match child
+            .try_wait()
+            .expect("the child's state should be readable")
+        {
+            Some(finished) => {
+                status = Some(finished);
+                break;
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(10)),
+        }
+    }
+    let status = status.expect("the child should answer a usage error promptly");
+    assert_eq!(status.code(), Some(2), "a usage error");
+    write_stdin(&mut child, SAMPLE);
 }
