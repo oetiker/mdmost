@@ -501,8 +501,9 @@ not scroll. One too wide for the body as well is drawn at its own width and the
 page scrolls sideways to the rest of it, where it overruns the body by eight
 columns or more. One that overruns the body by one to seven columns is not
 drawn at all: it is shown as its framed source, captioned with the width it
-needs, as in `this formula needs 43 columns`. Widening the terminal past that
-number draws it.
+needs, as in `this formula needs 43 columns`. That number counts body columns,
+and the body is two columns narrower than the terminal: widening the terminal to
+two columns past that number draws it.
 
 A macro is in scope for every formula after the one that defines it, inline and
 display alike. A display block holding nothing but definitions draws no rows and
@@ -525,8 +526,9 @@ terminal having one face; so does `\boldsymbol` over letters, though over digits
 it draws the bold ones.
 
 Colour follows the theme. The structure a formula draws — the fraction rule, the
-delimiter pieces, the radical strokes, the overline — takes the border colour,
-and the symbols take the colour of body text.
+delimiter pieces, the radical strokes, the overline — takes the ink a diagram's
+lines take: the `border` colour blended towards body text, not `border` itself.
+The symbols take the colour of body text.
 
 ## Mermaid
 
