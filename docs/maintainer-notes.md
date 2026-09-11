@@ -504,3 +504,44 @@ exactly where a walk like this one produces one.
 section, not the recipe above it. Day-to-day, verifying the beat is just steps 5 and 6
 of the regeneration recipe: open the theme frame and confirm it is light, then confirm
 the tour's closing frame is dark.
+
+## What LaTeX math stage 2 deliberately did not do
+
+Four things, recorded so the next reader does not have to rediscover them.
+
+**The two clipboard flavours still disagree about math.** `src/export/html.rs` branches on
+`display`: an inline formula pastes what it drew, a display formula pastes its LaTeX
+source (owner ruling, 2026-09-11). `src/export/tsv.rs` branches on nothing — it goes
+through `Node::plain_text()`, which pushes the raw literal for both kinds. So one copy
+operation still produces two different pastes for inline math, and reconciling them needs
+a ruling on what a copied formula *is* rather than a layout decision. What changed at this
+stage is that there is now something to be consistent about: a display formula has a real
+drawn form, and pasting a one-row linearisation of it was defensible only while the screen
+drew one row too.
+
+**Grids are stage 3.** Matrices, `cases`, `align`, `alignat`, `gathered` and `array` reach
+`MathError::NotDrawable` by name and show their framed source. Design spec §6.5 describes
+them as one mechanism laid over the width negotiation `src/render/table.rs` already
+performs, so the work is a bridge rather than a new layout engine.
+
+**`\boldsymbol` is half closed.** `build::atom` collapses `BoldSymbol` to `Bold` for a
+`Content::Number`, which is what the parser's own renderer does
+(`vendor/pulldown-latex/src/mathml.rs:628`) and is unconditional, so `\boldsymbol{123}`
+draws bold digits. Letters are not closed: choosing between `Bold` and `BoldItalic` for a
+letter needs the parser's config-dependent `should_be_upright`, which this crate does not
+consult, so `\boldsymbol{x}` draws a plain `x`. Closing it means either reaching that rule
+through another vendor patch or restating it here, and restating it would put a second
+copy of an uprightness policy in the tree.
+
+**`tests/glyph_inventory.rs` cannot attribute a macro's expansion.** The inventory
+subtracts the characters a math node's own commands resolved to, via `math::symbols`,
+which is handed one formula's literal and nothing else. A macro defined in one block and
+used in another is therefore unknown to it: `symbols(r"\Q")` fails with *unknown primitive
+command*, the walk swallows the error, and every character the macro expanded to is
+credited to this crate instead of to the document. A corpus fixture defining
+`\newcommand{\Q}{\mathbb{Q}}` in one block and using `$\Q$` in the next makes the
+inventory demand a Letterlike Symbols entry for ℚ — which design spec §13 says is the
+author's character, not ours. The corpus works around it (its cross-block macro expands to
+a fraction, whose rule this crate does own); the real fix is an entry point that resolves a
+formula under the document's macro preamble, which is what `render::math::formula` already
+does with `ctx.preamble` and what `symbols` has no parameter for.

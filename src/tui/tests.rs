@@ -7062,6 +7062,37 @@ fn a_search_hit_on_a_formula_lights_every_row_of_it() {
     }
 }
 
+#[test]
+fn a_search_hit_on_a_formula_lights_every_column_of_it() {
+    // The companion to the test above, which pins the rows. Every drawn formula this
+    // suite searches is one column wide — `\frac{a}{b}` stacks `a`, `─`, `b` — so a
+    // rectangle built from the atom's `col` with `cols` left at 1 would satisfy all of
+    // them and nothing would notice. A numerator of `a + b` against a denominator of `c`
+    // gives the rectangle a width there is something to get wrong about, and pins that
+    // the one-character denominator row lights the full width rather than its own cell.
+    let doc = "$$\\frac{a+b}{c}$$\n";
+    let canvas = render(doc, 80);
+    let atom = canvas
+        .atoms()
+        .first()
+        .expect("a drawn formula records an atom")
+        .clone();
+    assert_eq!(atom.rows, 3, "numerator, rule, denominator");
+    assert_eq!(atom.cols, 5, "`a + b` is the widest row, at five columns");
+    let want: Vec<crate::search::Segment> = (atom.row..atom.row + atom.rows)
+        .map(|row| crate::search::Segment {
+            row,
+            col: atom.col,
+            cols: atom.cols,
+        })
+        .collect();
+    assert_eq!(
+        located(doc, "frac"),
+        want,
+        "every row lights all five columns, the denominator's row included"
+    );
+}
+
 /// The guard the atom lookup must not overrun: a hit in ordinary prose lights its own
 /// columns, exactly.
 ///

@@ -880,10 +880,33 @@ fn a_font_variant_with_no_mapping_draws_the_plain_letter() {
     // a terminal, where there is one face. `Font::BoldSymbol` maps nothing because
     // `map_char` has no arm for it: the vendor's own renderer resolves `\boldsymbol` to
     // `Bold` or `BoldItalic` before the lookup, in `mathml.rs`, using a config-dependent
-    // uprightness rule rather than the table. Drawing the plain letter is what the table
-    // says; see the Task 15b report.
+    // uprightness rule rather than the table.
+    //
+    // A *letter* therefore still draws plain, and that is what this pins. The digit half
+    // of the same gap is closed — see
+    // `boldsymbol_draws_bold_digits_and_leaves_its_letters_plain` — because the collapse
+    // for digits is unconditional and needs none of that rule.
     assert_eq!(rendered(r"\mathrm{x}"), "x");
     assert_eq!(rendered(r"\boldsymbol{x}"), "x");
+}
+
+#[test]
+fn boldsymbol_draws_bold_digits_and_leaves_its_letters_plain() {
+    // `\boldsymbol` is bold *italic*, and Unicode encodes no italic digit, so the parser's
+    // own renderer collapses `BoldSymbol` to `Bold` for a `Content::Number` and for
+    // nothing else (`vendor/pulldown-latex/src/mathml.rs:628`). `build::atom` mirrors that
+    // one rule. Without it `map_char` has no `BoldSymbol` arm at all and these draw as a
+    // plain `123`.
+    assert_eq!(rendered(r"\boldsymbol{123}"), "𝟏𝟐𝟑");
+    // The same three characters `Bold` gives, which is the whole content of the collapse.
+    assert_eq!(rendered(r"\mathbf{123}"), "𝟏𝟐𝟑");
+    // The letters half stays open: choosing between `Bold` and `BoldItalic` needs the
+    // parser's config-dependent `should_be_upright`, which this crate does not consult.
+    assert_eq!(rendered(r"\boldsymbol{x}"), "x");
+    // The collapse is scoped to the font, not to digits in general: an unstyled digit is
+    // untouched, and a digit under another font still takes that font.
+    assert_eq!(rendered(r"123"), "123");
+    assert_eq!(rendered(r"\mathbb{1}"), "𝟙");
 }
 
 #[test]

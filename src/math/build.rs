@@ -571,7 +571,19 @@ fn neighbour<'a>(mut towards: impl Iterator<Item = &'a (Option<Class>, MathBox)>
 fn atom(content: &Content<'_>, font: Option<Font>) -> (Class, MathBox) {
     match content {
         Content::Text(s) => (Class::Ordinary, text(styled(s, font))),
-        Content::Number(s) => (Class::Ordinary, text(styled(s, font))),
+        // `BoldSymbol` collapses to `Bold` for a digit, exactly as the parser's own
+        // renderer does it (`vendor/pulldown-latex/src/mathml.rs:628`): Unicode encodes
+        // no italic digit, so a bold-italic digit has nowhere else to go. Without the
+        // collapse `map_char` has no `BoldSymbol` arm at all and `\boldsymbol{123}` draws
+        // the plain `123`. Only digits are closed here; `\boldsymbol` over letters needs
+        // the parser's `should_be_upright` and is not done.
+        Content::Number(s) => {
+            let font = match font {
+                Some(Font::BoldSymbol) => Some(Font::Bold),
+                other => other,
+            };
+            (Class::Ordinary, text(styled(s, font)))
+        }
         Content::Function(s) => (Class::Function, text(*s)),
         // A stretchy ordinary is an arrow or a brace drawn over or under an element, not a
         // letter, so it takes no font — `mathml.rs:676` writes it out before the lookup.

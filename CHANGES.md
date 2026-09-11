@@ -2,11 +2,58 @@
 
 ## Unreleased
 
+### Breaking
+
+- `Search::locate` takes `&Canvas` where it took `&[SearchSpan]`. A hit inside a construct
+  with no interior position — a drawn formula — is answered by the construct's rectangle
+  rather than by the span that names it, and the rectangle is on the canvas and not on any
+  span. The crate is `publish = false`, so this is a record of what moved for a reader and
+  for anyone building against `mdmost` as a git dependency, not a compatibility promise.
+
 ### New
+
+- **Display math is laid out in two dimensions.** `$$…$$` and ```` ```math ```` blocks are
+  drawn as rows of box art — a fraction over its rule, limits above and below a big
+  operator, a radical with an overbar sized to what is under it, delimiters stretched to
+  the height of what they enclose — where stage 1 wrote them on one line or not at all. A
+  formula is centred in the column of prose it belongs to; one wider than that is drawn at
+  its own width for the page to scroll sideways to.
+- `MathError::TooWide`, and the caption it reaches the reader as: a formula that overruns
+  the body by less than the surplus a horizontal scrollbar would cost is shown as its
+  framed source, captioned with the width it needs (`this formula needs 43 columns`).
+  `MathError` is `#[non_exhaustive]`, so the new variant breaks no `match`.
+- **Macros are global to a document.** A macro defined in one formula is in scope for every
+  formula after it, inline and display alike, and a display block that holds nothing but
+  definitions draws no rows and leaves no gap. A block that also has content to draw keeps
+  its definitions to itself.
+- `\binom`, drawn as a display construct. It has no one-row form, so an inline
+  `$\binom{n}{k}$` shows its source.
+- `\mathbb`, `\mathcal`, `\mathfrak`, `\mathbf`, `\mathit`, `\mathsf`, `\mathtt` and the
+  parser's other font commands draw the character Unicode encodes for that alphabet —
+  `\mathbb{R}` is ℝ, `\mathcal{L}` is ℒ — using the parser's own table rather than an
+  offset, so the letters Unicode placed in Letterlike Symbols come out right. `\boldsymbol`
+  draws bold digits; over letters it still draws the plain letter.
+- `Theme::math`, a new public field on `Theme` carrying the styles a formula's structure is
+  drawn in. A caller building a `Theme` by struct literal has to add it.
+- A drag anywhere inside a drawn formula washes the whole formula, not the row it started
+  on. Design spec §10: a formula is selectable as a whole, and the wash now says so.
 
 ### Changed
 
+- `-\sin x` renders `−sin x`. The minus is the Unicode minus and the function name is set
+  as a name rather than as three letters in a row.
+- A fraction or a radical may be the base of a script, so `\frac{a}{b}^2` and `\sqrt{x}^2`
+  draw with the script against the construct instead of falling back to the source.
+- A **display** formula copied in the rich-HTML flavour pastes as its LaTeX source. It used
+  to go through the inline engine, which pasted `$$\frac{a}{b}$$` as `a/b` — a linearisation
+  the reader never saw, once the screen began drawing the formula in two dimensions. Inline
+  math is unchanged: it still pastes what it drew.
+
 ### Fixed
+
+- Pressing a drawn formula's **first** row washed one cell while pressing any other row
+  washed all of them, though both copied the whole formula. The wash follows the clipboard
+  now, from every row.
 
 ## 0.3.0 - 2026-09-10
 

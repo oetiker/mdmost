@@ -176,9 +176,13 @@ impl Search {
     ///
     /// The whole canvas rather than its [`SearchSpan`](crate::canvas::SearchSpan)s
     /// alone, because a hit inside a construct with no interior position is answered by
-    /// the construct's rectangle and not by the span — see [`segments_for`]. This is the
+    /// the construct's rectangle and not by the span — see `segments_for`. This is the
     /// same argument `tui::select::highlighted_columns` takes, and deliberately so: the
     /// wash and the search highlight answer "what is this formula?" from one place.
+    ///
+    /// Both are named as plain code spans rather than rustdoc links because both are
+    /// private, and a link to a private item from a public one warns
+    /// `private_intra_doc_links`.
     pub fn locate(&mut self, source: &str, canvas: &Canvas) {
         let mut hits = Vec::with_capacity(self.source_hits.len());
         for hit in &self.source_hits {

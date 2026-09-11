@@ -27,4 +27,123 @@ expression: canvas.plain_text()
                   2a                    
                                         
  Currency is not math: it costs $5 and  
- $10 in total.
+ $10 in total.                          
+                                        
+ Display: a fraction                    
+ ────────────────────────────────────── 
+                                        
+                    ┌─────────          
+                    │  2                
+             −b ± ‾╲│ b  − 4ac          
+         x = ─────────────────          
+                    2a                  
+                                        
+ Display: limits on a big operator      
+ ────────────────────────────────────── 
+                                        
+        n    2   n(n + 1)(2n + 1)       
+        ∑   i  = ────────────────       
+      i = 1             6               
+                                        
+ Display: tall delimiters               
+ ────────────────────────────────────── 
+                                        
+                 ╭ a ╮2                 
+                 │ ─ │                  
+                 ╰ b ╯                  
+                                        
+ Display: an indexed root               
+ ────────────────────────────────────── 
+                                        
+                3 ─────                 
+                √ x + 1                 
+                                        
+ Display: a formula wider than forty    
+ columns                                
+ ────────────────────────────────────── 
+                                        
+ ╭ math ──────────────────────────────╮ 
+ │ f(x) = a_0 + a_1 x + a_2 x^2 + a_› │ 
+ ╰ this formula needs 43 columns ─────╯ 
+                                        
+ Display: a block that only defines     
+ macros                                 
+ ────────────────────────────────────── 
+                                        
+ That block draws nothing and leaves no 
+ gap behind it. What it defined is in   
+ scope for every formula after it,      
+ inline — 1/2 — and displayed:          
+                                        
+                   1   1                
+               x = ─ + ─                
+                   2   2                
+                                        
+ Display: a mixed block keeps its       
+ macros to itself                       
+ ────────────────────────────────────── 
+                                        
+                 ℕ ⊂ ℤ                  
+                                        
+ Outside that block $\N$ is undefined,  
+ so it reaches the reader as its        
+ source.                                
+                                        
+ Display: a double bar stretched around 
+ a fraction                             
+ ────────────────────────────────────── 
+                                        
+                 ║ a ║                  
+                 ║ ─ ║                  
+                 ║ b ║                  
+                                        
+ Display: a double bar around a single  
+ row                                    
+ ────────────────────────────────────── 
+                                        
+                  ‖x‖                   
+                                        
+ Display: a binomial coefficient, which 
+ has no inline form                     
+ ────────────────────────────────────── 
+                                        
+                 ╭ n ╮                  
+                 │   │                  
+                 ╰ k ╯                  
+                                        
+ Written inline, $\binom{n}{k}$ reaches 
+ the reader as its source too.          
+                                        
+ Display: blackboard letters            
+ ────────────────────────────────────── 
+                                        
+                 ℝ ⊂ ℂ                  
+                                        
+ Display: a block inside a block quote  
+ ────────────────────────────────────── 
+                                        
+ ▌ The quote bar runs beside every      
+ ▌ drawn row:                           
+ ▌                                      
+ ▌                  a                   
+ ▌                  ─                   
+ ▌                  b                   
+                                        
+ Display: a block inside a list item    
+ ────────────────────────────────────── 
+                                        
+ 1. The formula is laid out in the      
+    item's own column:                  
+                                        
+                     a                  
+                     ─                  
+                     b                  
+                                        
+ 2. The list continues underneath it.   
+                                        
+ Display: a formula that does not parse 
+ ────────────────────────────────────── 
+                                        
+ ╭ math ──────────────────────────────╮ 
+ │ \frac{                             │ 
+ ╰ parsing error: unbalanced group f… ╯

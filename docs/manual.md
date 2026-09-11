@@ -494,6 +494,37 @@ art. One that does not parse, or that this version does not draw, is shown as a
 framed, syntax-highlighted code block with the reason in its bottom edge, the
 same as an unsupported Mermaid diagram.
 
+A display formula is centred in the column of prose it belongs to. One too wide
+for that column is drawn at its own width and left-aligned, and the page scrolls
+sideways to the rest of it — but only where it overruns the body by eight
+columns or more. A formula that overruns by less is not drawn at all: it is
+shown as its framed source, captioned with the width it needs, as in `this
+formula needs 43 columns`. Widening the terminal past that number draws it.
+
+A macro is in scope for every formula after the one that defines it, inline and
+display alike. A display block holding nothing but definitions draws no rows and
+leaves no gap where it stands. `\newcommand` on a name that is already defined
+is an error, and that block shows its source captioned `parsing error: macro
+already defined`; `\def` redefines without complaint. A macro defined in a block
+that also has content to draw is not in scope afterwards.
+
+A binomial coefficient has no inline form: `$\binom{n}{k}$` shows its source,
+while `$$\binom{n}{k}$$` draws.
+
+`\mathbb`, `\mathcal`, `\mathfrak`, `\mathbf`, `\mathit`, `\mathsf`, `\mathtt`
+and the parser's other font commands draw the character Unicode encodes for that
+alphabet: `\mathbb{R}` is ℝ, `\mathcal{L}` is ℒ. Most of those characters are in
+Mathematical Alphanumeric Symbols (U+1D400-U+1D7FF) and a few in Letterlike
+Symbols (U+2100-U+214F); a font covering the blocks under **TERMINAL SETUP**
+need not cover either, and these are the document's characters rather than this
+program's, so they are not listed there. `\mathrm` draws the plain letter, a
+terminal having one face; so does `\boldsymbol` over letters, though over digits
+it draws the bold ones.
+
+Colour follows the theme. The structure a formula draws — the fraction rule, the
+delimiter pieces, the radical strokes, the overline — takes the border colour,
+and the symbols take the colour of body text.
+
 ## Mermaid
 
 Fenced `mermaid` blocks are parsed and drawn as Unicode box art. All seven
@@ -576,8 +607,9 @@ coverage will do.
 
 - **Geometric Shapes (U+25A0-U+25FF)** — Heading marks, diagram node shapes, arrowheads.
 
-- **General Punctuation (U+2000-U+206F)** — The elision marker, the tick on a tall
-  radical, and math's double bar.
+- **General Punctuation (U+2000-U+206F)** — The elision marker, the mark on a framed
+  block whose content is wider than its frame, the tick on a tall radical, and math's
+  double bar.
 
 - **Mathematical Operators (U+2200-U+22FF)** — Class-diagram relations, and math's
   radical sign (`\sqrt`).

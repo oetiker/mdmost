@@ -157,6 +157,44 @@ fn inline_math_that_will_not_draw_falls_back_to_its_literal() {
 }
 
 #[test]
+fn display_math_in_a_cell_pastes_as_its_latex_source() {
+    // Ruled 2026-09-11 (owner). A display formula's drawn form is rows of box art, and
+    // `render_inline` does not produce it: asked for a one-row form it either linearises
+    // the formula into something the reader never saw or refuses outright. Neither is a
+    // useful paste, so this flavour carries the source and lets the receiving
+    // application lay it out.
+    let html = html_of("| a |\n| --- |\n| $$\\frac{a}{b}$$ |\n");
+    assert!(
+        html.contains(r"<td>\frac{a}{b}</td>"),
+        "a display formula pastes as its source: {html}"
+    );
+}
+
+#[test]
+fn a_display_formula_is_escaped_like_everything_else_here() {
+    // The source is document bytes and this payload is interpreted elsewhere, so the
+    // literal goes through `escape_into` rather than being pushed raw.
+    let html = html_of("| a |\n| --- |\n| $$a < b$$ |\n");
+    assert!(
+        html.contains("&lt;") && !html.contains("<td>a < b"),
+        "the literal is escaped: {html}"
+    );
+}
+
+#[test]
+fn the_two_math_arms_differ_by_display_alone() {
+    // The same formula written both ways. Pinning the pair is what stops the branch
+    // being collapsed back into the single arm this replaced.
+    let inline = html_of("| a |\n| --- |\n| $\\frac{a}{b}$ |\n");
+    let display = html_of("| a |\n| --- |\n| $$\\frac{a}{b}$$ |\n");
+    assert!(inline.contains("<td>a/b</td>"), "inline draws: {inline}");
+    assert!(
+        display.contains(r"<td>\frac{a}{b}</td>"),
+        "display does not: {display}"
+    );
+}
+
+#[test]
 fn a_line_break_in_a_cell_becomes_br() {
     let html = html_of("| a |\n| --- |\n| x<br>y |\n");
     assert!(html.contains("<br>"), "got {html}");

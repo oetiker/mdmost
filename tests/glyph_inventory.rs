@@ -121,12 +121,22 @@ const INVENTORY: &[(&str, &str)] = &[
     // form Unicode placed here instead of in Superscripts and Subscripts, below.
     ("Latin-1 Supplement (U+0080-U+00FF)", "\u{a0}©¹²"),
     // The elision marker and `&hellip;`, and `‾` (U+203E), the tick that tips a tall
-    // radical's diagonal (design spec §6.2). `‖` (U+2016) is math's double bar,
-    // `\left\|` and `\Vert`. The corpus's `\sqrt{b^2-4ac}` emits the tick as of Task
-    // 10, which wired display math onto the renderer; nothing emits the bar yet, because
-    // the corpus line that exercises `\Vert` is Task 15's, so that half of this entry
-    // goes green either way until then.
-    ("General Punctuation (U+2000-U+206F)", "…‾‖"),
+    // radical's diagonal (design spec §6.2), which the corpus's `\sqrt{b^2-4ac}` emits.
+    //
+    // `‖` (U+2016) is math's double bar at its natural height, emitted by the corpus's
+    // `$$\left\|x\right\|$$` — a `\left\|` pair around a single row, which needs no
+    // stretching and so draws the plain character rather than the tall `║` below.
+    //
+    // `\Vert` produces the same character but never reaches this set: `math::symbols`
+    // resolves it, so the subtraction credits it to the document and not to us. Only
+    // the delimiter built by `\left\|` is drawn by the layout, which is why the corpus
+    // line that makes this entry real is a `\left\|` pair and not a `\Vert` pair.
+    //
+    // `›` (U+203A) is `render::code`'s `OVERFLOW_MARKER` (`src/render/code.rs:48`), the
+    // mark on a framed block whose content is wider than the frame. It has been
+    // drawable since long before math, but no corpus file clipped a code block at 40,
+    // 80 or 200 columns until the too-wide formula's framed source did.
+    ("General Punctuation (U+2000-U+206F)", "…‾‖›"),
     // Class-diagram relation glyphs, and math's radical sign (`\sqrt`).
     ("Mathematical Operators (U+2200-U+22FF)", "∧∨√"),
     // Math's raised `n`, `+` and `-`, and lowered `=` and `1` (design spec §5.1) —
@@ -143,9 +153,10 @@ const INVENTORY: &[(&str, &str)] = &[
     // Math's raised `c f z` — the superscript letters Unicode placed here instead.
     ("Phonetic Extensions Supplement (U+1D80-U+1DBF)", "ᶜᶠᶻ"),
     // Every frame, rule, table border and diagram box. `║` (U+2551) is math's tall `\|`
-    // (design spec §6.4) and nothing else: nothing emits it yet — display math reaches
-    // the page as of Task 10, but no corpus line asks for a tall `\|`, so this entry
-    // goes green either way and Task 15's corpus line is what makes it real.
+    // (design spec §6.4) and nothing else. The corpus's
+    // `$$\left\| \frac{a}{b} \right\|$$` emits it: a `\left\|` pair around three rows
+    // has to stretch, and a stretched double bar is this character rather than the
+    // plain `‖` above.
     //
     // NOT the other candidate, and it was checked rather than assumed: a sequence
     // diagram's nested activation bar is also `║` (`src/mermaid/sequence/mod.rs:48`),
