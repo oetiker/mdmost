@@ -51,10 +51,6 @@
 
 ### Fixed
 
-- Pressing a drawn formula's **first** row washed one cell while pressing any other row
-  washed all of them, though both copied the whole formula. The wash follows the clipboard
-  now, from every row.
-
 ## 0.3.0 - 2026-09-10
 
 ### Breaking

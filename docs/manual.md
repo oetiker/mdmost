@@ -495,11 +495,14 @@ framed, syntax-highlighted code block with the reason in its bottom edge, the
 same as an unsupported Mermaid diagram.
 
 A display formula is centred in the column of prose it belongs to. One too wide
-for that column is drawn at its own width and left-aligned, and the page scrolls
-sideways to the rest of it — but only where it overruns the body by eight
-columns or more. A formula that overruns by less is not drawn at all: it is
-shown as its framed source, captioned with the width it needs, as in `this
-formula needs 43 columns`. Widening the terminal past that number draws it.
+for that column is left-aligned and laid out across the whole body, which is
+wider than the prose column wherever `body_width` is capping it; the page does
+not scroll. One too wide for the body as well is drawn at its own width and the
+page scrolls sideways to the rest of it, where it overruns the body by eight
+columns or more. One that overruns the body by one to seven columns is not
+drawn at all: it is shown as its framed source, captioned with the width it
+needs, as in `this formula needs 43 columns`. Widening the terminal past that
+number draws it.
 
 A macro is in scope for every formula after the one that defines it, inline and
 display alike. A display block holding nothing but definitions draws no rows and
