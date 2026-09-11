@@ -41,7 +41,7 @@ use crate::math::{draw, scripts};
 pub(crate) enum Mode {
     /// One row. A taller construct rewrites itself or fails.
     Inline,
-    /// Two dimensions. What `crate::math::render_display` asks for.
+    /// Two dimensions. What `crate::math::render_display_natural` asks for.
     Display,
 }
 

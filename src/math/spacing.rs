@@ -68,10 +68,10 @@ impl Class {
     /// `cfg_attr` rather than `expect` because `expect` fires
     /// `unfulfilled_lint_expectations` on the test target, where this is used.
     ///
-    /// Re-measured when `crate::math::render_display` landed and gave `draw::to_canvas` a
-    /// caller in the lib target: with all eight suppressions under `src/math/` removed at
-    /// once, clippy reports exactly one warning and it is this one. It is now the only
-    /// `dead_code` suppression in the module tree, so nothing else can sit behind it.
+    /// Re-measured when the display entry point gave `draw::to_canvas` a caller in the lib
+    /// target: with all eight suppressions under `src/math/` removed at once, clippy reports
+    /// exactly one warning and it is this one. It is now the only `dead_code` suppression in
+    /// the module tree, so nothing else can sit behind it.
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) const ALL: [Self; N] = [
         Self::Edge,

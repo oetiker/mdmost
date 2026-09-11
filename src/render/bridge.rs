@@ -15,9 +15,10 @@
 //! concatenation here, on this side of the seam: `src/math/` knows nothing of `doc` and
 //! must not learn, and the four callers must not each spell the join out.
 //!
-//! `math::render_display` is the one entry point of a collaborator that is deliberately
-//! *not* routed here, because nothing in the renderer calls it any more: see
-//! [`math_natural`] for what replaced it and why.
+//! Every entry point of `math` that the renderer uses is routed here. There used to be a
+//! second display one, `math::render_display`, deliberately not routed because nothing in
+//! the renderer called it; it has since been retired — see [`math_natural`] for what the
+//! renderer asks for instead, and why.
 //!
 //! A Mermaid failure is never fatal: [`render_code_block`](super::code::render_code_block)
 //! turns the error into a syntax-highlighted code block with a dim caption naming the
@@ -91,12 +92,13 @@ pub(crate) fn math_inline(preamble: &str, src: &str) -> Result<String, MathError
 ///
 /// Named for what it returns, like [`mermaid`] and [`math_inline`] beside it.
 ///
-/// **The renderer asks for the natural width, never the padded one.** `math::render_display`
-/// pads its canvas out to `width`, which is the right answer for a caller laying a formula
-/// into a fixed column and the wrong one for every caller here: once the canvas is padded,
-/// the formula and the padding are the same cells, so there is nothing left to centre
-/// (design spec §7) and nothing to measure a table column by. The padding this module does
-/// want is applied where the centring is decided — [`super::math::centred`].
+/// **The renderer asks for the natural width, never a padded one.** A canvas padded out to
+/// the column is the right answer for a caller laying a formula into a fixed measure and
+/// the wrong one for every caller here: once it is padded, the formula and the padding are
+/// the same cells, so there is nothing left to centre (design spec §7) and nothing to
+/// measure a table column by. The padding this module does want is applied where the
+/// centring is decided — [`super::math::centred`]. `math::render_display` existed to do it
+/// the other way and was retired for want of a caller.
 ///
 /// There is no layout counter here. A diagram is laid out repeatedly while the width
 /// search hunts for a fit, which is why [`MERMAID_LAYOUTS`] exists to keep that cost

@@ -10,6 +10,12 @@ Changed, below) and the crate is `publish = false`, so the audience for this sec
 whoever builds against `mdmost` as a git dependency, and anyone reading it to understand
 what moved. The entries are a record, not a compatibility promise.
 
+- `math::render_display` is gone. It drew a formula into a column of a given width, padding
+  the canvas out to it; `math::render_display_natural` does the same walk and hands back the
+  width the formula itself drew at. Nothing in this repository had called the padded form
+  since display math learned to centre itself, because the renderer needs the natural width
+  to centre by and to measure a table column with. A caller that wants a canvas filling a
+  fixed measure pads it with `Canvas::resize_width`, which is all the retired function did.
 - `Search::locate` takes `&Canvas` where it took `&[SearchSpan]`. A hit inside a construct
   with no interior position — a drawn formula — is answered by the construct's rectangle
   rather than by the span that names it, and the rectangle is on the canvas and not on any

@@ -122,7 +122,8 @@ impl MathBox {
     ///
     /// Design spec §16.3: a display block whose layout produces nothing contributes no
     /// rows to the document — no frame, no caption, no blank line.
-    /// `crate::math::render_display` acts on the answer by returning an empty canvas.
+    /// [`crate::math::render_display_natural`] acts on the answer by returning an empty
+    /// canvas.
     pub(crate) fn is_empty(&self) -> bool {
         self.width == 0 && self.above == 0 && self.below == 0
     }

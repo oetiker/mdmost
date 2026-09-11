@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-use proptest::{prop_assert, prop_assert_eq};
+use proptest::prop_assert;
 
-use super::{render_display, render_inline, symbols};
+use super::{render_display_natural, render_inline, symbols};
 
 fn rendered(src: &str) -> String {
     render_inline(src).unwrap_or_else(|err| panic!("{src:?} failed: {err}"))
@@ -510,17 +510,22 @@ proptest::proptest! {
     /// because every construct wider than one column is then drawn against a floor it
     /// overruns.
     #[test]
-    fn render_display_never_panics_and_always_holds_the_canvas_contract(src in latex_shaped()) {
+    fn render_display_natural_never_panics_and_always_holds_the_canvas_contract(src in latex_shaped()) {
         let theme = crate::theme::Theme::default();
         for width in [1u16, 8, 40, 200] {
-            match render_display(&src, width, &theme) {
+            match render_display_natural(&src, width, &theme) {
                 Ok(canvas) => {
                     prop_assert!(canvas.check_invariants().is_ok());
-                    // Equality, not the floor `draw::to_canvas` promises. `TooWide` is
-                    // returned before the draw, so a box wider than `width` never reaches
-                    // `to_canvas` through here and its widening never fires: every canvas
-                    // this function returns — the empty one included — is exactly `width`.
-                    prop_assert_eq!(canvas.width(), width);
+                    // The cap, not equality. This used to run through the retired
+                    // `render_display`, which padded every canvas out to `width`, so the
+                    // assertion could be `==`. What it pinned there was
+                    // `Canvas::resize_width`, which `src/canvas/` tests directly and a
+                    // dozen other callers use; what belongs here is the property this
+                    // function actually promises. `TooWide` is returned before the draw, so
+                    // a box wider than `width` never reaches `draw::to_canvas` through here
+                    // and that function's own widening floor never fires — which is exactly
+                    // what `canvas.width() <= width` says.
+                    prop_assert!(canvas.width() <= width);
                 }
                 // The error is not merely an error: `needed` is the answer, so it has to
                 // be a width this call could not show.
@@ -563,8 +568,9 @@ fn left_right_still_draws_its_delimiters_as_a_script_base() {
 /// A display formula drawn on a canvas at its own width, one string per row, trailing
 /// blanks trimmed.
 ///
-/// Deliberately not through [`render_display`], which takes the *caller's* width and would
-/// pad every row out to it — these tests assert the art, and a formula's own width is the
+/// Deliberately not through the retired `render_display`, which took the *caller's* width
+/// and padded every row out to it — these tests assert the art, and a formula's own width is
+/// the
 /// only width at which the art is exactly the formula. Reaching `build` and `draw` directly
 /// is what lets `b.width` be passed as the floor.
 fn display(src: &str) -> Vec<String> {
@@ -720,16 +726,20 @@ fn a_display_fence_draws_only_the_delimiters_the_source_asked_for() {
 #[test]
 fn a_display_formula_draws_as_a_canvas() {
     let theme = crate::theme::Theme::default();
-    let canvas = render_display(r"\frac{a}{b}", 40, &theme).expect("draws");
-    assert_eq!(canvas.height(), 3);
-    assert_eq!(canvas.width(), 40);
+    let canvas = render_display_natural(r"\frac{a}{b}", 40, &theme).expect("draws");
+    assert_eq!(canvas.height(), 3, "numerator, rule, denominator");
+    // The formula's own width, not the 40 it was capped at. Under the retired
+    // `render_display` this line read `assert_eq!(canvas.width(), 40)` and was pinning that
+    // function's padding; the width a one-character fraction draws at is the thing this
+    // test is about.
+    assert_eq!(canvas.width(), 1);
     canvas.check_invariants().expect("width holds");
 }
 
 #[test]
 fn a_display_formula_wider_than_the_width_says_what_it_needs() {
     let theme = crate::theme::Theme::default();
-    let err = render_display(r"\frac{a+b+c+d+e+f}{2}", 8, &theme).expect_err("too wide");
+    let err = render_display_natural(r"\frac{a+b+c+d+e+f}{2}", 8, &theme).expect_err("too wide");
     let crate::error::MathError::TooWide { needed } = err else {
         panic!("expected TooWide, got {err:?}")
     };
@@ -743,11 +753,12 @@ fn a_formula_that_exactly_fits_draws_and_one_column_narrower_does_not() {
     // (`display_and_inline_agree_about_a_flat_formula` renders it), so six fits exactly and
     // five is the first width that cannot show it.
     let theme = crate::theme::Theme::default();
-    let canvas = render_display("E = mc", 6, &theme).expect("exactly the width is not too wide");
+    let canvas =
+        render_display_natural("E = mc", 6, &theme).expect("exactly the width is not too wide");
     assert_eq!(canvas.width(), 6);
     assert_eq!(canvas.row_text(0), "E = mc");
     assert_eq!(
-        render_display("E = mc", 5, &theme).expect_err("one column short"),
+        render_display_natural("E = mc", 5, &theme).expect_err("one column short"),
         crate::error::MathError::TooWide { needed: 6 },
         "and `needed` is the formula's own width, not the width that was asked for"
     );
@@ -768,7 +779,8 @@ fn a_block_that_draws_nothing_draws_nothing() {
         "% nothing but a comment",
         "   ",
     ] {
-        let canvas = render_display(src, 40, &theme).unwrap_or_else(|e| panic!("{src:?}: {e}"));
+        let canvas =
+            render_display_natural(src, 40, &theme).unwrap_or_else(|e| panic!("{src:?}: {e}"));
         assert_eq!(
             canvas.height(),
             0,
@@ -779,7 +791,7 @@ fn a_block_that_draws_nothing_draws_nothing() {
     // a formula that draws something must not take the empty path. `\R` is the same macro
     // put to use, so the pair also says the definition really was read and not merely
     // skipped over.
-    let drawn = render_display(r"\def\R{\mathbb{R}}\R", 40, &theme).expect("draws");
+    let drawn = render_display_natural(r"\def\R{\mathbb{R}}\R", 40, &theme).expect("draws");
     assert_eq!(drawn.height(), 1, "a formula with cells keeps its row");
 }
 
@@ -787,27 +799,29 @@ fn a_block_that_draws_nothing_draws_nothing() {
 fn a_display_formula_that_does_not_parse_is_an_error_not_a_panic() {
     let theme = crate::theme::Theme::default();
     assert!(matches!(
-        render_display(r"\frac{", 40, &theme),
+        render_display_natural(r"\frac{", 40, &theme),
         Err(crate::error::MathError::Parse { .. })
     ));
 }
 
 #[test]
 fn a_construct_this_engine_cannot_build_reaches_the_display_caller_as_an_error() {
-    // `render_display` must not swallow `NotDrawable`. Two routes reach it in display mode and
-    // neither is an inline constraint: a grid, which no mode builds yet (design spec §6.5),
-    // and `build::parse`'s source caps, which run before the mode is consulted at all.
+    // The display entry point must not swallow `NotDrawable`. Two routes reach it in display
+    // mode and neither is an inline constraint: a grid, which no mode builds yet (design spec
+    // §6.5), and `build::parse`'s source caps, which run before the mode is consulted at all.
     //
     // Both matter to the caller for the same reason: design spec §9's framed source is
     // reached by returning the error, so an arm that turned either into an empty canvas
     // would make the formula vanish off the page instead.
     let theme = crate::theme::Theme::default();
     assert_eq!(
-        render_display(r"\begin{pmatrix} 1 \end{pmatrix}", 40, &theme).expect_err("no grids yet"),
+        render_display_natural(r"\begin{pmatrix} 1 \end{pmatrix}", 40, &theme)
+            .expect_err("no grids yet"),
         crate::error::MathError::NotDrawable("a matrix")
     );
     assert_eq!(
-        render_display(&r"\alpha".repeat(64), 40, &theme).expect_err("past the command-run cap"),
+        render_display_natural(&r"\alpha".repeat(64), 40, &theme)
+            .expect_err("past the command-run cap"),
         crate::error::MathError::NotDrawable("a formula with more than 32 chained commands")
     );
 }
@@ -820,7 +834,7 @@ fn display_and_inline_agree_about_a_flat_formula() {
     // where that is pinned, and it asserts `is_inline` on every case, so neither test can
     // catch a substitution that only shows up on a tall box.
     let theme = crate::theme::Theme::default();
-    let canvas = render_display("E = mc", 40, &theme).expect("draws");
+    let canvas = render_display_natural("E = mc", 40, &theme).expect("draws");
     assert_eq!(canvas.height(), 1);
     assert_eq!(canvas.row_text(0).trim_end(), "E = mc");
     assert_eq!(render_inline("E = mc").expect("renders"), "E = mc");
@@ -959,14 +973,14 @@ fn a_styled_letter_is_one_column_wide() {
     // the plain letter. If a terminal font sets them wide the *document* is what changes,
     // not this measurement — `crate::text` is the single home of width logic.
     let theme = crate::theme::Theme::default();
-    let canvas = render_display(r"\mathbb{R} \cup \mathbb{Z}", 40, &theme).expect("draws");
+    let canvas = render_display_natural(r"\mathbb{R} \cup \mathbb{Z}", 40, &theme).expect("draws");
     assert_eq!(canvas.height(), 1);
     assert_eq!(canvas.row_text(0).trim_end(), "ℝ ∪ ℤ");
     // One column each, so the formula measures exactly as `R ∪ Z` does. A styled letter
     // that measured two would push everything after it and the display width with it.
     assert_eq!(
         canvas.width(),
-        render_display(r"R \cup Z", 40, &theme)
+        render_display_natural(r"R \cup Z", 40, &theme)
             .expect("draws")
             .width(),
         "a styled letter must measure like the plain one it replaced"
