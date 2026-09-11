@@ -8316,3 +8316,26 @@ fn a_long_file_name_is_capped_so_the_breadcrumb_fits_at_eighty_columns() {
     });
     assert!(rows[0].contains("notes.md"), "{:?}", rows[0]);
 }
+
+#[test]
+fn a_long_notice_is_elided_rather_than_dropped_on_a_narrow_bar() {
+    // The realistic failure text `could not re-read /some/long/path: No such file or
+    // directory (os error 2)` is wider than a sixty-column bar has to give even with
+    // the file name elided away. Ranking the notice above the meter is not enough on
+    // its own: a segment that cannot shrink is still dropped whole, and the reader is
+    // back to a stale document and a bar that says nothing. So the notice gives up its
+    // own tail, the way the hovered URL does, and keeps its head.
+    let mut app = pager_named("# H\n\nbody\n", "notes.md", 60, 10);
+    app.notify(
+        "could not re-read /home/me/docs/notes.md: No such file or directory (os error 2)",
+        true,
+    );
+    let rows = painted(60, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        rows[0].contains("could not re-read") && rows[0].contains('\u{2026}'),
+        "the head of the notice is kept and its tail elided at 60 columns: {:?}",
+        rows[0]
+    );
+}
