@@ -153,8 +153,9 @@ const INVENTORY: &[(&str, &str)] = &[
     // `\u{a0}` and `©` arrive by HTML entity decoding — `&nbsp;` and `&copy;` in the
     // source become the characters themselves on the canvas, so they are "added" by
     // the renderer even though they are really the author's content. `¹` and `²` are
-    // math's raised `1` and `2` (design spec §5.1) — the two digits whose superscript
-    // form Unicode placed here instead of in Superscripts and Subscripts, below.
+    // math's raised `1` and `2` (design spec §5.1). Unicode placed three superscript
+    // digits here instead of in Superscripts and Subscripts, below — `¹²³`, all three
+    // drawable (`src/math/scripts.rs`); the corpus only reaches the first two.
     ("Latin-1 Supplement (U+0080-U+00FF)", "\u{a0}©¹²"),
     // The elision marker and `&hellip;`, and `‾` (U+203E), the tick that tips a tall
     // radical's diagonal (design spec §6.2), which the corpus's `\sqrt{b^2-4ac}` emits.

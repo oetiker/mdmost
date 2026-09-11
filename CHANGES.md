@@ -16,6 +16,8 @@ what moved. The entries are a record, not a compatibility promise.
   since display math learned to centre itself, because the renderer needs the natural width
   to centre by and to measure a table column with. A caller that wants a canvas filling a
   fixed measure pads it with `Canvas::resize_width`, which is all the retired function did.
+- `Theme::math`, a new public field on `Theme` carrying the styles a formula's structure is
+  drawn in. A caller building a `Theme` by struct literal has to add it.
 - `Search::locate` takes `&Canvas` where it took `&[SearchSpan]`. A hit inside a construct
   with no interior position — a drawn formula — is answered by the construct's rectangle
   rather than by the span that names it, and the rectangle is on the canvas and not on any
@@ -44,8 +46,6 @@ what moved. The entries are a record, not a compatibility promise.
   `\mathbb{R}` is ℝ, `\mathcal{L}` is ℒ — using the parser's own table rather than an
   offset, so the letters Unicode placed in Letterlike Symbols come out right. `\boldsymbol`
   draws bold digits; over letters it still draws the plain letter.
-- `Theme::math`, a new public field on `Theme` carrying the styles a formula's structure is
-  drawn in. A caller building a `Theme` by struct literal has to add it.
 - A drag anywhere inside a drawn formula washes the whole formula, not the row it started
   on. Design spec §10: a formula is selectable as a whole, and the wash now says so.
 

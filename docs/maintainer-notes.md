@@ -546,9 +546,10 @@ copy of an uprightness policy in the tree.
 
 **A display formula's width bands are not monotone, and no code change fixes that.** The
 caption half of this was fixed — `MathError::TooWide`'s message was shortened so the number
-survives the frame's elision — but the band structure itself was left alone, because
-changing it means changing a placement ruling and that is the owner's to make. Measured on
-the built binary with `$$\frac{a + b + c + d + e + f + g}{2}$$`, which draws at 25 columns:
+survives the frame's elision — and the band structure itself stands, by ruling of
+2026-09-12: `MIN_SURPLUS` keeps its value and the surprise is answered by the caption, not
+by the layout. Measured on the built binary with
+`$$\frac{a + b + c + d + e + f + g}{2}$$`, which draws at 25 columns:
 
 | terminal | body | what the reader gets | why |
 |---|---|---|---|
@@ -566,7 +567,8 @@ ways to make it go: draw at an overrun of 1 … 7, which is the thing `MIN_SURPL
 prevent (a horizontal scrollbar, a chevron on every row and an `↔ 1/1` readout for the sake
 of three columns); or never side-scroll a formula at all, which contradicts design spec §7
 and the manual. `VIEWPORTS` puts a second edge at the narrow end by the same argument. Both
-are rulings, not code.
+are rulings, not code, and both were declined on 2026-09-12: three columns of formula do
+not buy a scrollbar, and a formula that side-scrolls is spec §7.
 
 What the caption fix does buy: inside the 20 … 26 band the reader is now told `needs 25
 columns`, elided to `needs 25 …` at the narrow end of it, where before they got `this
