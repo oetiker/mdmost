@@ -8,6 +8,12 @@
 
 ### Fixed
 
+- A status-bar notice — `auto-reload on`, `reloaded`, a file that could not be re-read —
+  is no longer the first thing a narrow terminal gives up. It shared the heading
+  breadcrumb's slot, so at sixty columns pressing `R` showed nothing at all and a read
+  failure was reported to nobody. The notice now outranks the meter, the search chip and
+  the breadcrumb, and a long file name is elided to make room for it.
+
 ## 0.3.0 - 2026-09-10
 
 ### Breaking

@@ -393,7 +393,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         // goes through the same substitution as the hovered URL above rather than
         // trusting each `notify` caller to remember which kind it produced.
         spans.push(TermSpan::styled(sanitized(&notice.text), term_style(style)));
-        left.push(Segment::new(Drop::Context, spans));
+        left.push(Segment::new(Drop::Notice, spans));
     } else if let Some(index) = app.current_heading()
         && let Some(entry) = app.toc().entries().get(index)
     {
@@ -546,7 +546,7 @@ fn match_hint(app: &App) -> MatchHint {
 /// Ordered least valuable first, which is the order they are dropped in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Drop {
-    /// The heading, or the transient notice standing in for it.
+    /// The heading breadcrumb.
     Context,
     /// The second way of stepping between matches — the modified arrows, by default.
     /// Cheaper than the hint that carries the words, because a reader who has the primary
@@ -572,6 +572,16 @@ enum Drop {
     /// name and the position, which say what is on screen at all times rather than
     /// only while the pointer rests on a control.
     Url,
+    /// The transient notice — `auto-reload on`, `reloaded`, a file that could not be
+    /// re-read. It used to share the breadcrumb's slot and so was the first thing a
+    /// narrow bar gave up, which left a reader on a sixty-column terminal pressing a key
+    /// and seeing nothing happen. The breadcrumb can go first because the heading is on
+    /// the page a few rows up; a notice is said nowhere else and is gone again in a
+    /// moment. It outranks the hovered URL only because the two never share the bar
+    /// for long: a notice is a reply to something the reader just did, and the reply
+    /// is what they are looking for. It stays below the file name and the position,
+    /// which the name is elided, not dropped, to keep.
+    Notice,
     /// The file name, which is elided before it is given up altogether.
     Title,
     /// The position and the way out.
