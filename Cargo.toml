@@ -12,7 +12,7 @@ members = ["vendor/pulldown-latex"]
 
 [package]
 name = "mdmost"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 # mdmost is not on crates.io. A path dependency cannot be published at all, and the
 # owner's ruling of 2026-08-24 was to vendor and drop crates.io rather than hold a

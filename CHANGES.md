@@ -51,6 +51,26 @@
 
 ### Fixed
 
+## 0.3.1 - 2026-09-11
+
+### New
+
+### Changed
+
+### Fixed
+
+- A status-bar notice — `auto-reload on`, `reloaded`, a file that could not be re-read —
+  is no longer the first thing a narrow terminal gives up. It shared the heading
+  breadcrumb's slot, so at sixty columns pressing `R` showed nothing at all and a read
+  failure was reported to nobody. The notice now outranks the meter, the search chip and
+  the breadcrumb, and a long file name is elided to make room for it. A notice too
+  wide for the bar even then — `could not re-read /some/path: No such file or
+  directory` on a sixty-column terminal — keeps its head and loses its tail, the way
+  a hovered URL does, rather than going whole.
+- A long file name no longer pushes the heading breadcrumb and the meter off an
+  eighty-column status bar. The name is capped at a quarter of the bar and elided with
+  `…`; a name that already fits is left alone.
+
 ## 0.3.0 - 2026-09-10
 
 ### Breaking

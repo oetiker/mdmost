@@ -1683,11 +1683,10 @@ fn a_control_character_in_a_failed_open_notice_cannot_reach_the_terminal() {
     // rather than through a real failed spawn, because `App` never touches a process
     // (design spec §13): the state machine only needs to be handed the message a real
     // failure would have produced.
-    // `Drop::Context` -- what carries the notice -- is the very first segment the bar
-    // sheds for space (see `chrome::Drop`), so the buffer has to be wide enough that
-    // nothing competes it away before sanitization is even reached. The message is a
-    // realistic length for what `open::open` actually produces; this test is about
-    // sanitization, not the drop order.
+    // 200 columns so that nothing on the bar competes with the notice for space (see
+    // `chrome::Drop`) before sanitization is even reached. The message is a realistic
+    // length for what `open::open` actually produces; this test is about sanitization,
+    // not the drop order.
     let mut app = pager_at("[here](https://example.com/x)\n", 200, 10);
     app.notify(
         "could not open https://example.com/\u{9b}pwned: no such file or directory",
@@ -1713,6 +1712,39 @@ fn a_control_character_in_a_failed_open_notice_cannot_reach_the_terminal() {
         status.contains("could not open https://example.com/"),
         "the rest of the notice still draws: {status:?}"
     );
+}
+
+#[test]
+fn a_notice_outlives_the_file_name_on_a_narrow_bar() {
+    // The status bar never lies — and it never stays silent either. The notice used to
+    // ride in `Drop::Context` beside the breadcrumb, the cheapest segment on the bar,
+    // so at sixty columns a reader who pressed `R` got no `auto-reload on`, and a file
+    // that could not be re-read was reported to nobody. The breadcrumb can go first
+    // because the heading is on the page a few rows up; the notice is said nowhere
+    // else, and it is gone again in a moment. So it outranks the meter, the search
+    // chip and the breadcrumb, and a long file name is elided to make room for it.
+    for width in [40, 60, 100] {
+        let mut app = pager_named(
+            "# Heading\n\nbody\n",
+            "a-rather-long-file-name.md",
+            width,
+            10,
+        );
+        app.notify("auto-reload on", false);
+        let rows = painted(width, 1, |buffer, area| {
+            super::chrome::draw_status(buffer, area, &app)
+        });
+        assert!(
+            rows[0].contains("auto-reload on"),
+            "the notice is drawn at {width} columns: {:?}",
+            rows[0]
+        );
+        assert!(
+            rows[0].contains("h help"),
+            "and the way out is still there at {width} columns: {:?}",
+            rows[0]
+        );
+    }
 }
 
 #[test]
@@ -1743,7 +1775,7 @@ fn the_keyboard_cursor_shows_its_url_in_the_status_bar_too() {
     // 200 columns, not the 60 the hover test above uses: `Drop::Url` is a
     // high-priority segment that survives even a 60-column bar, so a narrow buffer
     // here would happen to pass either way, which is exactly the shape of vacuous
-    // test this plan has shipped before against `Drop::Context`. 200 columns removes
+    // test this plan has shipped before against the notice. 200 columns removes
     // any doubt that the segment was actually drawn rather than merely surviving
     // by luck of the width picked.
     let mut app = pager_at("[here](https://example.com/a/path)\n", 200, 10);
@@ -1840,9 +1872,9 @@ fn a_duplicate_heading_resolves_to_the_right_one() {
 
 #[test]
 fn an_unknown_anchor_reports_and_does_not_move() {
-    // Wide enough that the notice is not the first segment the bar's own width-based
-    // elision (`Drop::Context` is the cheapest priority) gives up; the assertion is
-    // about the anchor, not about the bar's unrelated elision policy.
+    // Wide enough that the bar's own width-based elision (see `chrome::Drop`) never
+    // comes into it; the assertion is about the anchor, not about the bar's unrelated
+    // elision policy.
     let mut app = pager_at("# A\n\nbody\n", 80, 10);
     let before = app.scroll();
     app.activate(activation(HotspotKind::Anchor {
@@ -7749,9 +7781,8 @@ fn a_cell_outside_the_popup(app: &mut App, width: u16, height: u16) -> (u16, u16
 
 #[test]
 fn an_unknown_footnote_reports_and_opens_nothing() {
-    // The status bar never lies. 200 columns: the notice rides in `Drop::Context`, the
-    // cheapest-priority segment of the bar, which is dropped for width at 60 and at 100
-    // — so a narrower buffer would assert on a notice that was never drawn.
+    // The status bar never lies. 200 columns so the bar's own width-based elision (see
+    // `chrome::Drop`) never comes into it; this test is about the footnote, not the bar.
     let mut app = pager_at("a[^n]\n\n[^n]: note\n", 200, 24);
     app.activate(activation(HotspotKind::Footnote {
         id: "missing".to_string(),
@@ -7773,10 +7804,9 @@ fn a_marker_with_no_room_on_either_side_of_it_says_so() {
     // offer, and the status bar never lies.
     //
     // Five rows of document area with the marker on the middle one leaves two rows above
-    // and two below, and a box needs three. 200 columns because the notice rides in
-    // `Drop::Context`, the cheapest-priority segment of the status bar, which is dropped
-    // for width at 60 and at 100 — a narrower buffer would assert on a notice that was
-    // never drawn.
+    // and two below, and a box needs three. 200 columns so the bar's own width-based
+    // elision (see `chrome::Drop`) never comes into it; this test is about the popup,
+    // not the bar.
     let mut app = pager_at("filler\n\na[^n]\n\n[^n]: a note worth reading\n", 200, 6);
     let (x, y) = painted_at(&mut app, 200, 6, "[1]");
     assert_eq!(
@@ -8677,5 +8707,58 @@ fn a_drag_copies_the_source_the_file_holds() {
     assert!(
         app.doc().source().contains('\u{fe0f}'),
         "a drag would copy source the document no longer holds"
+    );
+}
+
+#[test]
+fn a_long_file_name_is_capped_so_the_breadcrumb_fits_at_eighty_columns() {
+    // The name is the one segment that can lose characters and still mean something,
+    // and at eighty columns a forty-character name used to keep every one of them
+    // while the breadcrumb and then the meter were dropped around it. It now takes at
+    // most a quarter of the bar; what is on screen matters more than the tail of a
+    // name the reader chose themselves.
+    let long = "a-rather-long-file-name-for-a-document.md";
+    let app = pager_named("# Introduction and overview\n\nbody\n", long, 80, 10);
+    let rows = painted(80, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        rows[0].contains("Introduction and overview"),
+        "the breadcrumb outlives the tail of the name: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[0].contains("a-rather-long-file-\u{2026}"),
+        "the name is elided to twenty columns: {:?}",
+        rows[0]
+    );
+    // A name that already fits the cap is left alone.
+    let app = pager_named("# Introduction and overview\n\nbody\n", "notes.md", 80, 10);
+    let rows = painted(80, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(rows[0].contains("notes.md"), "{:?}", rows[0]);
+}
+
+#[test]
+fn a_long_notice_is_elided_rather_than_dropped_on_a_narrow_bar() {
+    // The realistic failure text `could not re-read /some/long/path: No such file or
+    // directory (os error 2)` is wider than a sixty-column bar has to give even with
+    // the file name elided away. Ranking the notice above the meter is not enough on
+    // its own: a segment that cannot shrink is still dropped whole, and the reader is
+    // back to a stale document and a bar that says nothing. So the notice gives up its
+    // own tail, the way the hovered URL does, and keeps its head.
+    let mut app = pager_named("# H\n\nbody\n", "notes.md", 60, 10);
+    app.notify(
+        "could not re-read /home/me/docs/notes.md: No such file or directory (os error 2)",
+        true,
+    );
+    let rows = painted(60, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        rows[0].contains("could not re-read") && rows[0].contains('\u{2026}'),
+        "the head of the notice is kept and its tail elided at 60 columns: {:?}",
+        rows[0]
     );
 }

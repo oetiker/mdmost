@@ -9,7 +9,7 @@
 class Mdmost < Formula
   desc "Full-screen terminal pager for a single Markdown document"
   homepage "https://github.com/oetiker/mdmost"
-  version "0.3.0"
+  version "0.3.1"
   license "MIT"
 
   # Bottles exist for one reason: without one, Homebrew treats this formula as a source
@@ -26,31 +26,31 @@ class Mdmost < Formula
   # runner image available for each architecture.
   # BOTTLE-START
   bottle do
-    root_url "https://github.com/oetiker/mdmost/releases/download/v0.3.0"
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "c123cbb172ac5c723bae8952481fc59f63f502e342ba4d83532bfa848b0ba7f5"
-    sha256 cellar: :any_skip_relocation, sequoia: "e0da64acf0f3476fbf765aadde649d137eb50139853c30cc0c3f8a95e54737d1"
+    root_url "https://github.com/oetiker/mdmost/releases/download/v0.3.1"
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "b17633cc5f534af4cb60ed4eb92791da21d08e7a70758ef80256e28bd27d8fc7"
+    sha256 cellar: :any_skip_relocation, sequoia: "d16eae6b9407e979ac5b5c788abd8fb1d9fff83b65f352669a34b602a8d04baa"
   end
   # BOTTLE-END
 
   on_macos do
     on_arm do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-aarch64-apple-darwin.tar.gz"
-      sha256 "0ecb6acdd89f32839cfe3857732c4747fdbebae2a8db5eafa956b7774291bd79" # mac-arm
+      sha256 "f766e795305d3dc175265eddebc9cd543cf0832b6672f2cbcfae8b96799c87e2" # mac-arm
     end
     on_intel do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-x86_64-apple-darwin.tar.gz"
-      sha256 "fb6d6eeb49b8bef265f7fd4c7bda7752d6f2ddbb018a8ee81679c1b4478b5df8" # mac-x86
+      sha256 "ec6c78cd033cc0d478c0c57046eee23705dd5c775a0f4db9f77fe28df5bff7fc" # mac-x86
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "fe89114bb8f1aae1f235e6410b8513dbc225276b4dca4c1326202387db86bf47" # linux-x86
+      sha256 "8d6f90cb66ec39e6ba502fc24c5582d406db3d73b7b304318ebb9d84e8edc5c5" # linux-x86
     end
     on_arm do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-aarch64-unknown-linux-musl.tar.gz"
-      sha256 "aa5a2167591b266f3fbe29db85b169f428422fe10d23b1d825ae990949ec6dc9" # linux-arm
+      sha256 "e2b265888565fd836a54dfb6eef218c6cf7d538dcb74f20ebe71cbce55bedbad" # linux-arm
     end
   end
 
