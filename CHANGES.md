@@ -13,6 +13,9 @@
   breadcrumb's slot, so at sixty columns pressing `R` showed nothing at all and a read
   failure was reported to nobody. The notice now outranks the meter, the search chip and
   the breadcrumb, and a long file name is elided to make room for it.
+- A long file name no longer pushes the heading breadcrumb and the meter off an
+  eighty-column status bar. The name is capped at a quarter of the bar and elided with
+  `…`; a name that already fits is left alone.
 
 ## 0.3.0 - 2026-09-10
 

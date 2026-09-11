@@ -8286,3 +8286,33 @@ fn a_drag_copies_the_source_the_file_holds() {
         "a drag would copy source the document no longer holds"
     );
 }
+
+#[test]
+fn a_long_file_name_is_capped_so_the_breadcrumb_fits_at_eighty_columns() {
+    // The name is the one segment that can lose characters and still mean something,
+    // and at eighty columns a forty-character name used to keep every one of them
+    // while the breadcrumb and then the meter were dropped around it. It now takes at
+    // most a quarter of the bar; what is on screen matters more than the tail of a
+    // name the reader chose themselves.
+    let long = "a-rather-long-file-name-for-a-document.md";
+    let app = pager_named("# Introduction and overview\n\nbody\n", long, 80, 10);
+    let rows = painted(80, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        rows[0].contains("Introduction and overview"),
+        "the breadcrumb outlives the tail of the name: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[0].contains("a-rather-long-file-\u{2026}"),
+        "the name is elided to twenty columns: {:?}",
+        rows[0]
+    );
+    // A name that already fits the cap is left alone.
+    let app = pager_named("# Introduction and overview\n\nbody\n", "notes.md", 80, 10);
+    let rows = painted(80, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(rows[0].contains("notes.md"), "{:?}", rows[0]);
+}

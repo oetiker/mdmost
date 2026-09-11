@@ -260,6 +260,12 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     // dropped, and given up altogether only when eliding it away is still not enough.
     // Segments cheaper than that — a breadcrumb, a search chip, the meter — go first,
     // because each of them is restated somewhere the reader can already see.
+    //
+    // Before any of that, the name is capped at a share of the bar. A forty-character
+    // name on an eighty-column terminal used to keep every one of its characters while
+    // the breadcrumb and then the meter were dropped around it — the tail of a name the
+    // reader chose themselves, kept at the cost of what is on screen right now.
+    let cap = (usize::from(area.width) / TITLE_SHARE).max(TITLE_FLOOR);
     left.push(Segment::new(
         Drop::Title,
         vec![
@@ -268,7 +274,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
                 term_style(theme.ui.status_accent),
             ),
             TermSpan::styled(
-                app.title().to_string(),
+                fit(app.title(), cap),
                 term_style(theme.ui.status_accent.bold()),
             ),
         ],
@@ -483,6 +489,16 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
 
 /// The width of the status bar's progress meter, in cells.
 const METER_WIDTH: usize = 8;
+
+/// The file name takes at most this fraction of the bar: a quarter, twenty columns of
+/// an eighty-column terminal, which leaves the position, the meter and a breadcrumb of
+/// ordinary length beside it.
+const TITLE_SHARE: usize = 4;
+
+/// The fewest columns the cap ever leaves the name, so that a narrow terminal shows a
+/// recognisable name rather than a dozen characters of nothing. The width-driven
+/// elision in [`lay_out`] can still shorten it past this when nothing else will fit.
+const TITLE_FLOOR: usize = 12;
 
 /// What the status bar says about stepping between matches.
 ///
