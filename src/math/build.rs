@@ -91,10 +91,23 @@ const MAX_COMMAND_RUN: usize = 32;
 /// this cap — and needs 3 555 328 B of stack, 1.7× a 2 MiB thread. A byte cap alone would
 /// let it through. Both caps are needed.
 ///
-/// What 2 048 rejects: a single formula over two kilobytes of source. That is 5.7× the
-/// largest formula in `pulldown-latex`'s own 385 fixtures (median 38 B, max 361 B —
-/// Maxwell's equations), and a pager renders one formula at a time, so the cap is per
-/// formula and not per document.
+/// What 2 048 rejects: over two kilobytes of source in one parse. That is 5.7× the largest
+/// formula in `pulldown-latex`'s own 385 fixtures (median 38 B, max 361 B — Maxwell's
+/// equations).
+///
+/// **It is not a per-formula cap.** It was, and this comment used to say so; design spec
+/// §16's global macros changed it. `render::bridge::with_preamble` joins every kept
+/// definition onto the front of each later formula and hands the *joined* string to
+/// [`parse`], so what this cap measures is `preamble + 1 + formula`. A document whose
+/// macro blocks total 2 043 bytes refuses `$$x = 1$$` — five bytes of LaTeX — and the
+/// caption has to say so, which is why the message names the macros. The joined string is
+/// also the right thing to measure: the stack overflow the cap exists for is a property of
+/// what the parser is actually given.
+///
+/// Two consequences a reader meets, both measured and both recorded in
+/// `docs/maintainer-notes.md`: the refusal is non-monotonic in the preamble's size, and
+/// the preamble therefore self-limits. Neither is fixed here — the owner ruled the
+/// behaviour kept and the message corrected.
 const MAX_SOURCE_BYTES: usize = 2048;
 
 // The safety property each number exists for, pinned at compile time where the number is,
@@ -176,7 +189,19 @@ fn longest_command_run(src: &str) -> usize {
 fn refuse_pathological_source(src: &str) -> Result<(), MathError> {
     // Length first: it is the cheaper test, and it bounds the scan below.
     if src.len() > MAX_SOURCE_BYTES {
-        return Err(MathError::NotDrawable("a formula longer than 2048 bytes"));
+        // "and its macros", because `src` is what the caller assembled and that is
+        // `preamble + 1 + formula` for any document that defines a macro
+        // (`render::bridge::with_preamble`). Saying "a formula longer than 2048 bytes"
+        // told the author of a five-byte formula that their formula was two kilobytes
+        // long, which is the one thing the caption must not do. The phrase stays true
+        // where there is no preamble: the formula plus no macros is over the cap.
+        //
+        // `NotDrawable` carries a `&'static str`, so the caption cannot name the two
+        // sizes separately, and the macros come early in the phrase because the caption
+        // is elided to the frame's width (`render::code`) and the tail goes first.
+        return Err(MathError::NotDrawable(
+            "a formula and its macros over 2048 bytes",
+        ));
     }
     if longest_command_run(src) > MAX_COMMAND_RUN {
         return Err(MathError::NotDrawable(
@@ -1516,7 +1541,7 @@ mod tests {
         // between the two and the reason the line above stops at 1023.
         assert_eq!(
             scan_refusal(&nest(5000)),
-            "a formula longer than 2048 bytes cannot be drawn here"
+            "a formula and its macros over 2048 bytes cannot be drawn here"
         );
 
         // And the cap is not so tight that ordinary nesting trips it -- including at the
@@ -1620,7 +1645,7 @@ mod tests {
         parser_accepts(&comments);
         assert_eq!(
             scan_refusal(&comments),
-            "a formula longer than 2048 bytes cannot be drawn here"
+            "a formula and its macros over 2048 bytes cannot be drawn here"
         );
 
         // The cheapest event-less *token* of the 838 the parser knows, at 6 source bytes a
@@ -1634,13 +1659,13 @@ mod tests {
         parser_accepts(&relaxes);
         assert_eq!(
             scan_refusal(&relaxes),
-            "a formula longer than 2048 bytes cannot be drawn here"
+            "a formula and its macros over 2048 bytes cannot be drawn here"
         );
 
         // The boundary, from both sides, on a source with no commands in it at all.
         assert_eq!(
             scan_refusal(&"x".repeat(MAX_SOURCE_BYTES + 1)),
-            "a formula longer than 2048 bytes cannot be drawn here"
+            "a formula and its macros over 2048 bytes cannot be drawn here"
         );
         assert_eq!(
             inline(&"x".repeat(MAX_SOURCE_BYTES)).len(),
@@ -1657,7 +1682,7 @@ mod tests {
         assert_eq!(longest_command_run(&hazard), 0);
         assert_eq!(
             scan_refusal(&hazard),
-            "a formula longer than 2048 bytes cannot be drawn here"
+            "a formula and its macros over 2048 bytes cannot be drawn here"
         );
     }
 

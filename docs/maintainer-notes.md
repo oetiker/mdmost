@@ -544,6 +544,44 @@ consult, so `\boldsymbol{x}` draws a plain `x`. Closing it means either reaching
 through another vendor patch or restating it here, and restating it would put a second
 copy of an uprightness policy in the tree.
 
+**The 2048-byte cap is per parse, not per formula, and the macro preamble spends it.**
+`MAX_SOURCE_BYTES` (`src/math/build.rs`) is applied to whatever `bridge::with_preamble`
+assembled, and that is `preamble + 1 + formula` for any document that defines a macro. The
+cap was written when a pager parsed one formula at a time; design spec §16's global macros
+changed what is parsed, and the constant's doc comment said "per formula and not per
+document" until this was found. Measured on the built binary, with a definition-only block
+of `L` bytes followed by `$$x = 1$$`:
+
+| `L` | what the reader gets |
+|---|---|
+| ≤ 2042 | `x = 1` draws — 2042 + 1 + 5 is the cap exactly |
+| 2043 … 2048 | `$$x = 1$$` refused: the block is kept, so the join is over the cap |
+| ≥ 2049 | `x = 1` draws again |
+
+Two things fall out, and the owner ruled the behaviour kept and the caption corrected
+rather than either of them fixed.
+
+**The window is six bytes wide and the failure is non-monotonic.** Past 2048 the
+definition block is itself over the cap, so `definitions()` never keeps it — it keeps a
+candidate only if it comes back `Ok` and empty, and an over-cap candidate returns `Err` —
+the preamble stays empty, and the formula below recovers. *Adding* a character to a macro
+definition therefore fixes the formula under it. Anyone reasoning about this from the
+constant alone will get it backwards.
+
+**The preamble self-limits, and the caption for that case is misleading in a second way.**
+Because an over-cap candidate is dropped rather than kept, the preamble can never exceed
+about 2048 bytes: a macro defined late in a long document is silently not exported. What
+the reader sees is not silence but the wrong sentence. With a 2018-byte definition block
+first, a later `$$\newcommand{\bee}{\frac{1}{2}}$$` — thirty bytes — is captioned *a
+formula and its macros over 2048 bytes*, and `$$\bee$$` below it is then captioned
+*parsing error: unknown primitive command found*, with the `\newcommand` for it visible on
+the same screen two blocks up. The message now at least names the macros; it still cannot
+name the two sizes separately, because `MathError::NotDrawable` carries a `&'static str`.
+
+`the_macro_preamble_spends_the_byte_cap_and_the_caption_says_so` (`src/render/tests.rs`)
+pins all three points, including the far edge — without that line the test would pass
+against a cap that really was per formula.
+
 **`tests/glyph_inventory.rs` cannot attribute a macro's expansion.** The inventory
 subtracts the characters a math node's own commands resolved to, via `math::symbols`,
 which is handed one formula's literal and nothing else. A macro defined in one block and

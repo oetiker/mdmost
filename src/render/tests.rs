@@ -4136,6 +4136,66 @@ fn a_macro_defined_in_an_earlier_block_resolves_in_a_later_one() {
 }
 
 #[test]
+fn the_macro_preamble_spends_the_byte_cap_and_the_caption_says_so() {
+    // `MAX_SOURCE_BYTES` is applied to what `bridge::with_preamble` assembles, which is
+    // `preamble + 1 + formula`, so a document's macro blocks spend a budget the formulas
+    // after them need. The owner ruled the behaviour kept and the caption corrected; this
+    // pins the caption, because the caption is all the reader gets.
+    //
+    // Three points, measured on the built binary before this test was written. `L` is the
+    // length of a definition-only block; `$$x = 1$$` follows it.
+    //
+    //   L <= 2042         x = 1 draws        2042 + 1 + 5 = 2048, the cap exactly
+    //   L in 2043..=2048  REFUSED            the block is kept, so the join is over
+    //   L >= 2049         x = 1 draws again  the block is over the cap on its own
+    //                                        account, `definitions()` does not keep it,
+    //                                        and the preamble stays empty
+    //
+    // The window is six bytes wide and the behaviour is NON-MONOTONIC: adding a character
+    // to a macro definition fixes the formula underneath it. Recorded in
+    // `docs/maintainer-notes.md` rather than fixed here.
+    let definition = |len: usize| {
+        let mut lit = String::from("\\newcommand{\\padx}{");
+        lit.push_str(&"x".repeat(len - 20));
+        lit.push('}');
+        assert_eq!(lit.len(), len);
+        lit
+    };
+    let render = |len: usize| {
+        let doc = Doc::parse(&format!("$${}$$\n\n$$x = 1$$\n", definition(len)));
+        render_document(&doc, 60, None, &Theme::default(), &RenderOptions::default()).plain_text()
+    };
+
+    // Just inside: the join is exactly the cap.
+    let inside = render(2042);
+    assert!(
+        !inside.contains("over 2048 bytes"),
+        "2042 + 1 + 5 is the cap exactly and must draw: {inside:?}"
+    );
+
+    // Just past it. The formula is five bytes, so the caption must not blame its own
+    // length -- that is the whole point of the message this test pins.
+    let past = render(2043);
+    assert!(
+        past.contains("a formula and its macros over 2048 bytes"),
+        "the caption must name the macros: {past:?}"
+    );
+
+    // Past the far edge the definition block is refused on its own account and the formula
+    // recovers. Without this line the test would pass against a cap that really was per
+    // formula. Only the block's own caption may mention the cap, so the tail after it must
+    // be clean.
+    let beyond = render(2049);
+    let after_block = beyond
+        .rsplit_once("2048 bytes")
+        .map_or(beyond.as_str(), |(_, tail)| tail);
+    assert!(
+        !after_block.contains("2048 bytes"),
+        "past the far edge the preamble is dropped and x = 1 draws again: {beyond:?}"
+    );
+}
+
+#[test]
 fn a_macro_used_before_its_definition_is_not_found() {
     // Design spec §16.2: one pass, document order, and this direction is the rule rather
     // than a limitation to be fixed by a second pass.
