@@ -4,11 +4,16 @@
 
 ### Breaking
 
+0.3.0 wrote these entries as API breaks a `cargo publish` consumer of the library crate
+would feel. That premise no longer holds: mdmost is not published to crates.io (see
+Changed, below) and the crate is `publish = false`, so the audience for this section is
+whoever builds against `mdmost` as a git dependency, and anyone reading it to understand
+what moved. The entries are a record, not a compatibility promise.
+
 - `Search::locate` takes `&Canvas` where it took `&[SearchSpan]`. A hit inside a construct
   with no interior position — a drawn formula — is answered by the construct's rectangle
   rather than by the span that names it, and the rectangle is on the canvas and not on any
-  span. The crate is `publish = false`, so this is a record of what moved for a reader and
-  for anyone building against `mdmost` as a git dependency, not a compatibility promise.
+  span.
 
 ### New
 
@@ -40,6 +45,23 @@
 
 ### Changed
 
+- **mdmost is no longer published to crates.io.** `cargo install mdmost` will not find
+  it; the Rust route is now `cargo install --git https://github.com/oetiker/mdmost`, and
+  the release tarballs, the Homebrew tap and the `.deb`/`.rpm` packages are unchanged.
+  The reason is the LaTeX parser: `pulldown-latex` 0.8.0 has four defects mdmost hits
+  with ordinary documents, two of which abort the whole process on a stack overflow
+  rather than panicking. The fixes are ours, they are open as pull requests upstream, and
+  one of the four has already been closed unmerged — so a release that waits for them is
+  a release with no date. Publishing was the only thing that stood in the way of carrying
+  the fixed parser in this repository, and it is the cheaper of the two to give up.
+- **The parser is vendored, at `vendor/pulldown-latex/`.** It was a git dependency on a
+  fork pinned by revision; it is now a workspace member with a path dependency, so a
+  clean checkout builds the code you can read, without fetching a second repository.
+  `vendor/pulldown-latex/VENDORED.md` records the upstream commit, the four patches with
+  their pull-request numbers, what was left behind from the upstream tree, and what has
+  to be true before the whole directory is deleted again. It is meant to be temporary:
+  when upstream releases with these fixes, `vendor/` goes and the crates.io question
+  reopens.
 - `-\sin x` renders `−sin x`. The minus is the Unicode minus and the function name is set
   as a name rather than as three letters in a row.
 - A fraction or a radical may be the base of a script, so `\frac{a}{b}^2` and `\sqrt{x}^2`
@@ -75,17 +97,9 @@
 
 ### Breaking
 
-No format for this existed in this file before now. These entries were written as API
-breaks a `cargo publish` consumer of the library crate would feel, and are why this
-release is a minor bump rather than a patch.
-
-**That premise changed inside this same release.** mdmost is no longer published to
-crates.io (see Changed, below), so there is no such consumer any more: the audience for
-this section is now whoever builds against `mdmost` as a git dependency, and anyone
-reading these entries to understand what moved. The entries are kept as written — they
-describe real changes, and the minor bump they justify has already been decided. **Open
-question for the owner, not settled here: whether tracking API breaks at all still earns
-its keep now that nothing downstream can be broken by them.**
+No format for this existed in this file before now; entries here are API breaks a
+`cargo publish` consumer of the library crate would feel, and are why this release is a
+minor bump rather than a patch.
 
 - `render_block_numbered` and `render_blocks` each gained a `source: &str` parameter, so
   that a formula which cannot be drawn can fall back to its own verbatim bytes, delimiters
@@ -156,34 +170,13 @@ its keep now that nothing downstream can be broken by them.**
   where a full raised or lowered form exists and written flat (`x^q`) where it does
   not, `\frac{a}{b}` reads `a/b`, `\sqrt{x}` reads `√x`, and a big operator such as
   `\sum` or `\int` carries its limits as a subscript and superscript on the one
-  character. A `$$…$$` block or a ```` ```math ```` fence is display math, drawn
-  as rows of box art; one that does not parse, or that this version does not draw,
-  is shown as its own framed, syntax-highlighted source instead, the same as an
-  unsupported Mermaid diagram. `\(…\)` and `\[…\]` are read as
+  character. A `$$…$$` block or a ```` ```math ```` fence is display math; it is not
+  laid out in this version and is shown as its own framed, syntax-highlighted source
+  instead, the same as an unsupported Mermaid diagram. `\(…\)` and `\[…\]` are read as
   well behind `math_backslash`, off by default. Three configuration keys and their
   matching `--math`/`--no-math`, `--math-inline`/`--no-math-inline` and
   `--math-backslash`/`--no-math-backslash` flags control this; `math = false` parses
   `$` as ordinary text, exactly as before this existed.
-
-### Changed
-
-- **mdmost is no longer published to crates.io.** `cargo install mdmost` will not find
-  it; the Rust route is now `cargo install --git https://github.com/oetiker/mdmost`, and
-  the release tarballs, the Homebrew tap and the `.deb`/`.rpm` packages are unchanged.
-  The reason is the LaTeX parser: `pulldown-latex` 0.8.0 has four defects mdmost hits
-  with ordinary documents, two of which abort the whole process on a stack overflow
-  rather than panicking. The fixes are ours, they are open as pull requests upstream, and
-  one of the four has already been closed unmerged — so a release that waits for them is
-  a release with no date. Publishing was the only thing that stood in the way of carrying
-  the fixed parser in this repository, and it is the cheaper of the two to give up.
-- **The parser is vendored, at `vendor/pulldown-latex/`.** It was a git dependency on a
-  fork pinned by revision; it is now a workspace member with a path dependency, so a
-  clean checkout builds the code you can read, without fetching a second repository.
-  `vendor/pulldown-latex/VENDORED.md` records the upstream commit, the four patches with
-  their pull-request numbers, what was left behind from the upstream tree, and what has
-  to be true before the whole directory is deleted again. It is meant to be temporary:
-  when upstream releases with these fixes, `vendor/` goes and the crates.io question
-  reopens.
 
 ### Fixed
 

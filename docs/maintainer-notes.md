@@ -154,6 +154,17 @@ Each release:
    Unreleased, says why).
 3. `git pull` afterwards: the workflow has pushed two commits and a tag to `main`.
 
+**Open question, unsettled: whether `CHANGES.md`'s `### Breaking` section still earns its
+keep.** 0.3.0 introduced it to record API breaks a `cargo publish` consumer of the library
+crate would feel, and that premise is gone — the crate is `publish = false` and mdmost is
+not on crates.io. Whoever builds against `mdmost` as a git dependency still feels the
+breaks, so the entries are not worthless; but nothing downstream can be broken in the
+sense the section was written for, and a section justifying a minor bump is a different
+thing from a section recording what moved. It needs an owner's ruling. It is recorded
+here because the question belongs to the maintainer, not to a reader of the changelog:
+it was briefly written into the *released* `## 0.3.0` section instead, whose text the
+release workflow had already published verbatim as the 0.3.0 release notes.
+
 What is deliberately not automated, and why, is in
 `docs/superpowers/specs/2026-08-09-publishing-design.md` §1 — there is no apt/yum
 repository, no Pages site, no container image and no macOS notarisation.
