@@ -544,6 +544,37 @@ consult, so `\boldsymbol{x}` draws a plain `x`. Closing it means either reaching
 through another vendor patch or restating it here, and restating it would put a second
 copy of an uprightness policy in the tree.
 
+**A display formula's width bands are not monotone, and no code change fixes that.** The
+caption half of this was fixed — `MathError::TooWide`'s message was shortened so the number
+survives the frame's elision — but the band structure itself was left alone, because
+changing it means changing a placement ruling and that is the owner's to make. Measured on
+the built binary with `$$\frac{a + b + c + d + e + f + g}{2}$$`, which draws at 25 columns:
+
+| terminal | body | what the reader gets | why |
+|---|---|---|---|
+| ≤ 10 | ≤ 8 | framed source | past the `VIEWPORTS` ceiling: 3 × body < 25 |
+| 11 … 19 | 9 … 17 | **drawn**, side-scrolling | overrun ≥ `MIN_SURPLUS` (8) |
+| 20 … 26 | 18 … 24 | framed source | overrun 1 … 7, under `MIN_SURPLUS` |
+| ≥ 27 | ≥ 25 | **drawn**, centred | it fits |
+
+Widening the terminal from 19 to 20 *loses* the formula, which reads as a bug to anyone
+who resizes. It is not one: it is what `MIN_SURPLUS` says, applied honestly.
+
+**The shape is structural.** A rule that refuses in a middle band cannot be monotone in the
+body width. To remove the 19 → 20 edge the middle band has to go, and there are only two
+ways to make it go: draw at an overrun of 1 … 7, which is the thing `MIN_SURPLUS` exists to
+prevent (a horizontal scrollbar, a chevron on every row and an `↔ 1/1` readout for the sake
+of three columns); or never side-scroll a formula at all, which contradicts design spec §7
+and the manual. `VIEWPORTS` puts a second edge at the narrow end by the same argument. Both
+are rulings, not code.
+
+What the caption fix does buy: inside the 20 … 26 band the reader is now told `needs 25
+columns`, elided to `needs 25 …` at the narrow end of it, where before they got `this
+form…` and no number at all. So the rule stays surprising, but it is no longer silent —
+which is what the 2026-08-29 placement ruling asked for.
+`the_caption_keeps_its_number_at_every_width_that_refuses_to_draw` (`src/render/math.rs`)
+walks the whole band rather than one point in it.
+
 **The 2048-byte cap is per parse, not per formula, and the macro preamble spends it.**
 `MAX_SOURCE_BYTES` (`src/math/build.rs`) is applied to whatever `bridge::with_preamble`
 assembled, and that is `preamble + 1 + formula` for any document that defines a macro. The

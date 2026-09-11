@@ -385,9 +385,52 @@ mod tests {
             text.contains("\\frac"),
             "the framed source, which the drawn form never contains: {text}"
         );
-        // Twenty-three columns is too narrow for the whole caption, so the frame elides
-        // it; what matters here is that the reader is told a width was the problem.
-        assert!(text.contains("this formula needs"), "captioned: {text}");
+        // The caption is the entire compensation for refusing to draw, so the number has to
+        // survive the frame's elision. At 23 columns the room is 19 and the old
+        // 29-character message elided to `this formula ne…`, which told the reader nothing
+        // they could act on. `25` is the one thing they cannot get anywhere else.
+        assert!(text.contains("needs 25 columns"), "captioned: {text}");
+    }
+
+    #[test]
+    fn the_caption_keeps_its_number_at_every_width_that_refuses_to_draw() {
+        // The 2026-08-29 placement ruling says `TooWide`'s caption reaches a reader. It did
+        // not. The caption is shown only where the body is too narrow for the formula, and
+        // `code::fallback` elides it to the body less four -- so for any formula under
+        // about 34 columns those two conditions could not both hold, and the number was cut
+        // off at every width in the band.
+        //
+        // Measured on the built binary before the message was shortened, on MID (25
+        // columns), which refuses from body 18 through body 24:
+        //
+        //   terminal 20 (body 18)  `this form…`
+        //   terminal 22 (body 20)  `this formul…`
+        //   terminal 24 (body 22)  `this formula …`
+        //   terminal 26 (body 24)  `this formula ne…`
+        //
+        // Not one of them carries the width. The old tests each probed a single point
+        // inside the band; this walks all of it, which is what the ruling actually claims.
+        let doc = Doc::parse(MID);
+        for body in 18..=24 {
+            let (at, canvas) = formula(
+                node(&doc),
+                body,
+                body,
+                Limits::new(200, 1),
+                Ctx::new(&theme(), &RenderOptions::default()),
+            )
+            .expect("answered for");
+            assert_eq!(at, body, "body {body} is inside the refusal band");
+            let text = canvas.plain_text();
+            assert!(
+                text.contains("\\frac"),
+                "body {body} must show the framed source: {text}"
+            );
+            assert!(
+                text.contains("25"),
+                "body {body} must still tell the reader the width it needs: {text}"
+            );
+        }
     }
 
     #[test]
@@ -408,7 +451,7 @@ mod tests {
         assert_eq!(at, 36, "a surplus of five does not earn the room");
         let text = canvas.plain_text();
         assert!(
-            text.contains("this formula needs 41 columns"),
+            text.contains("needs 41 columns"),
             "the caption carries the answer: {text}"
         );
     }

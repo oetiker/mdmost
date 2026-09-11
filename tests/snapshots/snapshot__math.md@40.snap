@@ -64,7 +64,7 @@ expression: canvas.plain_text()
                                         
  ╭ math ──────────────────────────────╮ 
  │ f(x) = a_0 + a_1 x + a_2 x^2 + a_› │ 
- ╰ this formula needs 43 columns ─────╯ 
+ ╰ needs 43 columns ──────────────────╯ 
                                         
  Display: a block that only defines     
  macros                                 
