@@ -390,7 +390,12 @@ pub enum Grouping {
 }
 
 impl Grouping {
-    pub(crate) fn is_math_env(&self) -> bool {
+    /// Whether this grouping is a math environment, which does **not** inherit the
+    /// enclosing state — an ordinary group and a `\left…\right` pair do.
+    ///
+    /// `pub` is a local patch — patch 5 in `VENDORED.md`. mdmost scopes font state the way
+    /// this parser does and needs the same answer. The body is untouched.
+    pub fn is_math_env(&self) -> bool {
         !matches!(self, Self::Normal | Self::LeftRight(_, _))
     }
 }

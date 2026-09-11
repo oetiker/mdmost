@@ -15,7 +15,7 @@ before changing anything under it.
   field claims, plus the four merges below.
 - Licence: MIT. `LICENSE` is copied with the code because the licence requires it.
 
-## The four patches
+## Patches 1-4: defects, each an upstream branch
 
 Each is an independent branch off upstream `main`, merged into `mdmost-integration`.
 Every one of them is a defect mdmost hit with real documents.
@@ -36,6 +36,33 @@ mdmost's own test suite, not merely a hardening measure: `src/math/build.rs`'s
 case hold only with `fix/optional-argument-extent` and
 `fix/newcommand-optional-arg-count` applied.
 
+## Patch 5: two visibility widenings, local, no upstream PR
+
+**Added 2026-09-11, Task 15b. This one is not a defect and is not on a branch of the
+fork** — it is two words of `pub` in this tree, made by hand, and it must be re-applied by
+hand if this directory is ever re-synced.
+
+| File | Item | Was | Is |
+| --- | --- | --- | --- |
+| `src/mathml.rs` | `Font::map_char` | private | `pub` |
+| `src/event.rs` | `Grouping::is_math_env` | `pub(crate)` | `pub` |
+
+**No body was touched, moved or rewritten**, and the three `unsafe` blocks in this tree are
+untouched. Each item gained a doc comment saying the `pub` is ours and pointing here.
+
+Why: mdmost draws `\mathbb{R}` as `ℝ` on a terminal cell. `map_char` is the table that
+says which code point that is — the same table this crate's own MathML writer uses — and
+the alternative was a second copy of it in `src/math/build.rs`, which would drift. The
+owner ruled that the parser's table is the source (plan Task 15b). `is_math_env` is the
+same argument for the *scoping*: a font change applies to the end of its group, and a math
+environment is the one group that does not inherit one, which is a fact only this crate
+knows.
+
+Neither changes what parses or what this crate renders; `cargo test -p pulldown-latex`
+is unaffected by them. **No upstream PR was opened**, per the plan: widening visibility for
+one consumer's convenience is a different kind of ask from the four defect fixes above, and
+whether to make it is the owner's call rather than this task's.
+
 `MAX_COMMAND_RUN` and `MAX_SOURCE_BYTES` in `src/math/build.rs` stay regardless of what
 happens here. They refuse before the parser runs, so they do not depend on which parser
 is underneath.
@@ -44,6 +71,10 @@ is underneath.
 
 When upstream cuts a release carrying these fixes:
 
+0. **Patch 5 blocks this step until it is answered.** `src/math/build.rs` calls
+   `Font::map_char` and `Grouping::is_math_env`, and a crates.io `pulldown-latex` exports
+   neither. Deleting `vendor/` therefore stops mdmost compiling until either upstream makes
+   them public or `build.rs` grows a table of its own — which the owner ruled against.
 1. Delete `vendor/` entirely.
 2. Restore a plain version requirement in the root `Cargo.toml`:
    `pulldown-latex = { version = "…", default-features = false }`.

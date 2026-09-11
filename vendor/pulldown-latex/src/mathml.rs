@@ -1327,7 +1327,13 @@ impl<I: Iterator> Iterator for ManyPeek<I> {
 
 impl Font {
     /// Map a character to its mathvariant equivalent.
-    fn map_char(self, c: char) -> char {
+    ///
+    /// A character with no styled form in this font maps to itself.
+    ///
+    /// `pub` is a local patch — patch 5 in `VENDORED.md`. mdmost draws `\mathbb{R}` as `ℝ`
+    /// on a terminal cell and needs this table, which is the parser's own, rather than a
+    /// second one of its own. The body is untouched.
+    pub fn map_char(self, c: char) -> char {
         char::from_u32(match (self, c) {
             // Bold Script mappings
             (Font::BoldScript, 'A'..='Z') => c as u32 + 0x1D48F,
