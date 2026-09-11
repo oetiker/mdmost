@@ -977,6 +977,22 @@ mod tests {
                 "a fence whose delimiters have no box-art form",
                 fenced(Some('⌊'), Some('⌋'), text("x")),
             ),
+            // A zero-width cluster in a box of its own, which is the shape
+            // `Visual::Negation` builds for `a \not= b`. The flat walk concatenates the
+            // row into one string, so the overlay follows the `=` and the terminal
+            // composes them; the canvas walk gives each part its own `write_str`, so the
+            // overlay arrives alone and has to find the character it strikes on the
+            // canvas rather than earlier in the same call. Until these two cases existed
+            // the walks disagreed here and nothing said so: every other case in this list
+            // is a spacing cluster, so the ONE ENGINE claim covered only those.
+            (
+                "a combining mark in a box of its own",
+                row(vec![text("="), text("\u{338}")]),
+            ),
+            (
+                "a combining mark between two spacing parts",
+                row(vec![text("a "), text("="), text("\u{338}"), text(" b")]),
+            ),
         ];
 
         for (what, b) in cases {

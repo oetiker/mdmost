@@ -992,3 +992,52 @@ fn symbols_reports_the_styled_letter_because_the_author_asked_for_it() {
     // the one assertion that pins its font stack rather than the recursion's.
     assert_eq!(symbols(r"\mathbb{R}x").expect("parses"), "ℝx");
 }
+
+// --- Negation across both walks (branch review C1) -------------------------------------
+
+/// The display walk's rendering of `src`, as rows of text.
+fn display_rows(src: &str) -> Vec<String> {
+    let canvas = super::render_display_natural(src, 60, &crate::theme::Theme::default())
+        .unwrap_or_else(|err| panic!("{src:?} failed: {err}"));
+    (0..canvas.height())
+        .map(|row| canvas.row_text(row).trim_end().to_string())
+        .collect()
+}
+
+#[test]
+fn a_negation_reaches_the_display_walk_and_not_only_the_inline_one() {
+    // The formula asserted the opposite of what the author wrote: `\not` builds the
+    // overlay as its own zero-width box, and the display walk gives every box its own
+    // `write_str`, so the overlay arrived with nothing written in that call and was
+    // dropped. `a = b` for `a \not= b` is not a degraded rendering, it is a false
+    // statement, and it is the one answer design spec §9 forbids.
+    //
+    // Asserted as code points, because `=` and `=\u{338}` are indistinguishable in a
+    // report and in a diff.
+    assert_eq!(display_rows(r"a \not= b"), vec!["a =\u{338} b"]);
+    assert_eq!(display_rows(r"a \not\in B"), vec!["a ∈\u{338} B"]);
+    // The two walks must agree, which is the property that makes this a defect rather
+    // than a choice.
+    assert_eq!(rendered(r"a \not= b"), "a =\u{338} b");
+    assert_eq!(rendered(r"a \not\in B"), "a ∈\u{338} B");
+}
+
+#[test]
+fn a_negation_survives_inside_a_taller_construct() {
+    // The one-row case could be fixed by anything that happens to look left along row 0.
+    // A negated relation in a numerator puts the overlay on a row the walk reached by
+    // recursion, above the baseline, with the fraction rule drawn after it.
+    assert_eq!(
+        display_rows(r"\frac{a \not= b}{c}"),
+        vec!["a =\u{338} b", "─────", "  c"]
+    );
+}
+
+#[test]
+fn a_single_codepoint_negation_is_unaffected() {
+    // `\notin` is U+2209, not an overlay, so it never went through the dropped path.
+    // Pinned so that a fix aimed at `\not` cannot quietly change the spelling that
+    // already worked.
+    assert_eq!(display_rows(r"a \notin B"), vec!["a ∉ B"]);
+    assert_eq!(rendered(r"a \notin B"), "a ∉ B");
+}
