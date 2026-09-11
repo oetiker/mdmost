@@ -615,6 +615,16 @@ fn atom(content: &Content<'_>, font: Option<Font>) -> (Class, MathBox) {
                 DelimiterType::Open => Class::Open,
                 DelimiterType::Close => Class::Close,
                 // `\middle|` sits between two operands and reads as a relation does.
+                //
+                // **This arm is live, not defensive.** Two spellings reach it:
+                // `\middle<delim>` emits `DelimiterType::Fence` directly, and `\big`,
+                // `\Big`, `\bigg`, `\Bigg` (with their `l`/`r`/`m` forms) reach it through
+                // the parser's `char_delimiter_map`, which classes `|`, `‖`, `/`, `↑`,
+                // `⇑`, `↓`, `⇓`, `↕`, `⇕` as fences. Replacing it with `unreachable!()`
+                // would put a panic on the path `$\{ x \big| x > 0 \}$` takes, inside a
+                // module that may not panic (design spec §9) and inside a pager the reader
+                // cannot exit. `a_fence_delimiter_is_spaced_as_a_relation` pins both
+                // spellings.
                 DelimiterType::Fence => Class::Relation,
             };
             (class, text(content.to_string()))
@@ -1799,6 +1809,24 @@ mod tests {
             "(x)y",
             "the walk resumes after it"
         );
+    }
+
+    #[test]
+    fn a_fence_delimiter_is_spaced_as_a_relation() {
+        // `DelimiterType::Fence -> Class::Relation` was recorded as an unreachable arm.
+        // It is not: two ordinary spellings reach it, and until this test nothing anywhere
+        // in `src/` or `tests/` contained `\big` or `\middle`. An arm that no test reaches
+        // reads as dead code, and the obvious way to retire one -- `unreachable!()` --
+        // would put a panic on a live path, in a module that may not panic.
+        //
+        // What is asserted is the *spacing*, because the spacing is all the class decides:
+        // `Class::Ordinary` would draw `a|b` and `Open`/`Close` would hug one side.
+        //
+        // `\middle<delim>` emits the event directly.
+        assert_eq!(drawn(r"a \middle| b"), "a | b");
+        // `\big` and its family arrive by the other route, the parser's
+        // `char_delimiter_map`, which is why one spelling cannot stand for both.
+        assert_eq!(drawn(r"\{ x \big| x > 0 \}"), "{x | x > 0}");
     }
 
     #[test]
