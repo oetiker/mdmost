@@ -381,7 +381,7 @@ fn a_lone_top_level_heading_is_drawn_as_a_banner() {
         crate::search::SearchMode::Literal,
     )
     .expect("a literal query");
-    search.locate("# Title\n\nbody\n", canvas.spans());
+    search.locate("# Title\n\nbody\n", &canvas);
     let hit = &search.hits()[0];
     assert_eq!(hit.row(), Some(0), "the hit must be found on the banner");
     assert!(

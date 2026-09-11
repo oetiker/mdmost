@@ -4104,12 +4104,29 @@ fn a_press_anywhere_in_a_formula_copies_all_of_it() {
     }
 }
 
-/// Presses every drawn row of `formula` at column `col` of its atom and returns, per
-/// press, the clipboard text and the wash of every row the atom owns.
+/// What one press on a formula produced.
+struct Press {
+    /// The bytes the clipboard got.
+    text: String,
+    /// The wash of every row the formula's atom owns, in row order.
+    wash: Vec<Vec<std::ops::Range<u16>>>,
+}
+
+/// Every drawn row of a formula pressed in turn, with the rectangle they must agree on.
+struct FormulaPresses {
+    /// The drawn rectangle's columns.
+    columns: std::ops::Range<u16>,
+    /// One entry per drawn row, in row order.
+    presses: Vec<Press>,
+}
+
+/// Presses each drawn row of the formula in `source` at the rectangle's first column.
 ///
-/// The shape both whole-formula tests need: the claim is that *all* presses agree, so
-/// the assertion has to compare presses against each other, not each against a constant.
-fn presses_down_a_formula(source: &str) -> Vec<(String, Vec<Vec<std::ops::Range<u16>>>)> {
+/// The shape both whole-formula tests need. The claim is that *all* presses agree, so
+/// the assertions compare presses against each other; the columns come back too so they
+/// can also be compared against the rectangle, which is what makes them exact rather
+/// than merely consistent.
+fn presses_down_a_formula(source: &str) -> FormulaPresses {
     let mut app = pager(source);
     let canvas = app.canvas().clone();
     let atom = canvas
@@ -4124,7 +4141,8 @@ fn presses_down_a_formula(source: &str) -> Vec<(String, Vec<Vec<std::ops::Range<
         rows.len(),
         canvas.plain_text()
     );
-    rows.iter()
+    let presses = rows
+        .iter()
         .map(|&row| {
             let press = drag(Pos::new(row, atom.col), Pos::new(row, atom.col));
             let extract =
@@ -4133,9 +4151,16 @@ fn presses_down_a_formula(source: &str) -> Vec<(String, Vec<Vec<std::ops::Range<
                 .iter()
                 .map(|&lit| select::highlighted_columns(&canvas, source, press, lit))
                 .collect();
-            (extract.text, wash)
+            Press {
+                text: extract.text,
+                wash,
+            }
         })
-        .collect()
+        .collect();
+    FormulaPresses {
+        columns: atom.columns(),
+        presses,
+    }
 }
 
 /// A press on **any** row of a quoted display formula washes the whole rectangle.
@@ -4153,27 +4178,30 @@ fn presses_down_a_formula(source: &str) -> Vec<(String, Vec<Vec<std::ops::Range<
 #[test]
 fn a_press_on_any_row_of_a_quoted_formula_washes_all_of_it() {
     let source = "> $$\n> \\frac{a}{b}\n> $$\n";
-    let presses = presses_down_a_formula(source);
-    let (first_text, first_wash) = presses.first().expect("three presses").clone();
+    let FormulaPresses { columns, presses } = presses_down_a_formula(source);
+    let first = presses.first().expect("three presses");
     assert_eq!(
-        first_text, "$$\n\\frac{a}{b}\n$$",
+        first.text, "$$\n\\frac{a}{b}\n$$",
         "the first row's press copies clean LaTeX, quote markers off"
     );
-    // Every row of the rectangle lit, and lit identically — the wash follows the
-    // clipboard, and the clipboard is the whole formula.
-    for row_wash in &first_wash {
-        assert!(
-            !row_wash.is_empty(),
-            "a press on the first drawn row left a row of the rectangle dark: {first_wash:?}"
+    // Every row of the rectangle lit, and lit to the rectangle's own columns — the wash
+    // follows the clipboard, and the clipboard is the whole formula. Asserted against the
+    // atom rather than merely non-empty, so a wash of the wrong columns cannot pass.
+    for row_wash in &first.wash {
+        assert_eq!(
+            *row_wash,
+            vec![columns.clone()],
+            "a press on the first drawn row must light the rectangle on every row: {:?}",
+            first.wash
         );
     }
-    for (index, (text, wash)) in presses.iter().enumerate() {
+    for (index, press) in presses.iter().enumerate() {
         assert_eq!(
-            *text, first_text,
+            press.text, first.text,
             "press on drawn row {index} copied something else"
         );
         assert_eq!(
-            *wash, first_wash,
+            press.wash, first.wash,
             "press on drawn row {index} washed a different rectangle"
         );
     }
@@ -4182,37 +4210,35 @@ fn a_press_on_any_row_of_a_quoted_formula_washes_all_of_it() {
 /// The same, at the top level and wider than one column.
 ///
 /// The width matters: `\frac{a}{b}` draws a one-column rectangle, so a wash of the wrong
-/// *columns* would pass the quoted test above. `\frac{a+b}{c}` draws three columns, and
-/// the whole three must light on every press.
+/// *columns* would pass the quoted test above. `\frac{a+b}{c}` draws five — its rule row
+/// is `─────`, the width of the numerator `a + b` as the renderer spaces it — and all
+/// five must light on every press.
 #[test]
 fn a_press_on_any_row_of_a_top_level_formula_washes_all_of_it() {
     let source = "$$\n\\frac{a+b}{c}\n$$\n";
-    let presses = presses_down_a_formula(source);
-    let (first_text, first_wash) = presses.first().expect("three presses").clone();
-    assert_eq!(first_text, "$$\n\\frac{a+b}{c}\n$$");
-    let widest = first_wash
-        .iter()
-        .flatten()
-        .map(|range| range.end - range.start)
-        .max()
-        .expect("the press washed something");
-    assert!(
-        widest >= 3,
-        "the rule of a three-column fraction washes three columns, got {first_wash:?}"
+    let FormulaPresses { columns, presses } = presses_down_a_formula(source);
+    let first = presses.first().expect("three presses");
+    assert_eq!(first.text, "$$\n\\frac{a+b}{c}\n$$");
+    assert_eq!(
+        columns.end - columns.start,
+        5,
+        "the fixture draws a five-column rectangle, or it is not testing the columns"
     );
-    for row_wash in &first_wash {
+    for row_wash in &first.wash {
         assert_eq!(
-            *row_wash, first_wash[0],
-            "the rectangle is washed to the same columns on every row: {first_wash:?}"
+            *row_wash,
+            vec![columns.clone()],
+            "every row is washed to the rectangle's five columns: {:?}",
+            first.wash
         );
     }
-    for (index, (text, wash)) in presses.iter().enumerate() {
+    for (index, press) in presses.iter().enumerate() {
         assert_eq!(
-            *text, first_text,
+            press.text, first.text,
             "press on drawn row {index} copied something else"
         );
         assert_eq!(
-            *wash, first_wash,
+            press.wash, first.wash,
             "press on drawn row {index} washed a different rectangle"
         );
     }
@@ -6877,7 +6903,7 @@ fn a_search_hit_after_an_escape_lands_on_the_cells_it_drew() {
     let canvas = render(doc, 60);
     let mut search = crate::search::Search::new(doc, "beta gamma", SearchMode::Literal)
         .expect("a valid pattern");
-    search.locate(doc, canvas.spans());
+    search.locate(doc, &canvas);
     let hit = search.hits().first().expect("the pattern matches");
     assert_eq!(
         hit.segments.len(),
@@ -6955,7 +6981,7 @@ fn a_search_hit_across_a_soft_line_break_highlights_in_one_piece() {
     let canvas = render(doc, 60);
     let mut search = crate::search::Search::new(doc, "gamma\\s+delta", SearchMode::Regex)
         .expect("a valid pattern");
-    search.locate(doc, canvas.spans());
+    search.locate(doc, &canvas);
     let hit = search.hits().first().expect("the pattern matches");
     assert_eq!(
         hit.segments.len(),
@@ -6967,6 +6993,121 @@ fn a_search_hit_across_a_soft_line_break_highlights_in_one_piece() {
         hit.segments[0].cols,
         u16::try_from("gamma delta".len()).expect("short"),
         "and it is as wide as the rendered match"
+    );
+}
+
+/// Every segment a literal search for `query` produces in `doc`, rendered at 80 columns.
+fn located(doc: &str, query: &str) -> Vec<crate::search::Segment> {
+    let canvas = render(doc, 80);
+    let mut search =
+        crate::search::Search::new(doc, query, SearchMode::Literal).expect("a valid pattern");
+    search.locate(doc, &canvas);
+    let mut segments: Vec<crate::search::Segment> = search
+        .hits()
+        .iter()
+        .flat_map(|hit| hit.segments.iter().copied())
+        .collect();
+    segments.sort_unstable();
+    segments
+}
+
+/// A search hit on a formula's LaTeX lights every drawn row of it (design spec §10).
+///
+/// The other half of Task 15a. The wash follows the clipboard after `dbdc83a`, but the
+/// *search* highlight did not: `render::code` emits one `SearchSpan` per formula — which
+/// is right, and stays — and `search::segments_for` turned that one span into one
+/// `Segment`, so `frac` lit the formula's first drawn row and left the rule and the
+/// denominator dark. Spec §10: a hit anywhere in the LaTeX highlights the whole formula.
+///
+/// The block-quoted fixture again, because it is the one that notices atom mistakes, and
+/// because the quote bar it draws in column 1 is the nearest cell that must stay dark.
+#[test]
+fn a_search_hit_on_a_formula_lights_every_row_of_it() {
+    let doc = "> $$\n> \\frac{a}{b}\n> $$\n";
+    let canvas = render(doc, 80);
+    let atom = canvas
+        .atoms()
+        .first()
+        .expect("a drawn formula records an atom")
+        .clone();
+    assert_eq!(atom.rows, 3, "the fraction draws three rows");
+    let want: Vec<crate::search::Segment> = (atom.row..atom.row + atom.rows)
+        .map(|row| crate::search::Segment {
+            row,
+            col: atom.col,
+            cols: atom.cols,
+        })
+        .collect();
+    assert_eq!(
+        located(doc, "frac"),
+        want,
+        "one segment per drawn row, each the rectangle's own columns — and no other cell"
+    );
+    // The query above matches bytes that draw nothing at all — `\frac` is markup, the
+    // cells say `a`, `─`, `b` — which is the whole reason the lookup goes through the
+    // atom rather than through the span's own columns.
+    //
+    // The `$$` fences are the other shape: two hits, an opener and a closer, on source
+    // lines that draw no cells of their own. Each must light the same rectangle, not a
+    // row of its own and not a fourth row below the drawing.
+    let mut fences =
+        crate::search::Search::new(doc, "$$", SearchMode::Literal).expect("a valid pattern");
+    fences.locate(doc, &canvas);
+    assert_eq!(fences.hits().len(), 2, "an opening and a closing fence");
+    for hit in fences.hits() {
+        assert_eq!(
+            hit.segments, want,
+            "a fence lights the whole drawing, like any other hit in the formula"
+        );
+    }
+}
+
+/// The guard the atom lookup must not overrun: a hit in ordinary prose lights its own
+/// columns, exactly.
+///
+/// A paragraph carries `copied: true` spans and records no atom, so nothing about it
+/// changes. Asserted rather than assumed, because "light the rectangle" is a rule that
+/// would be easy to state too widely and impossible to notice going wrong in prose,
+/// where every span is one row deep already.
+#[test]
+fn a_search_hit_in_prose_still_lights_exactly_its_columns() {
+    let doc = "Alpha beta gamma delta.\n";
+    let canvas = render(doc, 80);
+    assert!(
+        canvas.atoms().is_empty(),
+        "a paragraph records no atom, so this fixture isolates the prose path"
+    );
+    let (row, col, _) = drawn(&canvas, "gamma");
+    assert_eq!(
+        located(doc, "gamma"),
+        vec![crate::search::Segment { row, col, cols: 5 }],
+        "five columns on one row, not the paragraph"
+    );
+}
+
+/// And a hit inside a Mermaid label lights the label, not the diagram.
+///
+/// The case that makes `copied` the discriminator rather than `Atom::contains_span` on
+/// its own: a label's bytes *are* inside the diagram's atom, so a lookup keyed only on
+/// containment would light the whole chart for a search on one box. A label is
+/// `copied: true` and has interior positions — search already projects into it correctly
+/// — so only a `copied: false` span takes the rectangle. This is the same discriminator
+/// the selection guard uses, which is what keeps the wash and the search highlight
+/// agreeing about what a formula is.
+#[test]
+fn a_search_hit_in_a_mermaid_label_lights_the_label_not_the_diagram() {
+    let canvas = render(FITTING_FENCE, 80);
+    let atom = canvas
+        .atoms()
+        .first()
+        .expect("the diagram records an atom")
+        .clone();
+    assert!(atom.rows > 1, "the chart draws more than one row");
+    let (row, col, cols) = drawn(&canvas, "Read");
+    assert_eq!(
+        located(FITTING_FENCE, "Read"),
+        vec![crate::search::Segment { row, col, cols }],
+        "the label's own cells, not the chart's rectangle"
     );
 }
 

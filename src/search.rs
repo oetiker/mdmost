@@ -7,7 +7,8 @@
 //!
 //! 1. [`Search::new`] finds byte ranges in [`Doc::source`](crate::doc::Doc::source).
 //! 2. [`Search::locate`] projects those ranges onto a rendered canvas through its
-//!    [`SearchSpan`]s, producing one [`Segment`] per rendered piece.
+//!    [`SearchSpan`](crate::canvas::SearchSpan)s, producing one [`Segment`] per
+//!    rendered piece.
 //!
 //! A hit that the renderer never put on screen — text inside a skipped HTML block, say
 //! — has no segments and is dropped by `locate`, so the match count the user sees is
@@ -25,7 +26,7 @@
 #[cfg(test)]
 mod tests;
 
-use crate::canvas::SearchSpan;
+use crate::canvas::Canvas;
 use crate::text::display_width;
 
 /// How the query text is interpreted.
@@ -172,10 +173,16 @@ impl Search {
     ///
     /// Call this again after every re-render; it is idempotent and cheap relative to
     /// rendering itself.
-    pub fn locate(&mut self, source: &str, spans: &[SearchSpan]) {
+    ///
+    /// The whole canvas rather than its [`SearchSpan`](crate::canvas::SearchSpan)s
+    /// alone, because a hit inside a construct with no interior position is answered by
+    /// the construct's rectangle and not by the span — see [`segments_for`]. This is the
+    /// same argument `tui::select::highlighted_columns` takes, and deliberately so: the
+    /// wash and the search highlight answer "what is this formula?" from one place.
+    pub fn locate(&mut self, source: &str, canvas: &Canvas) {
         let mut hits = Vec::with_capacity(self.source_hits.len());
         for hit in &self.source_hits {
-            let mut segments = segments_for(source, spans, hit.source_start, hit.source_end);
+            let mut segments = segments_for(source, canvas, hit.source_start, hit.source_end);
             if segments.is_empty() {
                 continue;
             }
@@ -366,35 +373,64 @@ fn first_line(message: &str) -> String {
 /// *Every* span overlapping the range contributes a segment, not just the one holding
 /// the start: a match that the renderer wrapped across a line break belongs to two
 /// spans and must highlight in both.
-fn segments_for(source: &str, spans: &[SearchSpan], start: usize, end: usize) -> Vec<Segment> {
-    spans
+///
+/// A span with **no interior position** is the one case a span cannot answer alone. A
+/// display formula records exactly one such span (`render::code`, and that stays: the
+/// drawn atoms carry no source positions, so no finer span is possible), sitting on the
+/// formula's first drawn row. Projecting the hit through that span alone lit one row of
+/// a rectangle three rows tall, while a mouse press on the same formula washed all three
+/// — the see/get divergence, arrived at from the other side. So a `copied: false` span
+/// that belongs to an [`Atom`](crate::canvas::Atom) is answered by the atom's rectangle,
+/// one segment per drawn row: design spec §10, "a search hit anywhere in the LaTeX
+/// highlights the whole formula".
+///
+/// `copied` is the discriminator, not containment on its own, and the difference is a
+/// Mermaid label: its bytes lie inside the diagram's atom too, but it is `copied: true`
+/// and does have interior positions, so search projects into it exactly as before. A hit
+/// on one box lights that box, never the chart. This is the same discriminator
+/// `tui::select::resolve` uses to decide what washes, which is what keeps the two
+/// agreeing.
+fn segments_for(source: &str, canvas: &Canvas, start: usize, end: usize) -> Vec<Segment> {
+    canvas
+        .spans()
         .iter()
         .filter(|span| span.source_start < end && span.source_end > start)
-        .filter_map(|span| {
+        .flat_map(|span| {
             // A span with no interior position is taken whole or not at all: measuring a
             // prefix of its source against its cells would place a highlight using an
             // arithmetic its body cannot support.
             if !span.copied {
-                return Some(Segment {
+                if let Some(atom) = canvas.atoms().iter().find(|atom| atom.contains_span(span)) {
+                    return (atom.row..atom.row.saturating_add(atom.rows))
+                        .map(|row| Segment {
+                            row,
+                            col: atom.col,
+                            cols: atom.cols,
+                        })
+                        .collect();
+                }
+                return Vec::from([Segment {
                     row: span.row,
                     col: span.col,
                     cols: span.cols,
-                });
+                }]);
             }
             let overlap_start = span.source_start.max(start);
             let overlap_end = span.source_end.min(end);
             let prefix = slice(source, span.source_start, overlap_start);
             let body = slice(source, overlap_start, overlap_end);
             let offset = u16::try_from(display_width(prefix)).unwrap_or(u16::MAX);
-            let available = span.cols.checked_sub(offset)?;
+            let Some(available) = span.cols.checked_sub(offset) else {
+                return Vec::new();
+            };
             let cols = u16::try_from(display_width(body))
                 .unwrap_or(u16::MAX)
                 .min(available);
-            (cols > 0).then_some(Segment {
+            Vec::from_iter((cols > 0).then_some(Segment {
                 row: span.row,
                 col: span.col.saturating_add(offset),
                 cols,
-            })
+            }))
         })
         .collect()
 }

@@ -2,6 +2,7 @@
 //! Search tests.
 
 use super::*;
+use crate::canvas::SearchSpan;
 
 /// A span mapping a source range onto one canvas run.
 fn span(source_start: usize, source_end: usize, row: usize, col: u16, cols: u16) -> SearchSpan {
@@ -14,6 +15,20 @@ fn span(source_start: usize, source_end: usize, row: usize, col: u16, cols: u16)
         cols,
         copied: true,
     }
+}
+
+/// A canvas carrying exactly `spans` and no atoms, for the projection tests.
+///
+/// `locate` takes the whole canvas because a hit inside a construct with no interior
+/// position is answered by that construct's [`Atom`](crate::canvas::Atom) rather than by
+/// its span. These fixtures exercise the span path, so they record no atom and the two
+/// answers cannot differ.
+fn canvas_of(spans: &[SearchSpan]) -> crate::canvas::Canvas {
+    let mut canvas = crate::canvas::Canvas::empty(80);
+    for span in spans {
+        canvas.add_span(*span);
+    }
+    canvas
 }
 
 /// Runs a literal search and returns the source ranges it found.
@@ -117,7 +132,7 @@ fn regex_mode_honours_smart_case() {
 fn located_matches_map_onto_canvas_positions() {
     let source = "hello world";
     let mut search = Search::new(source, "world", SearchMode::Literal).expect("valid");
-    search.locate(source, &[span(0, 11, 3, 2, 11)]);
+    search.locate(source, &canvas_of(&[span(0, 11, 3, 2, 11)]));
     assert_eq!(search.len(), 1);
     assert_eq!(
         search.hits()[0].segments,
@@ -138,7 +153,10 @@ fn a_match_split_across_a_line_wrap_highlights_in_both_rows() {
 
     let mut search = Search::new(source, "a b", SearchMode::Literal).expect("valid");
     // "a b" occupies bytes 4..7, which straddles the two spans below.
-    search.locate(source, &[span(0, 5, 0, 0, 5), span(5, 10, 1, 0, 4)]);
+    search.locate(
+        source,
+        &canvas_of(&[span(0, 5, 0, 0, 5), span(5, 10, 1, 0, 4)]),
+    );
     assert_eq!(search.len(), 1);
     let rows: Vec<usize> = search.hits()[0]
         .segments
@@ -154,7 +172,7 @@ fn matches_the_renderer_never_drew_are_dropped() {
     let mut search = Search::new(source, "hidden", SearchMode::Literal).expect("valid");
     assert_eq!(search.source_hits().len(), 1);
     // The renderer emitted a span only for the visible text.
-    search.locate(source, &[span(14, 21, 0, 0, 7)]);
+    search.locate(source, &canvas_of(&[span(14, 21, 0, 0, 7)]));
     assert_eq!(search.len(), 0, "unreachable matches must not be counted");
     assert!(search.is_empty());
 }
@@ -164,9 +182,9 @@ fn locating_is_idempotent() {
     let source = "one two one";
     let spans = [span(0, 11, 0, 0, 11)];
     let mut search = Search::new(source, "one", SearchMode::Literal).expect("valid");
-    search.locate(source, &spans);
+    search.locate(source, &canvas_of(&spans));
     let first = search.hits().to_vec();
-    search.locate(source, &spans);
+    search.locate(source, &canvas_of(&spans));
     assert_eq!(search.hits(), first.as_slice());
 }
 
@@ -176,11 +194,11 @@ fn stepping_wraps_around_in_both_directions() {
     let mut search = Search::new(source, "x", SearchMode::Literal).expect("valid");
     search.locate(
         source,
-        &[
+        &canvas_of(&[
             span(0, 1, 0, 0, 1),
             span(2, 3, 5, 0, 1),
             span(4, 5, 9, 0, 1),
-        ],
+        ]),
     );
     assert_eq!(search.len(), 3);
     assert_eq!(search.step(None, true), Some(0));
@@ -203,11 +221,11 @@ fn matches_can_be_found_relative_to_a_row() {
     let mut search = Search::new(source, "x", SearchMode::Literal).expect("valid");
     search.locate(
         source,
-        &[
+        &canvas_of(&[
             span(0, 1, 0, 0, 1),
             span(2, 3, 5, 0, 1),
             span(4, 5, 9, 0, 1),
-        ],
+        ]),
     );
     assert_eq!(search.first_at_or_after(1, false), Some(1));
     assert_eq!(search.first_at_or_after(10, false), None);
@@ -220,7 +238,7 @@ fn matches_can_be_found_relative_to_a_row() {
 fn segments_can_be_looked_up_by_row() {
     let source = "one two";
     let mut search = Search::new(source, "o", SearchMode::Literal).expect("valid");
-    search.locate(source, &[span(0, 7, 2, 0, 7)]);
+    search.locate(source, &canvas_of(&[span(0, 7, 2, 0, 7)]));
     let on_row: Vec<(usize, Segment)> = search.segments_on_row(2).collect();
     assert_eq!(on_row.len(), 2);
     assert!(search.segments_on_row(3).next().is_none());
@@ -230,7 +248,7 @@ fn segments_can_be_looked_up_by_row() {
 fn clearing_the_location_keeps_the_source_matches() {
     let source = "abc";
     let mut search = Search::new(source, "b", SearchMode::Literal).expect("valid");
-    search.locate(source, &[span(0, 3, 0, 0, 3)]);
+    search.locate(source, &canvas_of(&[span(0, 3, 0, 0, 3)]));
     assert_eq!(search.len(), 1);
     search.clear_location();
     assert_eq!(search.len(), 0);
@@ -245,7 +263,7 @@ fn hits_for(markdown: &str, query: &str) -> Vec<Hit> {
     let options = crate::render::RenderOptions::default();
     let canvas = crate::render::render_flat(&doc, 40, &theme, &options);
     let mut search = Search::new(doc.source(), query, SearchMode::Literal).expect("valid pattern");
-    search.locate(doc.source(), canvas.spans());
+    search.locate(doc.source(), &canvas);
     search.hits().to_vec()
 }
 
@@ -272,6 +290,11 @@ fn an_atomic_span_highlights_whole_when_a_search_hits_inside_it() {
     // A formula's drawn cells are not a copy of its source, so the column arithmetic
     // that serves ordinary text cannot place a hit inside one. An atomic span
     // highlights all of itself instead of part of nothing.
+    //
+    // This fixture records no atom, which is the inline case: an inline formula is one
+    // row deep and its span is the whole answer. A *display* formula belongs to an atom
+    // and is answered by the atom's rectangle instead — `segments_for`, and
+    // `tui::tests::a_search_hit_on_a_formula_lights_every_row_of_it`.
     let span = SearchSpan {
         source_start: 10,
         source_end: 20,
@@ -281,7 +304,7 @@ fn an_atomic_span_highlights_whole_when_a_search_hits_inside_it() {
         cols: 3,
         copied: false,
     };
-    let segments = segments_for("x".repeat(40).as_str(), &[span], 12, 15);
+    let segments = segments_for("x".repeat(40).as_str(), &canvas_of(&[span]), 12, 15);
     assert_eq!(segments.len(), 1);
     assert_eq!(segments[0].col, 4);
     assert_eq!(
