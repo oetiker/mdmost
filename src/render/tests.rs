@@ -4115,9 +4115,13 @@ fn a_definition_only_block_contributes_no_rows() {
 }
 
 // Design spec §16: a macro defined in a display block that draws nothing is visible to
-// every formula after it. The engine draws `\mathbb{R}` as a plain `R` (font changes are
-// not glyph changes here), so what these tests look for is the *drawn* formula against
-// the *source* fallback of spec §9 — `x ∈ R` against `\R` — not a double-struck glyph.
+// every formula after it. What these tests look for is the *drawn* formula against the
+// *source* fallback of spec §9 — `x ∈ ℝ` against `\R`.
+//
+// The drawn side used to be a plain `R`: the engine dropped every font state change, so
+// `\mathbb{R}` and `R` were the same cell and this comment said so. Task 15b draws the
+// double-struck glyph, which makes these assertions sharper rather than weaker — `ℝ` can
+// only have come through `\mathbb`, where `R` could have come from anywhere.
 
 #[test]
 fn a_macro_defined_in_an_earlier_block_resolves_in_a_later_one() {
@@ -4125,7 +4129,7 @@ fn a_macro_defined_in_an_earlier_block_resolves_in_a_later_one() {
     let canvas = render_document(&doc, 40, None, &Theme::default(), &RenderOptions::default());
     let text = canvas.plain_text();
     assert!(
-        text.contains("x ∈ R"),
+        text.contains("x ∈ ℝ"),
         "the macro did not resolve: {text:?}"
     );
     assert!(!text.contains("\\R"), "the source leaked: {text:?}");
@@ -4143,7 +4147,7 @@ fn a_macro_used_before_its_definition_is_not_found() {
         "an undefined macro shows its source, which is spec §9's failure path: {text:?}"
     );
     assert!(
-        !text.contains("x ∈ R"),
+        !text.contains("x ∈ ℝ"),
         "the definition reached back: {text:?}"
     );
 }
@@ -4153,7 +4157,7 @@ fn an_inline_formula_sees_an_earlier_definition_too() {
     let doc = Doc::parse("$$\\newcommand{\\R}{\\mathbb{R}}$$\n\nThe set $\\R$ is real.\n");
     let canvas = render_document(&doc, 40, None, &Theme::default(), &RenderOptions::default());
     let text = canvas.plain_text();
-    assert!(text.contains("The set R is real."), "got {text:?}");
+    assert!(text.contains("The set ℝ is real."), "got {text:?}");
     assert!(!text.contains("\\R"), "the source leaked: {text:?}");
 }
 
@@ -4230,15 +4234,15 @@ fn the_preamble_stops_at_the_formula() {
     let canvas = render_document(&doc, 40, None, &Theme::default(), &RenderOptions::default());
     let text = canvas.plain_text();
     assert!(
-        text.contains("x ∈ R"),
+        text.contains("x ∈ ℝ"),
         "the first formula sees the first definition: {text:?}"
     );
     assert!(
-        text.contains("y ∈ Q"),
+        text.contains("y ∈ ℚ"),
         "the second formula sees the redefinition: {text:?}"
     );
     assert!(
-        !text.contains("x ∈ Q"),
+        !text.contains("x ∈ ℚ"),
         "the redefinition reached back: {text:?}"
     );
 }
@@ -4256,7 +4260,7 @@ fn a_definition_block_inside_a_quote_or_a_list_item_exports_too() {
         let canvas = render_document(&doc, 40, None, &Theme::default(), &RenderOptions::default());
         let text = canvas.plain_text();
         assert!(
-            text.contains("x ∈ R"),
+            text.contains("x ∈ ℝ"),
             "{markdown:?}: the macro did not resolve: {text:?}"
         );
         assert!(

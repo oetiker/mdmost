@@ -141,17 +141,17 @@ pub fn render_display_natural(src: &str, width: u16, theme: &Theme) -> Result<Ca
 /// forms this crate puts around it are mdmost's. `tests/glyph_inventory.rs` subtracts this
 /// from what the renderer drew and claims the rest.
 ///
+/// A font command is the same case: an author who writes `\mathbb{R}` asked for `ℝ`, so
+/// that is what comes back — not the `R` they typed, which is never drawn. The walk is
+/// `build::content_text`, which tracks the font state, and it is deliberately not the
+/// layout walk: a construct this engine refuses to draw is still made of its author's
+/// characters, and only a parse failure is an error here.
+///
 /// # Errors
 ///
 /// [`MathError::Parse`] if the LaTeX does not parse.
 pub fn symbols(src: &str) -> Result<String, MathError> {
     let storage = Storage::new();
     let events = build::parse(src, &storage)?;
-    let mut out = String::new();
-    for event in &events {
-        if let pulldown_latex::event::Event::Content(content) = event {
-            out.push_str(&build::atom(content).1.plain_text());
-        }
-    }
-    Ok(out)
+    Ok(build::content_text(&events))
 }

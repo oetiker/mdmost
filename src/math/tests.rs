@@ -164,9 +164,17 @@ fn a_horizontal_space_command_draws_one_column() {
 
 #[test]
 fn a_state_change_draws_nothing_of_its_own() {
-    // `\mathbf` is `Event::StateChange(StateChange::Font(..))` wrapping its argument in
-    // a group; the walk ignores the state change and still writes the content inside.
-    assert_eq!(rendered(r"\mathbf{x}"), "x");
+    // `\mathbf` is `Event::StateChange(StateChange::Font(..))` wrapping its argument in a
+    // group. The state change contributes no cell of its own — it moves the state the
+    // *next* atom is drawn in — so one letter goes in and one letter comes out.
+    //
+    // *Which* letter is Task 15b's subject, pinned in the font tests at the foot of this
+    // file. Until then this read `x`, because the walk dropped every state change and drew
+    // the plain letter; the claim made here was always about the cell count.
+    assert_eq!(rendered(r"\mathbf{x}"), "𝐱");
+    // A style change draws nothing *and* changes nothing: a terminal has one size, so
+    // `\displaystyle` is the state change with no state behind it.
+    assert_eq!(rendered(r"\displaystyle x"), "x");
 }
 
 #[test]
@@ -816,4 +824,148 @@ fn display_and_inline_agree_about_a_flat_formula() {
     assert_eq!(canvas.height(), 1);
     assert_eq!(canvas.row_text(0).trim_end(), "E = mc");
     assert_eq!(render_inline("E = mc").expect("renders"), "E = mc");
+}
+
+// --- Font commands (Task 15b) ----------------------------------------------------------
+//
+// `\mathbb{R}` and its friends are drawn with the *parser's own* table,
+// `pulldown_latex::event::Font::map_char` (made `pub` by vendor patch 5). Every code point
+// asserted below was read off that table rather than guessed, which matters: `\mathcal{L}`
+// is U+2112 ℒ from Letterlike Symbols, **not** U+1D4DB 𝓛 — that one is `\mathbfcal`, the
+// bold script. Eight of the sixteen `Font` variants land in Letterlike Symbols for at least
+// one letter, because Unicode unified the "already existing" ones there and left holes in
+// the Mathematical Alphanumeric Symbols block for them.
+
+#[test]
+fn a_font_command_draws_the_styled_letter_and_not_the_plain_one() {
+    assert_eq!(rendered(r"\mathbb{R}"), "ℝ");
+    assert_eq!(rendered(r"\mathbb{C}"), "ℂ");
+    // A hole in U+1D400's double-struck range and a letter that is not a hole, so the
+    // pair says the table is consulted rather than an offset applied.
+    assert_eq!(rendered(r"\mathbb{E}"), "𝔼");
+    assert_eq!(rendered(r"\mathcal{L}"), "ℒ");
+    assert_eq!(rendered(r"\mathcal{A}"), "𝒜");
+    assert_eq!(rendered(r"\mathfrak{a}"), "𝔞");
+}
+
+#[test]
+fn every_font_command_the_parser_knows_reaches_its_own_block() {
+    // `vendor/pulldown-latex/src/parser/primitives.rs:437-456` is the whole list of font
+    // commands, and this is one case per `Font` variant that `map_char` maps. Two variants
+    // map nothing and are listed with the others in
+    // `a_font_variant_with_no_mapping_draws_the_plain_letter`.
+    for (src, want) in [
+        (r"\mathbf{x}", "𝐱"),
+        (r"\mathit{x}", "𝑥"),
+        (r"\mathsf{x}", "𝗑"),
+        (r"\mathtt{x}", "𝚡"),
+        (r"\mathbb{x}", "𝕩"),
+        (r"\mathfrak{x}", "𝔵"),
+        (r"\mathcal{X}", "𝒳"),
+        (r"\mathbfcal{X}", "𝓧"),
+        (r"\mathbfit{x}", "𝒙"),
+        (r"\mathbffrak{x}", "𝖝"),
+        (r"\mathsfit{x}", "𝘹"),
+        (r"\mathbfsfup{x}", "𝘅"),
+        (r"\mathbfsfit{x}", "𝙭"),
+        (r"\mathbbit{d}", "ⅆ"),
+    ] {
+        assert_eq!(rendered(src), want, "{src}");
+    }
+}
+
+#[test]
+fn a_font_variant_with_no_mapping_draws_the_plain_letter() {
+    // `Font::UpRight` maps every character to itself on purpose — `\mathrm{x}` *is* `x` on
+    // a terminal, where there is one face. `Font::BoldSymbol` maps nothing because
+    // `map_char` has no arm for it: the vendor's own renderer resolves `\boldsymbol` to
+    // `Bold` or `BoldItalic` before the lookup, in `mathml.rs`, using a config-dependent
+    // uprightness rule rather than the table. Drawing the plain letter is what the table
+    // says; see the Task 15b report.
+    assert_eq!(rendered(r"\mathrm{x}"), "x");
+    assert_eq!(rendered(r"\boldsymbol{x}"), "x");
+}
+
+#[test]
+fn a_font_command_does_not_leak_past_its_group() {
+    // `\mathbb{R}` is `Begin(Normal)`, `StateChange(Font(DoubleStruck))`, the content,
+    // `End` — the font is scoped by the group the parser wrapped the argument in. The `x`
+    // is outside it and must stay plain; a leak would draw `𝕩`.
+    assert_eq!(rendered(r"\mathbb{R}x"), "ℝx");
+    assert_eq!(rendered(r"\mathbb{Q} \cup \mathbb{Z}"), "ℚ ∪ ℤ");
+    assert_eq!(rendered(r"\mathbb{R} \times \mathbb{R} = x"), "ℝ × ℝ = x");
+}
+
+#[test]
+fn a_bare_font_switch_runs_to_the_end_of_its_group() {
+    // `\bf` takes no argument: it is a lone `StateChange` with no `Begin` of its own, so
+    // it applies from where it stands to the end of the group that encloses it. The brace
+    // is what stops it, and the same rule scopes both forms.
+    assert_eq!(rendered(r"x \bf y"), "x𝐲");
+    assert_eq!(rendered(r"{x \bf y} z"), "x𝐲z");
+}
+
+#[test]
+fn a_font_command_keeps_its_scripts() {
+    assert_eq!(rendered(r"\mathbb{R}^n"), "ℝⁿ");
+    assert_eq!(rendered(r"\mathbb{R}^2"), "ℝ²");
+    // `\mathbb{R^n}` puts the exponent *inside* the group, so LaTeX styles it too — and
+    // Unicode has no raised 𝕟, so design spec §5.1's substitution declines and the caret
+    // stays. That is the same answer this engine already gives `x^\alpha`, which sets
+    // `x^α` for the same reason, so the font commands added no new fallback. Written out
+    // here because `ℝⁿ` is the plausible wrong expectation: it would mean the `n` lost its
+    // style on the way up.
+    assert_eq!(rendered(r"\mathbb{R^n}"), "ℝ^𝕟");
+    assert_eq!(rendered(r"x^\alpha"), "x^α");
+}
+
+#[test]
+fn a_font_command_styles_digits_and_leaves_operators_alone() {
+    // The parser applies the font to `Text`, `Number` and non-stretchy `Ordinary` and to
+    // nothing else (`mathml.rs:602`, `:630`, `:683`), so this mirrors it: `1` is a
+    // `Content::Number` and takes the style, `+` is a `Content::BinaryOp` and does not.
+    // `map_char` would leave `+` alone anyway; asserting it here says the *arm* is right
+    // and not merely the table.
+    assert_eq!(rendered(r"\mathbb{1}"), "𝟙");
+    assert_eq!(rendered(r"\mathbb{R+1}"), "ℝ + 𝟙");
+}
+
+#[test]
+fn a_styled_letter_is_one_column_wide() {
+    // Both blocks these come from are narrow, so a formula containing one measures like
+    // the plain letter. If a terminal font sets them wide the *document* is what changes,
+    // not this measurement — `crate::text` is the single home of width logic.
+    let theme = crate::theme::Theme::default();
+    let canvas = render_display(r"\mathbb{R} \cup \mathbb{Z}", 40, &theme).expect("draws");
+    assert_eq!(canvas.height(), 1);
+    assert_eq!(canvas.row_text(0).trim_end(), "ℝ ∪ ℤ");
+    // One column each, so the formula measures exactly as `R ∪ Z` does. A styled letter
+    // that measured two would push everything after it and the display width with it.
+    assert_eq!(
+        canvas.width(),
+        render_display(r"R \cup Z", 40, &theme)
+            .expect("draws")
+            .width(),
+        "a styled letter must measure like the plain one it replaced"
+    );
+}
+
+#[test]
+fn symbols_reports_the_styled_letter_because_the_author_asked_for_it() {
+    // Design spec §13: an author who writes `\mathbb{R}` asked for `ℝ` as surely as one
+    // who typed it, so `symbols` must report it and `tests/glyph_inventory.rs` must not
+    // claim it for this crate. The plain `R` is *not* what was drawn and must not be
+    // reported either — reporting it would let a real `R` elsewhere go unclaimed.
+    assert_eq!(symbols(r"\mathbb{R}").expect("parses"), "ℝ");
+    assert_eq!(
+        symbols(r"\mathbb{Q} \cup \mathbb{Z}").expect("parses"),
+        "ℚ∪ℤ"
+    );
+    assert_eq!(
+        symbols(r"\mathcal{L}(x) = \mathbb{E}[x]").expect("parses"),
+        "ℒ(x)=𝔼[x]"
+    );
+    // The same scoping `render_inline` gets: the walk `symbols` does is flat, so this is
+    // the one assertion that pins its font stack rather than the recursion's.
+    assert_eq!(symbols(r"\mathbb{R}x").expect("parses"), "ℝx");
 }

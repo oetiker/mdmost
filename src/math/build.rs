@@ -20,7 +20,8 @@
 //! one arm while leaving the other sounding covered, which is how it came to have a hole.
 
 use pulldown_latex::event::{
-    Content, DelimiterType, Dimension, Event, Grouping, ScriptPosition, ScriptType, Visual,
+    Content, DelimiterType, Dimension, Event, Font, Grouping, ScriptPosition, ScriptType,
+    StateChange, Visual,
 };
 use pulldown_latex::{Parser, Storage};
 
@@ -231,7 +232,12 @@ pub(crate) fn parse<'a>(src: &'a str, storage: &'a Storage) -> Result<Vec<Event<
 /// second row, and — in **either** mode — when it nests past [`MAX_NESTING`], ends
 /// unfinished, or is a grid, which no mode builds yet.
 pub(crate) fn build(events: &[Event<'_>], mode: Mode) -> Result<MathBox, MathError> {
-    let (parts, _) = build_run(events, mode, Spacing::Normal, 0)?;
+    let walk = Walk {
+        mode,
+        spacing: Spacing::Normal,
+        font: None,
+    };
+    let (parts, _) = build_run(events, walk, 0)?;
     Ok(parts)
 }
 
@@ -269,6 +275,38 @@ impl Spacing {
             Self::Normal => true,
             Self::Suppressed => false,
         }
+    }
+}
+
+/// The ambient state a run carries into every atom it builds.
+///
+/// The three fields are exactly the ones the recursion threads through untouched and that
+/// a nested run may override for its own contents. They travel together because they are
+/// answered together at every atom: `mode` says whether a second row is allowed, `spacing`
+/// whether the table's gaps are written, `font` which letter is drawn.
+///
+/// `depth` is deliberately *not* here. It is about the recursion rather than about the
+/// formula, it changes at every level rather than being inherited, and keeping it a
+/// separate argument is what makes the two nesting caps readable at the point they fire.
+///
+/// **`font` is the scoping rule.** This struct is `Copy`, so a run that changes its font
+/// changes its own copy and nothing above it. A group hands its contents this value and
+/// never takes one back, which is why `\mathbb{R}x` sets `ℝx`: the outer run still holds
+/// the copy it made before the group opened. The parser scopes font state the same way,
+/// with an explicit stack (`vendor/pulldown-latex/src/mathml.rs:147-165`); here the call
+/// stack is the stack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Walk {
+    mode: Mode,
+    spacing: Spacing,
+    font: Option<Font>,
+}
+
+impl Walk {
+    /// The same walk under a different spacing policy, which is the only field any caller
+    /// overrides for a *child* — a script operand and a root index each take their own.
+    const fn with_spacing(self, spacing: Spacing) -> Self {
+        Self { spacing, ..self }
     }
 }
 
@@ -318,12 +356,20 @@ const _: () = assert!(
 /// and leaves it for [`group`], which opened the group and knows it has to be paid for.
 ///
 /// `depth` is how many groups enclose this run; see [`MAX_NESTING`].
+///
+/// `font` is the font state this run *starts* in, inherited from the group that opened it.
+/// It is a local from there on, and that is the whole of the scoping rule: a
+/// [`StateChange::Font`] rewrites this run's copy and nothing above it, so the change dies
+/// with the run — which is where the group that carried it ends. `\mathbb{R}x` sets `ℝx`
+/// because the `x` is read by the *outer* run, whose copy was never touched. A bare `\bf`,
+/// which opens no group of its own, runs from where it stands to the end of this run for
+/// the same reason.
 fn build_run(
     events: &[Event<'_>],
-    mode: Mode,
-    spacing: Spacing,
+    walk: Walk,
     depth: usize,
 ) -> Result<(MathBox, usize), MathError> {
+    let mut walk = walk;
     // The one check that guards the recursion, at the point the recursion re-enters, so
     // that every path into it is covered by the single test.
     if depth > MAX_NESTING {
@@ -342,21 +388,28 @@ fn build_run(
             // not got and set `\,-x` as `  − x`, where TeX skips the glue and sets a sign.
             // Hence `None` — [`assemble`] writes the cells and reads through them.
             Event::Space { width, .. } => {
-                if let Some(cells) = source_space(*width, spacing) {
+                if let Some(cells) = source_space(*width, walk.spacing) {
                     pieces.push((None, cells));
                 }
                 index += 1;
             }
-            // Font and style changes carry no cells of their own.
-            Event::StateChange(_) => index += 1,
+            // Font and style changes carry no cells of their own — a font change moves the
+            // state the *next* atom is drawn in, and a style change moves nothing here,
+            // because a terminal has one size.
+            Event::StateChange(change) => {
+                if let StateChange::Font(next) = change {
+                    walk.font = *next;
+                }
+                index += 1;
+            }
             _ => {
-                let (class, piece, used) = element(events, index, mode, spacing, depth)?;
+                let (class, piece, used) = element(events, index, walk, depth)?;
                 pieces.push((Some(class), piece));
                 index = index.saturating_add(used);
             }
         }
     }
-    Ok((assemble(pieces, spacing), index))
+    Ok((assemble(pieces, walk.spacing), index))
 }
 
 /// The cells a `Space` event contributes, or `None` for the ones that contribute none.
@@ -513,14 +566,23 @@ fn neighbour<'a>(mut towards: impl Iterator<Item = &'a (Option<Class>, MathBox)>
 /// a single `char`, and `\not=` does not even arrive as a relation but as
 /// `Visual(Negation)` followed by `=`.
 ///
-/// Crate-visible for `crate::math::symbols`, which asks it what each content event
-/// resolved to and keeps only the cells (design spec §13).
-pub(crate) fn atom(content: &Content<'_>) -> (Class, MathBox) {
+/// `font` is the state the last [`StateChange::Font`] left in scope, and the three arms
+/// that honour it are the three the parser's own renderer honours — see [`styled`].
+fn atom(content: &Content<'_>, font: Option<Font>) -> (Class, MathBox) {
     match content {
-        Content::Text(s) => (Class::Ordinary, text(*s)),
-        Content::Number(s) => (Class::Ordinary, text(*s)),
+        Content::Text(s) => (Class::Ordinary, text(styled(s, font))),
+        Content::Number(s) => (Class::Ordinary, text(styled(s, font))),
         Content::Function(s) => (Class::Function, text(*s)),
-        Content::Ordinary { content, .. } => (Class::Ordinary, text(content.to_string())),
+        // A stretchy ordinary is an arrow or a brace drawn over or under an element, not a
+        // letter, so it takes no font — `mathml.rs:676` writes it out before the lookup.
+        Content::Ordinary { content, stretchy } => (
+            Class::Ordinary,
+            text(if *stretchy {
+                content.to_string()
+            } else {
+                styled_char(*content, font)
+            }),
+        ),
         Content::LargeOp { content, .. } => (Class::Large, text(content.to_string())),
         Content::BinaryOp { content, .. } => (Class::Binary, text(content.to_string())),
         Content::Relation { content, .. } => {
@@ -549,6 +611,76 @@ pub(crate) fn atom(content: &Content<'_>) -> (Class, MathBox) {
     }
 }
 
+/// `s` written in `font`, using the parser's own table and no table of this crate's.
+///
+/// [`Font::map_char`] is `pulldown-latex`'s, made reachable by vendor patch 5
+/// (`vendor/pulldown-latex/VENDORED.md`); it is the same table its `MathML` writer uses, so
+/// `\mathbb{R}` draws the ℝ that renderer would emit. **A character with no styled form
+/// maps to itself**, which is why there is no list of what is stylable here: `\mathbb{+}`
+/// is `+` because the table says so.
+///
+/// The styled letters live in two Unicode blocks — Letterlike Symbols (U+2100–U+214F) for
+/// the dozen or so that Unicode had already encoded before the math alphabets, ℝ, ℒ and ℚ
+/// among them, and Mathematical Alphanumeric Symbols (U+1D400–U+1D7FF) for the rest. They
+/// are the *document's* characters, asked for by name, so `symbols` reports them and
+/// `tests/glyph_inventory.rs` does not claim them (design spec §13).
+fn styled(s: &str, font: Option<Font>) -> String {
+    match font {
+        None => s.to_string(),
+        Some(font) => s.chars().map(|c| font.map_char(c)).collect(),
+    }
+}
+
+/// [`styled`] for a single character.
+fn styled_char(c: char, font: Option<Font>) -> String {
+    font.map_or(c, |font| font.map_char(c)).to_string()
+}
+
+/// The characters `events` resolve to, each under the font state it is written in.
+///
+/// The walk `crate::math::symbols` needs, and it is *not* [`build_run`]'s: this one reports
+/// a formula this engine refuses to draw — a matrix is still made of its author's
+/// characters — so it cannot go through a function that returns [`MathError`]. It is here
+/// rather than in `mod.rs` so that both readings of the font rule sit in one file.
+///
+/// The scope of a font change is its group, which the recursion expresses for free and a
+/// flat walk has to keep on a stack. The stack mirrors `mathml.rs:147-165`: an ordinary
+/// group and a `\left…\right` pair inherit the enclosing font, a math environment resets
+/// to none, and every group restores its parent's on the way out. The base entry is never
+/// popped, so an unbalanced `End` from a truncated stream cannot empty the stack.
+pub(crate) fn content_text(events: &[Event<'_>]) -> String {
+    let mut scopes: Vec<Option<Font>> = vec![None];
+    let mut out = String::new();
+    for event in events {
+        match event {
+            Event::Begin(grouping) => {
+                let inherited = if grouping.is_math_env() {
+                    None
+                } else {
+                    scopes.last().copied().flatten()
+                };
+                scopes.push(inherited);
+            }
+            Event::End => {
+                if scopes.len() > 1 {
+                    scopes.pop();
+                }
+            }
+            Event::StateChange(StateChange::Font(font)) => {
+                if let Some(scope) = scopes.last_mut() {
+                    *scope = *font;
+                }
+            }
+            Event::Content(content) => {
+                let font = scopes.last().copied().flatten();
+                out.push_str(&atom(content, font).1.plain_text());
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The group opened by `events[start]`, and how many events it accounts for.
 ///
 /// The count covers the opening [`Event::Begin`], the run inside it and the closing
@@ -563,8 +695,7 @@ fn group(
     events: &[Event<'_>],
     start: usize,
     grouping: &Grouping,
-    mode: Mode,
-    spacing: Spacing,
+    walk: Walk,
     depth: usize,
 ) -> Result<(MathBox, usize), MathError> {
     match grouping {
@@ -574,8 +705,7 @@ fn group(
             let inside = start.saturating_add(1);
             let (inner, used) = build_run(
                 events.get(inside..).unwrap_or_default(),
-                mode,
-                spacing,
+                walk,
                 depth.saturating_add(1),
             )?;
             // `used` stops at the `End`; the `Begin` and that `End` are this group's own.
@@ -590,8 +720,7 @@ fn group(
             let inside = start.saturating_add(1);
             let (body, used) = build_run(
                 events.get(inside..).unwrap_or_default(),
-                mode,
-                spacing,
+                walk,
                 depth.saturating_add(1),
             )?;
             // `used` stops at the `End`; the `Begin` and that `End` are this group's own.
@@ -641,8 +770,7 @@ fn grouping_name(grouping: &Grouping) -> &'static str {
 fn element(
     events: &[Event<'_>],
     at: usize,
-    mode: Mode,
-    spacing: Spacing,
+    walk: Walk,
     depth: usize,
 ) -> Result<(Class, MathBox, usize), MathError> {
     // The second of the two places the recursion is capped; see [`MAX_NESTING`]. It is for
@@ -666,7 +794,7 @@ fn element(
         // `Begin`, `End` -- and it is an element, of two events, that draws nothing.
         None | Some(Event::End) => Err(MathError::NotDrawable("an unfinished construct")),
         Some(Event::Content(content)) => {
-            let (class, cells) = atom(content);
+            let (class, cells) = atom(content, walk.font);
             Ok((class, cells, 1))
         }
         // A braced group is an atom of the enclosing run: `2{ab}` sets the same cells as
@@ -683,12 +811,12 @@ fn element(
         // form moved; both are pinned in
         // `a_fence_keeps_its_delimiters_as_an_unbraced_operand`.
         Some(Event::Begin(grouping)) => {
-            let (inner, used) = group(events, at, grouping, mode, spacing, depth)?;
+            let (inner, used) = group(events, at, grouping, walk, depth)?;
             Ok((Class::Ordinary, inner, used))
         }
-        Some(Event::Visual(visual)) => visual_box(events, at, *visual, mode, spacing, deeper),
+        Some(Event::Visual(visual)) => visual_box(events, at, *visual, walk, deeper),
         Some(Event::Script { ty, position }) => {
-            script_box(events, at, *ty, *position, mode, spacing, deeper)
+            script_box(events, at, *ty, *position, walk, deeper)
         }
         Some(Event::EnvironmentFlow(_)) => Err(MathError::NotDrawable("a multi-row environment")),
         // Neither carries an atom of its own, so as an element each draws nothing —
@@ -697,7 +825,7 @@ fn element(
         // skipped them would take the event *after* as its element and lose count.
         Some(Event::Space { width, .. }) => Ok((
             Class::Ordinary,
-            source_space(*width, spacing).unwrap_or_else(|| row(Vec::new())),
+            source_space(*width, walk.spacing).unwrap_or_else(|| row(Vec::new())),
             1,
         )),
         Some(Event::StateChange(_)) => Ok((Class::Ordinary, row(Vec::new()), 1)),
@@ -717,8 +845,7 @@ fn visual_box(
     events: &[Event<'_>],
     at: usize,
     visual: Visual,
-    mode: Mode,
-    spacing: Spacing,
+    walk: Walk,
     depth: usize,
 ) -> Result<(Class, MathBox, usize), MathError> {
     let after = at.saturating_add(1);
@@ -736,10 +863,10 @@ fn visual_box(
         // units to find that out would only add a way to get it wrong.
         Visual::Fraction(thickness) => {
             let ruleless = matches!(thickness, Some(d) if d.value == 0.0);
-            let (_, num, a) = element(events, after, mode, spacing, depth)?;
-            let (_, den, b) = element(events, after.saturating_add(a), mode, spacing, depth)?;
+            let (_, num, a) = element(events, after, walk, depth)?;
+            let (_, den, b) = element(events, after.saturating_add(a), walk, depth)?;
             let used = 1usize.saturating_add(a).saturating_add(b);
-            let cells = match mode {
+            let cells = match walk.mode {
                 Mode::Display if ruleless => boxes::fraction_ruleless(num, den),
                 Mode::Display => boxes::fraction(num, den),
                 // A ruleless fraction has no one-row form and this engine does not invent
@@ -759,8 +886,8 @@ fn visual_box(
             Ok((Class::Ordinary, cells, used))
         }
         Visual::SquareRoot => {
-            let (_, radicand, a) = element(events, after, mode, spacing, depth)?;
-            let cells = match mode {
+            let (_, radicand, a) = element(events, after, walk, depth)?;
+            let cells = match walk.mode {
                 Mode::Display => boxes::radical(radicand, None),
                 Mode::Inline => row(vec![text("√"), bracketed(radicand)]),
             };
@@ -771,18 +898,22 @@ fn visual_box(
         // `mroot`, whose child order is base then index. Taking them the other way round
         // draws `\sqrt[3]{x}` as `ˣ√3`.
         Visual::Root => {
-            let (_, radicand, a) = element(events, after, mode, spacing, depth)?;
+            let (_, radicand, a) = element(events, after, walk, depth)?;
             // The index is raised, so it is built under the same suppression a script
             // operand is built under and for the same reason: there is no raised space,
             // and one in the index would make the substitution below decline.
-            let index_spacing = match mode {
+            let index_spacing = match walk.mode {
                 Mode::Inline => Spacing::Suppressed,
-                Mode::Display => spacing,
+                Mode::Display => walk.spacing,
             };
-            let (_, index, b) =
-                element(events, after.saturating_add(a), mode, index_spacing, depth)?;
+            let (_, index, b) = element(
+                events,
+                after.saturating_add(a),
+                walk.with_spacing(index_spacing),
+                depth,
+            )?;
             let used = 1usize.saturating_add(a).saturating_add(b);
-            let cells = match mode {
+            let cells = match walk.mode {
                 Mode::Display => boxes::radical(radicand, Some(index)),
                 // `scripts::superscript` and not `scripts::raised`: the caret fallback of
                 // design spec §5.1 is a *script* notation, and a root index is not a
@@ -801,7 +932,7 @@ fn visual_box(
             Ok((Class::Ordinary, cells, used))
         }
         Visual::Negation => {
-            let (class, inner, a) = element(events, after, mode, spacing, depth)?;
+            let (class, inner, a) = element(events, after, walk, depth)?;
             // U+0338 COMBINING LONG SOLIDUS OVERLAY. The crate leaves the rendering to us
             // (`$PL/src/event.rs:166-171`) and this is what a terminal can do: the
             // overlay follows the character it strikes, and measures no column of its own.
@@ -827,40 +958,38 @@ fn script_box(
     at: usize,
     ty: ScriptType,
     position: ScriptPosition,
-    mode: Mode,
-    spacing: Spacing,
+    walk: Walk,
     depth: usize,
 ) -> Result<(Class, MathBox, usize), MathError> {
     let after = at.saturating_add(1);
-    let (class, base, a) = element(events, after, mode, spacing, depth)?;
+    let (class, base, a) = element(events, after, walk, depth)?;
     // Operands of a script are built with spacing suppressed: there is no raised space in
     // Unicode, so a space in the operand makes the substitution decline and `x^{a+b}`
     // would be written flat as `x^{a + b}` instead of raised at all. The owner ruled this
     // exception; it lives here rather than in the table because it is a fact about
     // position, not about a pair. Display keeps the enclosing policy, because a script
     // drawn on its own row can hold a space like any other row.
-    let operand_spacing = match mode {
+    let operand_spacing = match walk.mode {
         Mode::Inline => Spacing::Suppressed,
-        Mode::Display => spacing,
+        Mode::Display => walk.spacing,
     };
     let first = after.saturating_add(a);
     let (sub, sup, used) = match ty {
         ScriptType::Subscript => {
-            let (_, s, b) = element(events, first, mode, operand_spacing, depth)?;
+            let (_, s, b) = element(events, first, walk.with_spacing(operand_spacing), depth)?;
             (Some(s), None, 1usize.saturating_add(a).saturating_add(b))
         }
         ScriptType::Superscript => {
-            let (_, s, b) = element(events, first, mode, operand_spacing, depth)?;
+            let (_, s, b) = element(events, first, walk.with_spacing(operand_spacing), depth)?;
             (None, Some(s), 1usize.saturating_add(a).saturating_add(b))
         }
         // Base, then subscript, then superscript, whichever order the source wrote them.
         ScriptType::SubSuperscript => {
-            let (_, lo, b) = element(events, first, mode, operand_spacing, depth)?;
+            let (_, lo, b) = element(events, first, walk.with_spacing(operand_spacing), depth)?;
             let (_, hi, c) = element(
                 events,
                 first.saturating_add(b),
-                mode,
-                operand_spacing,
+                walk.with_spacing(operand_spacing),
                 depth,
             )?;
             (
@@ -872,9 +1001,9 @@ fn script_box(
     };
 
     let stacked = matches!(position, ScriptPosition::AboveBelow)
-        || (matches!(position, ScriptPosition::Movable) && matches!(mode, Mode::Display));
+        || (matches!(position, ScriptPosition::Movable) && matches!(walk.mode, Mode::Display));
 
-    let cells = match (mode, stacked) {
+    let cells = match (walk.mode, stacked) {
         (Mode::Display, true) => boxes::limits(base, sub, sup),
         (Mode::Display, false) => boxes::scripts(base, sub, sup),
         (Mode::Inline, _) => {
@@ -981,11 +1110,21 @@ fn bracketed(b: MathBox) -> MathBox {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_COMMAND_RUN, MAX_NESTING, MAX_SOURCE_BYTES, Mode, Spacing, build, build_run, draw,
-        longest_command_run, parse,
+        MAX_COMMAND_RUN, MAX_NESTING, MAX_SOURCE_BYTES, Mode, Spacing, Walk, build, build_run,
+        draw, longest_command_run, parse,
     };
     use crate::math::boxes::BoxContent;
     use pulldown_latex::{Parser, Storage};
+
+    /// An inline walk in no font, under the given spacing policy, for the tests that drive
+    /// [`build_run`] directly to compare the two policies over one event stream.
+    const fn flat(spacing: Spacing) -> Walk {
+        Walk {
+            mode: Mode::Inline,
+            spacing,
+            font: None,
+        }
+    }
 
     /// Builds and flattens to the one row it must be, for the inline cases.
     fn inline(src: &str) -> String {
@@ -1868,7 +2007,11 @@ mod tests {
         // the walk never advances: not a wrong rendering but a hang, which no assertion
         // about output can catch. `\text{if }` does not reach this arm -- a text argument
         // with no font emits only `Content::Text` -- so without this the arm has no test.
-        assert_eq!(inline(r"x \bf y"), "xy");
+        //
+        // The `y` is bold from Task 15b, which is a fact about the arm's *other* half; the
+        // claim here is that two atoms come out and the walk terminated. Scoping is
+        // `a_bare_font_switch_runs_to_the_end_of_its_group` in `src/math/tests.rs`.
+        assert_eq!(inline(r"x \bf y"), "x𝐲");
     }
 
     #[test]
@@ -1902,10 +2045,10 @@ mod tests {
         let storage = Storage::new();
         let events = parse("a+b=c", &storage).expect("parses");
 
-        let (normal, _) = build_run(&events, Mode::Inline, Spacing::Normal, 0).expect("builds");
+        let (normal, _) = build_run(&events, flat(Spacing::Normal), 0).expect("builds");
         assert_eq!(flatten(&normal), "a + b = c", "the table's own answer");
 
-        let (tight, _) = build_run(&events, Mode::Inline, Spacing::Suppressed, 0).expect("builds");
+        let (tight, _) = build_run(&events, flat(Spacing::Suppressed), 0).expect("builds");
         assert_eq!(
             flatten(&tight),
             "a+b=c",
@@ -1918,9 +2061,9 @@ mod tests {
         // declines on it, and the formula falls back to the source dump -- the exact
         // outcome the no-spaces-in-an-operand ruling exists to prevent.
         let spaced = parse(r"a\,b", &storage).expect("parses");
-        let (normal, _) = build_run(&spaced, Mode::Inline, Spacing::Normal, 0).expect("builds");
+        let (normal, _) = build_run(&spaced, flat(Spacing::Normal), 0).expect("builds");
         assert_eq!(flatten(&normal), "a b", "the source asked for it");
-        let (tight, _) = build_run(&spaced, Mode::Inline, Spacing::Suppressed, 0).expect("builds");
+        let (tight, _) = build_run(&spaced, flat(Spacing::Suppressed), 0).expect("builds");
         assert_eq!(
             flatten(&tight),
             "ab",
