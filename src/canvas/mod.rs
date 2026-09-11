@@ -797,9 +797,6 @@ pub(crate) fn align_offset(field_width: usize, content_width: usize, align: Alig
     }
 }
 
-/// Places `cell` at `col`, repairing any double-width cell it cuts in half.
-///
-/// The caller guarantees `col + cell.width() <= cells.len()` and `cell.width() >= 1`.
 /// The cell a combining mark written at `col` strikes, when the write itself has put
 /// nothing down yet.
 ///
@@ -817,6 +814,10 @@ fn left_anchor(cells: &[Cell], col: usize) -> Option<usize> {
     (!cells[index].is_blank()).then_some(index)
 }
 
+/// Places `cell` at `col`, repairing any double-width cell it cuts in half.
+///
+/// The caller guarantees `col + cell.width() <= cells.len()` and `cell.width() >= 1`;
+/// every index below is unchecked on that promise.
 fn overwrite(cells: &mut [Cell], col: usize, cell: Cell) {
     let style = cell.style();
     // We are covering the right half of a wide cell: blank out its orphaned left half.

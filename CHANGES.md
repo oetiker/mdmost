@@ -33,7 +33,7 @@ what moved. The entries are a record, not a compatibility promise.
   its own width for the page to scroll sideways to.
 - `MathError::TooWide`, and the caption it reaches the reader as: a formula that overruns
   the body by less than the surplus a horizontal scrollbar would cost is shown as its
-  framed source, captioned with the width it needs (`this formula needs 43 columns`).
+  framed source, captioned with the width it needs (`needs 43 columns`).
   `MathError` is `#[non_exhaustive]`, so the new variant breaks no `match`.
 - **Macros are global to a document.** A macro defined in one formula is in scope for every
   formula after it, inline and display alike, and a display block that holds nothing but

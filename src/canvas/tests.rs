@@ -144,6 +144,39 @@ fn a_leading_combining_mark_is_dropped_rather_than_stealing_a_column() {
 }
 
 #[test]
+fn a_combining_mark_with_only_blank_to_its_left_is_dropped() {
+    // The other half of `write_str`'s contract, and the half `left_anchor`'s `is_blank`
+    // guard is the whole of: a mark that opens a write strikes the cell to the left only
+    // if something is drawn there. Padding is not something to strike.
+    let mut canvas = Canvas::new(4, 1, base());
+    canvas.write_str(0, 2, "\u{0301}x", base());
+    ok(&canvas);
+    assert_eq!(
+        canvas.row_text(0),
+        "  x ",
+        "the mark has nothing to strike and is dropped, not hung on the padding"
+    );
+}
+
+#[test]
+fn a_combining_mark_steps_back_over_a_wide_cell_onto_the_character() {
+    // A continuation cell draws nothing, so a mark landing after a double-width character
+    // must reach the character itself rather than its trailing half.
+    let mut canvas = Canvas::new(4, 1, base());
+    canvas.write_str(0, 0, "\u{65e5}", base());
+    canvas.write_str(0, 2, "\u{0301}x", base());
+    ok(&canvas);
+    let row = canvas.row(0).expect("row exists");
+    assert_eq!(
+        row[0].text(),
+        "\u{65e5}\u{0301}",
+        "the mark strikes the wide character, not the half that draws nothing"
+    );
+    assert_eq!(row[0].width(), 2, "striking it does not change its width");
+    assert_eq!(canvas.row_text(0), "\u{65e5}\u{0301}x ");
+}
+
+#[test]
 fn writing_clips_at_the_right_edge() {
     let mut canvas = Canvas::new(4, 1, base());
     let written = canvas.write_str(0, 0, "abcdef", base());

@@ -994,6 +994,26 @@ mod tests {
                 "a combining mark between two spacing parts",
                 row(vec![text("a "), text("="), text("\u{338}"), text(" b")]),
             ),
+            // Every case above is one column wide per cluster. A double-width cluster is
+            // where the flat walk's `display_width` and the canvas walk's per-cell advance
+            // could next disagree, so the list carries one alone, one in a row, and one
+            // under a combining mark -- the shape where the mark must reach the character
+            // and not the blank half that trails it.
+            ("a double-width cluster", text("\u{65e5}")),
+            (
+                "a double-width cluster between spacing parts",
+                row(vec![text("a "), text("\u{65e5}"), text(" b")]),
+            ),
+            (
+                "a combining mark on a double-width base",
+                row(vec![text("\u{65e5}"), text("\u{338}")]),
+            ),
+            // NOT in this list, and deliberately: a row whose FIRST part is zero-width,
+            // which `\not{}` builds. The two walks disagree there -- the canvas drops a
+            // mark that opens a write with blank to its left, per `Canvas::write_str`'s
+            // contract, while the flat walk keeps it and the terminal hangs it on whatever
+            // precedes. Adding the case turns this test red. It is recorded in
+            // `docs/maintainer-notes.md` and is an owner's call, not a test to write.
         ];
 
         for (what, b) in cases {

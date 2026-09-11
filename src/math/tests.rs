@@ -569,10 +569,9 @@ fn left_right_still_draws_its_delimiters_as_a_script_base() {
 /// blanks trimmed.
 ///
 /// Deliberately not through the retired `render_display`, which took the *caller's* width
-/// and padded every row out to it — these tests assert the art, and a formula's own width is
-/// the
-/// only width at which the art is exactly the formula. Reaching `build` and `draw` directly
-/// is what lets `b.width` be passed as the floor.
+/// and padded every row out to it — these tests assert the art, and a formula's own width
+/// is the only width at which the art is exactly the formula. Reaching `build` and `draw`
+/// directly is what lets `b.width` be passed as the floor.
 fn display(src: &str) -> Vec<String> {
     let storage = pulldown_latex::Storage::new();
     let events = super::build::parse(src, &storage).unwrap_or_else(|e| panic!("{src:?}: {e}"));

@@ -4181,16 +4181,15 @@ fn the_macro_preamble_spends_the_byte_cap_and_the_caption_says_so() {
         "the caption must name the macros: {past:?}"
     );
 
-    // Past the far edge the definition block is refused on its own account and the formula
-    // recovers. Without this line the test would pass against a cap that really was per
-    // formula. Only the block's own caption may mention the cap, so the tail after it must
-    // be clean.
+    // Past the far edge the definition block is refused on its own account, so it spends
+    // none of the cap and the formula under it recovers. Assert that the formula DREW: a
+    // drawn `x = 1` is a line of its own, where a refused one is source inside a frame and
+    // trims to `\u{2502} x = 1 \u{2026} \u{2502}`. Asking instead whether the tail after the
+    // block mentions the cap would assert nothing -- `rsplit_once` returns the text after
+    // the LAST occurrence, which cannot contain it whatever the cap does.
     let beyond = render(2049);
-    let after_block = beyond
-        .rsplit_once("2048 bytes")
-        .map_or(beyond.as_str(), |(_, tail)| tail);
     assert!(
-        !after_block.contains("2048 bytes"),
+        beyond.lines().any(|line| line.trim() == "x = 1"),
         "past the far edge the preamble is dropped and x = 1 draws again: {beyond:?}"
     );
 }

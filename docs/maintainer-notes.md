@@ -572,7 +572,10 @@ not buy a scrollbar, and a formula that side-scrolls is spec §7.
 
 What the caption fix does buy: inside the 20 … 26 band the reader is now told `needs 25
 columns`, elided to `needs 25 …` at the narrow end of it, where before they got `this
-form…` and no number at all. So the rule stays surprising, but it is no longer silent —
+form…` and no number at all. **The narrow band keeps no number, and cannot.** At terminal
+9 … 10 the frame leaves 4 … 6 columns for a 16-character message, so it elides to nothing
+whatever the message says; `the_caption_keeps_its_number_at_every_width_that_refuses_to_draw`
+walks the `MIN_SURPLUS` band only, and that is the whole of what it claims. So the rule stays surprising, but it is no longer silent —
 which is what the 2026-08-29 placement ruling asked for.
 `the_caption_keeps_its_number_at_every_width_that_refuses_to_draw` (`src/render/math.rs`)
 walks the whole band rather than one point in it.
@@ -611,9 +614,13 @@ formula and its macros over 2048 bytes*, and `$$\bee$$` below it is then caption
 the same screen two blocks up. The message now at least names the macros; it still cannot
 name the two sizes separately, because `MathError::NotDrawable` carries a `&'static str`.
 
+Both captions above are quoted from a render, not predicted. So is the band:
 `the_macro_preamble_spends_the_byte_cap_and_the_caption_says_so` (`src/render/tests.rs`)
-pins all three points, including the far edge — without that line the test would pass
-against a cap that really was per formula.
+pins all three points — 2042 draws, 2043 refuses naming the macros, and past the far edge
+the block is refused on its own account so the formula under it draws again. The far-edge
+point asks whether the formula DREW. It used to ask whether the text after the block's own
+caption mentions the cap, which is true whatever the cap does — `rsplit_once` returns the
+text after the LAST occurrence — so that point pinned nothing until 2026-09-12.
 
 **`tests/glyph_inventory.rs` cannot attribute a macro's expansion.** The inventory
 subtracts the characters a math node's own commands resolved to, via `math::symbols`,
@@ -643,3 +650,26 @@ and everything needed to build a preamble is `pub(crate)` — `render::macros`
 (`src/render/macros.rs`). So the honest shape is a new public document-level entry point,
 or moving the inventory test inside the crate. Both are design decisions; scheduled for
 stage 3, where the corpus is reshaped for grids anyway.
+
+**The two walks disagree on a row that opens with a zero-width box, and only `\not{}`
+builds one.** `Visual::Negation` builds `row([operand, U+0338])`, so the mark is second and
+the walks agree — unless the operand is itself empty, which `\not{}` and `\not{{}}` are.
+Then the row opens with a zero-width part, and the two renderings part company:
+
+| source | what the reader gets |
+|---|---|
+| `see $\not{}x$ here` | `see ̸x here` — the mark is kept and strikes the space before it |
+| `$$\not{}x$$` | `x` — the mark is dropped |
+| `see $a\not{}b$ here` | `a̸b` — agrees, the mark has `a` to strike |
+| `$$a\not{}b$$` | `a̸b` — agrees |
+
+The canvas walk is the one obeying `Canvas::write_str`'s documented contract: a mark that
+opens a write with blank to its left has nothing to strike and is dropped. The flat walk
+concatenates the row into one string and lets the terminal compose it, so the mark reaches
+the preceding cell — a space, or in inline math the prose before the formula.
+
+`the_flat_walk_and_the_canvas_walk_render_the_same_cells` does **not** carry this case; a
+comment there says why. Adding it turns the test red. Which walk should change is a
+placement question — drop the mark in the flat walk too, or let the canvas keep it — and
+neither is a defect in the sense the ONE ENGINE guard was built to catch, since the input is
+a negation of nothing. Recorded rather than fixed.
