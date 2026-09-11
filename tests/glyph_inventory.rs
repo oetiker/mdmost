@@ -59,37 +59,73 @@ use std::collections::BTreeSet;
 /// tree and adds those in as well. What is left after both subtractions is what
 /// mdmost itself drew: the raised and lowered script forms, the radical sign, and
 /// the rest of §5's structure.
-fn added(source: &str, width: u16, options: &RenderOptions) -> BTreeSet<char> {
+fn added(source: &str, width: u16, options: &RenderOptions, out: &mut Added) {
     let doc = Doc::parse_auto(source);
     let canvas = render_document(&doc, width, None, &Theme::default_dark(), options);
     let mut from_source: BTreeSet<char> = source.chars().filter(|c| !c.is_ascii()).collect();
-    from_source.extend(math_symbols(doc.root()));
-    (0..canvas.height())
-        .flat_map(|row| canvas.row_text(row).chars().collect::<Vec<_>>())
-        .filter(|c| !c.is_ascii() && !from_source.contains(c))
-        .collect()
+    from_source.extend(math_symbols(doc.root(), &mut out.unresolved));
+    out.glyphs.extend(
+        (0..canvas.height())
+            .flat_map(|row| canvas.row_text(row).chars().collect::<Vec<_>>())
+            .filter(|c| !c.is_ascii() && !from_source.contains(c)),
+    );
+}
+
+/// What the renders contributed: the glyphs [`added`] credited to this crate, and the
+/// math literals whose own symbols could not be resolved to subtract them.
+///
+/// The two travel together because the second is the first's most likely explanation.
+#[derive(Default)]
+struct Added {
+    glyphs: BTreeSet<char>,
+    /// See [`math_symbols`]. Never an assertion of its own — the corpus has entries here
+    /// today and is correct — only the context that makes a failed assertion legible.
+    unresolved: BTreeSet<String>,
 }
 
 /// The characters every math node in `node`'s subtree resolved to, via
-/// [`mdmost::math::symbols`].
+/// [`mdmost::math::symbols`], with the literals it could not resolve recorded in
+/// `unresolved`.
 ///
-/// A formula that does not parse contributes nothing, which is right: it draws no
-/// symbols either.
-fn math_symbols(node: &Node) -> BTreeSet<char> {
+/// **A literal that does not resolve is two opposite cases, and this walk cannot tell
+/// them apart.** One is a formula that does not parse at all: it draws no symbols, so
+/// contributing nothing is right. The other is a formula whose macro is defined in an
+/// earlier block — `symbols` is handed one literal and no preamble, so `symbols(r"\Q")`
+/// fails with *unknown primitive command* while the renderer, which has the preamble,
+/// draws ℚ. Contributing nothing there credits the author's character to this crate and
+/// inverts design spec §13.
+///
+/// Swallowing the error made the second case invisible. Recording the literal does not
+/// fix the attribution — that needs an entry point which resolves a formula under the
+/// document's preamble, and `docs/maintainer-notes.md` holds the seam — but it puts the
+/// evidence in front of whoever reads the failure.
+fn math_symbols(node: &Node, unresolved: &mut BTreeSet<String>) -> BTreeSet<char> {
     let mut out = BTreeSet::new();
-    collect_math_symbols(node, &mut out);
+    collect_math_symbols(node, &mut out, unresolved);
     out
 }
 
 /// The walk behind [`math_symbols`].
-fn collect_math_symbols(node: &Node, out: &mut BTreeSet<char>) {
-    if let NodeKind::Math { literal, .. } = &node.kind
-        && let Ok(symbols) = mdmost::math::symbols(literal)
-    {
-        out.extend(symbols.chars());
+fn collect_math_symbols(node: &Node, out: &mut BTreeSet<char>, unresolved: &mut BTreeSet<String>) {
+    if let NodeKind::Math { literal, .. } = &node.kind {
+        match mdmost::math::symbols(literal) {
+            Ok(symbols) => out.extend(symbols.chars()),
+            Err(_) => {
+                unresolved.insert(elide(literal));
+            }
+        }
     }
     for child in &node.children {
-        collect_math_symbols(child, out);
+        collect_math_symbols(child, out, unresolved);
+    }
+}
+
+/// `literal` on one line, short enough to read in an assertion message.
+fn elide(literal: &str) -> String {
+    let one_line = literal.split_whitespace().collect::<Vec<_>>().join(" ");
+    match one_line.char_indices().nth(60) {
+        Some((cut, _)) => format!("{}…", &one_line[..cut]),
+        None => one_line,
     }
 }
 
@@ -197,7 +233,7 @@ const INVENTORY: &[(&str, &str)] = &[
 
 /// Everything the renderer is asked to draw, across the widths and option sets
 /// that change which glyphs come out.
-fn everything_emitted() -> BTreeSet<char> {
+fn everything_emitted() -> Added {
     let corpus: Vec<String> =
         std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/corpus"))
             .expect("tests/corpus must be readable")
@@ -216,7 +252,7 @@ fn everything_emitted() -> BTreeSet<char> {
         .map(String::as_str)
         .chain(MERMAID_FIXTURES.iter().copied());
 
-    let mut seen = BTreeSet::new();
+    let mut seen = Added::default();
     for source in sources {
         // Both glyph sets, and both line-number settings: icons changes the
         // code-fence language icon, and nothing else in the body.
@@ -228,7 +264,7 @@ fn everything_emitted() -> BTreeSet<char> {
                 // Narrow forces wrapping, the table gap row and the cut markers;
                 // wide leaves everything dense.
                 for width in [40, 80, 200] {
-                    seen.extend(added(source, width, &options));
+                    added(source, width, &options, &mut seen);
                 }
             }
         }
@@ -243,17 +279,48 @@ fn every_glyph_the_renderer_emits_is_in_the_documented_inventory() {
         .flat_map(|(_, chars)| chars.chars())
         .collect();
 
-    let undocumented: Vec<String> = everything_emitted()
+    let emitted = everything_emitted();
+    let undocumented: Vec<String> = emitted
+        .glyphs
         .difference(&documented)
         .map(|c| format!("U+{:04X} {c}", *c as u32))
         .collect();
 
     assert!(
         undocumented.is_empty(),
-        "the renderer emits {} codepoint(s) the manual does not document.\n\
-         Add them to INVENTORY here and to the manual's TERMINAL SETUP section:\n  {}",
+        "the renderer emitted {} codepoint(s) this file does not document:\n  {}\n\
+         \n\
+         Decide whose character it is before you add anything. The answer is not always \
+         \"add it\", and adding it wrongly puts a false claim in the one document this \
+         test exists to protect.\n\
+         \n\
+         A formula whose macro is defined in an EARLIER block resolves to nothing here: \
+         `math::symbols` is handed one literal and no preamble, so the renderer draws \
+         the expansion and this walk sees none of it, and every character that macro \
+         drew is credited to mdmost by mistake. Literals that did not resolve in this \
+         run ({}):\n  {}\n\
+         \n\
+         If a codepoint above came from one of those, it is the DOCUMENT's character. \
+         Design spec §13 says mdmost does not claim it: do not add it to INVENTORY and \
+         do not add it to the manual. See `docs/maintainer-notes.md`, \"cannot attribute \
+         a macro's expansion\".\n\
+         \n\
+         Only a codepoint mdmost itself draws -- a border, rule, marker, script form or \
+         diagram stroke -- belongs in INVENTORY here AND in the manual's TERMINAL SETUP \
+         section.",
         undocumented.len(),
-        undocumented.join("\n  ")
+        undocumented.join("\n  "),
+        emitted.unresolved.len(),
+        if emitted.unresolved.is_empty() {
+            "(none)".to_owned()
+        } else {
+            emitted
+                .unresolved
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        }
     );
 }
 

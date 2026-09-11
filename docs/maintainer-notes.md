@@ -537,11 +537,27 @@ copy of an uprightness policy in the tree.
 subtracts the characters a math node's own commands resolved to, via `math::symbols`,
 which is handed one formula's literal and nothing else. A macro defined in one block and
 used in another is therefore unknown to it: `symbols(r"\Q")` fails with *unknown primitive
-command*, the walk swallows the error, and every character the macro expanded to is
-credited to this crate instead of to the document. A corpus fixture defining
-`\newcommand{\Q}{\mathbb{Q}}` in one block and using `$\Q$` in the next makes the
-inventory demand a Letterlike Symbols entry for ℚ — which design spec §13 says is the
-author's character, not ours. The corpus works around it (its cross-block macro expands to
-a fraction, whose rule this crate does own); the real fix is an entry point that resolves a
-formula under the document's macro preamble, which is what `render::math::formula` already
-does with `ctx.preamble` and what `symbols` has no parameter for.
+command* and every character the macro expanded to is credited to this crate instead of to
+the document. A corpus fixture defining `\newcommand{\Q}{\mathbb{Q}}` in one block and
+using `$\Q$` in the next makes the inventory demand a Letterlike Symbols entry for ℚ —
+which design spec §13 says is the author's character, not ours. The corpus works around it:
+its cross-block macro is `\half`, which expands to a fraction, whose rule this crate does
+own.
+
+The walk no longer *swallows* the error. `collect_math_symbols` records every literal that
+did not resolve, and the assertion message lists them and tells the reader to decide whose
+character it is before adding anything — the old message said "Add them to INVENTORY here
+and to the manual's TERMINAL SETUP section", which instructs the one repair this test
+exists to prevent. That is the reporting half only; the attribution is still wrong, and an
+unresolved literal is deliberately not an assertion of its own, because the corpus has four
+of them today and is correct. `\half` is among them, so the workaround is now visible in
+the failure rather than only recorded here.
+
+The real fix is an entry point that resolves a formula under the document's macro preamble,
+which is what `render::math::formula` already does with `ctx.preamble` and what `symbols`
+has no parameter for. **It is more than a parameter.** `tests/` sees only the public API,
+and everything needed to build a preamble is `pub(crate)` — `render::macros`
+(`src/render/mod.rs`), and `Definition`, `definitions()` and `preamble()`
+(`src/render/macros.rs`). So the honest shape is a new public document-level entry point,
+or moving the inventory test inside the crate. Both are design decisions; scheduled for
+stage 3, where the corpus is reshaped for grids anyway.
