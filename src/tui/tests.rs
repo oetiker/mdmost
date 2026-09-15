@@ -8836,4 +8836,3 @@ fn a_long_notice_is_elided_rather_than_dropped_on_a_narrow_bar() {
         rows[0]
     );
 }
-
