@@ -18,6 +18,28 @@
 /// building a run want nothing at all.
 pub const EIGHTH_BLOCKS: [&str; 9] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"];
 
+/// Bottom-growing block elements, indexed by how many eighths of a cell are filled.
+///
+/// The vertical sibling of [`EIGHTH_BLOCKS`], with the same convention: index `0` is the
+/// empty *string* and index `8` is a full block.
+///
+/// # There is no top-growing ladder, and none is needed
+///
+/// Unicode gives eight steps growing up from the bottom and, apart from `▀` and `▔`, no
+/// steps growing down from the top. (`U+1FB76`..`U+1FB7B` exist but are Symbols for
+/// Legacy Computing, a block far too young to count on.) A vertical bar drawn between
+/// two flat colours does not need them: a cell whose *top* fraction is filled is the same
+/// glyph with the two colours exchanged, because a lower block paints its bottom fraction
+/// in the foreground and leaves the rest showing the background. So one ladder draws both
+/// ends of a thumb — see `tui::draw::scrollbar`, which is why this table exists.
+pub const LOWER_BLOCKS: [&str; 9] = ["", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+/// How many sub-cell steps a block-element ladder resolves.
+///
+/// Named because the scrollbar's geometry, its painter and its mouse hit test all count
+/// in these units and must agree; a bare `8` in three files is how they stop agreeing.
+pub const EIGHTHS: usize = 8;
+
 /// The glyph an unfilled meter track is drawn with.
 ///
 /// A gauge needs a track: left bare, an empty meter reads as a hole rather than as
@@ -123,9 +145,28 @@ mod tests {
 
     #[test]
     fn every_glyph_is_one_column_wide() {
-        for glyph in EIGHTH_BLOCKS.iter().skip(1).chain(std::iter::once(&TROUGH)) {
+        for glyph in EIGHTH_BLOCKS
+            .iter()
+            .chain(LOWER_BLOCKS.iter())
+            .skip(1)
+            .chain(std::iter::once(&TROUGH))
+        {
+            if glyph.is_empty() {
+                continue;
+            }
             assert_eq!(grapheme_width(glyph), 1, "{glyph:?} must be one column");
         }
+    }
+
+    #[test]
+    fn the_two_ladders_run_the_same_length_and_meet_at_the_full_block() {
+        // The scrollbar indexes `LOWER_BLOCKS` by `EIGHTHS - n`, so a ladder of any other
+        // length would silently address the wrong step rather than fail to compile.
+        assert_eq!(EIGHTH_BLOCKS.len(), EIGHTHS + 1);
+        assert_eq!(LOWER_BLOCKS.len(), EIGHTHS + 1);
+        assert_eq!(EIGHTH_BLOCKS[0], "");
+        assert_eq!(LOWER_BLOCKS[0], "");
+        assert_eq!(EIGHTH_BLOCKS[EIGHTHS], LOWER_BLOCKS[EIGHTHS]);
     }
 
     #[test]

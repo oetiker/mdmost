@@ -10,6 +10,7 @@ use ratatui::layout::Rect;
 use super::app::{App, AppOptions, Focus, Overlay, PromptKind};
 use super::help;
 use crate::canvas::HotspotKind;
+use crate::canvas::meter::{EIGHTHS, LOWER_BLOCKS, TRACK_INK, TROUGH};
 use crate::config::{Action, Config, Key, KeyBindings, KeyCode};
 use crate::doc::Doc;
 use crate::search::SearchMode;
@@ -3339,9 +3340,9 @@ fn a_press_on_the_scrollbar_track_puts_the_thumb_under_the_pointer() {
         for row in 0..height {
             app.scrollbar_press(height, row);
             let (start, length) = app.scrollbar_thumb(height);
-            let top = usize::from(row) * 2;
+            let top = usize::from(row) * EIGHTHS;
             assert!(
-                top < start + length && top + 1 >= start,
+                top < start + length && top + EIGHTHS > start,
                 "{name}: pressing row {row} of {height} left the thumb at \
                  {start}..{} (scroll {} of {})",
                 start + length,
@@ -3354,50 +3355,122 @@ fn a_press_on_the_scrollbar_track_puts_the_thumb_under_the_pointer() {
 }
 
 #[test]
-fn the_scrollbar_track_is_broken_so_the_thumb_never_appears_to_touch_it() {
-    // Owner report: the thumb moves in half-cells, so its end lands mid-cell on every
-    // second step, and against an unbroken rule the line alternately met the thumb and
-    // stood clear of it. Dots have no join to break: whatever the thumb's parity, the
-    // cell above it looks the same as every other track cell.
-    //
-    // Asserted over the whole track and at both parities, because the defect was
-    // *between* two states rather than in either one.
-    let mut app = pager(&long_document(400));
-    let height = bar_height(&app);
-    let column = app.scrollbar_column();
-    let mut seen_half = false;
-    for row in 0..height {
-        app.scrollbar_press(height, row);
-        app.scrollbar_release();
-        let (start, length) = app.scrollbar_thumb(height);
-        seen_half |= start % 2 == 1 || length % 2 == 1;
-        let buffer = framed_buffer(&mut app, 80, height + 1);
-        for y in 0..height {
-            let symbol = buffer
-                .cell((column, y))
-                .expect("the gutter is inside the frame")
-                .symbol();
-            let filled = (start..start + length).contains(&(usize::from(y) * 2));
-            let lower = (start..start + length).contains(&(usize::from(y) * 2 + 1));
-            let want = match (filled, lower) {
-                (true, true) => "\u{2588}",
-                (true, false) => "\u{2580}",
-                (false, true) => "\u{2584}",
-                (false, false) => super::draw::TRACK,
-            };
-            assert_eq!(
-                symbol,
-                want,
-                "row {y} of the gutter with the thumb at {start}..{}",
-                start + length
+fn the_scrollbar_thumb_is_never_shorter_than_one_cell() {
+    // Not only so a very long document still shows a thumb. A thumb shorter than a cell
+    // could come to rest with track above it *and* track below it inside one cell, and
+    // the painter has one character per cell, splitting it at exactly one height — that
+    // position simply cannot be drawn. The floor is what makes the painter total, so it
+    // is asserted on the geometry rather than left to the painter to survive.
+    for (name, mut app) in scrollbar_pagers() {
+        let height = bar_height(&app);
+        for row in 0..height {
+            app.scrollbar_press(height, row);
+            app.scrollbar_release();
+            let (start, length) = app.scrollbar_thumb(height);
+            assert!(
+                length >= EIGHTHS,
+                "{name}: the thumb shrank to {length} eighths at row {row}"
             );
+            for y in 0..height {
+                let top = usize::from(y) * EIGHTHS;
+                let lead = start.clamp(top, top + EIGHTHS) - top;
+                let trail = (start + length).clamp(top, top + EIGHTHS) - top;
+                assert!(
+                    trail <= lead || lead == 0 || trail == EIGHTHS,
+                    "{name}: thumb {start}..{} sits inside cell {y} alone",
+                    start + length
+                );
+            }
         }
     }
-    assert!(
-        seen_half,
-        "the sample must put the thumb on a half-cell boundary at least once, \
-         or the case this is about is never reached"
-    );
+}
+
+#[test]
+fn the_scrollbar_track_is_a_colour_so_the_thumb_has_no_join_to_flicker_at() {
+    // Owner report against the old half-cell thumb on an unbroken `│` rule: the thumb's
+    // end landed mid-cell on every second step, so the rule alternately met the thumb and
+    // stood a half-cell clear of it. Dots were the workaround — a track already broken
+    // has no join to lose — and two flat colours are the fix: the fraction of a cell the
+    // thumb does not cover is painted track at the very height the thumb's edge cuts, so
+    // no gap exists to flicker.
+    //
+    // Asserted as glyph *and* style over the whole track, at every thumb position, and
+    // specifically at positions that do not land on a cell boundary — the defect was
+    // *between* two states rather than in either one.
+    for theme_name in ["dark", "light"] {
+        let mut app = themed_pager(&long_document(400), theme_name, 80, 12);
+        let height = bar_height(&app);
+        let column = app.scrollbar_column();
+        let theme = app.theme().clone();
+        let surface = theme
+            .ui
+            .scrollbar_track
+            .bg
+            .expect("the track has a surface behind it");
+        let ink = theme
+            .ui
+            .scrollbar_track
+            .fg
+            .expect("the track has an ink of its own");
+        let track_colour =
+            super::draw::term_style(crate::theme::Style::new().bg(surface.blend(ink, TRACK_INK)))
+                .bg
+                .expect("the blend produced a colour");
+        let thumb_colour = super::draw::term_style(theme.ui.scrollbar_thumb)
+            .fg
+            .expect("the thumb has an ink of its own");
+        assert_ne!(
+            track_colour, thumb_colour,
+            "{theme_name}: the test is only meaningful while the two colours differ"
+        );
+        // Driven by the scroll offset rather than by pressing track rows. A press is the
+        // *inverse* of the thumb mapping, so on a document this long — where the thumb is
+        // at its one-cell minimum — it lands the thumb on a cell boundary by construction
+        // and never reaches the case this test is about. Scrolling reaches every position
+        // the reader can actually put the thumb in.
+        let mut seen_partial = false;
+        for offset in 0..=app.max_scroll() {
+            app.scroll_to(offset);
+            let (start, length) = app.scrollbar_thumb(height);
+            let buffer = framed_buffer(&mut app, 80, height + 1);
+            for y in 0..height {
+                let cell = buffer
+                    .cell((column, y))
+                    .expect("the gutter is inside the frame");
+                let top = usize::from(y) * EIGHTHS;
+                let lead = start.clamp(top, top + EIGHTHS) - top;
+                let trail = (start + length).clamp(top, top + EIGHTHS) - top;
+                // What the cell must show, top to bottom: `thumb` eighths of thumb colour
+                // somewhere, and track everywhere else — expressed as the glyph that cuts
+                // the cell there and the pair of colours either side of the cut.
+                let (want, want_fg, want_bg) = if trail <= lead {
+                    (TROUGH, track_colour, track_colour)
+                } else if lead == 0 && trail == EIGHTHS {
+                    (LOWER_BLOCKS[EIGHTHS], thumb_colour, track_colour)
+                } else {
+                    seen_partial = true;
+                    if lead == 0 {
+                        // Thumb at the top of the cell: the glyph inks the track below it.
+                        (LOWER_BLOCKS[EIGHTHS - trail], track_colour, thumb_colour)
+                    } else {
+                        (LOWER_BLOCKS[EIGHTHS - lead], thumb_colour, track_colour)
+                    }
+                };
+                let at = format!(
+                    "{theme_name}: row {y} of the gutter with the thumb at {start}..{}",
+                    start + length
+                );
+                assert_eq!(cell.symbol(), want, "{at}");
+                assert_eq!(cell.fg, want_fg, "{at}: foreground");
+                assert_eq!(cell.bg, want_bg, "{at}: background");
+            }
+        }
+        assert!(
+            seen_partial,
+            "{theme_name}: the sample must put a thumb edge inside a cell at least once, \
+             or the case this is about is never reached"
+        );
+    }
 }
 
 #[test]
@@ -3451,7 +3524,7 @@ fn grabbing_the_thumb_does_not_move_it() {
         let before = app.scroll();
         let (start, length) = app.scrollbar_thumb(height);
         for top in start..start + length {
-            let row = u16::try_from(top / 2).expect("the thumb is inside the track");
+            let row = u16::try_from(top / EIGHTHS).expect("the thumb is inside the track");
             app.scrollbar_press(height, row);
             assert_eq!(
                 app.scroll(),
@@ -3474,7 +3547,7 @@ fn dragging_the_thumb_tracks_the_pointer_without_drift() {
         app.scroll_to(app.max_scroll() / 2);
         let before = app.scroll();
         let (start, length) = app.scrollbar_thumb(height);
-        let middle = u16::try_from((start + length / 2) / 2).expect("inside the track");
+        let middle = u16::try_from((start + length / 2) / EIGHTHS).expect("inside the track");
 
         app.scrollbar_press(height, middle);
         app.scrollbar_drag(height, middle + 1);
@@ -3488,22 +3561,23 @@ fn dragging_the_thumb_tracks_the_pointer_without_drift() {
         assert_eq!(app.scroll(), before, "{name}: no drift on the way back");
 
         // And the thumb goes down with the pointer, three rows for three rows, to
-        // within the half-cell the painter rounds to. This is the gain: a drag that
+        // within the eighth-cell the painter rounds to. This is the gain: a drag that
         // applied the *track's* rate rather than the thumb's would move the document
         // and leave the thumb sliding out from under the finger holding it.
         // Only where the document has more scrollable lines than the thumb has
-        // half-cells of travel. Below that the thumb moves in jumps of several
-        // half-cells per line because there is nothing finer to move it by, and no
+        // eighth-cells of travel. Below that the thumb moves in jumps of several
+        // eighth-cells per line because there is nothing finer to move it by, and no
         // mapping can make it track a pointer more smoothly than the document allows.
-        let travel = usize::from(height) * 2 - length;
+        let travel = usize::from(height) * EIGHTHS - length;
         if middle + 3 < height - 1 && app.max_scroll() >= travel {
             app.scrollbar_drag(height, middle + 3);
             let (moved_start, _) = app.scrollbar_thumb(height);
             assert!(
-                moved_start.abs_diff(start + 6) <= 1,
+                moved_start.abs_diff(start + 3 * EIGHTHS) <= 2,
                 "{name}: the pointer moved three rows and the thumb moved {} \
-                 half-cells, not six",
+                 eighth-cells, not {}",
                 moved_start as i64 - start as i64,
+                3 * EIGHTHS,
             );
         }
         app.scrollbar_release();
@@ -8762,3 +8836,4 @@ fn a_long_notice_is_elided_rather_than_dropped_on_a_narrow_bar() {
         rows[0]
     );
 }
+

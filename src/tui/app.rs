@@ -6,6 +6,7 @@
 //! module drives the real application logic, and [`super::draw`] is left with nothing
 //! but painting.
 
+use crate::canvas::meter::EIGHTHS;
 use crate::canvas::{Canvas, HotspotKind};
 use crate::config::{Action, Config, Key, KeyCode};
 use crate::doc::Doc;
@@ -709,32 +710,40 @@ impl App {
         self.size.0.saturating_sub(1)
     }
 
-    /// Where the scrollbar's thumb sits, in half-cells, for a track `height` cells tall.
+    /// Where the scrollbar's thumb sits, in eighth-cells, for a track `height` cells tall.
     ///
-    /// `(start, length)`, measured in half-cells from the top of the track, because
-    /// the painter positions the thumb to half-cell precision with the half-block
-    /// glyphs. Both the painter and the mouse hit test go through this, so the two
+    /// `(start, length)`, measured in eighths of a cell from the top of the track, because
+    /// the painter positions the thumb to eighth-cell precision with the block-element
+    /// ladder. Both the painter and the mouse hit test go through this, so the two
     /// cannot disagree about which rows the thumb occupies — the same reason
     /// [`App::toc_first_visible`] is derived rather than stored.
     ///
     /// `length` depends only on how much of the document fits, never on where the
     /// reader is, which is what lets a drag compute its gain once and keep it.
+    ///
+    /// # Why one whole cell is the floor
+    ///
+    /// A thumb shorter than a cell could come to rest with track above it *and* track
+    /// below it inside a single cell, and no one glyph draws that — the painter has one
+    /// character per cell and each character splits it at exactly one height. The floor
+    /// is not only so the reader can still see the thumb on a very long document; it is
+    /// what makes the painter's four cases cover every position that can occur.
     pub fn scrollbar_thumb(&self, height: u16) -> (usize, usize) {
-        let halves = usize::from(height) * 2;
-        if halves == 0 {
+        let eighths = usize::from(height) * EIGHTHS;
+        if eighths == 0 {
             return (0, 0);
         }
         let total = self.rendered().height().max(1);
         let visible = self.viewport_height().min(total);
-        let length = ((visible * halves) / total).clamp(2, halves);
-        let start = ((halves - length) as f32 * self.progress()).round() as usize;
+        let length = ((visible * eighths) / total).clamp(EIGHTHS, eighths);
+        let start = ((eighths - length) as f32 * self.progress()).round() as usize;
         (start, length)
     }
 
-    /// How far the thumb's top may travel, in half-cells. Zero when it cannot move.
+    /// How far the thumb's top may travel, in eighth-cells. Zero when it cannot move.
     fn scrollbar_span(&self, height: u16) -> usize {
         let (_, length) = self.scrollbar_thumb(height);
-        (usize::from(height) * 2).saturating_sub(length)
+        (usize::from(height) * EIGHTHS).saturating_sub(length)
     }
 
     /// The scroll offset a press on track row `row` means.
@@ -765,14 +774,15 @@ impl App {
             return max;
         }
         let (_, length) = self.scrollbar_thumb(height);
-        // Quarter-cells, so that the half-cell the pointer's own centre sits at stays
-        // an integer: the pointer's centre is `2·row + ½` half-cells down, and the
-        // thumb's is `start + length/2`.
+        // Sixteenths, so that a thumb of odd length still has an integer centre: the
+        // pointer's centre is `8·row + 4` eighth-cells down, and the thumb's is
+        // `start + length/2`. Doubling both clears the halving.
         let span = self.scrollbar_span(height) * 2;
         if span == 0 {
             return 0;
         }
-        let start = (4 * i64::from(row) + 1 - length as i64).clamp(0, span as i64) as usize;
+        let start = (2 * EIGHTHS as i64 * i64::from(row) + EIGHTHS as i64 - length as i64)
+            .clamp(0, span as i64) as usize;
         (start * max + span / 2) / span
     }
 
@@ -798,10 +808,10 @@ impl App {
         self.close_popup();
         self.ensure_rendered();
         let (start, length) = self.scrollbar_thumb(height);
-        let top = usize::from(row) * 2;
-        // The cell covers half-cells `top` and `top + 1`; the thumb covers
+        let top = usize::from(row) * EIGHTHS;
+        // The cell covers eighth-cells `top..top + EIGHTHS`; the thumb covers
         // `start..start + length`.
-        let on_thumb = length > 0 && top < start + length && top + 1 >= start;
+        let on_thumb = length > 0 && top < start + length && top + EIGHTHS > start;
         if !on_thumb {
             let target = self.scrollbar_scroll_at(height, row);
             self.scroll_to(target);
@@ -830,9 +840,6 @@ impl App {
         // The ends of the track are the ends of the document, for the reason given at
         // `scrollbar_scroll_at` — and this is also where a pointer dragged off the
         // bottom of the terminal arrives.
-        // The ends of the track are the ends of the document, for the reason given at
-        // `scrollbar_scroll_at` — and this is also where a pointer dragged off the
-        // bottom of the terminal arrives.
         if row == 0 {
             self.scroll_to(0);
             return;
@@ -845,8 +852,8 @@ impl App {
         if span == 0 {
             return;
         }
-        // One row of pointer is two half-cells of thumb.
-        let numerator = 2 * (i64::from(row) - i64::from(grab.row)) * max as i64;
+        // One row of pointer is a whole cell — `EIGHTHS` eighth-cells — of thumb.
+        let numerator = EIGHTHS as i64 * (i64::from(row) - i64::from(grab.row)) * max as i64;
         let moved = if numerator >= 0 {
             (numerator + span / 2) / span
         } else {

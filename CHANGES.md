@@ -6,6 +6,12 @@
 
 ### Changed
 
+- The document scrollbar now positions its thumb to eighth-cell precision rather than
+  half-cell, so a long document scrolls it smoothly instead of in visible steps. Its
+  track is a flat colour rather than one `·` per cell, drawn with the same ink and
+  coverage as the status bar's position meter, so the two read as one system. The thumb
+  is never shorter than one cell.
+
 ### Fixed
 
 ## 0.3.2 - 2026-09-14
