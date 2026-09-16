@@ -6,6 +6,14 @@
 
 ### Changed
 
+### Fixed
+
+## 0.3.4 - 2026-09-16
+
+### New
+
+### Changed
+
 - The document scrollbar now positions its thumb to eighth-cell precision rather than
   half-cell, so a long document scrolls it smoothly instead of in visible steps. Its
   track is a flat colour rather than one `·` per cell, drawn with the same ink and
