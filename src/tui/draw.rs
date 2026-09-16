@@ -12,8 +12,9 @@ use ratatui::style::{Color as TermColor, Modifier, Style as TermStyle};
 use ratatui::text::Span as TermSpan;
 use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
+use crate::canvas::meter::{EIGHTHS, LOWER_BLOCKS, TRACK_INK, TROUGH};
 use crate::canvas::{BorderSet, Canvas, Cell, Rule, Side};
-use crate::theme::{Attributes, Color, Style};
+use crate::theme::{Attributes, Color, Style, Theme};
 
 use super::app::{App, Overlay};
 use super::chrome;
@@ -987,51 +988,105 @@ fn highlight_selection(buffer: &mut Buffer, area: Rect, app: &App, top: usize, l
     }
 }
 
+/// The colour an unfilled stretch of scrollbar track is painted.
+///
+/// A flat colour, not an inked glyph, and the same recipe the status bar's position meter
+/// uses for its trough (`chrome::track_surface`): the track ink laid over the surface
+/// behind it at [`TRACK_INK`] coverage. Laying it over rather than painting it neat is
+/// what keeps a full-height stripe as quiet as the sparse dots it replaces — the palette
+/// tuned `scrollbar_track` as an ink, and an ink painted neat is about four times the
+/// weight the theme intends.
+///
+/// The foreground is given the same colour as the background so that an empty cell is one
+/// flat colour whichever way a terminal resolves a stray reverse-video attribute.
+///
+/// Falls back to the theme's own track style when either colour is missing, since there is
+/// then nothing to lay anything over.
+fn scrollbar_surface(theme: &Theme) -> Style {
+    let track = theme.ui.scrollbar_track;
+    let (Some(surface), Some(ink)) = (track.bg, track.fg) else {
+        return track;
+    };
+    let blended = surface.blend(ink, TRACK_INK);
+    Style {
+        fg: Some(blended),
+        bg: Some(blended),
+        ..track
+    }
+}
+
 /// Draws the document scrollbar in its one-column gutter.
 ///
-/// The thumb is positioned to half-cell precision using the upper and lower half-block
-/// glyphs, so scrolling a long document moves it smoothly rather than in whole rows.
-/// Where it sits is [`App::scrollbar_thumb`]'s answer, not this function's, because the
-/// mouse has to invert exactly this mapping to make the bar draggable.
+/// The thumb is positioned to eighth-cell precision, so scrolling a long document moves it
+/// smoothly rather than in whole rows. Where it sits is [`App::scrollbar_thumb`]'s answer,
+/// not this function's, because the mouse has to invert exactly this mapping to make the
+/// bar draggable.
 ///
-/// # Why the track is dots and not a line
+/// # One ladder draws both ends
 ///
-/// Half-cell precision means the thumb's end lands mid-cell on every second scroll step,
-/// and the other half of that cell is empty. Against an unbroken `│` the reader saw the
-/// line touch the thumb on one step and stand a half-cell clear of it on the next — the
-/// smoothness the half blocks buy, reported back as a flicker at the join. A track that
-/// is *already* broken has no join to lose: one [`TRACK`] dot per cell, and the gap
-/// beside a half-filled thumb reads as more track rather than as a seam.
-/// The scrollbar track: one dot per cell, widely spaced by construction.
+/// [`LOWER_BLOCKS`] grows upward from the bottom of a cell, and Unicode offers no usable
+/// ladder growing the other way. It does not need to: a lower block paints its bottom
+/// fraction in the foreground and leaves the top showing the background, so the cell at the
+/// thumb's *lower* end is the same glyph with thumb and track exchanged. Every cell in the
+/// gutter is therefore exactly one character split once between exactly two colours.
 ///
-/// `·` U+00B7 rather than a dashed box-drawing rule (`┆`, `┊`, `╎`): those draw the same
-/// gap, but coverage is the only font question worth asking and they lose it badly. A
-/// survey of the fonts installed on one developer machine found 44 families carrying `┆`
-/// against 216 for `·` — and 95 for the `│` this replaced, so the dot is on firmer
-/// ground than what it succeeds as well as quieter.
-pub(super) const TRACK: &str = "\u{b7}";
-
+/// # Why the track is a colour and not dots
+///
+/// It used to be one `·` per cell. That was a workaround: with half-cell precision the
+/// thumb's end landed mid-cell on every second scroll step, and against an unbroken `│` the
+/// reader saw the rule touch the thumb on one step and stand clear of it on the next. Dots
+/// have no join to lose, so the flicker went away — but so did the rule.
+///
+/// Two flat colours remove the cause instead. There is no join to flicker because there is
+/// no gap: the fraction of a cell the thumb does not cover is painted track, at the same
+/// height the thumb's edge cuts. The seam the dots were hiding cannot occur.
 fn scrollbar(buffer: &mut Buffer, area: Rect, app: &App) {
     if area.width == 0 || area.height == 0 {
         return;
     }
     let theme = app.theme();
-    let track = term_style(theme.ui.scrollbar_track);
-    let thumb = term_style(theme.ui.scrollbar_thumb);
+    let surface = scrollbar_surface(theme);
+    let track = term_style(surface);
+    // The thumb over the track, and the track over the thumb. The partial cells at the two
+    // ends of the thumb are the reason both exist: each paints one colour in front of the
+    // other, and which is in front is what decides whether the filled fraction sits at the
+    // bottom of the cell or at the top.
+    let thumb = term_style(Style {
+        bg: surface.bg,
+        ..theme.ui.scrollbar_thumb
+    });
+    let inverted = term_style(Style {
+        fg: surface.fg,
+        bg: theme.ui.scrollbar_thumb.fg,
+        ..surface
+    });
 
     // Geometry lives on `App` because the mouse needs to invert it; see
     // [`App::scrollbar_thumb`].
     let (start, length) = app.scrollbar_thumb(area.height);
 
     for y in 0..area.height {
-        let upper = usize::from(y) * 2;
-        let filled_upper = (start..start + length).contains(&upper);
-        let filled_lower = (start..start + length).contains(&(upper + 1));
-        let (symbol, style) = match (filled_upper, filled_lower) {
-            (true, true) => ("\u{2588}", thumb),
-            (true, false) => ("\u{2580}", thumb),
-            (false, true) => ("\u{2584}", thumb),
-            (false, false) => (TRACK, track),
+        let top = usize::from(y) * EIGHTHS;
+        // The eighths of this cell the thumb covers, as `lead..trail` within the cell.
+        let lead = start.clamp(top, top + EIGHTHS) - top;
+        let trail = (start + length).clamp(top, top + EIGHTHS) - top;
+        // A thumb is never shorter than a cell ([`App::scrollbar_thumb`]), so it can never
+        // be strictly inside one — which is what lets these four cases be exhaustive.
+        debug_assert!(
+            trail <= lead || lead == 0 || trail == EIGHTHS,
+            "thumb {start}..{} sits inside cell {y} alone",
+            start + length
+        );
+        let (symbol, style) = if trail <= lead {
+            (TROUGH, track)
+        } else if lead == 0 && trail == EIGHTHS {
+            (LOWER_BLOCKS[EIGHTHS], thumb)
+        } else if lead == 0 {
+            // The thumb covers the top of the cell: track in front, thumb behind.
+            (LOWER_BLOCKS[EIGHTHS - trail], inverted)
+        } else {
+            // The thumb covers the bottom of the cell: thumb in front, track behind.
+            (LOWER_BLOCKS[EIGHTHS - lead], thumb)
         };
         if let Some(cell) = buffer.cell_mut((area.x, area.y + y)) {
             cell.set_symbol(symbol);

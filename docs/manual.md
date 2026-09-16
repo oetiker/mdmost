@@ -648,8 +648,8 @@ coverage will do.
 - **Phonetic Extensions Supplement (U+1D80-U+1DBF)** — Math's raised `c f z`, the
   superscript letters Unicode placed here instead.
 
-- **Latin-1 Supplement (U+0080-U+00FF)** — The scrollbar track, whatever HTML entities
-  the document decodes to, and math's raised `1`, `2` and `3`.
+- **Latin-1 Supplement (U+0080-U+00FF)** — Whatever HTML entities the document decodes
+  to, and math's raised `1`, `2` and `3`.
 
 - **Specials (U+FFF0-U+FFFF)** — The replacement character, drawn in place of one that
   cannot be represented.
