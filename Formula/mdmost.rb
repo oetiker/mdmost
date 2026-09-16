@@ -25,6 +25,11 @@ class Mdmost < Formula
   # fallback only reaches upward, which is why the bottles are built on the oldest
   # runner image available for each architecture.
   # BOTTLE-START
+  bottle do
+    root_url "https://github.com/oetiker/mdmost/releases/download/v0.3.4"
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "1380132de11e1f14963f07fec98dcc3671ab1e70e2ca3162974300ba6c8785d5"
+    sha256 cellar: :any_skip_relocation, sequoia: "368354df439676e89ab18ed8dbffe7e99f20b1bed3eff7632f8952c774183d37"
+  end
   # BOTTLE-END
 
   on_macos do
