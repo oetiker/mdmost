@@ -733,13 +733,13 @@ per process** (`SyntaxSet` caches per process, so each row needed a fresh binary
 | Rust | 25 ms | 255 ms | 10.2x |
 | Python | 31 ms | 329 ms | 10.6x |
 | YAML | 7 ms | 72 ms | 10.3x |
-| Makefile | 42 ms | 678 ms | 16.2x |
+| Makefile | 42 ms | 678 ms | 16.1x |
 
 `RELEASE_FLOOR` starts from four times the worst release figure above (TypeScript, 258 ms
 -> 1032 ms), then raised to 1200 ms so it sits comfortably clear of the "never below one
 second" rule this was calibrated against, rather than just past it. `DEBUG_BUDGET_MULTIPLIER`
 is the worst debug/release ratio above (Makefile,
-16.2x), rounded up to 20x, applied to the whole of `budget_for`'s result rather than to the
+16.1x), rounded up to 20x, applied to the whole of `budget_for`'s result rather than to the
 floor alone, so a debug build's line-count cap grows by the same factor as its floor. With
 this floor, all sixteen failures disappeared with no change to either integration test
 file — confirming the floor, not the tests, was wrong.

@@ -303,7 +303,7 @@ const RELEASE_FLOOR: Duration = Duration::from_millis(1200);
 
 /// How much slower the same cold compile is measured to be in an unoptimized
 /// (`cargo test`) build, rounded up for margin. The worst observed
-/// debug/release ratio was Makefile at 16.2x (678 ms against 42 ms); the
+/// debug/release ratio was Makefile at 16.1x (678 ms against 42 ms); the
 /// others clustered around 10x. See `docs/maintainer-notes.md`.
 const DEBUG_BUDGET_MULTIPLIER: u32 = 20;
 
