@@ -20,10 +20,12 @@
   configured body width. Only the wide block itself still reaches past the cap.
 - A fenced block whose language definition never finishes parsing (a bug in the bundled
   JavaScript grammar `syntect` compiles; see `docs/upstream/`) no longer freezes the
-  pager. Such a block now gives up and renders as plain text instead. A document with
-  many distinct code blocks now takes measurably longer to first open — about 19% on a
-  36-block document — as the price. Thread creation was measured and accounts for only a
-  small part of that; the rest is not yet understood.
+  pager. Such a block now gives up after a measured budget and renders as plain text
+  instead of hanging forever. Compared to 0.3.4, a 36-block reference document that used
+  to take 6.07 s to first open now takes about 2.27 s — 2.7x faster, most of that from
+  the change above, with the price of this guard folded in. After two blocks are
+  abandoned this way in one session, every later code block that is not already cached
+  falls back to plain text too, silently, for the rest of that session.
 
 ## 0.3.4 - 2026-09-16
 
