@@ -156,6 +156,18 @@ static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| {
     })
 });
 
+/// Serialises tests that depend on [`CACHE`]'s single theme slot.
+///
+/// `cache_put` clears the *whole* map whenever it sees a theme other than the one
+/// it already holds, so a test running under one theme can watch a concurrently
+/// running test's theme switch clear its entry mid-assertion. A test's `(lang,
+/// src)` key being unique does not prevent this: the invalidation is keyed on the
+/// theme, not on the entry. Any test that reads `computed_count` or otherwise
+/// depends on a particular theme staying cached must hold this lock for the span
+/// of its assertions.
+#[cfg(test)]
+pub(crate) static CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
 /// Runs `body` against the locked cache.
 ///
 /// A panic elsewhere must not take highlighting with it: a poisoned lock is

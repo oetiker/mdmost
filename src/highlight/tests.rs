@@ -202,12 +202,16 @@ fn each_syntax_is_paired_with_its_own_set() {
     assert!(set.find_syntax_by_name(&syntax.name).is_some());
 }
 
-/// A key no other test uses, so the assertions below are unaffected by tests
-/// running in parallel against the same global cache.
+/// A key no other test uses, so this test's entry is never confused with another
+/// test's. It does not by itself protect against another test's theme switch —
+/// see [`CACHE_TEST_LOCK`], which every test here holds for that reason.
 const TASK1_SRC: &str = "let task1_unique_probe = 1;\n";
 
 #[test]
 fn a_second_highlight_of_the_same_block_is_not_recomputed() {
+    let _guard = CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     let theme = Theme::default_dark();
     assert_eq!(computed_count(Some("rust"), TASK1_SRC, &theme), None);
 
@@ -223,6 +227,9 @@ fn a_second_highlight_of_the_same_block_is_not_recomputed() {
 /// rather than a wrong-coloured hit.
 #[test]
 fn a_different_theme_recomputes_rather_than_reusing_the_colours() {
+    let _guard = CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     const SRC: &str = "let task1_theme_probe = 2;\n";
     let dark = Theme::default_dark();
     let light = Theme::default_light();

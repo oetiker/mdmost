@@ -4602,6 +4602,14 @@ fn a_paragraph_with_display_math_and_other_content_is_not_hoisted() {
 /// arguments. See the plan's finding F1.
 #[test]
 fn a_clipping_code_block_is_highlighted_once_however_often_it_is_laid_out() {
+    // Held for the whole test, not just the assertion: `render_document` itself
+    // drives the cache, and another test's theme switch could clear this test's
+    // entry between that call and the check below. See `CACHE_TEST_LOCK`'s doc
+    // comment for why the highlighter's `(lang, src)` key alone does not protect
+    // against this.
+    let _guard = crate::highlight::CACHE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     const CODE: &str =
         "let probe_for_the_clip_search = \"a line far wider than any prose cap set here\";\n";
     let source = format!("Text.\n\n```rust\n{CODE}```\n");
