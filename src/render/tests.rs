@@ -4710,6 +4710,10 @@ fn a_wide_fence_in_a_quote_does_not_widen_the_quoted_prose() {
         "quoted prose must keep the prose cap, got {}",
         widest_prose_row(&canvas)
     );
+    assert!(
+        widest_row(&canvas) > 72,
+        "the fence itself must still be granted the room it needs"
+    );
 }
 
 /// A narrow fence changes nothing: the container was never escalating for its own sake,
