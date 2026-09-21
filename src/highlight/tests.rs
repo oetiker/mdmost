@@ -204,12 +204,12 @@ fn each_syntax_is_paired_with_its_own_set() {
 
 /// A key no other test uses, so this test's entry is never confused with another
 /// test's. It does not by itself protect against another test's theme switch —
-/// see [`CACHE_TEST_LOCK`], which every test here holds for that reason.
+/// see [`HIGHLIGHT_GLOBALS_TEST_LOCK`], which every test here holds for that reason.
 const TASK1_SRC: &str = "let task1_unique_probe = 1;\n";
 
 #[test]
 fn a_second_highlight_of_the_same_block_is_not_recomputed() {
-    let _guard = CACHE_TEST_LOCK
+    let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     let theme = Theme::default_dark();
@@ -227,7 +227,7 @@ fn a_second_highlight_of_the_same_block_is_not_recomputed() {
 /// rather than a wrong-coloured hit.
 #[test]
 fn a_different_theme_recomputes_rather_than_reusing_the_colours() {
-    let _guard = CACHE_TEST_LOCK
+    let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
     const SRC: &str = "let task1_theme_probe = 2;\n";
@@ -273,6 +273,12 @@ fn the_budget_grows_with_the_block() {
 /// rather than hanging the caller.
 #[test]
 fn work_that_overruns_its_budget_is_abandoned() {
+    // ABANDONED is process-global and shared with every other test in this
+    // binary; without this lock a concurrently running test's own overrun or
+    // reset can race this one. See `HIGHLIGHT_GLOBALS_TEST_LOCK`.
+    let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     let outcome = run_within(Duration::from_millis(50), || {
         std::thread::sleep(Duration::from_secs(30));
         vec![Line::empty()]
@@ -289,6 +295,12 @@ fn work_that_overruns_its_budget_is_abandoned() {
 /// be counted the same as a genuine abandonment.
 #[test]
 fn a_panicking_worker_does_not_consume_an_abandoned_slot() {
+    // See `HIGHLIGHT_GLOBALS_TEST_LOCK`: without it, a concurrently running
+    // test's own use of ABANDONED can land inside this test's reset/assert
+    // window and fail it spuriously.
+    let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     reset_abandoned_for_test();
     let outcome = run_within(Duration::from_secs(5), || panic!("scratch panic for test"));
     assert!(outcome.is_none());

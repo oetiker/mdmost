@@ -158,7 +158,9 @@ static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| {
     })
 });
 
-/// Serialises tests that depend on [`CACHE`]'s single theme slot.
+/// Serialises tests that depend on either of this module's two process-global,
+/// `cargo test`-shared pieces of state: [`CACHE`]'s single theme slot and
+/// [`ABANDONED`].
 ///
 /// `cache_put` clears the *whole* map whenever it sees a theme other than the one
 /// it already holds, so a test running under one theme can watch a concurrently
@@ -167,8 +169,17 @@ static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| {
 /// theme, not on the entry. Any test that reads `computed_count` or otherwise
 /// depends on a particular theme staying cached must hold this lock for the span
 /// of its assertions.
+///
+/// `ABANDONED` has the same shape of problem: it is a bare counter with no test
+/// isolation, so a test that deliberately abandons or panics a worker races any
+/// other test doing the same. One lock guards both rather than two separate
+/// locks, because a test can need both at once —
+/// `the_javascript_hang_degrades_to_plain_text` goes through [`highlight`], which
+/// touches the cache and can abandon a thread — and two locks taken in different
+/// orders by different tests is a deadlock waiting to happen that a single lock
+/// cannot have.
 #[cfg(test)]
-pub(crate) static CACHE_TEST_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static HIGHLIGHT_GLOBALS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Runs `body` against the locked cache.
 ///
