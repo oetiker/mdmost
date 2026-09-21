@@ -33,7 +33,9 @@ mod scopes;
 pub use acknowledgements::syntax_acknowledgements;
 
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex, PoisonError};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{LazyLock, Mutex, PoisonError, mpsc};
+use std::time::Duration;
 
 use syntect::easy::ScopeRegionIterator;
 use syntect::parsing::{
@@ -272,6 +274,103 @@ const ALIASES: &[(&str, &str)] = &[
     ("text", "txt"),
 ];
 
+/// The longest any one block may be highlighted for, however large it is, in a
+/// release build. A debug build multiplies this along with the rest of
+/// [`budget_for`]'s result by [`DEBUG_BUDGET_MULTIPLIER`]: `cargo test` never
+/// ships, so the only thing the multiplier has to do is stop the same
+/// cold-compile cost that motivates [`RELEASE_FLOOR`] from false-positiving
+/// the guard in an unoptimized binary.
+pub const MAX_HIGHLIGHT_BUDGET: Duration = Duration::from_secs(20);
+
+/// The budget's floor before any per-line allowance, calibrated in a release
+/// build against a genuinely cold (first-ever, single-threaded, uncontended)
+/// compile of six representative bundled syntaxes. The worst was TypeScript
+/// at 258 ms; this is four times that, rounded up, and never below one
+/// second regardless of what a lighter syntax would allow. The full
+/// measured table is in `docs/maintainer-notes.md`.
+const RELEASE_FLOOR: Duration = Duration::from_millis(1200);
+
+/// How much slower the same cold compile is measured to be in an unoptimized
+/// (`cargo test`) build, rounded up for margin. The worst observed
+/// debug/release ratio was Makefile at 16.2x (678 ms against 42 ms); the
+/// others clustered around 10x. See `docs/maintainer-notes.md`.
+const DEBUG_BUDGET_MULTIPLIER: u32 = 20;
+
+/// How long a block of `lines` lines is given before it is abandoned.
+///
+/// The floor is not about parsing — it absorbs `syntect`'s one-time cost of
+/// compiling a syntax's regexes, which `SyntaxSet` caches globally once paid,
+/// but which is charged in full to whichever block happens to use that
+/// language first in this process. That cost is not proportional to the
+/// block that pays it, so it cannot be amortised by the per-line term below;
+/// it has to be a floor.
+///
+/// Past the floor, budget grows with the input so that a legitimately large
+/// block is not degraded for being large: a thousand lines of TypeScript
+/// cost about 1.4 s of honest parsing on top of the one-time compile.
+fn budget_for(lines: usize) -> Duration {
+    let scaled =
+        (RELEASE_FLOOR + Duration::from_millis(2) * lines as u32).min(MAX_HIGHLIGHT_BUDGET);
+    if cfg!(debug_assertions) {
+        scaled * DEBUG_BUDGET_MULTIPLIER
+    } else {
+        scaled
+    }
+}
+
+/// How many abandoned threads are tolerated before the guard stops spawning.
+///
+/// An abandoned thread cannot be stopped — Rust has no way to cancel one — so
+/// each costs a core until the process exits. Past this, an uncached block is
+/// plain text rather than another core.
+const MAX_ABANDONED: usize = 2;
+
+static ABANDONED: AtomicUsize = AtomicUsize::new(0);
+
+/// Resets [`ABANDONED`] to zero.
+///
+/// [`ABANDONED`] only ever counts up, and it is process-global: a test that
+/// deliberately abandons a thread would otherwise permanently spend one of
+/// [`MAX_ABANDONED`]'s two slots for the rest of the test binary, leaving one
+/// more genuine overrun anywhere else in that process — plausible on a
+/// shared, busy machine even with a calibrated floor — enough to make every
+/// later `highlight()` in the binary silently degrade to plain text. Called
+/// by the one test that deliberately triggers an overrun, right after it.
+#[cfg(test)]
+fn reset_abandoned_for_test() {
+    ABANDONED.store(0, Ordering::Relaxed);
+}
+
+/// Runs `work` on a thread and gives up on it after `budget`.
+///
+/// `None` means the work did not finish in time, or that too many threads have
+/// already been abandoned to risk another.
+fn run_within(
+    budget: Duration,
+    work: impl FnOnce() -> Vec<Line> + Send + 'static,
+) -> Option<Vec<Line>> {
+    if ABANDONED.load(Ordering::Relaxed) >= MAX_ABANDONED {
+        return None;
+    }
+    let (tx, rx) = mpsc::channel();
+    // The result is sent rather than joined: a join would wait for a thread
+    // that may never return, which is the whole thing being defended against.
+    // The send fails harmlessly when this side has already given up.
+    std::thread::Builder::new()
+        .name("mdmost-highlight".to_owned())
+        .spawn(move || {
+            let _ = tx.send(work());
+        })
+        .ok()?;
+    match rx.recv_timeout(budget) {
+        Ok(lines) => Some(lines),
+        Err(_) => {
+            ABANDONED.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+    }
+}
+
 /// Highlights the body of a fenced code block.
 ///
 /// `lang` is the fence's info string, if any; only the first word before a comma or
@@ -289,23 +388,32 @@ pub fn highlight(lang: Option<&str>, src: &str, theme: &Theme) -> Vec<Line> {
     if let Some(hit) = cache_get(lang, src, theme) {
         return hit;
     }
-    let lines = highlight_uncached(lang, src, theme);
+    let styles = theme.code;
+    let owned_lang = lang.map(str::to_owned);
+    let owned_src = src.to_owned();
+    let line_count = LinesWithEndings::from(src).count();
+    let lines = run_within(budget_for(line_count), move || {
+        highlight_uncached(owned_lang.as_deref(), &owned_src, &styles)
+    })
+    // A block that overran is cached as plain text, so it is neither
+    // re-attempted on the next layout probe nor on the next resize.
+    .unwrap_or_else(|| plain(src, &theme.code));
     cache_put(lang, src, theme, &lines);
     lines
 }
 
 /// Highlights without consulting the cache. See [`highlight`] for the contract.
-fn highlight_uncached(lang: Option<&str>, src: &str, theme: &Theme) -> Vec<Line> {
+fn highlight_uncached(lang: Option<&str>, src: &str, styles: &CodeStyles) -> Vec<Line> {
     if src.len() > MAX_HIGHLIGHT_BYTES {
-        return plain(src, theme);
+        return plain(src, styles);
     }
     let Some((set, syntax)) = resolve_syntax(lang) else {
-        return plain(src, theme);
+        return plain(src, styles);
     };
     if LinesWithEndings::from(src).count() > MAX_HIGHLIGHT_LINES {
-        return plain(src, theme);
+        return plain(src, styles);
     }
-    highlight_with(set, syntax, src, theme).unwrap_or_else(|| plain(src, theme))
+    highlight_with(set, syntax, src, styles).unwrap_or_else(|| plain(src, styles))
 }
 
 /// The name of the `syntect` syntax a language tag resolves to, if any.
@@ -366,7 +474,7 @@ fn highlight_with(
     set: &SyntaxSet,
     syntax: &SyntaxReference,
     src: &str,
-    theme: &Theme,
+    styles: &CodeStyles,
 ) -> Option<Vec<Line>> {
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
@@ -376,7 +484,7 @@ fn highlight_with(
         let ops = state.parse_line(raw, set).ok()?;
         let mut line = Line::empty();
         let mut column = 0usize;
-        let mut style = theme.code.text;
+        let mut style = styles.text;
         let mut restyle = true;
 
         for (text, op) in ScopeRegionIterator::new(&ops, raw) {
@@ -389,7 +497,7 @@ fn highlight_with(
                 continue;
             }
             if restyle {
-                style = scopes::style_for(stack.as_slice(), &theme.code);
+                style = scopes::style_for(stack.as_slice(), styles);
                 restyle = false;
             }
             line.push(Span::new(expand_tabs(text, &mut column), style));
@@ -400,7 +508,7 @@ fn highlight_with(
 }
 
 /// Renders `src` as plain themed text, one [`Line`] per source line.
-fn plain(src: &str, theme: &Theme) -> Vec<Line> {
+fn plain(src: &str, styles: &CodeStyles) -> Vec<Line> {
     LinesWithEndings::from(src)
         .map(|raw| {
             let mut column = 0usize;
@@ -408,7 +516,7 @@ fn plain(src: &str, theme: &Theme) -> Vec<Line> {
             if text.is_empty() {
                 Line::empty()
             } else {
-                Line::styled(text, theme.code.text)
+                Line::styled(text, styles.text)
             }
         })
         .collect()

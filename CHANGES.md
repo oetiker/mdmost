@@ -18,6 +18,11 @@
   to take the whole list or quote with it: one over-wide fence in a single item was enough
   to make every sentence in every other item wrap at the terminal width instead of the
   configured body width. Only the wide block itself still reaches past the cap.
+- A fenced block whose language definition never finishes parsing (a bug in the bundled
+  JavaScript grammar `syntect` compiles; see `docs/upstream/`) no longer freezes the
+  pager. Such a block now gives up and renders as plain text instead. Highlighting is
+  slightly slower as a result, since a highlight now runs on its own thread rather than
+  the caller's.
 
 ## 0.3.4 - 2026-09-16
 

@@ -240,3 +240,71 @@ fn a_different_theme_recomputes_rather_than_reusing_the_colours() {
     assert_eq!(in_dark.len(), in_light.len());
     assert_ne!(in_dark, in_light, "the two themes colour code differently");
 }
+
+use std::time::Duration;
+
+/// The budget must leave an honest block alone and still be finite.
+///
+/// `budget_for`'s absolute floor is now calibrated from measurement (see its
+/// doc comment and `docs/maintainer-notes.md`) and, in a debug build — which
+/// is what `cargo test` compiles by default — multiplied by
+/// [`DEBUG_BUDGET_MULTIPLIER`] on top of that. A hard-coded millisecond
+/// literal here would only ever be right for one build profile, so this
+/// compares against the same named constants `budget_for` itself uses,
+/// scaled the same way.
+#[test]
+fn the_budget_grows_with_the_block() {
+    let multiplier = if cfg!(debug_assertions) {
+        DEBUG_BUDGET_MULTIPLIER
+    } else {
+        1
+    };
+    assert!(budget_for(2) >= RELEASE_FLOOR * multiplier);
+    assert!(
+        budget_for(2) < budget_for(1077),
+        "the budget must grow with the block"
+    );
+    assert!(budget_for(1077) >= Duration::from_secs(2) * multiplier);
+    assert!(budget_for(1077) < budget_for(1_000_000));
+    assert!(budget_for(1_000_000) <= MAX_HIGHLIGHT_BUDGET * multiplier);
+}
+
+/// A parse that does not return within its budget degrades to plain text
+/// rather than hanging the caller.
+#[test]
+fn work_that_overruns_its_budget_is_abandoned() {
+    let outcome = run_within(Duration::from_millis(50), || {
+        std::thread::sleep(Duration::from_secs(30));
+        vec![Line::empty()]
+    });
+    assert!(outcome.is_none(), "the caller must not wait for it");
+    // This test's own overrun is deliberate; it must not permanently spend
+    // one of ABANDONED's two slots against every other test in this binary.
+    // See `reset_abandoned_for_test`.
+    reset_abandoned_for_test();
+}
+
+/// Work that finishes inside its budget is returned unchanged.
+#[test]
+fn work_that_finishes_in_time_is_returned() {
+    let outcome = run_within(Duration::from_secs(5), || {
+        vec![Line::empty(), Line::empty()]
+    });
+    assert_eq!(outcome.map(|lines| lines.len()), Some(2));
+}
+
+/// The reproducer from the plan's finding F3. Ignored by default: the abandoned
+/// parser thread burns a core until the process exits, which is not something to
+/// impose on every `cargo test`.
+///
+/// Run with: `cargo test -p mdmost -j 4 -- --ignored the_javascript_hang`
+#[test]
+#[ignore = "abandons a spinning thread; see the doc comment"]
+fn the_javascript_hang_degrades_to_plain_text() {
+    let theme = Theme::default_dark();
+    let src = "  | { type: \"a\" }\n  /** x */\n";
+    let lines = highlight(Some("js"), src, &theme);
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0].text(), "  | { type: \"a\" }");
+    assert_eq!(lines[1].text(), "  /** x */");
+}
