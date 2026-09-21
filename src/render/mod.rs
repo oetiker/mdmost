@@ -236,12 +236,10 @@ pub(crate) struct Ctx<'a> {
     /// A container narrows this by its own gutter before handing it to its
     /// children, so a list item's cap is the body's cap less the marker column.
     ///
-    /// [`render_document`] sets this; nothing reads it yet.
-    #[expect(
-        dead_code,
-        reason = "set here, first read by Task 3's per-child placement escalation; \
-                  this must fail to build, and be deleted, the moment that read lands"
-    )]
+    /// [`render_document`] sets this; [`super::block::render_sequence`] reads it to
+    /// place each child the way the document places a top-level block, so a wide fence
+    /// nested in a list or a quote escalates on its own instead of dragging the whole
+    /// container out to the terminal width.
     pub measure: Option<crate::render::document::Measure>,
 }
 

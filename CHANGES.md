@@ -13,6 +13,12 @@
 
 ### Fixed
 
+- A code fence, table or other wide block nested inside a list item, a block quote or a
+  footnote no longer drags the rest of that container out to the terminal's edge. It used
+  to take the whole list or quote with it: one over-wide fence in a single item was enough
+  to make every sentence in every other item wrap at the terminal width instead of the
+  configured body width. Only the wide block itself still reaches past the cap.
+
 ## 0.3.4 - 2026-09-16
 
 ### New

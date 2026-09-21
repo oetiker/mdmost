@@ -245,6 +245,21 @@ impl Measure {
     pub(crate) const fn is_capped(&self) -> bool {
         self.prose < self.full
     }
+
+    /// The same measure, narrowed by `by` columns on both the full body and the cap.
+    ///
+    /// A container's children are laid out inside its own gutter — a quote's bar, a
+    /// list's marker column, a footnote's `[n]` label — so the cap they inherit has to
+    /// shrink by the same amount their content actually loses. Left unnarrowed, a
+    /// child's prose would run `by` columns past the body's cap; see [`super::block`]'s
+    /// `quote`, `list` and `footnote`, which each narrow the measure they hand to
+    /// [`super::block::render_sequence`] this way before rendering their children.
+    pub(crate) fn narrowed(self, by: u16) -> Self {
+        Self {
+            full: self.full.saturating_sub(by).max(1),
+            prose: self.prose.saturating_sub(by).max(1),
+        }
+    }
 }
 
 /// Whether a block is laid out at the full body width however narrow the cap is.
