@@ -132,8 +132,31 @@ impl Cell {
         self.text.chars().all(|c| c == ' ')
     }
 
-    /// Appends a zero-width cluster (a combining mark) to this cell's text.
-    pub(crate) fn append_zero_width(&mut self, cluster: &str) {
+    /// Whether `cluster` can be drawn inside this cell without changing what it draws.
+    ///
+    /// A combining mark answers yes because it adds nothing to the advance. An emoji
+    /// modifier after an emoji base answers yes too: the pair still draws the base's two
+    /// columns. A variation selector after a one-column glyph answers no, because it
+    /// makes the cell draw two columns where one was laid out.
+    pub(crate) fn absorbs(&self, cluster: &str) -> bool {
+        let mut together = CompactString::with_capacity(self.text.len() + cluster.len());
+        together.push_str(&self.text);
+        together.push_str(cluster);
+        crate::text::display_width(&together) == usize::from(self.width)
+    }
+
+    /// Draws `cluster` inside this cell, as part of the glyph already there.
+    ///
+    /// For a combining mark, which is where this started; and for anything the terminal
+    /// will join to the cell's text whether the canvas plans for it or not — see
+    /// [`text::joins`](crate::text::joins). The caller must have asked [`Cell::absorbs`]
+    /// first: the cell's claimed width does not move.
+    pub(crate) fn append_joined(&mut self, cluster: &str) {
+        debug_assert!(
+            self.absorbs(cluster),
+            "{cluster:?} does not fit inside {:?} without changing its width",
+            self.text
+        );
         self.text.push_str(cluster);
     }
 }

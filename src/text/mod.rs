@@ -25,6 +25,7 @@ mod tests;
 pub use span::{Line, Span, spans_min_width, spans_width};
 pub use wrap::{wrap_plain, wrap_spans};
 
+use compact_str::CompactString;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -104,6 +105,40 @@ pub fn grapheme_width(cluster: &str) -> u8 {
         1 => 1,
         _ => 2,
     }
+}
+
+/// Whether `tail` written immediately after `head` draws as one thing with it.
+///
+/// Concatenation is not addition. A zero-width joiner at the end of `head` reaches
+/// across into an emoji opening `tail` and the pair becomes one glyph of two columns; an
+/// emoji modifier opening `tail` reaches back and colours the emoji ending `head`; a
+/// variation selector opening `tail` moves a glyph ending `head` between its one-column
+/// text form and its two-column emoji form. In each case the two measured apart do not
+/// add up to the two measured together, so a row assembled from pieces that join across
+/// their boundary is not as wide as the pieces claim — the canvas contract of design
+/// spec §4.
+///
+/// This is a question of measurement rather than of which characters are involved: the
+/// test is the arithmetic the contract rests on, so it holds for joins nobody has
+/// enumerated yet.
+///
+/// The document itself is never affected. Text joins across a boundary only where markup
+/// stood between the two runs, and what the reader copies still holds every character
+/// the file does.
+pub fn joins(head: &str, tail: &str) -> bool {
+    // Two ASCII characters never combine, and that is nearly every boundary in a
+    // document; the measurement below is only worth making when one side is not ASCII.
+    if head.as_bytes().last().is_none_or(u8::is_ascii)
+        && tail.as_bytes().first().is_none_or(u8::is_ascii)
+    {
+        return false;
+    }
+    // `CompactString` keeps a pair of clusters on the stack, which matters because this
+    // runs at every cell boundary of every row.
+    let mut together = CompactString::with_capacity(head.len() + tail.len());
+    together.push_str(head);
+    together.push_str(tail);
+    display_width(&together) != display_width(head) + display_width(tail)
 }
 
 /// The glyph standing in for a cluster no arrangement of cells can hold.

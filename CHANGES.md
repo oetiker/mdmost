@@ -8,6 +8,14 @@
 
 ### Fixed
 
+- A row no longer slides sideways where a formatting delimiter falls between an emoji and
+  the joiner or skin tone belonging to it. Emphasis, strong, strikethrough, a code span
+  and a link each split the text there, and the terminal drew the two halves as the one
+  glyph they spell while the layout had paid for two — so everything after it on that row
+  was drawn two columns to the left of where the rest of the document sat, and two stale
+  columns were left at the line's end. The joined glyph is now laid out in the single cell
+  it draws in.
+
 ## 0.3.4 - 2026-09-16
 
 ### New

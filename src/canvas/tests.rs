@@ -177,6 +177,72 @@ fn a_combining_mark_steps_back_over_a_wide_cell_onto_the_character() {
 }
 
 #[test]
+fn a_run_opening_where_the_cell_to_its_left_ends_in_a_joiner_is_drawn_inside_it() {
+    // Markup between the two halves of an emoji sequence is what puts them in separate
+    // writes: `*a<ZWJ>*b*` leaves the joiner at the end of one run and the emoji at the
+    // start of the next. The terminal joins them back into one glyph, so the emoji
+    // belongs in the cell the joiner is in rather than in a cell of its own.
+    let mut canvas = Canvas::new(6, 1, base());
+    canvas.write_str(0, 0, "\u{1f600}\u{200d}", base());
+    let written = canvas.write_str(0, 2, "\u{1f600}", base());
+    ok(&canvas);
+    let row = canvas.row(0).expect("row exists");
+    assert_eq!(row[0].text(), "\u{1f600}\u{200d}\u{1f600}");
+    assert_eq!(row[0].width(), 2);
+    assert_eq!(written, 0, "the joined emoji takes no column of its own");
+    assert_eq!(canvas.row_text(0), "\u{1f600}\u{200d}\u{1f600}    ");
+}
+
+#[test]
+fn an_emoji_modifier_colours_the_emoji_to_its_left_rather_than_taking_a_cell() {
+    // The joiner is on the other side here: the modifier opens a cluster that reaches
+    // back into whatever precedes it, and `unicode-width` prices the pair at the base's
+    // own two columns.
+    let mut canvas = Canvas::new(6, 1, base());
+    canvas.write_str(0, 0, "\u{1f44d}", base());
+    let written = canvas.write_str(0, 2, "\u{1f3fb}", base());
+    ok(&canvas);
+    let row = canvas.row(0).expect("row exists");
+    assert_eq!(row[0].text(), "\u{1f44d}\u{1f3fb}");
+    assert_eq!(row[0].width(), 2);
+    assert_eq!(written, 0);
+}
+
+#[test]
+fn a_variation_selector_the_cell_has_no_room_for_is_dropped() {
+    // U+FE0F turns a one-column text glyph into a two-column emoji. The column was
+    // negotiated before the selector arrived, so honouring it would make the cell draw
+    // wider than every measurement upstream allowed for; the selector is dropped
+    // instead, exactly as a mark with nothing to strike is.
+    let mut canvas = Canvas::new(4, 1, base());
+    canvas.write_str(0, 0, "\u{263a}", base());
+    canvas.write_str(0, 1, "\u{fe0f}", base());
+    ok(&canvas);
+    let row = canvas.row(0).expect("row exists");
+    assert_eq!(row[0].text(), "\u{263a}");
+    assert_eq!(row[0].width(), 1);
+}
+
+#[test]
+fn a_joining_run_the_cell_cannot_hold_stands_as_a_marker() {
+    // A skin tone after a *narrow* emoji base: the pair draws two columns where the
+    // cells claim three, and merging it into the base would make a one-column cell draw
+    // two. Neither is available, so the run is replaced by a same-width marker, which
+    // joins nothing and leaves the columns after it where they were.
+    let mut canvas = Canvas::new(5, 1, base());
+    canvas.write_str(0, 0, "\u{261d}", base());
+    let written = canvas.write_str(0, 1, "\u{1f3fb}", base());
+    ok(&canvas);
+    let row = canvas.row(0).expect("row exists");
+    assert_eq!(row[0].text(), "\u{261d}");
+    assert_eq!(row[1].text(), crate::text::UNPLACEABLE);
+    assert_eq!(
+        written, 2,
+        "the marker run is as wide as what it stands in for"
+    );
+}
+
+#[test]
 fn writing_clips_at_the_right_edge() {
     let mut canvas = Canvas::new(4, 1, base());
     let written = canvas.write_str(0, 0, "abcdef", base());
