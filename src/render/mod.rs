@@ -236,12 +236,12 @@ pub(crate) struct Ctx<'a> {
     /// A container narrows this by its own gutter before handing it to its
     /// children, so a list item's cap is the body's cap less the marker column.
     ///
-    /// [`render_document`] sets this and nothing reads it yet — the per-child
-    /// escalation that consumes it is a later change. `allow` rather than
-    /// leaving the warning: a field that is written but not read is exactly what
-    /// `dead_code` exists to catch, and there is no way to "use" a cap without
-    /// wiring up the escalation itself.
-    #[allow(dead_code)]
+    /// [`render_document`] sets this; nothing reads it yet.
+    #[expect(
+        dead_code,
+        reason = "set here, first read by Task 3's per-child placement escalation; \
+                  this must fail to build, and be deleted, the moment that read lands"
+    )]
     pub measure: Option<crate::render::document::Measure>,
 }
 
