@@ -364,10 +364,15 @@ fn run_within(
         .ok()?;
     match rx.recv_timeout(budget) {
         Ok(lines) => Some(lines),
-        Err(_) => {
+        // A timeout means the worker is still running past its budget — a thread
+        // is genuinely being abandoned, and the count has to reflect that. A
+        // disconnect means the worker panicked and dropped `tx` without sending;
+        // no thread is left running, so there is nothing to account for.
+        Err(mpsc::RecvTimeoutError::Timeout) => {
             ABANDONED.fetch_add(1, Ordering::Relaxed);
             None
         }
+        Err(mpsc::RecvTimeoutError::Disconnected) => None,
     }
 }
 

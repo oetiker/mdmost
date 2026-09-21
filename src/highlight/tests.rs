@@ -284,6 +284,21 @@ fn work_that_overruns_its_budget_is_abandoned() {
     reset_abandoned_for_test();
 }
 
+/// A worker that panics dropped `tx` without sending; that is a disconnect,
+/// not a timeout, and no thread is left running past its budget. It must not
+/// be counted the same as a genuine abandonment.
+#[test]
+fn a_panicking_worker_does_not_consume_an_abandoned_slot() {
+    reset_abandoned_for_test();
+    let outcome = run_within(Duration::from_secs(5), || panic!("scratch panic for test"));
+    assert!(outcome.is_none());
+    assert_eq!(
+        ABANDONED.load(Ordering::Relaxed),
+        0,
+        "a panic must not be counted as an abandonment"
+    );
+}
+
 /// Work that finishes inside its budget is returned unchanged.
 #[test]
 fn work_that_finishes_in_time_is_returned() {

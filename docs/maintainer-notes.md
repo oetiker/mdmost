@@ -758,13 +758,20 @@ out whether that is `std::thread::spawn` plus the `mpsc` round trip, 36 calls to
 `run_within` with a closure that returns immediately were timed against 36 direct calls of
 the same closure, release build: the guarded calls cost 5.67 ms more in total, about 157 µs
 per call. That accounts for roughly 1.5% of the measured 368 ms. **Spawn-and-channel
-overhead is not the dominant cost.** The likely remainder is the guarded closure's own
-`to_owned()` copies of `lang` and `src`, or the highlighted work losing warm cache
-locality by running on a freshly scheduled thread rather than the caller's — on a shared,
-busy 128-core machine a newly spawned thread also queues for a core rather than running
-immediately, which a near-instant trivial closure does not experience enough of to show up
-in the 157 µs figure. This was not chased further: the owner capped this at one
-measurement round and ruled the cost accepted regardless of the exact remaining cause.
+overhead is not the dominant cost, and the remaining ~98% is not yet understood** — the
+trivial closure allocated nothing, so this experiment cannot see anything that depends on
+real allocation.
+
+An **untested hypothesis**, not yet measured: per-thread `malloc` arenas. glibc gives each
+new thread its own arena, so every one of `syntect`'s parse allocations on the guarded
+thread comes from a fresh, cold arena that has to be `mmap`ed and page-faulted in, and the
+resulting `Vec<Line>` is then freed cross-thread by the caller — 36 times over for this
+document. Faulting in a fresh 2 MiB stack and lost cache locality from running on a
+freshly scheduled thread are two further untested candidates. Measuring any of these
+properly needs a *real* highlight run timed guarded versus direct, not a trivial closure —
+this was not done, and the owner capped the investigation at the one experiment above
+rather than chasing the remaining ~98% further; the cost is accepted regardless of which
+of these turns out to be the actual cause.
 
 **The cost is accepted.** Task 1 took this reference document from 6.07 s to 1.83 s; with
 the guard it is ~2.27 s — still 2.7x faster than before the branch, in exchange for a
