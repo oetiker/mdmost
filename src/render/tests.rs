@@ -4624,3 +4624,25 @@ fn a_clipping_code_block_is_highlighted_once_however_often_it_is_laid_out() {
         "the clip search must not recompute the highlight"
     );
 }
+
+/// A top-level fence wider than the cap takes the full body width. This is the
+/// behaviour `render_placed` has today and the refactor in Task 2 must preserve
+/// it exactly; Task 3 changes only what happens inside a container.
+#[test]
+fn a_top_level_wide_fence_still_takes_the_full_body() {
+    let source = "Short.\n\n```sh\n\
+        some --command --with --a --line --clearly --wider --than --the --prose --cap\n\
+        ```\n";
+    let doc = Doc::parse(source);
+    let theme = Theme::default_dark();
+    let canvas = render_document(&doc, 120, Some(72), &theme, &PLAIN);
+
+    let widest = (0..canvas.height())
+        .map(|row| canvas.row_text(row).trim_end().chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        widest > 72,
+        "a wide top-level fence is granted more than the prose cap, got {widest}"
+    );
+}
