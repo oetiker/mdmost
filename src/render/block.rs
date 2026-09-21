@@ -371,13 +371,31 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
 /// it is nested — and `place`'s own placement arithmetic is what puts a block that grew
 /// this way back in its rightful footprint on the page.
 fn contract(mut canvas: Canvas, width: u16, node: &Node, ctx: Ctx<'_>) -> Canvas {
-    let may_have_escalated = matches!(
-        node.kind,
-        NodeKind::List(_) | NodeKind::BlockQuote | NodeKind::FootnoteDefinition { .. }
-    ) && ctx.measure.is_some_and(|measure| measure.is_capped());
+    let is_capped = ctx.measure.is_some_and(|measure| measure.is_capped());
+    let may_have_escalated = is_capped
+        && matches!(
+            node.kind,
+            NodeKind::List(_) | NodeKind::BlockQuote | NodeKind::FootnoteDefinition { .. }
+        );
     if may_have_escalated {
         canvas.resize_width(canvas.width().max(width), ctx.base);
     } else {
+        // `resize_width` truncates in silence when `canvas` is already wider than
+        // `width` (see this function's own doc comment), so a fourth kind that
+        // escalates under a capped ctx would be cropped without an overflow marker
+        // rather than reaching `place`. This has gone stale three times already in
+        // this codebase (see `is_exempt`'s test module); catch the next one as a
+        // failing debug assertion instead of a silently narrowed block. Scoped to a
+        // capped ctx: with no live cap, a List's own marker geometry can legitimately
+        // overshoot a degenerate (near-zero) width — a known mismatch, harmless at any
+        // real terminal width, and not the case this guards against.
+        debug_assert!(
+            !is_capped || canvas.width() <= width,
+            "{:?} is not one of the three kinds `may_have_escalated` lists, but under a \
+             capped ctx it came back {} columns wide against a width of {width}",
+            node.kind,
+            canvas.width()
+        );
         canvas.resize_width(width, ctx.base);
     }
     canvas
