@@ -201,3 +201,35 @@ fn each_syntax_is_paired_with_its_own_set() {
     assert!(std::ptr::eq(set, &*BUNDLED_SYNTAXES));
     assert!(set.find_syntax_by_name(&syntax.name).is_some());
 }
+
+/// A key no other test uses, so the assertions below are unaffected by tests
+/// running in parallel against the same global cache.
+const TASK1_SRC: &str = "let task1_unique_probe = 1;\n";
+
+#[test]
+fn a_second_highlight_of_the_same_block_is_not_recomputed() {
+    let theme = Theme::default_dark();
+    assert_eq!(computed_count(Some("rust"), TASK1_SRC, &theme), None);
+
+    let first = highlight(Some("rust"), TASK1_SRC, &theme);
+    assert_eq!(computed_count(Some("rust"), TASK1_SRC, &theme), Some(1));
+
+    let second = highlight(Some("rust"), TASK1_SRC, &theme);
+    assert_eq!(computed_count(Some("rust"), TASK1_SRC, &theme), Some(1));
+    assert_eq!(first, second);
+}
+
+/// The cache is keyed on the theme's code styles, so a second theme is a miss
+/// rather than a wrong-coloured hit.
+#[test]
+fn a_different_theme_recomputes_rather_than_reusing_the_colours() {
+    const SRC: &str = "let task1_theme_probe = 2;\n";
+    let dark = Theme::default_dark();
+    let light = Theme::default_light();
+
+    let in_dark = highlight(Some("rust"), SRC, &dark);
+    let in_light = highlight(Some("rust"), SRC, &light);
+
+    assert_eq!(in_dark.len(), in_light.len());
+    assert_ne!(in_dark, in_light, "the two themes colour code differently");
+}

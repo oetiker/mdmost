@@ -4596,3 +4596,23 @@ fn a_paragraph_with_display_math_and_other_content_is_not_hoisted() {
         "a paragraph with other content must not gain a frame; got {text:?}"
     );
 }
+
+/// A fence wider than the layout sends `render_widened` through its probe
+/// ladder; every probe used to re-enter the highlighter with identical
+/// arguments. See the plan's finding F1.
+#[test]
+fn a_clipping_code_block_is_highlighted_once_however_often_it_is_laid_out() {
+    const CODE: &str =
+        "let probe_for_the_clip_search = \"a line far wider than any prose cap set here\";\n";
+    let source = format!("Text.\n\n```rust\n{CODE}```\n");
+    let doc = Doc::parse(&source);
+    let theme = Theme::default_dark();
+
+    let _ = render_document(&doc, 40, Some(20), &theme, &PLAIN);
+
+    assert_eq!(
+        crate::highlight::computed_count(Some("rust"), CODE, &theme),
+        Some(1),
+        "the clip search must not recompute the highlight"
+    );
+}

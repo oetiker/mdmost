@@ -6,6 +6,11 @@
 
 ### Changed
 
+- Fenced code blocks are highlighted once and reused, instead of being re-highlighted
+  every time the layout tries a different width. A wide fence in a long document could
+  previously take several seconds to open; the same document now renders in roughly the
+  time of one highlight pass.
+
 ### Fixed
 
 ## 0.3.4 - 2026-09-16
