@@ -204,7 +204,10 @@ fn each_syntax_is_paired_with_its_own_set() {
 
 /// A key no other test uses, so this test's entry is never confused with another
 /// test's. It does not by itself protect against another test's theme switch —
-/// see [`HIGHLIGHT_GLOBALS_TEST_LOCK`], which every test here holds for that reason.
+/// see [`HIGHLIGHT_GLOBALS_TEST_LOCK`], which every test that touches the cache or
+/// `ABANDONED` holds for that reason. A test that touches neither, such as
+/// `work_that_finishes_in_time_is_returned`, has nothing to serialise against and
+/// does not take it.
 const TASK1_SRC: &str = "let task1_unique_probe = 1;\n";
 
 #[test]
@@ -260,6 +263,7 @@ fn the_budget_grows_with_the_block() {
         1
     };
     assert!(budget_for(2) >= RELEASE_FLOOR * multiplier);
+    assert!(budget_for(2) <= (RELEASE_FLOOR + Duration::from_millis(100)) * multiplier);
     assert!(
         budget_for(2) < budget_for(1077),
         "the budget must grow with the block"
@@ -328,10 +332,19 @@ fn work_that_finishes_in_time_is_returned() {
 #[test]
 #[ignore = "abandons a spinning thread; see the doc comment"]
 fn the_javascript_hang_degrades_to_plain_text() {
+    // Goes through `highlight`, which touches both the cache and `ABANDONED`; see
+    // `HIGHLIGHT_GLOBALS_TEST_LOCK`.
+    let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     let theme = Theme::default_dark();
     let src = "  | { type: \"a\" }\n  /** x */\n";
     let lines = highlight(Some("js"), src, &theme);
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[0].text(), "  | { type: \"a\" }");
     assert_eq!(lines[1].text(), "  /** x */");
+    // This test's own abandonment is deliberate; it must not permanently spend one
+    // of ABANDONED's two slots against every other test in this binary. See
+    // `reset_abandoned_for_test`.
+    reset_abandoned_for_test();
 }
