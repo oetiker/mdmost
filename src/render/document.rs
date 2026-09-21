@@ -264,8 +264,14 @@ impl Measure {
 
 /// Whether a block is laid out at the full body width however narrow the cap is.
 ///
-/// See [`Measure`] for the reasoning. The test is the *top-level* block's own kind: a
-/// table nested in a quote is not exempt, it escalates instead.
+/// See [`Measure`] for the reasoning. The test is the *block's own* kind, checked
+/// wherever [`place`] is called — at the top level, and, since `render_block_set_off`
+/// calls `place` for a capped container's children too, on a table or diagram nested in
+/// a quote, list item or footnote as well. Being exempt only changes the width the
+/// block is laid out at, from the cap to the container's own `measure.full`; it does not
+/// widen the container's prose, and a narrow table does not draw any wider for it either,
+/// because `table::distribute` stops at the columns' natural width once they already
+/// fit rather than padding out to fill the room it is given.
 fn is_exempt(node: &Node) -> bool {
     match &node.kind {
         NodeKind::Table(_) => true,
