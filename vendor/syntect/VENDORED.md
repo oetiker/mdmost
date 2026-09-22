@@ -23,18 +23,107 @@ before changing anything under it.
 
 ## The patches
 
-None yet. This task (vendoring) adds no patches — the point of doing it first is that if
-anything breaks in a later task, it is provably a patch and not the vendoring. Two are
-coming:
+| Patch | File | Upstream | What it fixes |
+| --- | --- | --- | --- |
+| 1 | `src/parsing/parser.rs` | [#706](https://github.com/trishume/syntect/pull/706) by `tontinton`, open and unreviewed since 2026-09-12 — not this project's own work in origin, so not offered upstream again | Two contexts that `set` each other without ever consuming a character loop forever. |
+| 2 | — | [#202](https://github.com/trishume/syntect/issues/202) | Not yet implemented. |
 
-- **Patch 1** answers upstream PR [#706](https://github.com/trishume/syntect/pull/706) by
-  `tontinton`. Not this project's own work in origin.
-- **Patch 2** answers upstream issue
-  [#202](https://github.com/trishume/syntect/issues/202). Also not this project's own
-  work in origin.
+### Patch 1: break loops between non-consuming `set`s
 
-Each will get its own row here, in the same shape as `vendor/pulldown-latex/VENDORED.md`'s
-patch table, when it lands.
+`parse_next_token`'s existing loop guard (`non_consuming_push_at`, the long comment above
+`ParseState`) only remembers a non-consuming **push**, because only a **pop** can return
+to exactly the same stack depth and position and start the cycle again. A `set` was
+never covered: it leaves the stack depth unchanged, so it neither arms the existing guard
+nor trips it. Two contexts that `set` each other, both matching empty at the same byte,
+hand the position back and forth with nothing to stop them — the guard's own comment used
+to say as much (deleted by this patch, since it now describes a closed gap, not an open
+one). This is `syntect`'s half of the hang recorded in
+[`docs/upstream/2026-09-21-javascript-syntax-hang.md`](../../docs/upstream/2026-09-21-javascript-syntax-hang.md):
+`expression-statement-continuation` matches empty on an operator character (`/`, which
+starts `/* ... */`), and "rest of the line is blanks and comments, then end of line" also
+matches empty, and the two hand the position back to each other.
+
+The fix, from upstream PR #706: track the `(byte, stack)` pairs a non-consuming `set` was
+already taken from, in a new `set_states` set threaded alongside the existing
+`non_consuming_push_at`. Taking a `set` from a pair already in the set can only repeat
+work already done, so — exactly like the existing push/pop guard — advance one character
+and try again instead.
+
+Two local refinements on top of #706, both because they cost nothing on the hot path and
+close a gap #706 leaves open:
+
+- **A hash, not a cloned stack.** #706's own key is `(usize, Vec<ContextId>)` — the whole
+  context stack, cloned on every non-consuming `set`. This vendored copy instead hashes
+  the stack into a `u64` (`stack_fingerprint`) and keys on that, avoiding the allocation.
+  Measured below (Step 7) — the difference does not show above run-to-run spread on this
+  machine, for this input, and the change is kept anyway for not allocating on a path
+  that already exists, not for a measured win.
+- **`prototypes` is part of the key, `captures` is not.** #706 hashes only
+  `level.context`. Two stack levels that share a `context` but differ in their
+  `with_prototype`s (`StateLevel::prototypes`) are genuinely different parser states, and
+  folding them into one key could break a legitimate `set` one character early — this
+  vendored copy hashes `prototypes` too, for correctness `#706` does not need to worry
+  about with a full stack clone (two clones with different prototypes are never `==`
+  either, so #706 gets this for free). `captures` is left out of both: `Region` (from the
+  regex backend) is not `Hash`, and the cost of omitting it is bounded to at most one
+  character of lost highlighting on an adversarial pattern, never a hang or a panic.
+
+**If #706 merges upstream:** both refinements touch the exact lines PR #706 touches
+(`SetStates`'s definition and the `set_states.insert(...)` call). A future re-sync must
+reconcile the two by hand, not re-apply this patch over #706's own version.
+
+**Step 1 note — the reproducer does not fire against `syntect`'s own bundled `JavaScript`
+syntax.** The upstream report's own two lines were tried directly against
+`SyntaxSet::load_defaults_newlines()`'s `"JavaScript"` (syntect's 2016-vintage bundle,
+not `two-face`'s newer curation) before implementing anything: it parses both lines and
+returns, both before and after this patch. The real hang was against `two-face`'s
+JavaScript, which is not vendored here and cannot be exercised from this crate's own test
+suite. `the_javascript_continuation_then_block_comment_terminates` therefore uses a
+minimal synthetic syntax modelling the same rule pair (an `(?=/)`-triggered `set` cycle
+between two contexts named after the real ones) rather than the bundled `JavaScript`
+syntax, so it is testing the mechanism the real report hit, not a coincidentally-passing
+unrelated syntax.
+
+**Step 7 — is the fingerprint worth it?** Two release binaries, built in separate
+`CARGO_TARGET_DIR`s so the second build does not overwrite the first:
+`/scratch/oetiker/cargo-target-mdmost-fp-a` (the fingerprint, as implemented above) and
+`/scratch/oetiker/cargo-target-mdmost-fp-b2` (`stack_fingerprint` reverted to #706's own
+allocating key, `SetStates = HashSet<(usize, Vec<ContextId>), ...>`, built, then reverted
+back to the fingerprint — `git diff` confirmed clean afterwards). `perf` is unusable on
+this machine (`perf_event_paranoid` is 4), so this is wall-clock, interleaved, five rounds
+each, against `tests/corpus/adversarial.md` (3340 bytes, 22 fences — the largest
+multi-fence document in the corpus by `ls -S`; `headings_text.md` is larger but has no
+fences at all) via `--render-once`, the project's non-interactive render-and-exit path
+(the brief named a `--to-ansi` flag; the actual flag in this codebase is
+`--render-once`). All ten runs, in the order taken:
+
+| Round | fingerprint (s) | Vec-clone (s) |
+| --- | --- | --- |
+| 1 | 0.057611 | 0.058310 |
+| 2 | 0.060065 | 0.060039 |
+| 3 | 0.058902 | 0.059112 |
+| 4 | 0.060472 | 0.066358 |
+| 5 | 0.059497 | 0.058604 |
+
+Means: fingerprint 0.05931 s, Vec-clone 0.06048 s — a 1.2 ms gap, smaller than the 8.0 ms
+spread inside the Vec-clone column alone (round 4's 0.066358 s against round 1's
+0.058310 s), which is itself larger than the 2.9 ms spread inside the fingerprint column.
+**The difference does not show above run-to-run spread.** `adversarial.md` is 3.3 KB;
+almost all of both runtimes is process startup and loading `two-face`'s syntax sets, not
+highlighting, and non-consuming `set` cycles are rare enough in real syntax definitions
+that this document likely triggers the new code path few or zero times. Kept for the
+reason given above — not allocating on a path that already exists — not for a measured
+win; a later reader should not have to guess whether this was measured or assumed, so:
+it was measured, and it did not move the needle on this input.
+
+One measurement wrinkle worth recording since it cost real time to track down: an early
+`cp` of the Vec-clone binary out of its `CARGO_TARGET_DIR` produced a binary that
+panicked on startup (`failed to generate random data`) on every run, while the binary
+still sitting in its build directory ran fine. `md5sum` showed the copy was not
+byte-identical to the source despite matching file size — a race between `cp` reading and
+cargo's build finishing, not a defect in the reverted code. A second, later `cp` of the
+same source produced a byte-identical, working copy. If a future re-run of this
+measurement sees the same panic, re-copy and `md5sum`-verify before suspecting the code.
 
 ## This vendor is temporary
 

@@ -16,8 +16,8 @@ use super::syntax_definition::*;
 use crate::parsing::syntax_definition::ContextId;
 use crate::parsing::syntax_set::{SyntaxReference, SyntaxSet};
 use fnv::FnvHasher;
-use std::collections::HashMap;
-use std::hash::BuildHasherDefault;
+use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 
 /// Errors that can occur while parsing.
 #[derive(Debug, thiserror::Error)]
@@ -81,6 +81,41 @@ struct RegexMatch<'a> {
 
 /// Maps the pattern to the start index, which is -1 if not found.
 type SearchCache = HashMap<*const MatchPattern, Option<Region>, BuildHasherDefault<FnvHasher>>;
+
+/// The `(byte, stack fingerprint)` pairs a non-consuming `set` was already taken from,
+/// used to break `set` cycles. See [`ParseState::parse_next_token`].
+type SetStates = HashSet<(usize, u64), BuildHasherDefault<FnvHasher>>;
+
+/// A fingerprint of the context stack, for [`SetStates`].
+///
+/// A hash rather than the stack itself: the key is built on every non-consuming `set`,
+/// and cloning a `Vec<ContextId>` each time allocates for nothing. `prototypes` is part
+/// of it because two levels that share a context but differ in their prototypes are
+/// genuinely different states, and conflating them would break a legitimate `set` one
+/// character early. `captures` is left out because `Region` is not hashable; the cost of
+/// that is bounded to one character of lost highlighting and can never hang or panic.
+fn stack_fingerprint(stack: &[StateLevel]) -> u64 {
+    let mut hasher = FnvHasher::default();
+    for level in stack {
+        level.context.hash(&mut hasher);
+        level.prototypes.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// Moves `start` past one character, the way Sublime Text breaks a match loop.
+///
+/// Byte indices, so `+= 1` would split a multi-byte character. Returns false at the end
+/// of the line, where there is nothing to advance over and no point trying more patterns.
+fn advance_one_char(line: &str, start: &mut usize) -> bool {
+    match line[*start..].char_indices().nth(1) {
+        Some((i, _)) => {
+            *start += i;
+            true
+        }
+        None => false,
+    }
+}
 
 // To understand the implementation of this, here's an introduction to how
 // Sublime Text syntax definitions work.
@@ -234,6 +269,8 @@ impl ParseState {
         let mut search_cache: SearchCache = HashMap::with_capacity_and_hasher(128, fnv);
         // Used for detecting loops with push/pop, see long comment above.
         let mut non_consuming_push_at = (0, 0);
+        // Used for detecting loops between non-consuming `set`s, see `parse_next_token`.
+        let mut set_states = SetStates::default();
 
         while self.parse_next_token(
             line,
@@ -242,6 +279,7 @@ impl ParseState {
             &mut search_cache,
             &mut regions,
             &mut non_consuming_push_at,
+            &mut set_states,
             &mut res,
         )? {}
 
@@ -257,6 +295,7 @@ impl ParseState {
         search_cache: &mut SearchCache,
         regions: &mut Region,
         non_consuming_push_at: &mut (usize, usize),
+        set_states: &mut SetStates,
         ops: &mut Vec<(usize, ScopeStackOp)>,
     ) -> Result<bool, ParsingError> {
         let check_pop_loop = {
@@ -295,17 +334,7 @@ impl ParseState {
 
                 // println!("pop_would_loop for match {:?}, start {}", reg_match, *start);
 
-                // nth(1) gets the next character if there is one. Need to do
-                // this instead of just += 1 because we have byte indices and
-                // unicode characters can be more than 1 byte.
-                if let Some((i, _)) = line[*start..].char_indices().nth(1) {
-                    *start += i;
-                    return Ok(true);
-                } else {
-                    // End of line, no character to advance and no point trying
-                    // any more patterns.
-                    return Ok(false);
-                }
+                return Ok(advance_one_char(line, start));
             }
 
             let match_end = reg_match.regions.pos(0).unwrap().1;
@@ -314,12 +343,24 @@ impl ParseState {
             if !consuming {
                 // The match doesn't consume any characters. If this is a
                 // "push", remember the position and stack size so that we can
-                // check the next "pop" for loops. Otherwise leave the state,
-                // e.g. non-consuming "set" could also result in a loop.
+                // check the next "pop" for loops.
                 let context = reg_match.context;
                 let match_pattern = context.match_at(reg_match.pat_index)?;
                 if let MatchOperation::Push(_) = match_pattern.operation {
                     *non_consuming_push_at = (match_end, self.stack.len() + 1);
+                }
+
+                // A non-consuming "set" loops too, and the guard above cannot see it: a
+                // "set" is neither the push that arms it nor the pop that trips it, and
+                // the stack depth never changes, so two contexts that "set" each other
+                // spin here forever. Taking a "set" from a byte and stack we already took
+                // one from can only repeat the same work, so do what Sublime Text does
+                // with the push/pop loop and move on by a character.
+                if matches!(match_pattern.operation, MatchOperation::Set { .. }) {
+                    let fingerprint = stack_fingerprint(&self.stack);
+                    if !set_states.insert((*start, fingerprint)) {
+                        return Ok(advance_one_char(line, start));
+                    }
                 }
             }
 
@@ -1160,6 +1201,80 @@ contexts:
 "#;
 
         let line = "hello";
+        let expect = ["<source.test>, <test.matched>"];
+        expect_scope_stacks(line, &expect, syntax);
+    }
+
+    #[test]
+    fn can_parse_non_consuming_sets_that_would_loop() {
+        let syntax = r#"
+name: test
+scope: source.test
+contexts:
+  main:
+    # This makes us go into "a" without consuming any characters
+    - match: (?=test)
+      set: a
+  a:
+    # And this one into "b", still without consuming anything
+    - match: (?=t)
+      set: b
+    - match: \w+
+      scope: test.matched
+  b:
+    # Which sends us straight back to "a". Neither of the two is a push or a
+    # pop, so the stack depth never moves and the push/pop loop check above
+    # never sees a thing. ST stops taking a "set" that already fired at this
+    # position and advances instead.
+    - match: (?=t)
+      set: a
+    - match: \w+
+      scope: test.matched
+"#;
+
+        let line = "test";
+        let expect = ["<source.test>, <test.matched>"];
+        expect_scope_stacks(line, &expect, syntax);
+    }
+
+    /// Models the real-world hang from `docs/upstream/2026-09-21-javascript-syntax-hang.md`.
+    ///
+    /// That report's own two lines do *not* reproduce against `syntect`'s bundled
+    /// `JavaScript` syntax (checked directly: `load_defaults_newlines`'s "JavaScript"
+    /// parses both lines and returns, both before and after this patch). That syntax is
+    /// syntect's own 2016-vintage bundle; the report's hang was against `two-face`'s
+    /// newer curated JavaScript, not vendored here, so it cannot be reproduced verbatim in
+    /// this crate. This synthetic syntax models the same rule pair upstream PR #706
+    /// diagnosed instead: `expression-statement-continuation` matches empty on seeing an
+    /// operator character (`/`, which starts JS's `/* ... */`), and "blanks and comments
+    /// then end of line" also matches empty and hands the position straight back. Before
+    /// patch 1 this did not return. Kept as a *parser* test rather than only as an mdmost
+    /// one because the defect is here, and because a future re-sync to a newer upstream
+    /// needs to fail loudly if the fix is lost.
+    #[test]
+    fn the_javascript_continuation_then_block_comment_terminates() {
+        let syntax = r#"
+name: test
+scope: source.test
+contexts:
+  main:
+    # Models "expression-statement-continuation": matches empty whenever the next
+    # character could start an operator, which for JS includes "/", the start of
+    # "/* ... */".
+    - match: (?=/)
+      set: blanks-and-comments-then-eol
+    - match: \w+
+      scope: test.matched
+  blanks-and-comments-then-eol:
+    # Models "rest of the line is blanks and comments, then end of line": also
+    # matches empty, handing the position straight back to "main".
+    - match: (?=/)
+      set: main
+    - match: \w+
+      scope: test.matched
+"#;
+
+        let line = "/x";
         let expect = ["<source.test>, <test.matched>"];
         expect_scope_stacks(line, &expect, syntax);
     }
