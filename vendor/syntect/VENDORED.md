@@ -55,28 +55,27 @@ close a gap #706 leaves open:
 - **A hash, not a cloned stack.** #706's own key is `(usize, Vec<ContextId>)` — the whole
   context stack, cloned on every non-consuming `set`. This vendored copy instead hashes
   the stack into a `u64` (`stack_fingerprint`) and keys on that, avoiding the allocation.
-  Measured below (Step 7) — the difference does not show above run-to-run spread on this
-  machine, for this input, and the change is kept anyway for not allocating on a path
-  that already exists, not for a measured win.
-- **`prototypes` is part of the key, `captures` is not.** #706 hashes only
-  `level.context`. Two stack levels that share a `context` but differ in their
-  `with_prototype`s (`StateLevel::prototypes`) are genuinely different parser states, and
-  folding them into one key could break a legitimate `set` one character early — this
-  vendored copy hashes `prototypes` too, for correctness `#706` does not need to worry
-  about with a full stack clone (two clones with different prototypes are never `==`
-  either, so #706 gets this for free). `captures` is left out of both: `Region` (from the
-  regex backend) is not `Hash`, and the cost of omitting it is bounded to at most one
+  Measured below — the difference does not show above run-to-run spread on this machine,
+  for this input, and the change is kept anyway for not allocating on a path that already
+  exists, not for a measured win.
+- **`prototypes` is part of the key, `captures` is not.** #706's key is built from
+  `level.context` alone. Two stack levels that share a `context` but differ in their
+  `with_prototype`s (`StateLevel::prototypes`) are genuinely different parser states, but
+  are equal under #706's key — this vendored copy hashes `prototypes` too, so the two are
+  told apart and a legitimate `set` cannot be broken one character early. This is a
+  behavioural difference from #706, not just an implementation detail, and must survive
+  reconciliation if #706 merges upstream. `captures` is left out of both: `Region` (from
+  the regex backend) is not `Hash`, and the cost of omitting it is bounded to at most one
   character of lost highlighting on an adversarial pattern, never a hang or a panic.
 
 **If #706 merges upstream:** both refinements touch the exact lines PR #706 touches
 (`SetStates`'s definition and the `set_states.insert(...)` call). A future re-sync must
 reconcile the two by hand, not re-apply this patch over #706's own version.
 
-**Step 1 note — the reproducer does not fire against `syntect`'s own bundled `JavaScript`
-syntax.** The upstream report's own two lines were tried directly against
-`SyntaxSet::load_defaults_newlines()`'s `"JavaScript"` (syntect's 2016-vintage bundle,
-not `two-face`'s newer curation) before implementing anything: it parses both lines and
-returns, both before and after this patch. The real hang was against `two-face`'s
+`syntect`'s own bundled `JavaScript` syntax does not reproduce the hang: the upstream
+report's own two lines, tried directly against `SyntaxSet::load_defaults_newlines()`'s
+`"JavaScript"` (syntect's 2016-vintage bundle, not `two-face`'s newer curation), parse
+and return, both before and after this patch. The real hang was against `two-face`'s
 JavaScript, which is not vendored here and cannot be exercised from this crate's own test
 suite. `the_javascript_continuation_then_block_comment_terminates` therefore uses a
 minimal synthetic syntax modelling the same rule pair (an `(?=/)`-triggered `set` cycle
@@ -84,18 +83,15 @@ between two contexts named after the real ones) rather than the bundled `JavaScr
 syntax, so it is testing the mechanism the real report hit, not a coincidentally-passing
 unrelated syntax.
 
-**Step 7 — is the fingerprint worth it?** Two release binaries, built in separate
-`CARGO_TARGET_DIR`s so the second build does not overwrite the first:
-`/scratch/oetiker/cargo-target-mdmost-fp-a` (the fingerprint, as implemented above) and
-`/scratch/oetiker/cargo-target-mdmost-fp-b2` (`stack_fingerprint` reverted to #706's own
-allocating key, `SetStates = HashSet<(usize, Vec<ContextId>), ...>`, built, then reverted
-back to the fingerprint — `git diff` confirmed clean afterwards). `perf` is unusable on
-this machine (`perf_event_paranoid` is 4), so this is wall-clock, interleaved, five rounds
-each, against `tests/corpus/adversarial.md` (3340 bytes, 22 fences — the largest
-multi-fence document in the corpus by `ls -S`; `headings_text.md` is larger but has no
-fences at all) via `--render-once`, the project's non-interactive render-and-exit path
-(the brief named a `--to-ansi` flag; the actual flag in this codebase is
-`--render-once`). All ten runs, in the order taken:
+**Is the fingerprint worth it?** Two release binaries, built in separate target
+directories so the second build does not overwrite the first: one with the fingerprint
+key as implemented above, one with `stack_fingerprint` reverted to #706's own key
+(`SetStates = HashSet<(usize, Vec<ContextId>), ...>`, built from `level.context` alone),
+then reverted back to the fingerprint. `perf` is unusable on this machine
+(`perf_event_paranoid` is 4), so this is wall-clock, interleaved, five rounds each,
+against `tests/corpus/adversarial.md` (3340 bytes, 22 fences — the largest multi-fence
+document in the corpus; `headings_text.md` is larger but has zero fences) via the
+project's non-interactive render-and-exit path. All ten runs, in the order taken:
 
 | Round | fingerprint (s) | Vec-clone (s) |
 | --- | --- | --- |
@@ -108,22 +104,11 @@ fences at all) via `--render-once`, the project's non-interactive render-and-exi
 Means: fingerprint 0.05931 s, Vec-clone 0.06048 s — a 1.2 ms gap, smaller than the 8.0 ms
 spread inside the Vec-clone column alone (round 4's 0.066358 s against round 1's
 0.058310 s), which is itself larger than the 2.9 ms spread inside the fingerprint column.
-**The difference does not show above run-to-run spread.** `adversarial.md` is 3.3 KB;
-almost all of both runtimes is process startup and loading `two-face`'s syntax sets, not
+The difference does not show above run-to-run spread. `adversarial.md` is 3.3 KB; almost
+all of both runtimes is process startup and loading `two-face`'s syntax sets, not
 highlighting, and non-consuming `set` cycles are rare enough in real syntax definitions
-that this document likely triggers the new code path few or zero times. Kept for the
-reason given above — not allocating on a path that already exists — not for a measured
-win; a later reader should not have to guess whether this was measured or assumed, so:
-it was measured, and it did not move the needle on this input.
-
-One measurement wrinkle worth recording since it cost real time to track down: an early
-`cp` of the Vec-clone binary out of its `CARGO_TARGET_DIR` produced a binary that
-panicked on startup (`failed to generate random data`) on every run, while the binary
-still sitting in its build directory ran fine. `md5sum` showed the copy was not
-byte-identical to the source despite matching file size — a race between `cp` reading and
-cargo's build finishing, not a defect in the reverted code. A second, later `cp` of the
-same source produced a byte-identical, working copy. If a future re-run of this
-measurement sees the same panic, re-copy and `md5sum`-verify before suspecting the code.
+that this document likely triggers the new code path few or zero times. Kept for not
+allocating on a path that already exists, not for a measured win.
 
 ## This vendor is temporary
 
