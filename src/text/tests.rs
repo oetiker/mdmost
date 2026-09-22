@@ -62,6 +62,27 @@ fn grapheme_width_measures_a_one_cell_piece() {
 }
 
 #[test]
+fn joins_is_a_measurement_and_not_a_list_of_characters() {
+    // The shapes a boundary takes where the two sides do not add up: an emoji after a
+    // trailing joiner, an emoji modifier after its base, and a variation selector that
+    // widens a text glyph or narrows an emoji.
+    assert!(joins("\u{1f600}\u{200d}", "\u{1f600}"));
+    assert!(joins("\u{1f44d}", "\u{1f3fb}"));
+    assert!(joins("\u{263a}", "\u{fe0f}"));
+    assert!(joins("\u{1f44d}", "\u{fe0e}"));
+    // A trailing joiner is not itself the test. It joins an emoji and nothing else, and
+    // a boundary that adds up is left alone however exotic the characters at it are.
+    assert!(!joins("\u{1f600}\u{200d}", "a"));
+    assert!(!joins("a", "\u{1f3fb}"));
+    assert!(
+        !joins("\u{1f1e8}", "\u{1f1ed}"),
+        "a flag is two columns either way"
+    );
+    assert!(!joins("e", "\u{0301}"), "a combining mark adds no column");
+    assert!(!joins("ab", "cd"));
+}
+
+#[test]
 fn grapheme_width_clamps_only_as_a_backstop() {
     // A wide base plus a spacing mark genuinely draws three columns; the clamp would
     // report two. This is why cell fillers must split with `cell_clusters` first.

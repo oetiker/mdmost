@@ -135,6 +135,9 @@ pub fn render_blocks(
 /// See [`list`]'s docs for why that belongs to the list rather than to the sequence.
 pub(crate) fn render_sequence(nodes: &[Node], width: u16, ctx: Ctx<'_>, spaced: bool) -> Canvas {
     let fill = ctx.base;
+    // Built once, not per child: `ClipTest::new` only copies two styles out of the
+    // theme, and every child of a capped sequence needs the same test.
+    let clip = super::document::ClipTest::new(ctx.theme);
     let mut out = Canvas::empty(width);
     // Whether the block last appended asked to be set off, so the *next* seam gets a
     // blank row as well as the one before it.
@@ -164,7 +167,7 @@ pub(crate) fn render_sequence(nodes: &[Node], width: u16, ctx: Ctx<'_>, spaced: 
                 &mut out,
             );
         } else {
-            let (part, set_off) = render_block_set_off(&nodes[index], width, ctx);
+            let (part, set_off) = render_block_set_off(&nodes[index], width, ctx, &clip, fill);
             push(&part, set_off, &mut out);
             index += 1;
         }
@@ -178,12 +181,31 @@ pub(crate) fn render_sequence(nodes: &[Node], width: u16, ctx: Ctx<'_>, spaced: 
 /// by its sequence's own rule. Keeping the question here rather than inspecting the
 /// node means the answer is a *measurement of the drawn block* — the same thing
 /// [`list`] measured to reach it — and not a second guess at it.
-fn render_block_set_off(node: &Node, width: u16, ctx: Ctx<'_>) -> (Canvas, bool) {
+///
+/// A non-list child of a capped sequence is placed the way [`super::document::place`]
+/// places a top-level block: laid out at the cap, and granted the full width only if
+/// the cap would cut it short. Without this a container is escalated whole, and one
+/// over-wide fence inside one list item or quote drags every sentence in it out to the
+/// terminal's edge — see the plan's finding F2. `clip` and `fill` come from the caller
+/// so they are built once per sequence rather than once per child.
+fn render_block_set_off(
+    node: &Node,
+    width: u16,
+    ctx: Ctx<'_>,
+    clip: &super::document::ClipTest,
+    fill: Style,
+) -> (Canvas, bool) {
     let NodeKind::List(info) = &node.kind else {
-        return (render_block_ctx(node, width, ctx), false);
+        let part = match ctx.measure {
+            Some(measure) if measure.is_capped() => {
+                super::document::place(node, measure, ctx, clip, fill)
+            }
+            _ => render_block_ctx(node, width, ctx),
+        };
+        return (part, false);
     };
-    let (mut canvas, spaced) = list(node, *info, width, ctx);
-    canvas.resize_width(width, ctx.base);
+    let (canvas, spaced) = list(node, *info, width, ctx);
+    let canvas = contract(canvas, width, node, ctx);
     (canvas, spaced)
 }
 
@@ -224,7 +246,7 @@ pub(crate) fn is_inline(node: &Node) -> bool {
 
 /// Renders one block with an explicit context.
 pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
-    let mut canvas = match &node.kind {
+    let canvas = match &node.kind {
         NodeKind::Document => render_sequence(&node.children, width, ctx, true),
         NodeKind::Heading { level, id } => heading(node, *level, id, width, ctx),
         NodeKind::Paragraph => paragraph(node, width, ctx),
@@ -330,7 +352,52 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         // table cell, for instance.
         _ => render_inline(std::slice::from_ref(node), width, ctx.base, ctx),
     };
-    canvas.resize_width(width, ctx.base);
+    contract(canvas, width, node, ctx)
+}
+
+/// Enforces the "exactly `width` columns" contract every renderer here obeys — except
+/// that a capped `List`, `BlockQuote` or `FootnoteDefinition` is only padded up to
+/// `width`, never cropped down to it.
+///
+/// [`render_sequence`]'s per-child placement lets a wide fence nested in one of these
+/// three escalate past the cap on its own; when it does, the container's own canvas
+/// comes back wider than `width` too, because [`Canvas::append`] and [`Canvas::indent`]
+/// grow to fit whatever they are handed. Cropping that back to `width` here — which is
+/// what every other block kind still does, and what these three did before Task 3 —
+/// would throw the escalated content away with no overflow marker to say so:
+/// [`Canvas::truncate_width`] cuts in silence. Left wide instead, the container reaches
+/// [`super::document::place`] — directly, when it is itself a top-level block, or through
+/// the `place` call [`render_block_set_off`] makes on its parent sequence's behalf, when
+/// it is nested — and `place`'s own placement arithmetic is what puts a block that grew
+/// this way back in its rightful footprint on the page.
+fn contract(mut canvas: Canvas, width: u16, node: &Node, ctx: Ctx<'_>) -> Canvas {
+    let is_capped = ctx.measure.is_some_and(|measure| measure.is_capped());
+    let may_have_escalated = is_capped
+        && matches!(
+            node.kind,
+            NodeKind::List(_) | NodeKind::BlockQuote | NodeKind::FootnoteDefinition { .. }
+        );
+    if may_have_escalated {
+        canvas.resize_width(canvas.width().max(width), ctx.base);
+    } else {
+        // `resize_width` truncates in silence when `canvas` is already wider than
+        // `width` (see this function's own doc comment), so a fourth kind that
+        // escalates under a capped ctx would be cropped without an overflow marker
+        // rather than reaching `place`. This has gone stale three times already in
+        // this codebase (see `is_exempt`'s test module); catch the next one as a
+        // failing debug assertion instead of a silently narrowed block. Scoped to a
+        // capped ctx: with no live cap, a List's own marker geometry can legitimately
+        // overshoot a degenerate (near-zero) width — a known mismatch, harmless at any
+        // real terminal width, and not the case this guards against.
+        debug_assert!(
+            !is_capped || canvas.width() <= width,
+            "{:?} is not one of the three kinds `may_have_escalated` lists, but under a \
+             capped ctx it came back {} columns wide against a width of {width}",
+            node.kind,
+            canvas.width()
+        );
+        canvas.resize_width(width, ctx.base);
+    }
     canvas
 }
 
@@ -447,6 +514,13 @@ fn quote(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas {
         .iter()
         .any(|child| !matches!(child.kind, NodeKind::BlockQuote));
     let gutter = if carries_text { QUOTE_GUTTER } else { 1 }.min(width);
+    // The children are laid out `gutter` columns narrower than the quote itself, so
+    // the cap they inherit has to narrow by the same amount or their prose would run
+    // past the body's cap by exactly the bar's width.
+    let inner = Ctx {
+        measure: inner.measure.map(|measure| measure.narrowed(gutter)),
+        ..inner
+    };
     let content = render_sequence(&node.children, width - gutter, inner, true);
     let mut out = content.indent(gutter, 0, inner.base);
     if out.is_empty() {
@@ -531,6 +605,13 @@ fn list(node: &Node, info: ListInfo, width: u16, ctx: Ctx<'_>) -> (Canvas, bool)
         0
     };
     let indent = u16::try_from(field).unwrap_or(u16::MAX).min(width);
+    // Each item's content is laid out `indent` columns narrower than the list itself,
+    // so the cap it inherits has to narrow by the same amount or its prose would run
+    // past the body's cap by exactly the marker column's width.
+    let inner = Ctx {
+        measure: inner.measure.map(|measure| measure.narrowed(indent)),
+        ..inner
+    };
     // Rendered up front because the spacing decision needs every item's drawn height
     // before the first item can be placed. No item is rendered twice.
     let items: Vec<Canvas> = node
@@ -734,6 +815,13 @@ fn footnote(node: &Node, label: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
         ctx.theme.block.footnote_label,
     )]);
     let indent = u16::try_from(marker.width()).unwrap_or(u16::MAX).min(width);
+    // The same narrowing `quote` and `list` apply, one container over: the footnote's
+    // children are laid out `indent` columns narrower than the definition itself, at
+    // the width of its `[n] ` marker.
+    let ctx = Ctx {
+        measure: ctx.measure.map(|measure| measure.narrowed(indent)),
+        ..ctx
+    };
     let content = render_sequence(&node.children, width - indent, ctx, true);
     hanging(&marker, &content, ctx.base)
 }

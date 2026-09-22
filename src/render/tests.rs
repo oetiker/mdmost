@@ -4596,3 +4596,199 @@ fn a_paragraph_with_display_math_and_other_content_is_not_hoisted() {
         "a paragraph with other content must not gain a frame; got {text:?}"
     );
 }
+
+/// A fence wider than the layout sends `render_widened` through its probe
+/// ladder; every probe used to re-enter the highlighter with identical
+/// arguments. See the plan's finding F1.
+#[test]
+fn a_clipping_code_block_is_highlighted_once_however_often_it_is_laid_out() {
+    // Held for the whole test, not just the assertion: `render_document` itself
+    // drives the cache, and another test's theme switch could clear this test's
+    // entry between that call and the check below. See
+    // `HIGHLIGHT_GLOBALS_TEST_LOCK`'s doc comment for why the highlighter's
+    // `(lang, src)` key alone does not protect against this.
+    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    const CODE: &str =
+        "let probe_for_the_clip_search = \"a line far wider than any prose cap set here\";\n";
+    let source = format!("Text.\n\n```rust\n{CODE}```\n");
+    let doc = Doc::parse(&source);
+    let theme = Theme::default_dark();
+
+    let _ = render_document(&doc, 40, Some(20), &theme, &PLAIN);
+
+    assert_eq!(
+        crate::highlight::computed_count(Some("rust"), CODE, &theme),
+        Some(1),
+        "the clip search must not recompute the highlight"
+    );
+}
+
+/// The widest row of a canvas, ignoring trailing blanks.
+///
+/// Measured on [`body_rows`], not raw `row_text`: `render_document` insets the body by
+/// [`DOCUMENT_MARGIN`] on each side, so a block that exactly fills its cap reads one
+/// column wider than the cap in the raw row text. Every other layout assertion in this
+/// file goes through `body_rows` for the same reason — see its doc comment.
+fn widest_row(canvas: &Canvas) -> usize {
+    body_rows(canvas)
+        .iter()
+        .map(|row| row.chars().count())
+        .max()
+        .unwrap_or(0)
+}
+
+/// The widest row that is not part of a code frame, which is how the tests below ask
+/// "where does the prose wrap" without matching on prose text.
+fn widest_prose_row(canvas: &Canvas) -> usize {
+    body_rows(canvas)
+        .iter()
+        .filter(|text| {
+            !text.contains('\u{2502}') && !text.contains('\u{256d}') && !text.contains('\u{2570}')
+        })
+        .map(|text| text.chars().count())
+        .max()
+        .unwrap_or(0)
+}
+
+/// A top-level fence wider than the cap takes the full body width. This is the
+/// behaviour `render_placed` has today and the refactor in Task 2 must preserve
+/// it exactly; Task 3 changes only what happens inside a container.
+#[test]
+fn a_top_level_wide_fence_still_takes_the_full_body() {
+    let source = "Short.\n\n```sh\n\
+        some --command --with --a --line --clearly --wider --than --the --prose --cap\n\
+        ```\n";
+    let doc = Doc::parse(source);
+    let theme = Theme::default_dark();
+    let canvas = render_document(&doc, 120, Some(72), &theme, &PLAIN);
+
+    assert!(
+        widest_row(&canvas) > 72,
+        "a wide top-level fence is granted more than the prose cap, got {}",
+        widest_row(&canvas)
+    );
+}
+
+/// A wide fence inside a list item used to re-lay the whole list at the body width, so
+/// every item's prose wrapped at the terminal width instead of the cap. See the plan's
+/// finding F2.
+#[test]
+fn a_wide_fence_in_a_list_does_not_widen_the_list_prose() {
+    let source = "Intro.\n\n\
+        1. A first item, long enough to wrap so we can see which column it wraps at in practice here.\n\n   \
+        ```sh\n   some --command --with --a --line --that --is --clearly --wider --than --the --cap\n   ```\n\n\
+        2. A second item, long enough to wrap so we can see which column it wraps at in practice here.\n";
+    let doc = Doc::parse(source);
+    let theme = Theme::default_dark();
+    let canvas = render_document(&doc, 120, Some(72), &theme, &PLAIN);
+
+    assert!(
+        widest_prose_row(&canvas) <= 72,
+        "list prose must keep the prose cap, got {}",
+        widest_prose_row(&canvas)
+    );
+    assert!(
+        widest_row(&canvas) > 72,
+        "the fence itself must still be granted the room it needs"
+    );
+}
+
+/// The same defect, one container over.
+#[test]
+fn a_wide_fence_in_a_quote_does_not_widen_the_quoted_prose() {
+    let source = "Intro.\n\n\
+        > A quoted sentence, long enough to wrap so we can see which column the quote wraps at here.\n>\n\
+        > ```sh\n> some --command --with --a --line --that --is --clearly --wider --than --the --cap\n> ```\n";
+    let doc = Doc::parse(source);
+    let theme = Theme::default_dark();
+    let canvas = render_document(&doc, 120, Some(72), &theme, &PLAIN);
+
+    assert!(
+        widest_prose_row(&canvas) <= 72,
+        "quoted prose must keep the prose cap, got {}",
+        widest_prose_row(&canvas)
+    );
+    assert!(
+        widest_row(&canvas) > 72,
+        "the fence itself must still be granted the room it needs"
+    );
+}
+
+/// A narrow fence changes nothing: the container was never escalating for its own sake,
+/// and must not start.
+#[test]
+fn a_narrow_fence_in_a_list_leaves_everything_at_the_cap() {
+    let source = "Intro.\n\n\
+        1. A first item, long enough to wrap so we can see which column it wraps at in practice here.\n\n   \
+        ```sh\n   echo hi\n   ```\n";
+    let doc = Doc::parse(source);
+    let theme = Theme::default_dark();
+    let canvas = render_document(&doc, 120, Some(72), &theme, &PLAIN);
+
+    assert!(
+        widest_row(&canvas) <= 72,
+        "nothing here wants more than the cap, got {}",
+        widest_row(&canvas)
+    );
+}
+
+/// A wide fence inside a footnote popup used to widen the whole popup's prose the same
+/// way a list or quote did — one container over from both, at the marker's indent
+/// rather than a quote bar or list marker.
+#[test]
+fn a_wide_fence_in_a_footnote_does_not_widen_the_footnote_prose() {
+    let source = "Intro.[^n]\n\n\
+        [^n]: A footnote sentence, long enough to wrap so we can see which column it wraps at here.\n\n    \
+        ```sh\n    some --command --with --a --line --that --is --clearly --wider --than --the --cap\n    ```\n";
+    let doc = Doc::parse(source);
+    let theme = Theme::default_dark();
+    let canvas = render_document(&doc, 120, Some(72), &theme, &PLAIN);
+
+    assert!(
+        widest_prose_row(&canvas) <= 72,
+        "footnote prose must keep the prose cap, got {}",
+        widest_prose_row(&canvas)
+    );
+    assert!(
+        widest_row(&canvas) > 72,
+        "the fence itself must still be granted the room it needs"
+    );
+}
+
+/// The defect one more container over: a wide fence in a table cell must not blow the
+/// table out to the body width. A cell is laid out at a fixed width the table already
+/// negotiated, so a document-level prose cap has no meaning there — `Ctx::in_table` and
+/// `Ctx::in_cell` clear `measure` for exactly this reason.
+///
+/// Pipe syntax cannot put a fence inside a cell, so the tree is built directly, the way
+/// [`a_nested_table_inside_a_cell_is_rendered_as_a_table`] does. The test compares a
+/// `Ctx` carrying a live cap against one carrying none: if the clears were ever lost, the
+/// capped run would place the fence through the new per-child escalation and the two
+/// would disagree on width.
+#[test]
+fn a_wide_fence_in_a_table_cell_does_not_widen_the_table() {
+    let table = table_with_cell(
+        "```sh\nsome --command --with --a --line --that --is --clearly --wider --than --the --cap\n```\n",
+    );
+    let theme = Theme::default_dark();
+    let capped = Ctx {
+        measure: Some(document::Measure::new(72, Some(40))),
+        ..Ctx::new(&theme, &PLAIN)
+    };
+    let uncapped = Ctx::new(&theme, &PLAIN);
+    let with_cap = block::render_block_ctx(&table, 72, capped);
+    let without_cap = block::render_block_ctx(&table, 72, uncapped);
+
+    assert_eq!(
+        with_cap.width(),
+        without_cap.width(),
+        "a document-level prose cap must not reach into a table cell"
+    );
+    assert_eq!(
+        with_cap.plain_text(),
+        without_cap.plain_text(),
+        "a document-level prose cap must not change what a table cell draws"
+    );
+}

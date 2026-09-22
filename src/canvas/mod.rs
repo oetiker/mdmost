@@ -44,7 +44,9 @@ pub use border::{BorderSet, Rule, Side};
 pub use cell::Cell;
 pub use ops::CutMark;
 
-use crate::text::{Align, Line, cell_clusters, display_width, grapheme_width, pad_to_width};
+use crate::text::{
+    Align, Line, UNPLACEABLE, cell_clusters, display_width, grapheme_width, joins, pad_to_width,
+};
 use crate::theme::Style;
 
 /// A named position in a canvas, used by the table of contents to jump to a heading.
@@ -555,6 +557,13 @@ impl Canvas {
     /// * Zero-width clusters (combining marks, joiners) are appended to the previous
     ///   cell's text instead of consuming a column. If there is no previous cell in
     ///   this write and the cell to the left is blank, they are dropped.
+    /// * A cluster the terminal would join to the cell on its left — an emoji after a
+    ///   run ending in a zero-width joiner, an emoji modifier after an emoji — is drawn
+    ///   inside that cell and consumes no column, because that is what the terminal will
+    ///   do with it whatever the canvas claims. Where the join would make that cell draw
+    ///   wider or narrower than it claims, the piece is replaced by
+    ///   [`text::UNPLACEABLE`](crate::text::UNPLACEABLE) padded to its own width, or
+    ///   dropped when it had no width to begin with.
     /// * Overwriting either half of an existing double-width cell replaces the orphaned
     ///   half with a blank, so the row stays exactly [`Canvas::width`] columns wide.
     /// * A cluster that no cell can hold and that cannot be divided without changing its
@@ -584,27 +593,59 @@ impl Canvas {
         // be divided at all, what arrives here is the marker run that stands in for it.
         for cluster in cell_clusters(text) {
             let cluster_width = usize::from(grapheme_width(cluster));
+            // The cell whose text ends immediately to the left of the cursor. Within
+            // this call that is the cell last written; on the first cluster there is
+            // none, and it is then whatever is already on the canvas at `col`.
+            let anchor = last_written.or_else(|| left_anchor(cells, col));
             if cluster_width == 0 {
-                // A combining mark belongs on the character it strikes. Within this call
-                // that character is `last_written`; on the first cluster there is none,
-                // and the character is then whatever is already on the canvas to the
-                // left — which is what the contract above has always said, and what this
-                // branch did not do. It is not a hypothetical case: `math::draw::place`
-                // writes a row part by part, and `\not=` builds the overlay as its own
-                // zero-width box, so it arrives here alone, immediately after the `=`.
-                // Dropping it drew `a = b` for `a \not= b`.
+                // A combining mark belongs on the character it strikes, which is the
+                // anchor — what the contract above has always said, and what this branch
+                // did not do. It is not a hypothetical case: `math::draw::place` writes a
+                // row part by part, and `\not=` builds the overlay as its own zero-width
+                // box, so it arrives here alone, immediately after the `=`. Dropping it
+                // drew `a = b` for `a \not= b`.
                 //
                 // A blank cell to the left, or no cell at all, still means there is
                 // nothing to strike, and the mark is still dropped rather than stealing a
                 // column of its own.
-                let anchor = last_written.or_else(|| left_anchor(cells, col));
-                if let Some(index) = anchor {
-                    cells[index].append_zero_width(cluster);
+                //
+                // A selector the cell has no room for is dropped for the same reason a
+                // mark with nothing to strike is: the column was negotiated before it
+                // arrived, and widening the cell now would move every column after it.
+                if let Some(index) = anchor
+                    && cells[index].absorbs(cluster)
+                {
+                    cells[index].append_joined(cluster);
                 }
                 continue;
             }
             if cursor + cluster_width > width {
                 break;
+            }
+            // A cluster that the terminal will join to the cell on its left is not a
+            // piece of its own, however wide it measures alone: an emoji opening a run
+            // where the run before it ended in a joiner, or an emoji modifier, draws
+            // inside that cell. Markup is what puts the two in separate writes —
+            // `*a<ZWJ>*b*` — and removing the markup is what brings them back together.
+            // Giving such a cluster a cell of its own is what made a row draw narrower
+            // than its cells claimed.
+            if let Some(index) = anchor
+                && joins(cells[index].text(), cluster)
+            {
+                if cells[index].absorbs(cluster) {
+                    cells[index].append_joined(cluster);
+                    continue;
+                }
+                // The join cannot be drawn inside that cell without changing its width —
+                // a skin tone after a *narrow* emoji base. A same-width marker joins
+                // nothing, so the columns after it stay where they were laid out.
+                overwrite(cells, cursor, Cell::new(UNPLACEABLE, style));
+                for offset in 1..cluster_width {
+                    overwrite(cells, cursor + offset, Cell::blank(style));
+                }
+                last_written = Some(cursor);
+                cursor += cluster_width;
+                continue;
             }
             overwrite(cells, cursor, Cell::new(cluster, style));
             last_written = Some(cursor);

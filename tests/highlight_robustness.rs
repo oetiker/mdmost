@@ -219,7 +219,11 @@ fn highlighting_cost_grows_no_worse_than_linearly() {
 
     // Charge one-time setup — building the syntax set, resolving the theme — to nobody:
     // left in, it would land entirely on the first measurement and flatter the ratio.
-    let _ = highlight(Some("rust"), &small, &theme);
+    // Distinct content from `small` and `large`: `highlight` now memoises by its exact
+    // arguments, and warming up on `small` itself would make the measurement below a
+    // free cache hit instead of real work.
+    let warmup = unit.to_string();
+    let _ = highlight(Some("rust"), &warmup, &theme);
 
     let time = |src: &str| {
         let started = Instant::now();

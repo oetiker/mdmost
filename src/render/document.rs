@@ -148,10 +148,17 @@ pub fn render_document(
         source: doc.source(),
         macros: &macros,
     };
+    // The cap in force for every top-level block, carried in `Ctx` rather than passed
+    // alongside it. Task 3 reads it from inside a container; here it is set and nothing
+    // yet consumes it, which is what proves the field itself changes no behaviour.
+    let ctx = Ctx {
+        measure: Some(measure),
+        ..doc_ctx.ctx()
+    };
     for (index, node) in blocks.iter().enumerate() {
         let part = match banner.take() {
             Some(banner) if index == 0 => placed(banner, measure, fill),
-            _ => render_placed(node, measure, doc_ctx, &clipped, fill),
+            _ => place(node, measure, ctx, &clipped, fill),
         };
         if part.is_empty() {
             continue;
@@ -217,8 +224,8 @@ pub fn render_document(
 /// width and get an offset of zero. A pinned prefix needs nothing from the placement —
 /// it is published by the renderer and translated by the document margin itself
 /// ([`pinned_prefix`], [`Canvas::indent`]).
-#[derive(Debug, Clone, Copy)]
-struct Measure {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Measure {
     /// The whole body between the margins.
     full: u16,
     /// The width prose is laid out at; equal to `full` when there is no cap.
@@ -227,7 +234,7 @@ struct Measure {
 
 impl Measure {
     /// The measure for a body of `full` columns under `cap`.
-    fn new(full: u16, cap: Option<u16>) -> Self {
+    pub(crate) fn new(full: u16, cap: Option<u16>) -> Self {
         Self {
             full,
             prose: cap.map_or(full, |cap| cap.min(full)).max(1),
@@ -235,15 +242,36 @@ impl Measure {
     }
 
     /// Whether the cap is doing anything at this width.
-    const fn is_capped(&self) -> bool {
+    pub(crate) const fn is_capped(&self) -> bool {
         self.prose < self.full
+    }
+
+    /// The same measure, narrowed by `by` columns on both the full body and the cap.
+    ///
+    /// A container's children are laid out inside its own gutter — a quote's bar, a
+    /// list's marker column, a footnote's `[n]` label — so the cap they inherit has to
+    /// shrink by the same amount their content actually loses. Left unnarrowed, a
+    /// child's prose would run `by` columns past the body's cap; see [`super::block`]'s
+    /// `quote`, `list` and `footnote`, which each narrow the measure they hand to
+    /// [`super::block::render_sequence`] this way before rendering their children.
+    pub(crate) fn narrowed(self, by: u16) -> Self {
+        Self {
+            full: self.full.saturating_sub(by).max(1),
+            prose: self.prose.saturating_sub(by).max(1),
+        }
     }
 }
 
 /// Whether a block is laid out at the full body width however narrow the cap is.
 ///
-/// See [`Measure`] for the reasoning. The test is the *top-level* block's own kind: a
-/// table nested in a quote is not exempt, it escalates instead.
+/// See [`Measure`] for the reasoning. The test is the *block's own* kind, checked
+/// wherever [`place`] is called — at the top level, and, since `render_block_set_off`
+/// calls `place` for a capped container's children too, on a table or diagram nested in
+/// a quote, list item or footnote as well. Being exempt only changes the width the
+/// block is laid out at, from the cap to the container's own `measure.full`; it does not
+/// widen the container's prose, and a narrow table does not draw any wider for it either,
+/// because `table::distribute` stops at the columns' natural width once they already
+/// fit rather than padding out to fill the room it is given.
 fn is_exempt(node: &Node) -> bool {
     match &node.kind {
         NodeKind::Table(_) => true,
@@ -266,29 +294,34 @@ fn is_exempt(node: &Node) -> bool {
 
 /// Renders one block at the width its kind earns, and places it in the body.
 ///
-/// `doc` is threaded down as the block's [`Ctx`] so a formula that will not draw can
+/// `ctx` is threaded down as the block's [`Ctx`] so a formula that will not draw can
 /// fall back to its own bytes of the source — see [`super::Ctx::source`] — and a formula
 /// that uses a macro sees the definitions before it — see [`super::Ctx::macros`].
-fn render_placed(
+///
+/// It is `ctx`, not [`DocCtx`], on purpose: [`DocCtx::ctx`] builds a *fresh top-level*
+/// context, resetting the quote base style, the list depth and the quote depth. Called
+/// from inside a container with that, a quoted paragraph would be drawn as if it were at
+/// the top level. Taking the `Ctx` already in force is what makes this callable at depth.
+pub(crate) fn place(
     node: &Node,
     measure: Measure,
-    doc: DocCtx<'_>,
+    ctx: Ctx<'_>,
     clip: &ClipTest,
     fill: crate::theme::Style,
 ) -> Canvas {
     // Nothing to place: with no cap the body is the full width, and every block was laid
     // out at it.
     if !measure.is_capped() {
-        return render_widened(node, measure, doc, clip);
+        return render_widened(node, measure, ctx, clip);
     }
     let canvas = if is_exempt(node) {
-        render_widened(node, measure, doc, clip)
+        render_widened(node, measure, ctx, clip)
     } else {
-        let capped = block::render_block_ctx(node, measure.prose, doc.ctx());
+        let capped = block::render_block_ctx(node, measure.prose, ctx);
         if clip.is_clipped(&capped) {
             // The cap would cut this block short, so it takes the whole body — and
             // beyond it, if the whole body is not enough either.
-            render_widened(node, measure, doc, clip)
+            render_widened(node, measure, ctx, clip)
         } else {
             capped
         }
@@ -298,7 +331,7 @@ fn render_placed(
 
 /// Places an already-drawn block in the body: at the left margin, cropped to what it drew.
 ///
-/// Split out of [`render_placed`] so the title banner — which is drawn by the renderer
+/// Split out of [`place`] so the title banner — which is drawn by the renderer
 /// rather than here — is placed by exactly the same arithmetic as every other block.
 fn placed(mut canvas: Canvas, measure: Measure, fill: crate::theme::Style) -> Canvas {
     if !measure.is_capped() {
@@ -379,29 +412,29 @@ const DIAGRAM_PROBES: u8 = 8;
 /// that builds, so a formula never reaches the search; it is the one that applies
 /// [`MIN_SURPLUS`], and it is handed `measure.prose` because a formula is centred in the
 /// column of prose it belongs to rather than in the body it is laid out across.
-fn render_widened(node: &Node, measure: Measure, doc: DocCtx<'_>, clip: &ClipTest) -> Canvas {
+fn render_widened(node: &Node, measure: Measure, ctx: Ctx<'_>, clip: &ClipTest) -> Canvas {
     let width = measure.full;
     let limits = Limits::new(
         MAX_BLOCK_WIDTH.min(width.saturating_mul(VIEWPORTS)),
         DIAGRAM_PROBES,
     );
-    if let Some((at, canvas)) = crate::render::diagram(node, width, limits, doc.theme, doc.options)
+    if let Some((at, canvas)) = crate::render::diagram(node, width, limits, ctx.theme, &ctx.options)
         && (at == width || at - width >= MIN_SURPLUS)
     {
         return canvas;
     }
-    if let Some((_, canvas)) = super::math::formula(node, width, measure.prose, limits, doc.ctx()) {
+    if let Some((_, canvas)) = super::math::formula(node, width, measure.prose, limits, ctx) {
         // No guard: `formula` has already applied `MIN_SURPLUS` and answers with the
         // block to draw either way. Re-testing `at` here would be a second rule deciding
         // one width, and the range the two disagreed in is where the defect lived.
         return canvas;
     }
-    let narrow = block::render_block_ctx(node, width, doc.ctx());
+    let narrow = block::render_block_ctx(node, width, ctx);
     let is_clipped = |canvas: &Canvas| clip.is_clipped(canvas);
     if !is_clipped(&narrow) || width >= MAX_BLOCK_WIDTH {
         return narrow;
     }
-    let render = |at: u16| block::render_block_ctx(node, at, doc.ctx());
+    let render = |at: u16| block::render_block_ctx(node, at, ctx);
 
     // Double until the block fits, which bounds the search; then bisect for the
     // narrowest width that still fits, so the scrollable extent matches the content
@@ -570,14 +603,14 @@ fn row_extent(cells: &[Cell]) -> u16 {
 /// between its rules is not a table. A renderer that ever marked no row at all would
 /// switch horizontal scrolling off for its blocks in silence;
 /// [`super::tests::a_clipped_table_is_still_detected_and_widened`] is the tripwire.
-struct ClipTest {
+pub(crate) struct ClipTest {
     /// The styles the renderers paint the marker in.
     styles: [crate::theme::Style; 2],
 }
 
 impl ClipTest {
     /// Builds the test for one theme.
-    fn new(theme: &Theme) -> Self {
+    pub(crate) fn new(theme: &Theme) -> Self {
         Self {
             styles: [theme.code.overflow_marker, theme.table.overflow_marker],
         }
