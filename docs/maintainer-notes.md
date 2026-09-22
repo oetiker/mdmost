@@ -705,26 +705,12 @@ in `to_row`, and `the_flat_walk_and_the_canvas_walk_render_the_same_cells` now c
 the case. A mark
 anywhere else in a row is untouched: it has a cluster before it and composes onto that.
 
-## The highlight guard's budget floor is measured, not chosen, and neither is its cost
+## `syntect`'s cold-compile cost, one line, per syntax
 
-`highlight::budget_for` (finding F3: a `.sublime-syntax` rule that makes
-`ParseState::parse_line` never return, see
-`docs/upstream/2026-09-21-javascript-syntax-hang.md`) originally used a flat 200 ms floor.
-That number covered *parsing* — a 1077-line TypeScript block costs about 1.4 s of honest
-parsing — but not the cost it collided with in practice: `syntect` compiles a syntax's
-regexes once per process and caches the result in the `SyntaxSet` forever after, and that
-one-time cost is charged in full to whichever block happens to use the language first. It
-is not proportional to that block, so a floor sized for parsing cannot absorb it.
-
-The collision was not theoretical. A 200 ms floor broke the test suite outright in a debug
-build: sixteen tests failed deterministically
-(`makefile_recipe_lines_still_parse_with_a_leading_tab` in the lib, fourteen of nineteen in
-`tests/highlight_languages.rs`, one of thirteen in `tests/highlight_robustness.rs`),
-because their very first real highlight of an ordinary language cost more than the floor
-and the guard mistook a cold compile for a hang.
-
-**Measured cold-compile cost, one line, single-threaded, no contention, genuinely first-ever
-per process** (`SyntaxSet` caches per process, so each row needed a fresh binary):
+`syntect` compiles a syntax's regexes once per process and caches the result in the
+`SyntaxSet` forever after; the cost is charged in full to whichever code block first uses
+that language. Measured single-threaded, no contention, genuinely first-ever per process
+(`SyntaxSet` caches per process, so each row needed a fresh binary):
 
 | syntax | release | debug | debug / release |
 |---|---|---|---|
@@ -735,53 +721,46 @@ per process** (`SyntaxSet` caches per process, so each row needed a fresh binary
 | YAML | 7 ms | 72 ms | 10.3x |
 | Makefile | 42 ms | 678 ms | 16.1x |
 
-`RELEASE_FLOOR` starts from four times the worst release figure above (TypeScript, 258 ms
--> 1032 ms), then raised to 1200 ms so it sits comfortably clear of the "never below one
-second" rule this was calibrated against, rather than just past it. `DEBUG_BUDGET_MULTIPLIER`
-is the worst debug/release ratio above (Makefile,
-16.1x), rounded up to 20x, applied to the whole of `budget_for`'s result rather than to the
-floor alone, so a debug build's line-count cap grows by the same factor as its floor. With
-this floor, all sixteen failures disappeared with no change to either integration test
-file — confirming the floor, not the tests, was wrong.
+## `MAX_TOKENS_PER_LINE` is measured, not chosen
 
-**The guard has a real, measured cost in a release build, and it is not thread-spawn
-overhead.** Task 1's reference document (`/home/oetiker/checkouts/oxutlk/docs/superpowers/
-plans/2026-09-21-media-worker.md`, 36 fenced code blocks) rendered with `--render-once`,
-release binary, interleaved runs on the same machine to cancel out load swings:
+`highlight::highlight_with` bounds every line by `MAX_TOKENS_PER_LINE`
+(`src/highlight.rs`). `vendor/syntect`'s `ParseState::parse_line_with_limit` returns
+`ParsingError::TokenLimitExceeded` once a line's token count passes the limit; the whole
+block then degrades to plain text, same as any other parse error. It is a backstop
+against a `.sublime-syntax` rule that makes `ParseState::parse_line` never return (finding
+F3, see `docs/upstream/2026-09-21-javascript-syntax-hang.md`), not a size policy.
 
-| build | runs (ms) | mean |
-|---|---|---|
-| before the guard (Task 1's memo only) | 1872, 1890, 1857, 1978 | ~1899 ms |
-| with the guard | 2222, 2554, 2284, 2136, 2137 | ~2267 ms |
+**Method:** the smallest limit at which a line still parses, found by doubling the limit
+until it succeeds and then binary-searching the boundary, calling only
+`ParseState::parse_line_with_limit` — no instrumentation, so a reviewer can re-run it. A
+fresh `ParseState` is used for each measurement; the first line parsed by a fresh state
+pays one extra token for the zero-width `__start` → `main` push that later lines do not.
 
-That is ~368 ms slower, ~19%, consistent across five interleaved runs — not noise. To find
-out whether that is `std::thread::spawn` plus the `mpsc` round trip, 36 calls to
-`run_within` with a closure that returns immediately were timed against 36 direct calls of
-the same closure, release build: the guarded calls cost 5.67 ms more in total, about 157 µs
-per call. That accounts for roughly 1.5% of the measured 368 ms. **Spawn-and-channel
-overhead is not the dominant cost, and the remaining ~98% is not yet understood** — the
-trivial closure allocated nothing, so this experiment cannot see anything that depends on
-real allocation.
+**Measured token cost, longest realistic line per language, plus one deliberately dense
+but legitimate case:**
 
-An **untested hypothesis**, not yet measured: per-thread `malloc` arenas. glibc gives each
-new thread its own arena, so every one of `syntect`'s parse allocations on the guarded
-thread comes from a fresh, cold arena that has to be `mmap`ed and page-faulted in, and the
-resulting `Vec<Line>` is then freed cross-thread by the caller — 36 times over for this
-document. Faulting in a fresh 2 MiB stack and lost cache locality from running on a
-freshly scheduled thread are two further untested candidates. Measuring any of these
-properly needs a *real* highlight run timed guarded versus direct, not a trivial closure —
-this was not done, and the owner capped the investigation at the one experiment above
-rather than chasing the remaining ~98% further; the cost is accepted regardless of which
-of these turns out to be the actual cause.
+| language | line | length (chars) | tokens |
+|---|---|---|---|
+| Python | a dict comprehension with a nested list comprehension and two filters | 184 | 147 |
+| TypeScript | a generic `groupBy` with a typed `reduce` | 295 | 145 |
+| JavaScript | the same `groupBy` without types | 159 | 144 |
+| Rust | a `filter`/`fold` building a `HashMap<String, Vec<Item>>` | 216 | 114 |
+| YAML | a nested inline flow mapping (services, ports, environment) | 187 | 86 |
+| Makefile | a `CFLAGS` assignment with `$(shell …)` and nested `$(…)` | 201 | 37 |
+| JavaScript, minified (synthetic) | 30 repeats of a nested-arrow/regex/template-literal unit | 5,941 | 6,505 |
 
-**The cost is accepted.** Task 1 took this reference document from 6.07 s to 1.83 s; with
-the guard it is ~2.27 s — still 2.7x faster than before the branch, in exchange for a
-pathological block giving up instead of freezing the pager forever. A line-count threshold
-that skips the guard below some size was considered and rejected outright: the F3
-reproducer is two lines, so any such threshold would skip the guard for the exact input it
-exists to survive. A persistent worker thread reused across calls was also considered and
-set aside as a design change outside this plan's scope — it inherits the same abandon
-semantics once the worker itself hangs, plus a new global to manage it. The real answer —
-moving highlighting off the render path entirely with a background/lazy highlighter — was
-designed in conversation before this branch and shelved once Task 1's memo made it far
-less urgent; this measurement is the strongest argument yet for reviving it.
+The minified line is synthetic — written for this measurement, not pasted from a
+third-party bundle, so it carries no licence or attribution duty — and is valid
+JavaScript (`node --check` accepts it), not a pathological input. It stands in for the
+densest single-line output a real minifier plausibly produces.
+
+`MAX_TOKENS_PER_LINE` is 100,000: more than fifteen times the highest measured legitimate
+cost (6,505), rounded to a readable number. Below it, no real document loses colour;
+reaching it requires a line manufactured to push `syntect`'s parser as far as the public
+API allows.
+
+**Wall time at the limit, release build:** a line of 50,000 repeats of `"1+"` (100,005
+tokens counted from a fresh state) parsed against a limit of 100,000 took 277.5 ms. That
+bounds the cost of one hostile line: whatever a pathological `.sublime-syntax` rule does
+to a single line, `mdmost` spends at most a few hundred milliseconds discovering it, once,
+before the block falls back to plain text.
