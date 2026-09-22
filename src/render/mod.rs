@@ -229,6 +229,18 @@ pub(crate) struct Ctx<'a> {
     /// rendered on its own — the same trade `source` documents: a formula there sees
     /// only what it defines itself.
     pub macros: &'a [macros::Definition],
+    /// The prose cap in force for the blocks being laid out, if any.
+    ///
+    /// `None` for a render with no cap and for a fragment rendered on its own —
+    /// a table cell, a footnote popup — where there is no body to cap against.
+    /// A container narrows this by its own gutter before handing it to its
+    /// children, so a list item's cap is the body's cap less the marker column.
+    ///
+    /// [`render_document`] sets this; [`super::block::render_sequence`] reads it to
+    /// place each child the way the document places a top-level block, so a wide fence
+    /// nested in a list or a quote escalates on its own instead of dragging the whole
+    /// container out to the terminal width.
+    pub measure: Option<crate::render::document::Measure>,
 }
 
 /// The deepest table nesting that is rendered; deeper tables degrade to their text.
@@ -251,6 +263,7 @@ impl<'a> Ctx<'a> {
             numbers: None,
             source: "",
             macros: &[],
+            measure: None,
         }
     }
 
@@ -298,14 +311,29 @@ impl<'a> Ctx<'a> {
     }
 
     /// The context for the content of a table cell, drawn in the cell style.
+    ///
+    /// Clears `measure`: a cell is laid out at a fixed width the table already computed,
+    /// so the document's prose cap has nothing to say about it. Left set, the per-child
+    /// escalation a wide fence inside a cell would trigger could grant it the whole
+    /// document body width — inside a cell only a few columns wide.
     pub(crate) fn in_cell(self, base: Style) -> Self {
-        Self { base, ..self }
+        Self {
+            base,
+            measure: None,
+            ..self
+        }
     }
 
     /// The context for content one table deeper.
+    ///
+    /// Clears `measure` for the same reason [`Ctx::in_cell`] does: everything under a
+    /// table is laid out at widths the table itself computed, both when drawing a cell
+    /// and when measuring one for column distribution, and a cap carried in from outside
+    /// would corrupt both passes the same way.
     pub(crate) fn in_table(self) -> Self {
         Self {
             table_depth: self.table_depth + 1,
+            measure: None,
             ..self
         }
     }
