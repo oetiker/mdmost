@@ -126,9 +126,27 @@ static EXTRA_SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
 /// are wanted as a unit.
 const MAX_CACHE_ENTRIES: usize = 256;
 
+/// What became of a block's highlighting attempt.
+///
+/// A renderer reads this after calling [`highlight`] for the same key, to decide
+/// whether the block's frame should say why it has no colour. `Plain` covers both an
+/// absent or unknown language tag and the size guards in [`highlight_uncached`] — none
+/// of those are a failure, they are `mdmost` declining to try. `Failed` is reserved for
+/// a parse the token-limit guard actually cut short.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// The block was parsed and coloured.
+    Highlighted,
+    /// No attempt was made: no usable language tag, or a size guard tripped first.
+    Plain,
+    /// A parse was attempted and the token-limit guard cut it short.
+    Failed,
+}
+
 /// One cached block.
 struct Entry {
     lines: Vec<Line>,
+    outcome: Outcome,
     /// How many times the highlighter has run for this key. One, unless
     /// something recomputes an entry it already had — which is the defect this
     /// cache exists to stop, and what `computed_count` lets a test assert.
@@ -191,8 +209,9 @@ fn cache_get(lang: Option<&str>, src: &str, theme: &Theme) -> Option<Vec<Line>> 
     })
 }
 
-/// Records `lines` for this key, dropping everything cached for another theme.
-fn cache_put(lang: Option<&str>, src: &str, theme: &Theme, lines: &[Line]) {
+/// Records `lines` and `outcome` for this key, dropping everything cached for another
+/// theme.
+fn cache_put(lang: Option<&str>, src: &str, theme: &Theme, lines: &[Line], outcome: Outcome) {
     with_cache(|cache| {
         if cache.styles != Some(theme.code) {
             cache.entries.clear();
@@ -207,12 +226,35 @@ fn cache_put(lang: Option<&str>, src: &str, theme: &Theme, lines: &[Line]) {
             .entry(key)
             .and_modify(|entry| {
                 entry.lines = lines.to_vec();
+                entry.outcome = outcome;
                 entry.computed += 1;
             })
             .or_insert_with(|| Entry {
                 lines: lines.to_vec(),
+                outcome,
                 computed: 1,
             });
+    })
+}
+
+/// What became of the last [`highlight`] call for this key, or [`Outcome::Plain`] if
+/// the memo does not hold it.
+///
+/// Reads the memo rather than recomputing anything, so it must be called after
+/// [`highlight`] (or [`highlight_with_limit`] in a test) for the same `(lang, src,
+/// theme)` — a key the cache has never seen reads the same as one that declined to
+/// highlight, which is the right default for a caller that races the memo rather than
+/// one that is guaranteed to have primed it.
+pub fn outcome(lang: Option<&str>, src: &str, theme: &Theme) -> Outcome {
+    with_cache(|cache| {
+        if cache.styles != Some(theme.code) {
+            return Outcome::Plain;
+        }
+        let key = (lang.map(str::to_owned), src.to_owned());
+        cache
+            .entries
+            .get(&key)
+            .map_or(Outcome::Plain, |entry| entry.outcome)
     })
 }
 
@@ -321,26 +363,62 @@ fn token_limit_for(line: &str) -> NonZeroUsize {
 /// than re-run: `highlight` takes no width, so a renderer that lays a block out at
 /// several widths gets the same result each time and would otherwise pay for it again.
 pub fn highlight(lang: Option<&str>, src: &str, theme: &Theme) -> Vec<Line> {
+    highlight_capped(lang, src, theme, token_limit_for)
+}
+
+/// `highlight`, with the per-line token limit overridden to a flat `limit` rather than
+/// [`token_limit_for`]'s scaled one.
+///
+/// Exists so a test can drive a real [`Outcome::Failed`] on a real syntax — a line that
+/// would pass the production budget easily but not a deliberately tiny one — instead of
+/// stubbing the parser. It shares [`highlight_capped`] with [`highlight`], so the two
+/// memoise identically and a call here is exactly what [`outcome`] reads back.
+#[cfg(test)]
+pub(crate) fn highlight_with_limit(
+    lang: Option<&str>,
+    src: &str,
+    theme: &Theme,
+    limit: NonZeroUsize,
+) -> Vec<Line> {
+    highlight_capped(lang, src, theme, move |_line: &str| limit)
+}
+
+/// Shared body of [`highlight`] and [`highlight_with_limit`]: consults the memo, and on
+/// a miss highlights under `limit_for` and records both the lines and the [`Outcome`].
+fn highlight_capped(
+    lang: Option<&str>,
+    src: &str,
+    theme: &Theme,
+    limit_for: impl Fn(&str) -> NonZeroUsize,
+) -> Vec<Line> {
     if let Some(hit) = cache_get(lang, src, theme) {
         return hit;
     }
-    let lines = highlight_uncached(lang, src, &theme.code);
-    cache_put(lang, src, theme, &lines);
+    let (lines, outcome) = highlight_uncached(lang, src, &theme.code, &limit_for);
+    cache_put(lang, src, theme, &lines, outcome);
     lines
 }
 
 /// Highlights without consulting the cache. See [`highlight`] for the contract.
-fn highlight_uncached(lang: Option<&str>, src: &str, styles: &CodeStyles) -> Vec<Line> {
+fn highlight_uncached(
+    lang: Option<&str>,
+    src: &str,
+    styles: &CodeStyles,
+    limit_for: &dyn Fn(&str) -> NonZeroUsize,
+) -> (Vec<Line>, Outcome) {
     if src.len() > MAX_HIGHLIGHT_BYTES {
-        return plain(src, styles);
+        return (plain(src, styles), Outcome::Plain);
     }
     let Some((set, syntax)) = resolve_syntax(lang) else {
-        return plain(src, styles);
+        return (plain(src, styles), Outcome::Plain);
     };
     if LinesWithEndings::from(src).count() > MAX_HIGHLIGHT_LINES {
-        return plain(src, styles);
+        return (plain(src, styles), Outcome::Plain);
     }
-    highlight_with(set, syntax, src, styles).unwrap_or_else(|| plain(src, styles))
+    match highlight_with(set, syntax, src, styles, limit_for) {
+        Some(lines) => (lines, Outcome::Highlighted),
+        None => (plain(src, styles), Outcome::Failed),
+    }
 }
 
 /// The name of the `syntect` syntax a language tag resolves to, if any.
@@ -402,6 +480,7 @@ fn highlight_with(
     syntax: &SyntaxReference,
     src: &str,
     styles: &CodeStyles,
+    limit_for: &dyn Fn(&str) -> NonZeroUsize,
 ) -> Option<Vec<Line>> {
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
@@ -409,7 +488,7 @@ fn highlight_with(
 
     for raw in LinesWithEndings::from(src) {
         let ops = state
-            .parse_line_with_limit(raw, set, Some(token_limit_for(raw)))
+            .parse_line_with_limit(raw, set, Some(limit_for(raw)))
             .ok()?;
         let mut line = Line::empty();
         let mut column = 0usize;
@@ -490,4 +569,4 @@ pub fn plain_style(theme: &Theme) -> Style {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

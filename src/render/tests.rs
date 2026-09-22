@@ -1045,6 +1045,15 @@ fn table_with_cell(content: &str) -> crate::doc::Node {
     table
 }
 
+/// Parses a single fenced code block into a node, so a test can hand it straight to
+/// `render_block` without going through a whole document.
+fn code_block(lang: &str, src: &str) -> crate::doc::Node {
+    Doc::parse(&format!("```{lang}\n{src}```\n"))
+        .root()
+        .children[0]
+        .clone()
+}
+
 #[test]
 fn a_list_inside_a_cell_keeps_its_markers() {
     let table = table_with_cell("- one\n- two\n");
@@ -4791,4 +4800,84 @@ fn a_wide_fence_in_a_table_cell_does_not_widen_the_table() {
         without_cap.plain_text(),
         "a document-level prose cap must not change what a table cell draws"
     );
+}
+
+/// A block whose highlight failed says so in its frame's bottom edge.
+///
+/// The memo is primed through `highlight_with_limit` rather than by stubbing the parser,
+/// so this exercises the path a reader actually reaches. The globals lock is held because
+/// priming the memo under one theme races any other test that switches theme —
+/// `cache_put` clears the whole map on a theme change, keyed on the theme and not on the
+/// entry.
+///
+/// The source carries its own marker comment, distinct from every other test's, so its
+/// cache key cannot collide with anyone else's. Two collisions were found this way,
+/// deterministically under `--test-threads=1`, not by inspection: the unmodified
+/// `format!("{}\n", MINIFIED_JS_LINE)` is also
+/// `highlight::tests::a_long_minified_line_is_still_highlighted`'s unlocked key; and the
+/// memo is keyed on `(lang, src, theme)` alone, not on which limit computed it, so even
+/// two *locked* tests sharing one key would only have the first of them actually compute
+/// anything — every later call, `highlight_with_limit` included, is a cache hit that
+/// returns whatever the first test left, silently ignoring its own limit.
+#[test]
+fn a_failed_block_captions_its_frame() {
+    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let theme = Theme::default_dark();
+    let src = format!(
+        "{}\n// task5-render-caption-probe\n",
+        crate::highlight::tests::MINIFIED_JS_LINE
+    );
+    crate::highlight::highlight_with_limit(
+        Some("js"),
+        &src,
+        &theme,
+        std::num::NonZeroUsize::new(2).expect("two is non-zero"),
+    );
+
+    let node = code_block("js", &src);
+    let canvas = render_block(&node, 60, &theme, &BUTTONS);
+    canvas.check_invariants().expect("contract holds");
+
+    let bottom = canvas.row_text(canvas.height() - 1);
+    assert!(
+        bottom.contains(" highlighting timed out "),
+        "the failed block should caption its bottom edge:\n{bottom}"
+    );
+}
+
+/// The caption costs no row.
+///
+/// Branch B patches colour onto an already-rendered canvas, which is only sound while a
+/// plain block and a highlighted one occupy the same cells. A caption that added a row
+/// would break that silently, so it is pinned here rather than in a comment.
+///
+/// Its own marker, distinct from [`a_failed_block_captions_its_frame`]'s: see that
+/// function's doc for why sharing a cache key between tests — even two that both hold
+/// the lock — is unsafe here.
+#[test]
+fn a_caption_does_not_change_a_block_s_height() {
+    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let theme = Theme::default_dark();
+    let src = format!(
+        "{}\n// task5-render-geometry-probe\n",
+        crate::highlight::tests::MINIFIED_JS_LINE
+    );
+    let node = code_block("js", &src);
+
+    crate::highlight::highlight(Some("js"), &src, &theme);
+    let uncaptioned = render_block(&node, 60, &theme, &BUTTONS).height();
+
+    crate::highlight::highlight_with_limit(
+        Some("js"),
+        &src,
+        &theme,
+        std::num::NonZeroUsize::new(2).expect("two is non-zero"),
+    );
+    let captioned = render_block(&node, 60, &theme, &BUTTONS).height();
+
+    assert_eq!(uncaptioned, captioned);
 }
