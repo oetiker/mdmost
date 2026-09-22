@@ -114,10 +114,15 @@ backtrack limit of 1,000,000 (`src/lib.rs:396`) and `syntect` treats a regex err
 non-match rather than propagating it (`src/parsing/regex.rs:225`, with the comment at 236
 naming catastrophic backtracking). So capping the token loop is sufficient.
 
-**The mechanism.** `ParseState` gains an optional maximum number of tokens per line,
-defaulting to no limit so that no existing caller changes behaviour. On exceeding it,
-`parse_line` returns a new `ParsingError` variant. `ParsingError` is `#[non_exhaustive]`,
-so the variant is not a breaking change.
+**The mechanism.** A new method beside `parse_line` takes the maximum number of tokens for
+that line and returns a new `ParsingError` variant when it is exceeded. `parse_line` keeps
+its signature and delegates with no limit, so no existing caller changes behaviour.
+`ParsingError` is `#[non_exhaustive]`, so the variant is not a breaking change.
+
+**A parameter, not a field on `ParseState`.** `ParseState` derives `Eq` and `PartialEq`, so
+a limit stored on it would make two otherwise-identical parse states compare unequal — a
+configuration value leaking into an identity. A parameter also matches what issue #202
+asked for: "a version of the parse function that takes a timeout".
 
 **A token count, not a `Duration`.** A count is deterministic, which is what lets a test
 assert the limit fires exactly when it should; a wall-clock budget makes the same test
