@@ -32,7 +32,10 @@ mod scopes;
 
 pub use acknowledgements::syntax_acknowledgements;
 
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{LazyLock, Mutex, PoisonError, mpsc};
+use std::time::Duration;
 
 use syntect::easy::ScopeRegionIterator;
 use syntect::parsing::{
@@ -42,7 +45,7 @@ use syntect::parsing::{
 use syntect::util::LinesWithEndings;
 
 use crate::text::{Line, Span, display_width, graphemes};
-use crate::theme::{Style, Theme};
+use crate::theme::{CodeStyles, Style, Theme};
 
 /// Columns between tab stops when expanding a tab in a code block.
 pub const TAB_WIDTH: usize = 4;
@@ -118,6 +121,128 @@ static EXTRA_SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
     builder.build()
 });
 
+/// How many highlighted blocks are kept. Reached only by a document with more
+/// distinct code blocks than this; the cache is then cleared whole rather than
+/// evicting one entry, because a document is opened as a unit and its blocks
+/// are wanted as a unit.
+const MAX_CACHE_ENTRIES: usize = 256;
+
+/// One cached block.
+struct Entry {
+    lines: Vec<Line>,
+    /// How many times the highlighter has run for this key. One, unless
+    /// something recomputes an entry it already had — which is the defect this
+    /// cache exists to stop, and what `computed_count` lets a test assert.
+    computed: u64,
+}
+
+/// The memo behind [`highlight`].
+///
+/// `highlight` is a pure function of `(lang, src, theme)` — no width reaches it,
+/// which is why a block laid out at five widths during the clip search
+/// (`render::document::render_widened`) produced five identical results and paid
+/// for each. The key is therefore the whole of that triple.
+///
+/// The theme is held once for the whole map rather than per entry: a theme change
+/// invalidates every entry at the same moment, and a reader changes theme far less
+/// often than a document is laid out.
+struct Cache {
+    styles: Option<CodeStyles>,
+    entries: HashMap<(Option<String>, String), Entry>,
+}
+
+static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| {
+    Mutex::new(Cache {
+        styles: None,
+        entries: HashMap::new(),
+    })
+});
+
+/// Serialises tests that depend on either of this module's two process-global,
+/// `cargo test`-shared pieces of state: [`CACHE`]'s single theme slot and
+/// [`ABANDONED`].
+///
+/// `cache_put` clears the *whole* map whenever it sees a theme other than the one
+/// it already holds, so a test running under one theme can watch a concurrently
+/// running test's theme switch clear its entry mid-assertion. A test's `(lang,
+/// src)` key being unique does not prevent this: the invalidation is keyed on the
+/// theme, not on the entry. Any test that reads `computed_count` or otherwise
+/// depends on a particular theme staying cached must hold this lock for the span
+/// of its assertions.
+///
+/// `ABANDONED` has the same shape of problem: it is a bare counter with no test
+/// isolation, so a test that deliberately abandons or panics a worker races any
+/// other test doing the same. One lock guards both rather than two separate
+/// locks, because a test can need both at once —
+/// `the_javascript_hang_degrades_to_plain_text` goes through [`highlight`], which
+/// touches the cache and can abandon a thread — and two locks taken in different
+/// orders by different tests is a deadlock waiting to happen that a single lock
+/// cannot have.
+#[cfg(test)]
+pub(crate) static HIGHLIGHT_GLOBALS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+/// Runs `body` against the locked cache.
+///
+/// A panic elsewhere must not take highlighting with it: a poisoned lock is
+/// recovered rather than propagated, because the worst a torn cache can hold is
+/// lines that have to be computed again.
+fn with_cache<T>(body: impl FnOnce(&mut Cache) -> T) -> T {
+    let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
+    body(&mut cache)
+}
+
+/// The cached lines for this key, if the cache holds them for this theme.
+fn cache_get(lang: Option<&str>, src: &str, theme: &Theme) -> Option<Vec<Line>> {
+    with_cache(|cache| {
+        if cache.styles != Some(theme.code) {
+            return None;
+        }
+        let key = (lang.map(str::to_owned), src.to_owned());
+        cache.entries.get(&key).map(|entry| entry.lines.clone())
+    })
+}
+
+/// Records `lines` for this key, dropping everything cached for another theme.
+fn cache_put(lang: Option<&str>, src: &str, theme: &Theme, lines: &[Line]) {
+    with_cache(|cache| {
+        if cache.styles != Some(theme.code) {
+            cache.entries.clear();
+            cache.styles = Some(theme.code);
+        }
+        if cache.entries.len() >= MAX_CACHE_ENTRIES {
+            cache.entries.clear();
+        }
+        let key = (lang.map(str::to_owned), src.to_owned());
+        cache
+            .entries
+            .entry(key)
+            .and_modify(|entry| {
+                entry.lines = lines.to_vec();
+                entry.computed += 1;
+            })
+            .or_insert_with(|| Entry {
+                lines: lines.to_vec(),
+                computed: 1,
+            });
+    })
+}
+
+/// How many times the highlighter has run for this key, or `None` if the cache
+/// does not hold it.
+///
+/// Exists for the tests that assert a block is highlighted once however many
+/// widths it is laid out at.
+#[cfg(test)]
+pub(crate) fn computed_count(lang: Option<&str>, src: &str, theme: &Theme) -> Option<u64> {
+    with_cache(|cache| {
+        if cache.styles != Some(theme.code) {
+            return None;
+        }
+        let key = (lang.map(str::to_owned), src.to_owned());
+        cache.entries.get(&key).map(|entry| entry.computed)
+    })
+}
+
 /// Language tags that the bundled set's own name and extension lookup does not resolve,
 /// or resolves to something other than what a Markdown author means by the tag.
 ///
@@ -160,6 +285,108 @@ const ALIASES: &[(&str, &str)] = &[
     ("text", "txt"),
 ];
 
+/// The longest any one block may be highlighted for, however large it is, in a
+/// release build. A debug build multiplies this along with the rest of
+/// [`budget_for`]'s result by [`DEBUG_BUDGET_MULTIPLIER`]: `cargo test` never
+/// ships, so the only thing the multiplier has to do is stop the same
+/// cold-compile cost that motivates [`RELEASE_FLOOR`] from false-positiving
+/// the guard in an unoptimized binary.
+pub const MAX_HIGHLIGHT_BUDGET: Duration = Duration::from_secs(20);
+
+/// The budget's floor before any per-line allowance, calibrated in a release
+/// build against a genuinely cold (first-ever, single-threaded, uncontended)
+/// compile of six representative bundled syntaxes. The worst was TypeScript
+/// at 258 ms; this is four times that, rounded up, and never below one
+/// second regardless of what a lighter syntax would allow. The full
+/// measured table is in `docs/maintainer-notes.md`.
+const RELEASE_FLOOR: Duration = Duration::from_millis(1200);
+
+/// How much slower the same cold compile is measured to be in an unoptimized
+/// (`cargo test`) build, rounded up for margin. The worst observed
+/// debug/release ratio was Makefile at 16.1x (678 ms against 42 ms); the
+/// others clustered around 10x. See `docs/maintainer-notes.md`.
+const DEBUG_BUDGET_MULTIPLIER: u32 = 20;
+
+/// How long a block of `lines` lines is given before it is abandoned.
+///
+/// The floor is not about parsing — it absorbs `syntect`'s one-time cost of
+/// compiling a syntax's regexes, which `SyntaxSet` caches globally once paid,
+/// but which is charged in full to whichever block happens to use that
+/// language first in this process. That cost is not proportional to the
+/// block that pays it, so it cannot be amortised by the per-line term below;
+/// it has to be a floor.
+///
+/// Past the floor, budget grows with the input so that a legitimately large
+/// block is not degraded for being large: a thousand lines of TypeScript
+/// cost about 1.4 s of honest parsing on top of the one-time compile.
+fn budget_for(lines: usize) -> Duration {
+    let scaled =
+        (RELEASE_FLOOR + Duration::from_millis(2) * lines as u32).min(MAX_HIGHLIGHT_BUDGET);
+    if cfg!(debug_assertions) {
+        scaled * DEBUG_BUDGET_MULTIPLIER
+    } else {
+        scaled
+    }
+}
+
+/// How many abandoned threads are tolerated before the guard stops spawning.
+///
+/// An abandoned thread cannot be stopped — Rust has no way to cancel one — so
+/// each costs a core until the process exits. Past this, an uncached block is
+/// plain text rather than another core.
+const MAX_ABANDONED: usize = 2;
+
+static ABANDONED: AtomicUsize = AtomicUsize::new(0);
+
+/// Resets [`ABANDONED`] to zero.
+///
+/// [`ABANDONED`] only ever counts up, and it is process-global: a test that
+/// deliberately abandons a thread would otherwise permanently spend one of
+/// [`MAX_ABANDONED`]'s two slots for the rest of the test binary, leaving one
+/// more genuine overrun anywhere else in that process — plausible on a
+/// shared, busy machine even with a calibrated floor — enough to make every
+/// later `highlight()` in the binary silently degrade to plain text. Called
+/// by the one test that deliberately triggers an overrun, right after it.
+#[cfg(test)]
+fn reset_abandoned_for_test() {
+    ABANDONED.store(0, Ordering::Relaxed);
+}
+
+/// Runs `work` on a thread and gives up on it after `budget`.
+///
+/// `None` means the work did not finish in time, or that too many threads have
+/// already been abandoned to risk another.
+fn run_within(
+    budget: Duration,
+    work: impl FnOnce() -> Vec<Line> + Send + 'static,
+) -> Option<Vec<Line>> {
+    if ABANDONED.load(Ordering::Relaxed) >= MAX_ABANDONED {
+        return None;
+    }
+    let (tx, rx) = mpsc::channel();
+    // The result is sent rather than joined: a join would wait for a thread
+    // that may never return, which is the whole thing being defended against.
+    // The send fails harmlessly when this side has already given up.
+    std::thread::Builder::new()
+        .name("mdmost-highlight".to_owned())
+        .spawn(move || {
+            let _ = tx.send(work());
+        })
+        .ok()?;
+    match rx.recv_timeout(budget) {
+        Ok(lines) => Some(lines),
+        // A timeout means the worker is still running past its budget — a thread
+        // is genuinely being abandoned, and the count has to reflect that. A
+        // disconnect means the worker panicked and dropped `tx` without sending;
+        // no thread is left running, so there is nothing to account for.
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            ABANDONED.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => None,
+    }
+}
+
 /// Highlights the body of a fenced code block.
 ///
 /// `lang` is the fence's info string, if any; only the first word before a comma or
@@ -169,17 +396,40 @@ const ALIASES: &[(&str, &str)] = &[
 /// The returned [`Line`]s are unwrapped and unpadded: one per source line, in order,
 /// with a trailing newline (and a `\r` before it) stripped. Every span carries a style
 /// taken from `theme`.
+///
+/// A repeated call with the same `lang`, `src` and `theme` is served from a memo rather
+/// than re-run: `highlight` takes no width, so a renderer that lays a block out at
+/// several widths gets the same result each time and would otherwise pay for it again.
 pub fn highlight(lang: Option<&str>, src: &str, theme: &Theme) -> Vec<Line> {
+    if let Some(hit) = cache_get(lang, src, theme) {
+        return hit;
+    }
+    let styles = theme.code;
+    let owned_lang = lang.map(str::to_owned);
+    let owned_src = src.to_owned();
+    let line_count = LinesWithEndings::from(src).count();
+    let lines = run_within(budget_for(line_count), move || {
+        highlight_uncached(owned_lang.as_deref(), &owned_src, &styles)
+    })
+    // A block that overran is cached as plain text, so it is neither
+    // re-attempted on the next layout probe nor on the next resize.
+    .unwrap_or_else(|| plain(src, &theme.code));
+    cache_put(lang, src, theme, &lines);
+    lines
+}
+
+/// Highlights without consulting the cache. See [`highlight`] for the contract.
+fn highlight_uncached(lang: Option<&str>, src: &str, styles: &CodeStyles) -> Vec<Line> {
     if src.len() > MAX_HIGHLIGHT_BYTES {
-        return plain(src, theme);
+        return plain(src, styles);
     }
     let Some((set, syntax)) = resolve_syntax(lang) else {
-        return plain(src, theme);
+        return plain(src, styles);
     };
     if LinesWithEndings::from(src).count() > MAX_HIGHLIGHT_LINES {
-        return plain(src, theme);
+        return plain(src, styles);
     }
-    highlight_with(set, syntax, src, theme).unwrap_or_else(|| plain(src, theme))
+    highlight_with(set, syntax, src, styles).unwrap_or_else(|| plain(src, styles))
 }
 
 /// The name of the `syntect` syntax a language tag resolves to, if any.
@@ -240,7 +490,7 @@ fn highlight_with(
     set: &SyntaxSet,
     syntax: &SyntaxReference,
     src: &str,
-    theme: &Theme,
+    styles: &CodeStyles,
 ) -> Option<Vec<Line>> {
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
@@ -250,7 +500,7 @@ fn highlight_with(
         let ops = state.parse_line(raw, set).ok()?;
         let mut line = Line::empty();
         let mut column = 0usize;
-        let mut style = theme.code.text;
+        let mut style = styles.text;
         let mut restyle = true;
 
         for (text, op) in ScopeRegionIterator::new(&ops, raw) {
@@ -263,7 +513,7 @@ fn highlight_with(
                 continue;
             }
             if restyle {
-                style = scopes::style_for(stack.as_slice(), &theme.code);
+                style = scopes::style_for(stack.as_slice(), styles);
                 restyle = false;
             }
             line.push(Span::new(expand_tabs(text, &mut column), style));
@@ -274,7 +524,7 @@ fn highlight_with(
 }
 
 /// Renders `src` as plain themed text, one [`Line`] per source line.
-fn plain(src: &str, theme: &Theme) -> Vec<Line> {
+fn plain(src: &str, styles: &CodeStyles) -> Vec<Line> {
     LinesWithEndings::from(src)
         .map(|raw| {
             let mut column = 0usize;
@@ -282,7 +532,7 @@ fn plain(src: &str, theme: &Theme) -> Vec<Line> {
             if text.is_empty() {
                 Line::empty()
             } else {
-                Line::styled(text, theme.code.text)
+                Line::styled(text, styles.text)
             }
         })
         .collect()

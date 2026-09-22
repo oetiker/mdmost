@@ -6,7 +6,26 @@
 
 ### Changed
 
+- Fenced code blocks are highlighted once and reused, instead of being re-highlighted
+  every time the layout tries a different width. A wide fence in a long document could
+  previously take several seconds to open; the same document now renders in roughly the
+  time of one highlight pass.
+
 ### Fixed
+
+- A code fence, table or other wide block nested inside a list item, a block quote or a
+  footnote no longer drags the rest of that container out to the terminal's edge. It used
+  to take the whole list or quote with it: one over-wide fence in a single item was enough
+  to make every sentence in every other item wrap at the terminal width instead of the
+  configured body width. Only the wide block itself still reaches past the cap.
+- A fenced block whose language definition never finishes parsing (a bug in the bundled
+  JavaScript grammar `syntect` compiles; see `docs/upstream/`) no longer freezes the
+  pager. Such a block now gives up after a measured budget and renders as plain text
+  instead of hanging forever. Compared to 0.3.4, a 36-block reference document that used
+  to take 6.07 s to first open now takes about 2.27 s — 2.7x faster, most of that from
+  the change above, with the price of this guard folded in. After two blocks are
+  abandoned this way in one session, every later code block that is not already cached
+  falls back to plain text too, silently, for the rest of that session.
 
 ## 0.3.4 - 2026-09-16
 
