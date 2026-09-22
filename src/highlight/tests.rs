@@ -371,19 +371,11 @@ fn a_highlighted_block_says_so() {
 /// exercises the path a reader would hit: the minified line from Task 4 under a
 /// deliberately tiny limit, via the `#[cfg(test)]` seam rather than a mutable constant.
 ///
-/// The source carries a marker comment on a second line so its cache key is its own:
-/// it must not collide with [`a_long_minified_line_is_still_highlighted`]'s unmodified
-/// `format!("{}\n", MINIFIED_JS_LINE)` (never called under [`HIGHLIGHT_GLOBALS_TEST_LOCK`],
-/// so a concurrent run of that test would race this one's `Outcome::Failed` entry back to
-/// `Highlighted`), and it must not collide with `render::tests`' own marked copies either:
-/// the memo is keyed on `(lang, src, theme)` alone, not on which limit computed it, so two
-/// *locked* tests sharing one key would still only have the first of them actually compute
-/// anything — every later call, `highlight_with_limit` included, is a cache hit that
-/// returns whatever the first test left, silently ignoring its own limit. Found
-/// deterministically with `--test-threads=1` once the marker was unique against the two
-/// pre-existing tests but still shared with `render::tests`, which ruled out a thread race
-/// and pointed at the memo's own semantics instead. The first line alone already exceeds a
-/// limit of two tokens, so the second line never reaches the parser.
+/// The source carries its own marker comment on a second line: the memo is keyed on
+/// `(lang, src, theme)` alone, not on which limit computed the entry, so every test that
+/// primes a `Failed` outcome needs a key no other test — locked or not — also touches.
+/// The first line alone already exceeds a limit of two tokens, so the second line never
+/// reaches the parser.
 #[test]
 fn a_block_that_exceeds_its_token_budget_is_failed() {
     let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK

@@ -36,11 +36,12 @@
   to take the whole list or quote with it: one over-wide fence in a single item was enough
   to make every sentence in every other item wrap at the terminal width instead of the
   configured body width. Only the wide block itself still reaches past the cap.
-- A fenced block whose language definition never finishes parsing (a bug in the bundled
-  JavaScript grammar `syntect` compiles; see `docs/upstream/`) no longer freezes the
-  pager. The block is shown without colour and its frame says "highlighting timed out",
-  and later code blocks keep their own colour rather than losing it for the rest of the
-  session.
+- A JavaScript fence that used to freeze the pager when opened (a bug in the bundled
+  grammar `syntect` compiles; see `docs/upstream/`) now opens normally and is shown in
+  colour like any other code block.
+- A code block whose highlighting runs away is now shown without colour, with
+  "highlighting timed out" in its frame's bottom border, instead of freezing the pager.
+  The rest of the document is unaffected.
 
 ## 0.3.4 - 2026-09-16
 
