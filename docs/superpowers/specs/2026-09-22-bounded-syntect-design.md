@@ -143,10 +143,10 @@ are coarse pre-checks on block size and are orthogonal to a per-line token bound
 ## 6. Wiring
 
 `two-face` depends on `syntect`, so a plain path dependency would compile two copies whose
-`SyntaxSet` types do not interoperate. `[patch.crates.io]` is therefore required:
+`SyntaxSet` types do not interoperate. `[patch.crates-io]` is therefore required:
 
 ```toml
-[patch.crates.io]
+[patch.crates-io]
 syntect = { path = "vendor/syntect" }
 ```
 
@@ -274,7 +274,7 @@ Then:
    true or amend this section to say what it broke.
 2. Restore a plain version requirement in the root `Cargo.toml`:
    `syntect = { version = "…", default-features = false, features = ["default-fancy"] }`.
-3. Drop the `[patch.crates.io]` table and remove `vendor/syntect` from
+3. Drop the `[patch.crates-io]` table and remove `vendor/syntect` from
    `workspace.members`.
 4. Set the token limit through whatever API upstream shipped, which may not be the one
    §5 proposes. If upstream took a `Duration` instead of a count, the determinism argument

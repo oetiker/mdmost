@@ -4,7 +4,7 @@
 
 **Goal:** Make every `syntect` parse finite, so no document content can hang `mdmost`, and remove the worker-thread guard that existed only because a parse could run forever.
 
-**Architecture:** `syntect` 5.3.0 is vendored at `vendor/syntect/` and reached through `[patch.crates.io]` so that `two-face` resolves to the same copy. It carries two patches: upstream PR #706's fix for loops between non-consuming `set`s, and a new `parse_line_with_limit` that returns an error when a line exceeds a token budget. `highlight_with` already falls through to `plain` on a parse error, so the mdmost side is a deletion plus one new outcome value that lets a failed block caption its own frame.
+**Architecture:** `syntect` 5.3.0 is vendored at `vendor/syntect/` and reached through `[patch.crates-io]` so that `two-face` resolves to the same copy. It carries two patches: upstream PR #706's fix for loops between non-consuming `set`s, and a new `parse_line_with_limit` that returns an error when a line exceeds a token budget. `highlight_with` already falls through to `plain` on a parse error, so the mdmost side is a deletion plus one new outcome value that lets a failed block caption its own frame.
 
 **Tech Stack:** Rust 2024, `syntect` 5.3.0 with `default-fancy` (`fancy-regex`, no C toolchain), `two-face` 0.5.2+bat-0.26.1, `ratatui`. Cargo workspace with path-dependency vendoring.
 
@@ -16,13 +16,49 @@
 - **4-core cap on every cargo invocation.** Use `cargo test -j4`, `cargo build -j4`. This machine has 128 cores and is shared.
 - **Every session here shares one 25 GiB memory cgroup.** Any test on unbounded or adversarial input runs under `systemd-run --user --scope -p MemoryMax=2G --`.
 - **Give this work its own `CARGO_TARGET_DIR`**, e.g. `/scratch/oetiker/cargo-target-mdmost-syntect`.
-- **The vendored crate's version stays `5.3.0`.** `two-face` requires `^5.3.0`; a pre-release such as `5.3.1-mdmost` does **not** satisfy a caret requirement, and `[patch.crates.io]` would be silently ignored, producing two `syntect` crates with incompatible `SyntaxSet` types.
+- **The vendored crate's version stays `5.3.0`.** `two-face` requires `^5.3.0`; a pre-release such as `5.3.1-mdmost` does **not** satisfy a caret requirement, and `[patch.crates-io]` would be silently ignored, producing two `syntect` crates with incompatible `SyntaxSet` types.
 - **Keep every `syntect` feature name.** `two-face` selects `dump-load`, `parsing` and `regex-fancy` with `default-features = false`; mdmost selects `default-fancy`, which expands to `parsing`, `default-syntaxes`, `default-themes`, `html`, `plist-load`, `yaml-load`, `dump-load`, `dump-create`, `regex-fancy`.
 - **Nothing in `vendor/syntect/` may be a local-only change.** Every patch must be one upstream could take. This is what keeps the exit in spec §11 unblocked. The one tempting exception — deleting `FontStyle::from_bits_unchecked` — is explicitly **not** made.
 - **The version is bumped only in a `Release vX` commit, never in feature work.**
 - **`main` advances only through a PR merged on origin.** Never push local `main`.
 - **Nothing may panic on document content.**
 - **Commit messages end with:** `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
+
+
+## Amendments (Task 1, 2026-09-22)
+
+Task 1's execution found defects in this plan. The rulings below override the task text
+wherever they differ; the original text is left in place as the record of what was
+argued, not as an instruction.
+
+- **`[patch.crates-io]` is hyphenated.** The dotted `[patch.crates.io]` this plan
+  originally wrote is a nested table cargo rejects. Corrected throughout, here and in the
+  spec.
+- **The duplicate guard is `cargo tree -p syntect`, not a grep.** Task 1 Step 1's and
+  Step 8's `cargo tree --duplicates | grep -qv syntect` is inverted in both directions:
+  `cargo tree --duplicates` already prints the word `syntect` today, on the dependent
+  chains of unrelated duplicates, with one syntect compiled. `cargo tree -p <SPEC>` exits
+  101 when a name matches several versions. `tests/vendoring.rs` asserts the exit status
+  **and** that stdout names `vendor/syntect`, the second catching the patch table being
+  ignored while the versions happen to agree.
+- **The vendored `[lints]` tables carry real `allow` values**, following
+  `vendor/pulldown-latex`'s pattern. Step 4's empty tables are inert, and the comment
+  justifying them was wrong: `cargo clippy -p mdmost -- -D warnings` does reach
+  `vendor/syntect`. `--no-deps` is the real scoping and is now in CI and the README. The
+  verification list's clippy command gains `--no-deps`.
+- **`testdata/` is restored from upstream git tag `v5.3.0`.** The crates.io tarball
+  excludes it (`exclude = ["testdata/*", ...]` in upstream's own manifest) and syntect's
+  tests do not compile without it. **The re-sync baseline is therefore tag `v5.3.0` minus
+  the four `.gitmodules` submodules minus the dropped directories — not the crates.io
+  tarball**, which the verification list at the end of this plan still names.
+- **The four submodules are not vendored.** `sublimehq/Packages` alone is ~17.9 MB that
+  GitHub resolves as `NOASSERTION`. CI fetches all four at the commits
+  `git ls-tree v5.3.0 testdata` pins and runs the full 127-test suite with no `--skip`;
+  `.gitignore` refuses to track the result. The 16-name skip list is a documented local
+  command only. Seven of those 16 are in `parsing::parser::tests`, the file Tasks 2 and 3
+  patch, which is why CI fetches rather than lives with the list.
+- **Task 3's token-limit check is a nested `if let`, not a let-chain**, because the
+  vendored crate is edition 2021. Corrected in Task 3 Step 3.
 
 ---
 
@@ -33,7 +69,7 @@
 | `vendor/syntect/` (create) | The vendored crate. Read-only except for the two patches. |
 | `vendor/syntect/VENDORED.md` (create) | The contract: source version, each patch, what was dropped, and the exit procedure. Modelled on `vendor/pulldown-latex/VENDORED.md`. |
 | `vendor/syntect/src/parsing/parser.rs` (modify) | Both patches live here and nowhere else. |
-| `Cargo.toml` (modify) | `workspace.members`, `[patch.crates.io]`, and the `syntect` dependency comment. |
+| `Cargo.toml` (modify) | `workspace.members`, `[patch.crates-io]`, and the `syntect` dependency comment. |
 | `.github/workflows/ci.yml` (modify) | One new test step for the vendored crate; one `cargo tree -d` assertion. |
 | `src/highlight.rs` (modify) | Set the limit; add `Outcome`; delete the thread guard and its constants. |
 | `src/render/bridge.rs` (modify) | Expose the outcome to the renderer alongside the lines. |
@@ -66,7 +102,7 @@ This is the test that catches the trap in the Global Constraints. Create `tests/
 ```rust
 //! The vendored `syntect` must be the only `syntect` in the build.
 //!
-//! `two-face` depends on `syntect` too. If `[patch.crates.io]` ever stops applying — a
+//! `two-face` depends on `syntect` too. If `[patch.crates-io]` ever stops applying — a
 //! version bump that no longer satisfies `two-face`'s `^5.3.0`, a pre-release version,
 //! a stray `[dependencies.syntect]` with a `version` that disagrees — cargo silently
 //! compiles two copies. They are different crates to the type system, so
@@ -164,7 +200,7 @@ members = ["vendor/pulldown-latex", "vendor/syntect"]
 # The patch applies only while the vendored version satisfies what two-face asks for,
 # `^5.3.0`. A pre-release version would not, and cargo would ignore this table in
 # silence. `tests/vendoring.rs` fails if that ever happens.
-[patch.crates.io]
+[patch.crates-io]
 syntect = { path = "vendor/syntect" }
 ```
 
@@ -206,7 +242,7 @@ In `.github/workflows/ci.yml`, after the existing `cargo test -p pulldown-latex`
 And in the lint job, after the clippy step:
 
 ```yaml
-      # `[patch.crates.io]` is ignored in silence if the vendored version stops satisfying
+      # `[patch.crates-io]` is ignored in silence if the vendored version stops satisfying
       # two-face's requirement. Two syntect crates compile and the failure surfaces as a
       # type error naming `SyntaxSet` twice.
       - name: One syntect only
@@ -630,15 +666,20 @@ Replace the loop at the end of the body:
             &mut res,
         )? {
             tokens += 1;
-            if let Some(limit) = limit
-                && tokens >= limit.get()
-            {
-                return Err(ParsingError::TokenLimitExceeded { limit: limit.get() });
+            if let Some(limit) = limit {
+                if tokens >= limit.get() {
+                    return Err(ParsingError::TokenLimitExceeded { limit: limit.get() });
+                }
             }
         }
 ```
 
 Add `use std::num::NonZeroUsize;` to the imports.
+
+**A nested `if let`, not a let-chain.** `vendor/syntect/Cargo.toml` is `edition = "2021"`
+and let-chains need edition 2024. Raising the vendored crate's edition would be a
+local-only change, which the Global Constraints forbid because it blocks the spec §11
+exit.
 
 **`NonZeroUsize`, not `usize`:** a limit of zero would reject every line including empty ones, which is never what a caller means, and the type makes that unrepresentable rather than a runtime check.
 
