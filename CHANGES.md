@@ -13,6 +13,13 @@
 
 ### Fixed
 
+- A row no longer slides sideways where a formatting delimiter falls between an emoji and
+  the joiner or skin tone belonging to it. Emphasis, strong, strikethrough, a code span
+  and a link each split the text there, and the terminal drew the two halves as the one
+  glyph they spell while the layout had paid for two — so everything after it on that row
+  was drawn two columns to the left of where the rest of the document sat, and two stale
+  columns were left at the line's end. The joined glyph is now laid out in the single cell
+  it draws in.
 - A code fence, table or other wide block nested inside a list item, a block quote or a
   footnote no longer drags the rest of that container out to the terminal's edge. It used
   to take the whole list or quote with it: one over-wide fence in a single item was enough

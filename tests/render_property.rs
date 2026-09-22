@@ -191,3 +191,15 @@ fn turning_icons_off_never_changes_the_layout() {
         }
     }
 }
+
+/// A ZWJ emoji sequence cut by a formatting span must stay cut once drawn.
+///
+/// The generator found this. Each emphasis run ends its cell after a ZWJ and the next
+/// run opens with an emoji, so the assembled row carried a joined sequence that no
+/// cell had measured and the row drew narrower than the cells claimed.
+#[test]
+fn a_zwj_sequence_cut_by_a_formatting_span_stays_cut() {
+    let piece = "\u{1f600}\u{200d}*\u{1f600}";
+    let markdown = format!("*{piece}* **{piece}** ~~{piece}~~ `{piece}` [{piece}](u)");
+    check(&markdown, 6);
+}
