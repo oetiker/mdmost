@@ -139,8 +139,22 @@ syntect = { path = "vendor/syntect" }
 `publish = false` in the manifest, so a path dependency blocks nothing. `vendor/syntect`
 joins `workspace.members` beside `vendor/pulldown-latex`.
 
-The vendored version number must stay semver-compatible with what `two-face` requires, or
-the patch is ignored. Verify with `cargo tree -d`, which must show one `syntect`.
+**`two-face` 0.5.2+bat-0.26.1 requires `syntect = "5.3.0"`**, which is `^5.3.0` — anything
+from 5.3.0 up to but excluding 6.0.0. Vendoring at exactly `5.3.0` satisfies it.
+
+**Never give the vendored crate a pre-release version.** `5.3.1-mdmost` would *not* satisfy
+`^5.3.0`, because Cargo excludes pre-releases unless a requirement asks for one. The patch
+would then be silently ignored and the build would carry two `syntect` crates whose
+`SyntaxSet` types do not interoperate. Keep the version at `5.3.0`, or a plain `5.3.1`.
+
+**Keep every feature name.** `two-face` selects `dump-load`, `parsing` and — through its own
+`syntect-fancy` — `regex-fancy`, with `default-features = false`. `mdmost` selects
+`default-fancy`, which expands to `parsing`, `default-syntaxes`, `default-themes`, `html`,
+`plist-load`, `yaml-load`, `dump-load`, `dump-create` and `regex-fancy`. Renaming or
+dropping any of these breaks the build as a feature-resolution error, which does not read
+as a vendoring mistake.
+
+`cargo tree -d` must show one `syntect`, asserted in CI.
 
 ## 7. What this retires in `mdmost`
 
