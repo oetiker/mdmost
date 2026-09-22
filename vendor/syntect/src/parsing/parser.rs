@@ -257,9 +257,12 @@ impl ParseState {
         self.parse_line_with_limit(line, syntax_set, None)
     }
 
-    /// Parses a single line, giving up after `limit` tokens.
+    /// Parses a single line, giving up once it would need more than `limit` tokens.
     ///
-    /// `None` is unlimited and behaves exactly as [`Self::parse_line`] always has.
+    /// `Some(n)` permits exactly `n` tokens: a line costing `n` tokens or fewer parses
+    /// normally, and a line costing `n + 1` or more returns
+    /// [`ParsingError::TokenLimitExceeded`]. `None` is unlimited and behaves exactly as
+    /// [`Self::parse_line`] always has.
     ///
     /// A `.sublime-syntax` definition can drive the token loop below without ever
     /// consuming a character or changing the stack depth, and neither the push/pop guard
@@ -312,7 +315,7 @@ impl ParseState {
         )? {
             tokens += 1;
             if let Some(limit) = limit {
-                if tokens >= limit.get() {
+                if tokens > limit.get() {
                     return Err(ParsingError::TokenLimitExceeded { limit: limit.get() });
                 }
             }
@@ -2178,9 +2181,13 @@ contexts:
         states
     }
 
-    /// A syntax whose `main` produces one token per character, so a line of `n`
-    /// characters costs a predictable `n` tokens and the boundary can be asserted
-    /// exactly rather than approximately.
+    /// A syntax whose `main` produces one token per character, so a line's cost is
+    /// predictable and the boundary can be asserted exactly rather than approximately.
+    /// Predictable, but not simply "one token per character": entering `main` from the
+    /// syntax's own `__start` context costs one more token first, a zero-width match that
+    /// pushes the stack before any character is matched. A line of `n` characters costs
+    /// `n + 1` tokens, not `n` — see the boundary tests below, which measure this rather
+    /// than assume it.
     const ONE_TOKEN_PER_CHAR: &str = r#"
 name: counter
 scope: source.counter
@@ -2237,6 +2244,43 @@ contexts:
         assert!(
             matches!(err, ParsingError::TokenLimitExceeded { limit: 2 }),
             "expected TokenLimitExceeded {{ limit: 2 }}, got {err:?}"
+        );
+    }
+
+    /// A limit exactly at a line's cost permits it. "abcd\n" costs 5 tokens, not 4: entering
+    /// `main` from the syntax's own `__start` context is itself one token (a zero-width
+    /// match that pushes the stack, before any of "a", "b", "c", "d" is matched), and the
+    /// counter syntax's `.` does not match the trailing newline. Measured directly against
+    /// `parse_next_token` rather than assumed: `a_limit_below_the_line_s_cost...` above only
+    /// needed "far more than the cost", so it never exposed this off-by-one in the test data
+    /// itself.
+    #[test]
+    fn a_limit_exactly_at_the_line_s_cost_parses_normally() {
+        let ps = counter_set();
+        let syntax = ps
+            .find_syntax_by_name("counter")
+            .expect("the counter syntax should be in the set");
+        let mut state = ParseState::new(syntax);
+        let ops = state
+            .parse_line_with_limit("abcd\n", ps, NonZeroUsize::new(5))
+            .expect("the line costs exactly five tokens, and the limit is five");
+        assert!(!ops.is_empty());
+    }
+
+    /// One token below the boundary above: the same line, one less limit, is an error.
+    #[test]
+    fn a_limit_one_below_the_line_s_cost_is_an_error_naming_the_limit() {
+        let ps = counter_set();
+        let syntax = ps
+            .find_syntax_by_name("counter")
+            .expect("the counter syntax should be in the set");
+        let mut state = ParseState::new(syntax);
+        let err = state
+            .parse_line_with_limit("abcd\n", ps, NonZeroUsize::new(4))
+            .expect_err("the line costs five tokens, which four cannot cover");
+        assert!(
+            matches!(err, ParsingError::TokenLimitExceeded { limit: 4 }),
+            "expected TokenLimitExceeded {{ limit: 4 }}, got {err:?}"
         );
     }
 

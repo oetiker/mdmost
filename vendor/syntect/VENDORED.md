@@ -26,7 +26,7 @@ before changing anything under it.
 | Patch | File | Upstream | What it fixes |
 | --- | --- | --- | --- |
 | 1 | `src/parsing/parser.rs` | [#706](https://github.com/trishume/syntect/pull/706) by `tontinton`, open and unreviewed since 2026-09-12 — not this project's own work in origin, so not offered upstream again | Two contexts that `set` each other without ever consuming a character loop forever. |
-| 2 | `src/parsing/parser.rs` | [#202](https://github.com/trishume/syntect/issues/202), where the maintainer offered to accept exactly this | No backstop existed for a `.sublime-syntax` shape that drives the token loop without ever tripping patch 1's guards. |
+| 2 | `src/parsing/parser.rs` | [#202](https://github.com/trishume/syntect/issues/202), where the maintainer offered to accept a `Duration`-based version of `parse_line` | No backstop existed for a `.sublime-syntax` shape that drives the token loop without ever tripping patch 1's guards. |
 
 ### Patch 1: break loops between non-consuming `set`s
 
@@ -114,11 +114,12 @@ allocating on a path that already exists, not for a measured win.
 
 [Upstream issue #202](https://github.com/trishume/syntect/issues/202) asks for a way to
 bound how much work `ParseState::parse_line` can do on one line; the maintainer's own
-reply on that issue offers to accept exactly this shape of change. Patch 1 closes one
-concrete way a `.sublime-syntax` definition can drive `parse_next_token`'s loop forever
-without consuming a character or changing the stack depth, but neither it nor the
-existing push/pop guard is a proof that no other shape exists. This patch is the
-backstop: a line that needed more tokens than the caller allowed returns
+reply on that issue offers to accept a PR adding a version of the parse function that
+takes a `std::time::Duration`, not a token count. Patch 1 closes one concrete way a
+`.sublime-syntax` definition can drive `parse_next_token`'s loop forever without
+consuming a character or changing the stack depth, but neither it nor the existing
+push/pop guard is a proof that no other shape exists. This patch is the backstop: a line
+that needed more tokens than the caller allowed returns
 `ParsingError::TokenLimitExceeded { limit }` instead of not returning.
 
 Added: `ParseState::parse_line_with_limit(&mut self, line: &str, syntax_set: &SyntaxSet,
@@ -132,13 +133,13 @@ path returns byte-for-byte what `parse_line` always has. `NonZeroUsize` rather t
 what a caller means, and the type makes that state unrepresentable rather than a runtime
 check.
 
-A token count, not a wall-clock budget: the design spec (§9) also promises upstream a
-`Duration`-based layer above the count, for a caller that wants "give up after N
-milliseconds" rather than "give up after N tokens". That layer is **not** in this vendor
-— it belongs above `parse_line_with_limit` (checking the clock every N tokens), in
-mdmost's own code, not in a patch carried against someone else's crate. The vendor needs
-only the count: it is deterministic, so a test can assert the exact boundary a
-wall-clock budget cannot.
+A token count, not a wall-clock budget: what #202 actually asked for is a `Duration`, and
+what this patch carries is the token count that a `Duration` layer can be built on top of
+cheaply (checking the clock every N tokens). The count is the deterministic primitive a
+test can assert the exact boundary of; a wall-clock budget cannot be asserted that way on
+a machine that shares its cores with other work. The `Duration` layer itself is part of
+what would be offered back upstream, answering #202 as it was actually asked — it is
+**not** in this vendored copy, because mdmost's own call site needs only the count.
 
 ## This vendor is temporary
 
@@ -202,7 +203,7 @@ do
   mkdir "$1" && cd "$1" && git init -q && git fetch --depth 1 "$2" "$3" && git checkout -q FETCH_HEAD && rm -rf .git && cd ..
 done
 cd -
-cargo test -p syntect   # 106 lib + 8 error_handling + 13 doctests = 127 passed, 0 failed
+cargo test -p syntect   # 113 lib + 8 error_handling + 13 doctests = 134 passed, 0 failed
 ```
 
 A branch name would move; the pinned commit will not. If any fetch fails, this step
@@ -232,7 +233,7 @@ cargo test -p syntect -- \
   --skip parsing::syntax_set::tests::can_load \
   --skip dumps::tests::can_dump_and_load \
   --skip dumps::tests::dump_is_deterministic
-# 90 lib + 8 error_handling + 13 doctests = 111 passed, 16 skipped, 0 failed
+# 97 lib + 8 error_handling + 13 doctests = 118 passed, 16 skipped, 0 failed
 ```
 
 **This local skip list is a convenience for a working tree without the fixtures, not
