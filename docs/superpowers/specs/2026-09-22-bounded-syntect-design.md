@@ -56,11 +56,20 @@ question with a much larger blast radius, and it is out of scope here.
 `vendor/syntect/VENDORED.md` records the source version, each patch, and which patches
 are offered upstream — the same contract `vendor/pulldown-latex/VENDORED.md` follows.
 
-**One deletion.** `FontStyle::from_bits_unchecked` (`src/highlighting/style.rs:127`) is the
-only `unsafe` item in the tree and is referenced only by `tests/snapshots/public-api.txt`.
-It is removed, and the snapshot updated, so the vendored crate carries
-`#![forbid(unsafe_code)]` like the mdmost crate. This is a public API change and is
-therefore local only, never offered upstream.
+**Nothing is deleted, and that is deliberate.** `FontStyle::from_bits_unchecked`
+(`src/highlighting/style.rs:127`) is the only `unsafe` item in the tree, and it is
+referenced only by `tests/snapshots/public-api.txt`, so removing it would let the vendored
+crate carry `#![forbid(unsafe_code)]` like the mdmost crate. It stays anyway.
+
+Removing it changes public API for one consumer's benefit, so upstream would not take it,
+and a patch upstream will not take is a patch that keeps `vendor/` alive forever. The
+property bought is cosmetic: `#![forbid(unsafe_code)]` in the mdmost crate has never
+reached `vendor/`, so the guarantee mdmost actually makes is the same either way.
+
+**Every patch in this vendor is therefore offered-upstream content**, which is what makes
+§11's exit a procedure rather than a hope. `vendor/pulldown-latex` cannot say that: its
+patch 5 widens two items' visibility that crates.io does not export, so deleting that
+directory would stop mdmost compiling.
 
 ## 4. Patch 1 — break loops between non-consuming `set`s
 
@@ -216,7 +225,9 @@ its own tests. `VENDORED.md` records the PR number once filed.
 (2026-09-22) supplies an independent reproducer. The local refinement in §4 is offered
 only if #706 merges and a maintainer wants it.
 
-**The deletion in §3 is never offered.** It changes public API for one crate's benefit.
+**Nothing is local-only.** See §3: the one change that would have been — deleting the
+crate's single `unsafe` item — is deliberately not made, so that §11's exit has no blocking
+step.
 
 ## 10. Testing
 
@@ -240,7 +251,42 @@ input that started all of this.
 - **The musl static build and the Windows compile must both pass.** The vendored crate is
   pure Rust with no build script, so this is a check, not a risk.
 
-## 11. Out of scope
+## 11. This vendor is temporary
+
+Not a prediction — a procedure, and the conditions it waits on are named so that a later
+reader can check them instead of guessing.
+
+**Delete `vendor/syntect/` when a released `syntect` carries both patches.** Both, not
+either: #706 alone leaves the budget unavailable, and the budget alone leaves the
+JavaScript loop unfixed. Check with `cargo add syntect@<new> --dry-run` and by reading the
+release notes for a `ParsingError` variant covering the token limit.
+
+Then:
+
+1. Delete `vendor/syntect/` entirely. **No step blocks this** — every patch is
+   offered-upstream content, and nothing in `src/` depends on an item a crates.io `syntect`
+   does not export. §3 is what buys that, and any future local patch must either keep it
+   true or amend this section to say what it broke.
+2. Restore a plain version requirement in the root `Cargo.toml`:
+   `syntect = { version = "…", default-features = false, features = ["default-fancy"] }`.
+3. Drop the `[patch.crates.io]` table and remove `vendor/syntect` from
+   `workspace.members`.
+4. Set the token limit through whatever API upstream shipped, which may not be the one
+   §5 proposes. If upstream took a `Duration` instead of a count, the determinism argument
+   in §5 has to be re-made against the tests that relied on it, not quietly dropped.
+5. Re-run the gates, including `cargo tree -d`, the musl static build and the Windows
+   compile.
+
+**What to watch, as of 2026-09-22.** PR #706 open and unreviewed since 2026-09-12, no CI
+run. Issue #202 open since 2021 carrying the owner's standing offer. Nothing merged in the
+repository since May 2026, though PRs merged in 1-9 days through April, and three
+collaborators with write access still comment. Release cadence is roughly annual: 5.3.0
+2025-09-27, 5.2.0 2024-02-07, 5.1.0 2023-07-31, 5.0.0 2022-05-04.
+
+**So the realistic wait is a year or more, and may be indefinite.** That is a reason to
+keep the exit cheap, not a reason to pretend the vendor is permanent.
+
+## 12. Out of scope
 
 - **Branch support, and the newer syntax definitions it would unlock.** That means
   vendoring master, which risks `two-face`'s compiled dump. Separate question.
