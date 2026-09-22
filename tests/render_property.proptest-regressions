@@ -7,6 +7,7 @@
 cc 1e0f8a494eab33456b459570d522533593245d0a653b3e80831ed217343e7a07 # shrinks to markdown = "𗀀ᩗ", width = 2
 cc 06e9700e1fc689080148c2679bad7df6f6628d172352de07f3ff0f66de709e61 # shrinks to markdown = "###### 😀\u{200d}😀ᩗ", width = 8
 cc 138c39488df92edc6b19b6196a487e239a6ebd7fd76a2e53d964587e0a31992f # shrinks to markdown = "៘", width = 5
+cc 724a55ce180b7659d1ecc95f2dab678b5f3f7d7088313081152f7164a4f4c5ac # shrinks to markdown = "| a | b |\n|:--|--:|\n| ا\\!\\|😀! | ا\\!\\|😀! |", width = 1
 cc 70420ea1169556481ce4b74c4580feac98b9fb35b950f67de29c8a567b22639d # shrinks to markdown = "😀\u{200d}`😀`", width = 6
 cc f20be331de877fa015f90b560c5191169c4f44b3c9b5f1454c88a633e4803dd8 # shrinks to markdown = "*😀*\u{200d}😀* **😀*\u{200d}😀** ~~😀*\u{200d}😀~~ `😀*\u{200d}😀` [😀*\u{200d}😀](u)", width = 7
 cc 999cc756fb3895944fb946fbe2fe8a1d871de7b6f96fe630a7ba40463130f745 # shrinks to markdown = "*😀\u{200d}[😀* **😀\u{200d}[😀** ~~😀\u{200d}[😀~~ `😀\u{200d}[😀` [😀\u{200d}[😀](u)", width = 7

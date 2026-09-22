@@ -13,6 +13,17 @@
 
 ### Fixed
 
+- A table cell holding an escaped pipe next to another escape no longer aborts the pager.
+  `| a\|b\*c中d |` crashed while the file was still being parsed, before a row was drawn,
+  at every terminal width, and one such cell anywhere in the document was enough. comrak's
+  table extension rewrites `\|` to `|` inside a cell before it parses the cell's inlines
+  and reports their positions measured in that rewritten text, so the source mdmost is
+  handed for a run of prose is one byte short for every escaped pipe ahead of it. The walk
+  that matches a text node against its own source then ran out of source with text still
+  to account for, searched backwards for the escape it must have missed, and read the text
+  at a position inside a multi-byte character. Any non-ASCII character in the cell would
+  do — an accent, a CJK word, an emoji. Such a cell now keeps its prose in one piece, the
+  same answer mdmost already gave for text it cannot match against its source.
 - A row no longer slides sideways where a formatting delimiter falls between an emoji and
   the joiner or skin tone belonging to it. Emphasis, strong, strikethrough, a code span
   and a link each split the text there, and the terminal drew the two halves as the one

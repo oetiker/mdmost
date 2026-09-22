@@ -518,6 +518,43 @@ fn a_text_node_that_cannot_be_aligned_keeps_its_whole_source() {
 }
 
 #[test]
+fn an_escaped_pipe_in_a_table_cell_keeps_the_node_whole() {
+    // comrak's table extension rewrites `\|` to `|` inside a cell before parsing the
+    // cell's inlines, and reports their `sourcepos` measured in that rewritten string —
+    // so a text node's span comes out one byte short for every escaped pipe ahead of
+    // it. Here the node draws `|!中A` from the eight source bytes `\|\!中A` but is
+    // given seven of them, and the alignment walk runs out of source with the `A` still
+    // unaccounted for. That is a source and a text that do not correspond, so it
+    // declines, exactly as it does for `&fjlig;`.
+    let source = "| \\|\\!\u{4e2d}A |\n|---|\n";
+    assert_eq!(
+        source.get(2..10),
+        Some("\\|\\!\u{4e2d}A"),
+        "fixture: the cell's eight source bytes"
+    );
+    assert_eq!(
+        text_nodes(source),
+        vec![("|!\u{4e2d}A".to_string(), 2, 9)],
+        "one node, unsplit, keeping the span comrak reported"
+    );
+}
+
+#[test]
+fn the_rewind_declines_a_source_that_ends_inside_the_text() {
+    // The mechanism behind the table-cell case above, stated without comrak in the way:
+    // a `src` one byte shorter than the text it is supposed to have produced. The walk
+    // consumes `\!` against the `!`, copies the `中`, and then finds `src` exhausted
+    // with `A` left over. Rewinding over the run must not read `text` at the byte
+    // positions inside the `中` — `\` and `&` are ASCII, so no transcription can open
+    // there, and the two strings share their character boundaries.
+    assert_eq!(
+        convert::align("\\!\u{4e2d}", "!\u{4e2d}A", 0),
+        None,
+        "a source that cannot account for the whole text aligns to nothing"
+    );
+}
+
+#[test]
 fn an_escape_inside_markup_is_split_like_any_other() {
     // The alignment runs over every text node, not only the ones in a bare paragraph.
     for (source, expected) in [

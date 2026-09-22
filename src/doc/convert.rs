@@ -278,6 +278,13 @@ fn segments(node: &Node, source: &str) -> Option<Vec<(String, SourceSpan)>> {
 /// Returns `None` the moment the two stop re-synchronising: an entity that expands to
 /// more than one character (`&fjlig;` is `fj`), a tab comrak widened, anything unknown.
 /// The caller then keeps the node whole, which is exactly today's behaviour.
+///
+/// `src` is not always the whole of what produced `text`, so the walk can also run out
+/// of source with text still to account for. comrak's table extension rewrites `\|` to
+/// `|` inside a cell before parsing the cell's inlines and reports their `sourcepos`
+/// measured in that rewritten string, which leaves a text node's span one byte short for
+/// every escaped pipe ahead of it. That is a `src` and a `text` that do not correspond,
+/// and it declines like any other.
 pub(super) fn align(src: &str, text: &str, start: usize) -> Option<Vec<(String, SourceSpan)>> {
     let mut out: Vec<(String, SourceSpan)> = Vec::new();
     let (mut s, mut t) = (0usize, 0usize);
@@ -357,9 +364,19 @@ fn rewind(
     s: usize,
 ) -> Option<(usize, Transcription)> {
     let bytes = src.as_bytes();
-    for at in (run_s..=s).rev().filter(|at| *at < src.len()) {
-        // The run walked between `run_s` and `s` copies its source, so the two cursors
-        // moved in step and the text position is the same distance along.
+    // A transcription opens with `\` or `&`, so the search only has to consider those
+    // two bytes — and it must not look further, because the mapping onto `text` below
+    // is defined nowhere else. Both are ASCII, whereas the bytes stepped over include
+    // the continuation bytes of a multi-byte character, and a `text` index derived from
+    // one of those lands inside a character rather than on it. `get` also bounds `at`,
+    // which is `src.len()` whenever the walk ran out of source with text left over.
+    for at in (run_s..=s)
+        .rev()
+        .filter(|at| matches!(bytes.get(*at), Some(b'\\' | b'&')))
+    {
+        // `src[run_s..s]` and `text[run_t..t]` hold the same characters — the run was
+        // walked one character at a time with both sides equal — so the two strings
+        // share their boundaries and `at` is the same distance along either.
         let t_at = run_t + (at - run_s);
         let Some(drawn) = text[t_at..].chars().next() else {
             continue;
