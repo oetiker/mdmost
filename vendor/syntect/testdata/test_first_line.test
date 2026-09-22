@@ -1,0 +1,6 @@
+#!/usr/bin/ruby
+
+def blah
+  test = "wow"
+  puts test
+end

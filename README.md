@@ -182,17 +182,24 @@ effect rather than the defaults.
 
 ```sh
 cargo fmt --check -p mdmost
-cargo clippy --all-targets -p mdmost -- -D warnings
+cargo clippy --all-targets -p mdmost --no-deps -- -D warnings
 cargo test -p mdmost
 cargo test -p pulldown-latex   # the vendored parser's own tests
+cargo test -p syntect          # ditto -- see vendor/syntect/VENDORED.md for the invocation
 make man          # build man/mdmost.1 from docs/manual.md; needs pandoc
 ```
 
-Every command names its package because this is a workspace, and its other member —
-`vendor/pulldown-latex` — is a vendored copy of someone else's crate. It is not held to
-our formatting or our lints, but its tests do run: they are what tells us the four
-patches mdmost depends on are still in place. `vendor/pulldown-latex/VENDORED.md`
-explains the arrangement and how it ends.
+Every command names its package because this is a workspace, and its other members —
+`vendor/pulldown-latex` and `vendor/syntect` — are vendored copies of someone else's
+crate. Neither is held to our formatting, and `--no-deps` is what keeps clippy off them
+too: without it, `-p mdmost` still runs clippy-driver over every workspace member, not
+just mdmost, because that substitution applies workspace-wide. Their own tests do run:
+they are what tells us the patches mdmost depends on are still in place.
+`vendor/pulldown-latex/VENDORED.md` and `vendor/syntect/VENDORED.md` explain each
+arrangement and how it ends. `vendor/syntect/VENDORED.md` also has two different
+`cargo test -p syntect` invocations — a `--skip`-list one that runs locally with no
+setup, and the full one CI uses after fetching syntect's own test fixtures from
+upstream at pinned commits — and says which is which.
 
 Snapshot tests use [`insta`](https://insta.rs); property tests use `proptest`. The man
 page is generated and is not in git. Design specs live in `docs/superpowers/specs/`.

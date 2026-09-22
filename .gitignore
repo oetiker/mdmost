@@ -8,3 +8,15 @@ man/
 # Editor backups. They had been sitting untracked in the checkout for six days,
 # turning up in every `git status` and every handoff.
 *~
+
+# syntect's own test fixtures, fetched on demand (CI, or a developer following
+# vendor/syntect/VENDORED.md) from four upstream git repositories at pinned commits.
+# Never vendored -- one of the four, sublimehq/Packages, resolves on GitHub as
+# licence NOASSERTION -- so the repo must refuse to track what the fetch produces;
+# without this, a `git add -A` after fetching would commit exactly what the ruling
+# not to vendor it exists to prevent. Trailing slashes because InspiredGitHub.tmtheme
+# is a directory despite the extension, and a bare filename pattern would not match it.
+/vendor/syntect/testdata/Packages/
+/vendor/syntect/testdata/Solarized/
+/vendor/syntect/testdata/spacegray/
+/vendor/syntect/testdata/InspiredGitHub.tmtheme/
