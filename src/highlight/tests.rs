@@ -290,14 +290,52 @@ fn a_long_minified_line_is_still_highlighted() {
 ///
 /// Sixteen copies of [`MINIFIED_JS_LINE`] (each a self-contained statement, so
 /// concatenating them stays valid JavaScript) come to 95,057 bytes and measure at
-/// 104,065 tokens — above the flat 100,000-token constant this branch shipped for one
-/// review round, which is why it was replaced with a limit that scales with the line's
-/// byte length. Still well under `MAX_HIGHLIGHT_BYTES`, so the block reaches the parser
-/// rather than being pre-emptively rendered as plain for its size.
+/// 104,065 tokens — more than `MAX_TOKENS_PER_LINE_BASE` alone could ever cover, so this
+/// only stays highlighted because the per-byte term grows the budget with the line.
+/// Still well under `MAX_HIGHLIGHT_BYTES`, so the block reaches the parser rather than
+/// being pre-emptively rendered as plain for its size.
 #[test]
 fn a_much_longer_minified_line_still_scales_with_the_budget() {
     let theme = Theme::default();
     let src = format!("{}\n", MINIFIED_JS_LINE.repeat(16));
     let lines = highlight(Some("js"), &src, &theme);
     assert_ne!(lines, plain(&src, &theme.code));
+}
+
+/// A short line gets a small, cheap-to-exhaust budget: exactly
+/// `MAX_TOKENS_PER_LINE_BASE + MAX_TOKENS_PER_BYTE * line.len()`, and nowhere near the
+/// scale a long line needs. Without this, a flat limit large enough for a long line
+/// (any value at or above the previous test's 104,065) would pass every other test in
+/// this module while leaving a short, pathological line free to run up to that same
+/// huge limit before the guard notices — exactly the risk proportional scaling exists
+/// to avoid.
+#[test]
+fn a_short_lines_budget_is_the_exact_formula_and_stays_small() {
+    let limit = token_limit_for("x\n").get();
+    assert_eq!(limit, MAX_TOKENS_PER_LINE_BASE + MAX_TOKENS_PER_BYTE * 2);
+    assert!(
+        limit < 10_000,
+        "a two-byte line must not be given a huge budget: got {limit}"
+    );
+}
+
+/// The budget grows with the line: a line ten times longer gets a proportionally larger
+/// budget, pinned to the exact formula so a future edit can't quietly flatten it back
+/// out while still passing the tests above.
+#[test]
+fn the_budget_grows_with_the_line_by_the_exact_formula() {
+    let short = "a".repeat(100);
+    let long = "a".repeat(1_000);
+    assert_eq!(
+        token_limit_for(&short).get(),
+        MAX_TOKENS_PER_LINE_BASE + MAX_TOKENS_PER_BYTE * 100
+    );
+    assert_eq!(
+        token_limit_for(&long).get(),
+        MAX_TOKENS_PER_LINE_BASE + MAX_TOKENS_PER_BYTE * 1_000
+    );
+    assert!(
+        token_limit_for(&long).get() > token_limit_for(&short).get() * 2,
+        "a line ten times longer must get a substantially larger budget, not a flat one"
+    );
 }

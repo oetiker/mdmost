@@ -288,31 +288,19 @@ pub const MAX_TOKENS_PER_LINE_BASE: usize = 2_000;
 
 /// The per-byte part of the per-line token budget computed by [`token_limit_for`].
 ///
-/// A single flat token limit does not work: a legitimate one-line minified file can
-/// need tens of thousands of tokens — a real `jquery.min.js` build, 88,947 bytes on one
-/// line, measured at 86,535 tokens, only 1.16x under an earlier flat 100,000 constant,
-/// and `MAX_HIGHLIGHT_BYTES` admits lines up to three times that long — while a flat
-/// limit sized to cover that would let a short, pathological line spend a long time
-/// running up to it before the guard notices. Scaling the limit by the line's length in
-/// bytes keeps a short hostile line cheap to bound while still leaving room for a
-/// legitimately long, dense one.
-///
-/// This is at least three times the highest tokens-per-byte ratio measured across the
-/// same six bundled languages as [`MAX_TOKENS_PER_LINE_BASE`], `jquery.min.js`, and a
-/// synthetic minified line: the highest was the synthetic line at ~1.09 tokens/byte.
-/// The full measurement table, method and wall-time figures are in
-/// `docs/maintainer-notes.md`.
+/// At least three times the highest tokens-per-byte ratio measured across six bundled
+/// languages, `jquery.min.js`, and a synthetic minified line: the highest was the
+/// synthetic line at ~1.09 tokens/byte. The full measurement table, method, wall-time
+/// figures and why the budget scales by byte length rather than using a flat limit are
+/// in `docs/maintainer-notes.md`.
 pub const MAX_TOKENS_PER_BYTE: usize = 4;
 
 /// The token limit for one source `line`, scaled by its length in bytes: see
 /// [`MAX_TOKENS_PER_LINE_BASE`] and [`MAX_TOKENS_PER_BYTE`].
 ///
 /// Saturating arithmetic, so a pathologically long `line` can never overflow this into
-/// a panic; `MAX_HIGHLIGHT_BYTES` already keeps a whole block far below where `usize`
-/// arithmetic would be at risk, but this guard is cheap and removes one more way a
-/// document could crash the pager rather than just fail to highlight. The result is
-/// never zero: `MAX_TOKENS_PER_LINE_BASE` alone is already nonzero, and adding to it
-/// cannot lower it.
+/// a panic. The result is never zero: `MAX_TOKENS_PER_LINE_BASE` alone is already
+/// nonzero, and adding to it cannot lower it.
 fn token_limit_for(line: &str) -> NonZeroUsize {
     let limit =
         MAX_TOKENS_PER_LINE_BASE.saturating_add(MAX_TOKENS_PER_BYTE.saturating_mul(line.len()));

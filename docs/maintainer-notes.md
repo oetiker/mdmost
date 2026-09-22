@@ -735,13 +735,15 @@ as any other parse error. It is a backstop against a `.sublime-syntax` rule that
 A single flat limit does not work. A real, unmodified `jquery.min.js` (Debian's
 `libjs-jquery` package; read from `/usr/share/javascript/jquery/jquery.min.js` to
 measure, never pasted into this repository) is one 88,947-byte line that needs 86,535
-tokens — only 1.16x under a flat 100,000-token constant this branch shipped for one
-review round, and `MAX_HIGHLIGHT_BYTES` admits lines up to three times that long: a
-flat limit sized to clear a maximal minified line would also let a *short*,
-pathological line spend that whole budget looping before the guard notices — the F3
-reproducer is two lines. Scaling the limit by the line's length in bytes keeps a short
-hostile line cheap to bound while a long, legitimately dense one still gets the room it
-needs.
+tokens, and `MAX_HIGHLIGHT_BYTES` admits lines up to three times that long: a flat limit
+sized to clear a maximal minified line would also let a *short*, pathological line spend
+that whole budget looping before the guard notices — the F3 reproducer is two lines.
+Scaling the limit by the line's length in bytes keeps a short hostile line cheap to
+bound while a long, legitimately dense one still gets the room it needs. Saturating
+arithmetic in `token_limit_for` keeps this true regardless of `line`'s length: overflow
+is not a realistic risk given `MAX_HIGHLIGHT_BYTES` already caps a whole block, but the
+guard is cheap and removes one more way a document could crash the pager rather than
+just fail to highlight.
 
 **Method:** the smallest limit at which a line still parses, found by doubling the limit
 until it succeeds and then binary-searching the boundary, calling only
@@ -768,8 +770,9 @@ attribution duty, and is valid JavaScript (`node --check` accepts it) — a stan
 dense, real-world minified output, not a claim about the densest line any minifier
 could produce. Repeating it (16 copies, each a self-contained statement so the
 concatenation stays valid JavaScript; 95,057 bytes, still one line) scales linearly at
-the same 1.0948 tokens/byte and needs 104,065 tokens — above the flat 100,000 constant,
-which is why that constant was replaced with a budget that scales.
+the same 1.0948 tokens/byte and needs 104,065 tokens — well inside the 382,228-token
+budget `token_limit_for` computes for a line that length, which is what keeps a long,
+dense line covered as it grows.
 
 **The constants:**
 
@@ -796,14 +799,18 @@ it matched the synthetic line's ratio the whole way, and 4.1x `jquery.min.js`'s 
 
 Real syntax rules cost more per token than the cheap `"1+"` construct — `jquery.min.js`'s
 measured rate is about 4.1x higher. Applying that rate to the largest budget the formula
-ever computes (1,050,576 tokens, at the `MAX_HIGHLIGHT_BYTES` cap) gives an
-*extrapolated* upper bound of about 11 s for one maximally hostile line that size; the
-directly measured cheap-construct figure (2.15 s) is the floor. Both are for one line.
+ever computes (1,050,576 tokens, at the `MAX_HIGHLIGHT_BYTES` cap) gives an *estimate* of
+about 11 s for one maximally hostile line that size — an estimate, not an upper bound:
+`jquery.min.js` is real, well-formed minified JavaScript, not a hypothetical pathological
+`.sublime-syntax` rule, and no pathological rule's actual per-token cost has been
+measured, so nothing here rules out it costing more. The directly measured cheap-
+construct figure (2.15 s) is a lower bound for the same budget. Both are for one line.
 
 **There is no cap across blocks any more.** The thread guard this branch replaced
 (`MAX_ABANDONED` and the rest of it) capped how many blocks could be abandoned at once;
 the token budget has no equivalent. A document with several maximally hostile,
-block-size-cap lines pays the full per-line cost — somewhere between 2.15 s and roughly
-11 s, depending on how expensive the pathological rule's tokens are — for *each one*
-before that block falls back to plain text. The document-level worst case is therefore
-*(number of such blocks) × (one line's worst case)*, not a bounded total.
+block-size-cap lines pays the full per-line cost for *each one* before that block falls
+back to plain text — at least 2.15 s per such line, more for a pathological rule whose
+tokens cost more than the cheap construct's, with no measured ceiling on how much more.
+The document-level worst case is therefore *(number of such blocks) × (one line's worst
+case)*, not a bounded total.
