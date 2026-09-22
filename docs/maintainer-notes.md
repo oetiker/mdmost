@@ -721,14 +721,27 @@ that language. Measured single-threaded, no contention, genuinely first-ever per
 | YAML | 7 ms | 72 ms | 10.3x |
 | Makefile | 42 ms | 678 ms | 16.1x |
 
-## `MAX_TOKENS_PER_LINE` is measured, not chosen
+## The per-line token budget is measured, not chosen
 
-`highlight::highlight_with` bounds every line by `MAX_TOKENS_PER_LINE`
-(`src/highlight.rs`). `vendor/syntect`'s `ParseState::parse_line_with_limit` returns
-`ParsingError::TokenLimitExceeded` once a line's token count passes the limit; the whole
-block then degrades to plain text, same as any other parse error. It is a backstop
-against a `.sublime-syntax` rule that makes `ParseState::parse_line` never return (finding
-F3, see `docs/upstream/2026-09-21-javascript-syntax-hang.md`), not a size policy.
+`highlight::highlight_with` bounds every line by a budget `token_limit_for`
+(`src/highlight.rs`) computes as `MAX_TOKENS_PER_LINE_BASE` plus
+`MAX_TOKENS_PER_BYTE` for every byte in the line. `vendor/syntect`'s
+`ParseState::parse_line_with_limit` returns `ParsingError::TokenLimitExceeded` once a
+line's token count passes that budget; the whole block then degrades to plain text, same
+as any other parse error. It is a backstop against a `.sublime-syntax` rule that makes
+`ParseState::parse_line` never return (finding F3, see
+`docs/upstream/2026-09-21-javascript-syntax-hang.md`), not a size policy.
+
+A single flat limit does not work. A real, unmodified `jquery.min.js` (Debian's
+`libjs-jquery` package; read from `/usr/share/javascript/jquery/jquery.min.js` to
+measure, never pasted into this repository) is one 88,947-byte line that needs 86,535
+tokens — only 1.16x under a flat 100,000-token constant this branch shipped for one
+review round, and `MAX_HIGHLIGHT_BYTES` admits lines up to three times that long: a
+flat limit sized to clear a maximal minified line would also let a *short*,
+pathological line spend that whole budget looping before the guard notices — the F3
+reproducer is two lines. Scaling the limit by the line's length in bytes keeps a short
+hostile line cheap to bound while a long, legitimately dense one still gets the room it
+needs.
 
 **Method:** the smallest limit at which a line still parses, found by doubling the limit
 until it succeeds and then binary-searching the boundary, calling only
@@ -736,31 +749,61 @@ until it succeeds and then binary-searching the boundary, calling only
 fresh `ParseState` is used for each measurement; the first line parsed by a fresh state
 pays one extra token for the zero-width `__start` → `main` push that later lines do not.
 
-**Measured token cost, longest realistic line per language, plus one deliberately dense
-but legitimate case:**
+**Measured token cost:**
 
-| language | line | length (chars) | tokens |
+| line | length (bytes) | tokens | tokens/byte |
 |---|---|---|---|
-| Python | a dict comprehension with a nested list comprehension and two filters | 184 | 147 |
-| TypeScript | a generic `groupBy` with a typed `reduce` | 295 | 145 |
-| JavaScript | the same `groupBy` without types | 159 | 144 |
-| Rust | a `filter`/`fold` building a `HashMap<String, Vec<Item>>` | 216 | 114 |
-| YAML | a nested inline flow mapping (services, ports, environment) | 187 | 86 |
-| Makefile | a `CFLAGS` assignment with `$(shell …)` and nested `$(…)` | 201 | 37 |
-| JavaScript, minified (synthetic) | 30 repeats of a nested-arrow/regex/template-literal unit | 5,941 | 6,505 |
+| Python — dict comprehension nesting a list comprehension, two filters | 184 | 147 | 0.799 |
+| TypeScript — generic `groupBy` with a typed `reduce` | 295 | 145 | 0.492 |
+| JavaScript — the same `groupBy` without types | 159 | 144 | 0.906 |
+| Rust — `filter`/`fold` building a `HashMap<String, Vec<Item>>` | 216 | 114 | 0.528 |
+| YAML — nested inline flow mapping (services, ports, environment) | 187 | 86 | 0.460 |
+| Makefile — `CFLAGS` assignment with `$(shell …)` and nested `$(…)` | 201 | 37 | 0.184 |
+| JavaScript, minified (synthetic, 30 repeats of a nested-arrow/regex/template-literal unit) | 5,941 | 6,505 | 1.0947 |
+| JavaScript, minified (`jquery.min.js`, real) | 88,947 | 86,535 | 0.9729 |
 
-The minified line is synthetic — written for this measurement, not pasted from a
-third-party bundle, so it carries no licence or attribution duty — and is valid
-JavaScript (`node --check` accepts it), not a pathological input. It stands in for the
-densest single-line output a real minifier plausibly produces.
+The synthetic line has the highest measured density of the eight. It is written for
+this measurement, not pasted from a third-party bundle, so it carries no licence or
+attribution duty, and is valid JavaScript (`node --check` accepts it) — a stand-in for
+dense, real-world minified output, not a claim about the densest line any minifier
+could produce. Repeating it (16 copies, each a self-contained statement so the
+concatenation stays valid JavaScript; 95,057 bytes, still one line) scales linearly at
+the same 1.0948 tokens/byte and needs 104,065 tokens — above the flat 100,000 constant,
+which is why that constant was replaced with a budget that scales.
 
-`MAX_TOKENS_PER_LINE` is 100,000: more than fifteen times the highest measured legitimate
-cost (6,505), rounded to a readable number. Below it, no real document loses colour;
-reaching it requires a line manufactured to push `syntect`'s parser as far as the public
-API allows.
+**The constants:**
 
-**Wall time at the limit, release build:** a line of 50,000 repeats of `"1+"` (100,005
-tokens counted from a fresh state) parsed against a limit of 100,000 took 277.5 ms. That
-bounds the cost of one hostile line: whatever a pathological `.sublime-syntax` rule does
-to a single line, `mdmost` spends at most a few hundred milliseconds discovering it, once,
-before the block falls back to plain text.
+```rust
+pub const MAX_TOKENS_PER_LINE_BASE: usize = 2_000;
+pub const MAX_TOKENS_PER_BYTE: usize = 4;
+```
+
+`MAX_TOKENS_PER_LINE_BASE` is more than ten times the highest of the six ordinary-line
+figures above (Python, 147), rounded to a readable number. `MAX_TOKENS_PER_BYTE` is more
+than three times the highest tokens/byte ratio measured (the synthetic line, 1.0947),
+rounded up to an integer. At `MAX_HIGHLIGHT_BYTES` (262,144 bytes) the budget this
+formula computes is 1,050,576 tokens: 3.7x the token cost a line that dense would need if
+it matched the synthetic line's ratio the whole way, and 4.1x `jquery.min.js`'s ratio.
+
+**Wall time, release build:**
+
+| what | size | tokens | time | rate |
+|---|---|---|---|---|
+| cheap `"1+"` line, parsed to its own need | 2,002 B | 2,005 | 5.09 ms | ~2.54 µs/token |
+| `jquery.min.js`, parsed to its own need | 88,947 B | 86,535 | 907 ms | ~10.48 µs/token |
+| 44 self-contained copies of the synthetic minified unit, honestly parsed with no limit | 261,405 B | (fully parses) | 1.90 s | — |
+| a cheap `"1+"` line built with enough repeats to just exceed the largest budget the formula ever computes (1,050,576 tokens, for a line at the `MAX_HIGHLIGHT_BYTES` cap), parsed against that budget until it errors | 1,050,576 B | (errors past 1,050,576) | 2.15 s | ~2.05 µs/token |
+
+Real syntax rules cost more per token than the cheap `"1+"` construct — `jquery.min.js`'s
+measured rate is about 4.1x higher. Applying that rate to the largest budget the formula
+ever computes (1,050,576 tokens, at the `MAX_HIGHLIGHT_BYTES` cap) gives an
+*extrapolated* upper bound of about 11 s for one maximally hostile line that size; the
+directly measured cheap-construct figure (2.15 s) is the floor. Both are for one line.
+
+**There is no cap across blocks any more.** The thread guard this branch replaced
+(`MAX_ABANDONED` and the rest of it) capped how many blocks could be abandoned at once;
+the token budget has no equivalent. A document with several maximally hostile,
+block-size-cap lines pays the full per-line cost — somewhere between 2.15 s and roughly
+11 s, depending on how expensive the pathological rule's tokens are — for *each one*
+before that block falls back to plain text. The document-level worst case is therefore
+*(number of such blocks) × (one line's worst case)*, not a bounded total.
