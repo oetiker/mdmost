@@ -26,7 +26,7 @@ before changing anything under it.
 | Patch | File | Upstream | What it fixes |
 | --- | --- | --- | --- |
 | 1 | `src/parsing/parser.rs` | [#706](https://github.com/trishume/syntect/pull/706) by `tontinton`, open and unreviewed since 2026-09-12 — not this project's own work in origin, so not offered upstream again | Two contexts that `set` each other without ever consuming a character loop forever. |
-| 2 | — | [#202](https://github.com/trishume/syntect/issues/202) | Not yet implemented. |
+| 2 | `src/parsing/parser.rs` | [#202](https://github.com/trishume/syntect/issues/202), where the maintainer offered to accept exactly this | No backstop existed for a `.sublime-syntax` shape that drives the token loop without ever tripping patch 1's guards. |
 
 ### Patch 1: break loops between non-consuming `set`s
 
@@ -109,6 +109,36 @@ all of both runtimes is process startup and loading `two-face`'s syntax sets, no
 highlighting, and non-consuming `set` cycles are rare enough in real syntax definitions
 that this document likely triggers the new code path few or zero times. Kept for not
 allocating on a path that already exists, not for a measured win.
+
+### Patch 2: a per-line token budget
+
+[Upstream issue #202](https://github.com/trishume/syntect/issues/202) asks for a way to
+bound how much work `ParseState::parse_line` can do on one line; the maintainer's own
+reply on that issue offers to accept exactly this shape of change. Patch 1 closes one
+concrete way a `.sublime-syntax` definition can drive `parse_next_token`'s loop forever
+without consuming a character or changing the stack depth, but neither it nor the
+existing push/pop guard is a proof that no other shape exists. This patch is the
+backstop: a line that needed more tokens than the caller allowed returns
+`ParsingError::TokenLimitExceeded { limit }` instead of not returning.
+
+Added: `ParseState::parse_line_with_limit(&mut self, line: &str, syntax_set: &SyntaxSet,
+limit: Option<NonZeroUsize>)`, and the `TokenLimitExceeded` variant on `ParsingError`
+(`#[non_exhaustive]`, so this is not a breaking change for existing matchers).
+`ParseState::parse_line` keeps its exact signature and delegates with `limit: None`, so
+the default is unlimited and no existing caller changes — the third test in
+`parsing::parser::tests` (`no_limit_is_the_unchanged_5_3_0_behaviour`) asserts the `None`
+path returns byte-for-byte what `parse_line` always has. `NonZeroUsize` rather than
+`usize`: a limit of zero would reject every line including empty ones, which is never
+what a caller means, and the type makes that state unrepresentable rather than a runtime
+check.
+
+A token count, not a wall-clock budget: the design spec (§9) also promises upstream a
+`Duration`-based layer above the count, for a caller that wants "give up after N
+milliseconds" rather than "give up after N tokens". That layer is **not** in this vendor
+— it belongs above `parse_line_with_limit` (checking the clock every N tokens), in
+mdmost's own code, not in a patch carried against someone else's crate. The vendor needs
+only the count: it is deterministic, so a test can assert the exact boundary a
+wall-clock budget cannot.
 
 ## This vendor is temporary
 

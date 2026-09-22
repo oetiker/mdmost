@@ -18,6 +18,7 @@ use crate::parsing::syntax_set::{SyntaxReference, SyntaxSet};
 use fnv::FnvHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hash, Hasher};
+use std::num::NonZeroUsize;
 
 /// Errors that can occur while parsing.
 #[derive(Debug, thiserror::Error)]
@@ -33,6 +34,10 @@ pub enum ParsingError {
     BadMatchIndex(usize),
     #[error("Tried to use a ContextReference that has not bee resolved yet: {0:?}")]
     UnresolvedContextReference(ContextReference),
+    /// A line needed more tokens than the caller allowed. See
+    /// [`ParseState::parse_line_with_limit`].
+    #[error("Line exceeded its limit of {limit} tokens")]
+    TokenLimitExceeded { limit: usize },
 }
 
 /// Keeps the current parser state (the internal syntax interpreter stack) between lines of parsing.
@@ -249,6 +254,28 @@ impl ParseState {
         line: &str,
         syntax_set: &SyntaxSet,
     ) -> Result<Vec<(usize, ScopeStackOp)>, ParsingError> {
+        self.parse_line_with_limit(line, syntax_set, None)
+    }
+
+    /// Parses a single line, giving up after `limit` tokens.
+    ///
+    /// `None` is unlimited and behaves exactly as [`Self::parse_line`] always has.
+    ///
+    /// A `.sublime-syntax` definition can drive the token loop below without ever
+    /// consuming a character or changing the stack depth, and neither the push/pop guard
+    /// nor the non-consuming-`set` guard catches every shape of that. This limit is the
+    /// backstop: it turns a parse that would not return into a
+    /// [`ParsingError::TokenLimitExceeded`], which a caller can degrade on.
+    ///
+    /// A token count rather than a wall-clock budget, because a count is deterministic
+    /// and a test can assert the exact boundary. A `Duration` can be layered on top by
+    /// checking the clock every N tokens.
+    pub fn parse_line_with_limit(
+        &mut self,
+        line: &str,
+        syntax_set: &SyntaxSet,
+        limit: Option<NonZeroUsize>,
+    ) -> Result<Vec<(usize, ScopeStackOp)>, ParsingError> {
         if self.stack.is_empty() {
             return Err(ParsingError::MissingMainContext);
         }
@@ -272,6 +299,7 @@ impl ParseState {
         // Used for detecting loops between non-consuming `set`s, see `parse_next_token`.
         let mut set_states = SetStates::default();
 
+        let mut tokens = 0usize;
         while self.parse_next_token(
             line,
             syntax_set,
@@ -281,7 +309,14 @@ impl ParseState {
             &mut non_consuming_push_at,
             &mut set_states,
             &mut res,
-        )? {}
+        )? {
+            tokens += 1;
+            if let Some(limit) = limit {
+                if tokens >= limit.get() {
+                    return Err(ParsingError::TokenLimitExceeded { limit: limit.get() });
+                }
+            }
+        }
 
         Ok(res)
     }
@@ -787,6 +822,7 @@ mod tests {
     use crate::parsing::{Scope, ScopeStack, SyntaxSet, SyntaxSetBuilder};
     use crate::util::debug_print_ops;
     use crate::utils::testdata;
+    use std::sync::OnceLock;
 
     const TEST_SYNTAX: &str = include_str!("../../testdata/parser_tests.sublime-syntax");
     #[test]
@@ -2140,5 +2176,83 @@ contexts:
             states.push(stack_str);
         }
         states
+    }
+
+    /// A syntax whose `main` produces one token per character, so a line of `n`
+    /// characters costs a predictable `n` tokens and the boundary can be asserted
+    /// exactly rather than approximately.
+    const ONE_TOKEN_PER_CHAR: &str = r#"
+name: counter
+scope: source.counter
+contexts:
+  main:
+    - match: .
+      scope: counter.char
+"#;
+
+    /// The counter syntax, in a leaked set.
+    ///
+    /// Returns the set and nothing else, and each test looks its syntax up. It must NOT
+    /// return a `SyntaxReference` alongside a *clone* of the set: a `ContextId` is an
+    /// index into one particular `SyntaxSet` (`ParseState::parse_line`'s own doc says so),
+    /// so parsing with a reference from a different set gives wrong results or panics.
+    ///
+    /// Leaked on purpose. One small set per test binary, and `&'static` is what lets every
+    /// test share it without a lazy static or a per-test rebuild.
+    fn counter_set() -> &'static SyntaxSet {
+        static SET: OnceLock<SyntaxSet> = OnceLock::new();
+        SET.get_or_init(|| {
+            let mut builder = SyntaxSetBuilder::new();
+            builder.add(
+                SyntaxDefinition::load_from_str(ONE_TOKEN_PER_CHAR, true, None)
+                    .expect("the counter syntax should load"),
+            );
+            builder.build()
+        })
+    }
+
+    #[test]
+    fn a_limit_above_the_line_s_cost_parses_normally() {
+        let ps = counter_set();
+        let syntax = ps
+            .find_syntax_by_name("counter")
+            .expect("the counter syntax should be in the set");
+        let mut state = ParseState::new(syntax);
+        let ops = state
+            .parse_line_with_limit("abcd\n", ps, NonZeroUsize::new(64))
+            .expect("four characters cost far fewer than 64 tokens");
+        assert!(!ops.is_empty());
+    }
+
+    #[test]
+    fn a_limit_below_the_line_s_cost_is_an_error_naming_the_limit() {
+        let ps = counter_set();
+        let syntax = ps
+            .find_syntax_by_name("counter")
+            .expect("the counter syntax should be in the set");
+        let mut state = ParseState::new(syntax);
+        let err = state
+            .parse_line_with_limit("abcdefghij\n", ps, NonZeroUsize::new(2))
+            .expect_err("ten characters cannot be parsed in two tokens");
+        assert!(
+            matches!(err, ParsingError::TokenLimitExceeded { limit: 2 }),
+            "expected TokenLimitExceeded {{ limit: 2 }}, got {err:?}"
+        );
+    }
+
+    /// The promise that makes the upstream offer honest: with no limit, this is 5.3.0.
+    #[test]
+    fn no_limit_is_the_unchanged_5_3_0_behaviour() {
+        let ps = counter_set();
+        let syntax = ps
+            .find_syntax_by_name("counter")
+            .expect("the counter syntax should be in the set");
+        let mut with_none = ParseState::new(syntax);
+        let mut without_limit = ParseState::new(syntax);
+        let line = "abcdefghij\n";
+        assert_eq!(
+            with_none.parse_line_with_limit(line, ps, None).unwrap(),
+            without_limit.parse_line(line, ps).unwrap(),
+        );
     }
 }
