@@ -119,9 +119,12 @@ On the lints table, the honest version: **it fixes nothing today.** Measured on
 runs clippy in its own CI too. The table is insurance against the toolchain bump that
 introduces a lint nobody here is going to fix in someone else's frozen code.
 
-What is load-bearing is the other half: mdmost's gate names its package,
-`cargo clippy --all-targets -p mdmost -- -D warnings`, and trailing args reach only the
-selected package. Were the gate workspace-wide, `-D warnings` would override this table
-and lint upstream's code under our settings anyway. **Neither half can reach mdmost's own
-code** — a `[lints]` table applies to the package that declares it. If this tree ever
-stops being read-only, delete the `[lints]` table rather than the scoping.
+What is load-bearing is the other half: mdmost's gate runs `cargo clippy --all-targets
+-p mdmost --no-deps -- -D warnings`. `-p mdmost` alone does not scope the lint to
+mdmost's own code — clippy-driver still lints every workspace member, this crate
+included, the same gap confirmed directly against `vendor/syntect` (see its own
+`VENDORED.md`) — it is `--no-deps` that keeps `-D warnings` off this crate. Were the gate
+workspace-wide with no `--no-deps`, this table would be the only thing standing between a
+toolchain bump and a red CI on someone else's frozen code. **Neither half can reach
+mdmost's own code** — a `[lints]` table applies to the package that declares it. If this
+tree ever stops being read-only, delete the `[lints]` table rather than the scoping.
