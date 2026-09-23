@@ -128,7 +128,8 @@ jobs:
       # The vendored syntect's own suite, for the same reason pulldown-latex's runs: the
       # patches in vendor/syntect/src/parsing/parser.rs add their regression tests to the
       # inline `mod tests` there. If these go red, a patch has been lost. No `--skip`
-      # here -- the fixtures the step above fetched make the full 127 run.
+      # here -- the fixtures the step above fetched make the full 134 run (113 lib + 8
+      # error_handling + 13 doctests; see vendor/syntect/VENDORED.md).
       - name: Run the vendored syntect's tests
         run: cargo test -p syntect
 
