@@ -95,9 +95,10 @@ otherwise are treated as identical. Replace the key with `(usize, u64)`, where t
 an incremental hash over each level's `context` **and** `prototypes`. That removes the
 allocation and makes the key more precise than upstream's at the same time.
 
-`captures` stays out of the key: it holds a `Region`, which is not hashable, and the cost
-of excluding it is bounded — a state that differs only in captures may break its loop one
-character early, losing a little colour. It cannot hang and it cannot panic.
+`captures` stays out of the key: it holds a `Region`, which is not hashable. A fingerprint
+collision, or a state that differs only in `captures`, makes the guard treat that state as
+a repeat and skip its `set`; the wrong stack can then persist for the rest of the parse.
+The only guarantee is that the parser still advances, so it can never hang or panic.
 
 **Measure before keeping the allocation change.** Non-consuming `set`s are rare in real
 syntaxes, so the allocation may cost nothing measurable. If it does not show in the
@@ -189,8 +190,8 @@ new handling at the call site, and the following all go:
 
 ## 8. What the reader sees
 
-A block whose parse exceeds the budget renders as plain themed text, with
-`highlighting timed out` written into the bottom edge of its frame via the existing
+A block whose parse trips the token-limit guard renders as plain themed text, with
+`highlighting gave up` written into the bottom edge of its frame via the existing
 `Canvas::framed_captioned`. A caption in the border costs no row, so the block's geometry
 is unchanged.
 
@@ -201,8 +202,9 @@ a fence tagged `text` is not a failure. So `highlight` reports an outcome alongs
 lines:
 
 - `Highlighted` — a syntax was found and the parse finished.
-- `Plain` — no tag, or no syntax for the tag. Draws no caption. The common case.
-- `Failed` — a syntax was found and the parse returned an error. Draws the caption.
+- `Plain` — no tag, no syntax for the tag, or a parse error other than the token-limit
+  guard. Draws no caption. The common case.
+- `Failed` — the token-limit guard cut the parse short. Draws the caption.
 
 The outcome is memoised with the lines, so a failed block is neither re-attempted nor
 re-captioned on the next layout probe. `highlight`'s existing signature returns
@@ -216,10 +218,10 @@ nothing is silently disabled for the rest of the session.
 
 ## 9. Upstream
 
-**The budget is offered upstream.** Issue #202 has been open since 2021 asking for a
+**The budget is offered upstream.** Issue #202 has been open since 2018 asking for a
 highlighting timeout, and `trishume` replied there that he would accept a PR adding a
 version of the parse function taking a `std::time::Duration`, and that he is unlikely to
-write it himself. No PR followed in five years, and no general iteration cap on
+write it himself. No PR followed in eight years, and no general iteration cap on
 `parse_line` has ever been proposed.
 
 The upstream commit is shaped for upstream, not for us: the token limit as the primitive,
@@ -283,7 +285,7 @@ Then:
    compile.
 
 **What to watch, as of 2026-09-22.** PR #706 open and unreviewed since 2026-09-12, no CI
-run. Issue #202 open since 2021 carrying the owner's standing offer. Nothing merged in the
+run. Issue #202 open since 2018 carrying the owner's standing offer. Nothing merged in the
 repository since May 2026, though PRs merged in 1-9 days through April, and three
 collaborators with write access still comment. Release cadence is roughly annual: 5.3.0
 2025-09-27, 5.2.0 2024-02-07, 5.1.0 2023-07-31, 5.0.0 2022-05-04.

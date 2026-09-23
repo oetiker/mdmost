@@ -9,10 +9,10 @@ Nothing has been filed. Whether to file it, and where, is undecided.
 
 ## Prior art upstream
 
-- Issue [#202](https://github.com/trishume/syntect/issues/202), open since 2021, asks for
+- Issue [#202](https://github.com/trishume/syntect/issues/202), open since 2018, asks for
   a highlighting timeout. `trishume` replied that he would accept a PR adding a version of
   the parse function taking a `std::time::Duration`, and that he is unlikely to write it
-  himself. No PR followed in five years.
+  himself. No PR followed in eight years.
 - No general iteration cap on `parse_line` or `parse_next_token` has ever been proposed.
 - Two bounded guards are merged, both narrower than this: PR #142 turns Oniguruma's
   match-limit error into a `Result` instead of a panic, and PR #597 caps context pushes
