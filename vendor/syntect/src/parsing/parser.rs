@@ -97,8 +97,11 @@ type SetStates = HashSet<(usize, u64), BuildHasherDefault<FnvHasher>>;
 /// and cloning a `Vec<ContextId>` each time allocates for nothing. `prototypes` is part
 /// of it because two levels that share a context but differ in their prototypes are
 /// genuinely different states, and conflating them would break a legitimate `set` one
-/// character early. `captures` is left out because `Region` is not hashable; the cost of
-/// that is bounded to one character of lost highlighting and can never hang or panic.
+/// character early. `captures` is left out because `Region` is not hashable. A
+/// fingerprint collision, or two states that differ only in `captures`, makes this guard
+/// treat a new state as a repeat and skip its `set`; the wrong stack can then persist for
+/// the rest of the parse. The only guarantee is that the parser still advances a
+/// character instead, so it can never hang or panic.
 fn stack_fingerprint(stack: &[StateLevel]) -> u64 {
     let mut hasher = FnvHasher::default();
     for level in stack {
