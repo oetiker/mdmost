@@ -189,18 +189,6 @@ version = "1.0.0"
 [dev-dependencies.serde_json]
 version = "1.0"
 
-[profile.dev.package.aho-corasick]
-opt-level = 2
-
-[profile.dev.package.fancy-regex]
-opt-level = 2
-
-[profile.dev.package.regex-automata]
-opt-level = 2
-
-[profile.dev.package.regex-syntax]
-opt-level = 2
-
 # Allows everything, on purpose: insurance against a toolchain bump that introduces a
 # lint nobody here is going to fix in someone else's frozen code. It is not what keeps
 # mdmost's gate off this crate, though -- a lint level named on the command line
