@@ -65,8 +65,10 @@ close a gap #706 leaves open:
   told apart and a legitimate `set` cannot be broken one character early. This is a
   behavioural difference from #706, not just an implementation detail, and must survive
   reconciliation if #706 merges upstream. `captures` is left out of both: `Region` (from
-  the regex backend) is not `Hash`, and the cost of omitting it is bounded to at most one
-  character of lost highlighting on an adversarial pattern, never a hang or a panic.
+  the regex backend) is not `Hash`. A fingerprint collision, or two states that differ
+  only in `captures`, makes this guard treat a new state as a repeat and skip its `set`;
+  the wrong stack can then persist for the rest of the parse. The only guarantee is that
+  the parser still advances a character instead, so it can never hang or panic.
 
 **If #706 merges upstream:** both refinements touch the exact lines PR #706 touches
 (`SetStates`'s definition and the `set_states.insert(...)` call). A future re-sync must
@@ -126,9 +128,13 @@ Added: `ParseState::parse_line_with_limit(&mut self, line: &str, syntax_set: &Sy
 limit: Option<NonZeroUsize>)`, and the `TokenLimitExceeded` variant on `ParsingError`
 (`#[non_exhaustive]`, so this is not a breaking change for existing matchers).
 `ParseState::parse_line` keeps its exact signature and delegates with `limit: None`, so
-the default is unlimited and no existing caller changes — the third test in
-`parsing::parser::tests` (`no_limit_is_the_unchanged_5_3_0_behaviour`) asserts the `None`
-path returns byte-for-byte what `parse_line` always has. `NonZeroUsize` rather than
+the default is unlimited and no existing caller changes. The third test in
+`parsing::parser::tests` (`no_limit_is_the_unchanged_5_3_0_behaviour`) compares
+`parse_line_with_limit(None)` against `parse_line` — which now calls it, so this only
+proves the delegation is wired, not that the result matches 5.3.0's. What actually backs
+that claim is the delegation itself, plus the unchanged parser tests CI runs against the
+fetched fixtures: nothing in `parse_next_token`'s own logic changed under `limit: None`,
+only what it is now told to check. `NonZeroUsize` rather than
 `usize`: a limit of zero would reject every line including empty ones, which is never
 what a caller means, and the type makes that state unrepresentable rather than a runtime
 check.
@@ -143,19 +149,28 @@ what would be offered back upstream, answering #202 as it was actually asked —
 
 ## This vendor is temporary
 
-Per the design spec's exit condition (spec §11): when upstream cuts a release that
-carries both patches (or otherwise removes the need for the step-budget guard), the exit
-procedure is:
+**Delete `vendor/syntect/` when a released `syntect` carries both patches** (spec §11).
+Both, not either: #706 alone leaves the budget unavailable, and the budget alone leaves
+the JavaScript loop unfixed. Check with `cargo add syntect@<new> --dry-run` and by reading
+the release notes for a `ParsingError` variant covering the token limit — don't just trust
+the version number.
 
-1. Delete `vendor/syntect/` entirely.
+Then, following spec §11's steps:
+
+1. Delete `vendor/syntect/` entirely. No step blocks this: every patch is
+   offered-upstream content, and nothing in `src/` depends on an item a crates.io
+   `syntect` does not export.
 2. Restore a plain version requirement in the root `Cargo.toml`:
-   `syntect = { version = "…", default-features = false, features = ["default-fancy"] }`,
-   and drop the `[patch.crates-io]` table and the `"vendor/syntect"` workspace member.
-3. Delete `tests/vendoring.rs` and the CI steps that reference it
+   `syntect = { version = "…", default-features = false, features = ["default-fancy"] }`.
+3. Drop the `[patch.crates-io]` table and remove `vendor/syntect` from
+   `workspace.members`. Delete `tests/vendoring.rs` and the CI steps that reference it
    (`.github/workflows/ci.yml`: "Run the vendored syntect's tests", "One syntect only").
-4. Confirm both patches are actually present in the picked-up release before deleting —
-   grep the new dependency's source for the guarded step count and the bounded-recursion
-   check `parser.rs` carries once Tasks 2 and 3 land, don't just trust the version number.
+4. Set the token limit through whatever API upstream shipped, which may not be the one
+   this vendor uses. If upstream took a `Duration` instead of a token count, the
+   determinism argument in "Patch 2" above has to be re-made against the tests that
+   relied on it, not quietly dropped.
+5. Re-run the gates, including `cargo tree -d`, the musl static build and the Windows
+   compile.
 
 ## What was dropped from the upstream tree, and why
 
@@ -355,6 +370,12 @@ test target and the dev-dependencies those needed stripped (`criterion`, `getopt
   `README.md`). This table's real effect: a plain `cargo clippy -p syntect`, with no
   extra flags, stays silent. If this tree ever stops being read-only, delete the table
   rather than the `--no-deps` scoping.
+- Upstream's four `[profile.dev.package.*]` tables (`aho-corasick`, `fancy-regex`,
+  `regex-automata`, `regex-syntax`, each `opt-level = 2`) are dropped. Cargo only reads a
+  `[profile]` table from a workspace's *root* manifest; on a workspace member it is
+  ignored, printing `warning: profiles for the non root package will be ignored` on
+  every `cargo` invocation in this workspace, not only ones touching this crate.
+  Deleting the tables changes nothing cargo actually builds and silences the warning.
 
 Kept as dev-dependencies, deliberately: `pretty_assertions` (`src/lib.rs` has
 `#[cfg(test)] #[macro_use] extern crate pretty_assertions`), `rayon` (the
