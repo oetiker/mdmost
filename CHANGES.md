@@ -37,10 +37,10 @@
   to make every sentence in every other item wrap at the terminal width instead of the
   configured body width. Only the wide block itself still reaches past the cap.
 - A JavaScript fence that used to freeze the pager when opened (a bug in the bundled
-  grammar `syntect` compiles; see `docs/upstream/`) now opens normally and is shown in
-  colour like any other code block.
+  JavaScript grammar; see `docs/upstream/`) now opens normally and is shown in colour
+  like any other code block.
 - A code block whose highlighting runs away is now shown without colour, with
-  "highlighting timed out" in its frame's bottom border, instead of freezing the pager.
+  "highlighting gave up" in its frame's bottom border, instead of freezing the pager.
   The rest of the document is unaffected.
 
 ## 0.3.4 - 2026-09-16

@@ -38,8 +38,8 @@ use std::sync::{LazyLock, Mutex, PoisonError};
 
 use syntect::easy::ScopeRegionIterator;
 use syntect::parsing::{
-    ParseState, ScopeStack, ScopeStackOp, SyntaxDefinition, SyntaxReference, SyntaxSet,
-    SyntaxSetBuilder,
+    ParseState, ParsingError, ScopeStack, ScopeStackOp, SyntaxDefinition, SyntaxReference,
+    SyntaxSet, SyntaxSetBuilder,
 };
 use syntect::util::LinesWithEndings;
 
@@ -416,8 +416,9 @@ fn highlight_uncached(
         return (plain(src, styles), Outcome::Plain);
     }
     match highlight_with(set, syntax, src, styles, limit_for) {
-        Some(lines) => (lines, Outcome::Highlighted),
-        None => (plain(src, styles), Outcome::Failed),
+        Ok(lines) => (lines, Outcome::Highlighted),
+        Err(HighlightError::TokenLimitExceeded) => (plain(src, styles), Outcome::Failed),
+        Err(HighlightError::Other) => (plain(src, styles), Outcome::Plain),
     }
 }
 
@@ -470,7 +471,20 @@ fn find_in_sets(token: &str) -> Option<(&'static SyntaxSet, &'static SyntaxRefer
         .map(|syntax| (&*BUNDLED_SYNTAXES, syntax))
 }
 
-/// Highlights `src` with `syntax`, or returns `None` if the parser gave up.
+/// Why [`highlight_with`] produced no lines.
+///
+/// Only [`Self::TokenLimitExceeded`] is reported to the caller as [`Outcome::Failed`];
+/// every other cause degrades silently to [`Outcome::Plain`], exactly as every parser
+/// error was treated before this branch introduced the token-limit guard.
+enum HighlightError {
+    /// [`ParsingError::TokenLimitExceeded`]: the budget the caller passed in was not
+    /// enough to finish the line.
+    TokenLimitExceeded,
+    /// Any other [`ParsingError`], or a `ScopeStack::apply` error.
+    Other,
+}
+
+/// Highlights `src` with `syntax`, or returns why the parser gave up.
 ///
 /// Any parser error degrades the whole block rather than half of it, so the reader
 /// never sees a block that is colourful at the top and plain at the bottom for no
@@ -481,15 +495,19 @@ fn highlight_with(
     src: &str,
     styles: &CodeStyles,
     limit_for: &dyn Fn(&str) -> NonZeroUsize,
-) -> Option<Vec<Line>> {
+) -> Result<Vec<Line>, HighlightError> {
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
     let mut out = Vec::new();
 
     for raw in LinesWithEndings::from(src) {
-        let ops = state
-            .parse_line_with_limit(raw, set, Some(limit_for(raw)))
-            .ok()?;
+        let ops = match state.parse_line_with_limit(raw, set, Some(limit_for(raw))) {
+            Ok(ops) => ops,
+            Err(ParsingError::TokenLimitExceeded { .. }) => {
+                return Err(HighlightError::TokenLimitExceeded);
+            }
+            Err(_) => return Err(HighlightError::Other),
+        };
         let mut line = Line::empty();
         let mut column = 0usize;
         let mut style = styles.text;
@@ -497,7 +515,7 @@ fn highlight_with(
 
         for (text, op) in ScopeRegionIterator::new(&ops, raw) {
             if !matches!(op, ScopeStackOp::Noop) {
-                stack.apply(op).ok()?;
+                stack.apply(op).map_err(|_| HighlightError::Other)?;
                 restyle = true;
             }
             let text = strip_eol(text);
@@ -512,7 +530,7 @@ fn highlight_with(
         }
         out.push(line);
     }
-    Some(out)
+    Ok(out)
 }
 
 /// Renders `src` as plain themed text, one [`Line`] per source line.

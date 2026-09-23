@@ -368,7 +368,7 @@ fn framed_code(
         .flatten()
         .map(|name| title(name, ctx));
     let note = (bridge::outcome(language, literal, theme) == crate::highlight::Outcome::Failed)
-        .then(|| outcome_caption("highlighting timed out", ctx));
+        .then(|| outcome_caption("highlighting gave up", ctx));
     let mut out = inner.framed_captioned(
         BorderSet::ROUNDED,
         theme.code.frame,

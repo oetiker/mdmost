@@ -387,3 +387,52 @@ fn a_block_that_exceeds_its_token_budget_is_failed() {
     assert_eq!(lines, plain(&src, &theme.code));
     assert_eq!(outcome(Some("js"), &src, &theme), Outcome::Failed);
 }
+
+/// A parser error that is not the token limit must degrade silently to `Plain`, not
+/// `Failed`: `Failed` is reserved for `ParsingError::TokenLimitExceeded` alone (see
+/// `HighlightError`). Driven through a real, if synthetic, parser error rather than a
+/// stub — a `push` to a context this tiny syntax never defines is left unresolved when
+/// the set is built (the linker only turns a name into a `Direct` reference when it
+/// finds one), so parsing the one line that reaches it returns
+/// `ParsingError::UnresolvedContextReference`, not `TokenLimitExceeded`.
+///
+/// This calls `highlight_with` directly rather than going through `highlight`/`outcome`:
+/// reaching this error through a real fence's language tag would need a bundled syntax
+/// that itself contains an unresolved reference, and finding one (or confirming none
+/// exists among the 213 bundled syntaxes) is outside what a unit test can afford — see
+/// the final review's "Declined to judge". `highlight_with` is the exact function that
+/// classifies the error, so testing it directly still exercises the real classification
+/// rather than a restatement of it.
+#[test]
+fn a_non_limit_parse_error_stays_plain_not_failed() {
+    let source = "\
+name: broken
+scope: source.broken
+contexts:
+  main:
+    - match: .
+      push: nonexistent-context
+";
+    let definition =
+        SyntaxDefinition::load_from_str(source, true, None).expect("the broken syntax should load");
+    let mut builder = SyntaxSetBuilder::new();
+    builder.add(definition);
+    let set = builder.build();
+    let syntax = set
+        .find_syntax_by_name("broken")
+        .expect("the broken syntax should be in the set");
+
+    let err = highlight_with(
+        &set,
+        syntax,
+        "x\n",
+        &Theme::default().code,
+        &|line: &str| token_limit_for(line),
+    )
+    .expect_err("an unresolved context reference must not highlight successfully");
+    assert!(
+        matches!(err, HighlightError::Other),
+        "a non-limit parser error must classify as HighlightError::Other, not \
+         TokenLimitExceeded"
+    );
+}

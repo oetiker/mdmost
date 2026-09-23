@@ -4836,7 +4836,7 @@ fn a_failed_block_captions_its_frame() {
 
     let bottom = canvas.row_text(canvas.height() - 1);
     assert!(
-        bottom.contains(" highlighting timed out "),
+        bottom.contains(" highlighting gave up "),
         "the failed block should caption its bottom edge:\n{bottom}"
     );
 }
@@ -4879,7 +4879,7 @@ fn a_caption_does_not_change_a_block_s_height() {
     let uncaptioned_canvas = render_block(&uncaptioned_node, 60, &theme, &BUTTONS);
     let uncaptioned_bottom = uncaptioned_canvas.row_text(uncaptioned_canvas.height() - 1);
     assert!(
-        !uncaptioned_bottom.contains("highlighting timed out"),
+        !uncaptioned_bottom.contains("highlighting gave up"),
         "the uncaptioned render should carry no caption:\n{uncaptioned_bottom}"
     );
 
@@ -4893,7 +4893,7 @@ fn a_caption_does_not_change_a_block_s_height() {
     let captioned_canvas = render_block(&captioned_node, 60, &theme, &BUTTONS);
     let captioned_bottom = captioned_canvas.row_text(captioned_canvas.height() - 1);
     assert!(
-        captioned_bottom.contains("highlighting timed out"),
+        captioned_bottom.contains("highlighting gave up"),
         "the captioned render should carry the caption:\n{captioned_bottom}"
     );
 
