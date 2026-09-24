@@ -436,3 +436,44 @@ contexts:
          TokenLimitExceeded"
     );
 }
+
+/// The same non-limit parser error, but pinned through the production path rather than
+/// `highlight_with` alone: `highlight_with_syntax` (the `#[cfg(test)]` seam that injects
+/// a syntax the way `highlight_with_limit` injects a token limit) drives it through
+/// `highlight_capped`'s memo and `highlight_uncached`'s own `match` -- the code that
+/// actually decides `Outcome::Plain` for every production caller of `highlight`. The
+/// test above exercises `highlight_with`'s classification in isolation; this one pins
+/// that a non-limit error reaches `Outcome::Plain` end to end, so a mutation of
+/// `highlight_uncached`'s `Err(HighlightError::Other) =>` arm to `Outcome::Failed`
+/// fails here even though it leaves the test above untouched.
+#[test]
+fn a_non_limit_parse_error_gives_outcome_plain_on_the_production_path() {
+    let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    let source = "\
+name: broken
+scope: source.broken
+contexts:
+  main:
+    - match: .
+      push: nonexistent-context
+";
+    let definition =
+        SyntaxDefinition::load_from_str(source, true, None).expect("the broken syntax should load");
+    let mut builder = SyntaxSetBuilder::new();
+    builder.add(definition);
+    let set = builder.build();
+    let syntax = set
+        .find_syntax_by_name("broken")
+        .expect("the broken syntax should be in the set");
+
+    let theme = Theme::default();
+    // The marker line is never reached -- the error fires on the first line -- but the
+    // memo is keyed on `(lang, src, theme)` alone, so it keeps this call's key from
+    // colliding with any other test's.
+    let src = "x\n// task5-outcome-plain-non-limit-probe\n";
+    let lines = highlight_with_syntax(Some("broken"), &set, syntax, src, &theme);
+    assert_eq!(lines, plain(src, &theme.code));
+    assert_eq!(outcome(Some("broken"), src, &theme), Outcome::Plain);
+}

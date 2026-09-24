@@ -369,7 +369,7 @@ fn token_limit_for(line: &str) -> NonZeroUsize {
 /// than re-run: `highlight` takes no width, so a renderer that lays a block out at
 /// several widths gets the same result each time and would otherwise pay for it again.
 pub fn highlight(lang: Option<&str>, src: &str, theme: &Theme) -> Vec<Line> {
-    highlight_capped(lang, src, theme, token_limit_for)
+    highlight_capped(lang, || resolve_syntax(lang), src, theme, token_limit_for)
 }
 
 /// `highlight`, with the per-line token limit overridden to a flat `limit` rather than
@@ -386,13 +386,50 @@ pub(crate) fn highlight_with_limit(
     theme: &Theme,
     limit: NonZeroUsize,
 ) -> Vec<Line> {
-    highlight_capped(lang, src, theme, move |_line: &str| limit)
+    highlight_capped(
+        lang,
+        || resolve_syntax(lang),
+        src,
+        theme,
+        move |_line: &str| limit,
+    )
 }
 
-/// Shared body of [`highlight`] and [`highlight_with_limit`]: consults the memo, and on
-/// a miss highlights under `limit_for` and records both the lines and the [`Outcome`].
-fn highlight_capped(
+/// `highlight`, with the syntax injected directly rather than resolved from `lang`.
+///
+/// Exists so a test can drive a real, non-limit [`ParsingError`] through the actual
+/// classification in [`highlight_uncached`] — the same code [`Outcome::Plain`] and
+/// [`Outcome::Failed`] are decided by for every production caller — using a syntax the
+/// real global sets ([`EXTRA_SYNTAX_SET`], [`BUNDLED_SYNTAXES`]) do not, and should not,
+/// contain. Reaching the same classification through a bundled syntax's own tag would
+/// mean searching, or ruling out among, 213 bundled syntaxes for one with its own
+/// unresolved context reference, which is outside what a unit test can afford.
+///
+/// `lang` still keys the memo alongside `src` and `theme`, exactly as in [`highlight`];
+/// pick a `src` no other test's key collides with.
+#[cfg(test)]
+pub(crate) fn highlight_with_syntax<'a>(
     lang: Option<&str>,
+    set: &'a SyntaxSet,
+    syntax: &'a SyntaxReference,
+    src: &str,
+    theme: &Theme,
+) -> Vec<Line> {
+    highlight_capped(lang, || Some((set, syntax)), src, theme, token_limit_for)
+}
+
+/// Shared body of [`highlight`], [`highlight_with_limit`] and [`highlight_with_syntax`]:
+/// consults the memo, and on a miss highlights under `limit_for` and records both the
+/// lines and the [`Outcome`].
+///
+/// `resolve` is a closure rather than an already-resolved syntax so that it runs, if at
+/// all, only where [`highlight_uncached`] used to call [`resolve_syntax`] directly —
+/// after the cache miss and the byte-size guard — rather than unconditionally on every
+/// call, which would build [`EXTRA_SYNTAX_SET`] even for a block the byte-size guard
+/// was about to reject.
+fn highlight_capped<'a>(
+    lang: Option<&str>,
+    resolve: impl FnOnce() -> Option<(&'a SyntaxSet, &'a SyntaxReference)>,
     src: &str,
     theme: &Theme,
     limit_for: impl Fn(&str) -> NonZeroUsize,
@@ -400,14 +437,16 @@ fn highlight_capped(
     if let Some(hit) = cache_get(lang, src, theme) {
         return hit;
     }
-    let (lines, outcome) = highlight_uncached(lang, src, &theme.code, &limit_for);
+    let (lines, outcome) = highlight_uncached(resolve, src, &theme.code, &limit_for);
     cache_put(lang, src, theme, &lines, outcome);
     lines
 }
 
-/// Highlights without consulting the cache. See [`highlight`] for the contract.
-fn highlight_uncached(
-    lang: Option<&str>,
+/// Highlights without consulting the cache. See [`highlight`] for the contract; see
+/// [`highlight_capped`] for why `resolve` is a closure rather than an already-resolved
+/// syntax.
+fn highlight_uncached<'a>(
+    resolve: impl FnOnce() -> Option<(&'a SyntaxSet, &'a SyntaxReference)>,
     src: &str,
     styles: &CodeStyles,
     limit_for: &dyn Fn(&str) -> NonZeroUsize,
@@ -415,7 +454,7 @@ fn highlight_uncached(
     if src.len() > MAX_HIGHLIGHT_BYTES {
         return (plain(src, styles), Outcome::Plain);
     }
-    let Some((set, syntax)) = resolve_syntax(lang) else {
+    let Some((set, syntax)) = resolve() else {
         return (plain(src, styles), Outcome::Plain);
     };
     if LinesWithEndings::from(src).count() > MAX_HIGHLIGHT_LINES {
