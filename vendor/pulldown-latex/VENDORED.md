@@ -113,18 +113,21 @@ the fork before copying — that is one `git clone` away, and it is the right pl
 targets and their dev-dependencies stripped, plus two additions: `publish = false`, and a
 `[lints]` table that allows everything.
 
-On the lints table, the honest version: **it fixes nothing today.** Measured on
-2026-08-24 with rustc/clippy 1.96.0, this tree is clean under
-`cargo clippy --all-targets --workspace -- -D warnings` with the table removed — upstream
-runs clippy in its own CI too. The table is insurance against the toolchain bump that
-introduces a lint nobody here is going to fix in someone else's frozen code.
+On the lints table: **it fixes nothing today.** Measured on 2026-08-24 with rustc/clippy
+1.96.0, this tree is clean under `cargo clippy --all-targets --workspace -- -D warnings`
+with the table removed — upstream runs clippy in its own CI too. The table is insurance
+against the toolchain bump that introduces a lint nobody here is going to fix in someone
+else's frozen code, and even then its reach is narrow: it keeps a plain `cargo clippy -p
+pulldown-latex`, run with no extra flags, silent.
 
 What is load-bearing is the other half: mdmost's gate runs `cargo clippy --all-targets
 -p mdmost --no-deps -- -D warnings`. `-p mdmost` alone does not scope the lint to
 mdmost's own code — clippy-driver still lints every workspace member, this crate
 included, the same gap confirmed directly against `vendor/syntect` (see its own
-`VENDORED.md`) — it is `--no-deps` that keeps `-D warnings` off this crate. Were the gate
-workspace-wide with no `--no-deps`, this table would be the only thing standing between a
-toolchain bump and a red CI on someone else's frozen code. **Neither half can reach
-mdmost's own code** — a `[lints]` table applies to the package that declares it. If this
-tree ever stops being read-only, delete the `[lints]` table rather than the scoping.
+`VENDORED.md`) — it is `--no-deps` that keeps `-D warnings` off this crate. A lint level
+named on the command line overrides a crate's own `[lints]` table rather than the other
+way around, so even a workspace-wide gate with no `--no-deps` would still fail on this
+crate's code once `-D warnings` is on the command line — the table would do nothing to
+stop it. **Neither half can reach mdmost's own code** — a `[lints]` table applies to the
+package that declares it. If this tree ever stops being read-only, delete the `[lints]`
+table rather than the scoping.
