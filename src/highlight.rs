@@ -129,15 +129,18 @@ const MAX_CACHE_ENTRIES: usize = 256;
 /// What became of a block's highlighting attempt.
 ///
 /// A renderer reads this after calling [`highlight`] for the same key, to decide
-/// whether the block's frame should say why it has no colour. `Plain` covers both an
-/// absent or unknown language tag and the size guards in [`highlight_uncached`] — none
-/// of those are a failure, they are `mdmost` declining to try. `Failed` is reserved for
-/// a parse the token-limit guard actually cut short.
+/// whether the block's frame should say why it has no colour. `Plain` covers an absent
+/// or unknown language tag, the size guards in [`highlight_uncached`], and a parse that
+/// ran but failed for any reason other than the token-limit guard — either `mdmost`
+/// declining to try, or trying and finding nothing worth showing. `Failed` is reserved
+/// for a parse the token-limit guard actually cut short.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
     /// The block was parsed and coloured.
     Highlighted,
-    /// No attempt was made: no usable language tag, or a size guard tripped first.
+    /// No attempt was made, or a parse ran and failed for a reason other than the
+    /// token-limit guard: no usable language tag, a size guard tripped first, or
+    /// `highlight_with` returned an error other than the token limit.
     Plain,
     /// A parse was attempted and the token-limit guard cut it short.
     Failed,
