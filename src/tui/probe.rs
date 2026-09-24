@@ -152,6 +152,10 @@ fn reply() -> Option<u16> {
 ///
 /// Scans for the last complete report rather than assuming the reply arrived alone: a
 /// terminal may answer something else first, and a keystroke may land in the same read.
+///
+/// `#[cfg(unix)]` along with the only caller, [`reply`]'s Unix path; its own tests in
+/// `super::tests` carry the same cfg.
+#[cfg(unix)]
 pub(super) fn column_of(bytes: &[u8]) -> Option<u16> {
     let mut answer = None;
     for start in 0..bytes.len().saturating_sub(1) {
@@ -174,12 +178,14 @@ pub(super) fn column_of(bytes: &[u8]) -> Option<u16> {
 }
 
 /// `bytes` split around the first `at`, or `None` if it does not contain one.
+#[cfg(unix)]
 fn split_once(bytes: &[u8], at: u8) -> Option<(&[u8], &[u8])> {
     let index = bytes.iter().position(|&byte| byte == at)?;
     Some((&bytes[..index], &bytes[index + 1..]))
 }
 
 /// `bytes` as a decimal number, or `None` if it is not one that fits.
+#[cfg(unix)]
 fn number(bytes: &[u8]) -> Option<u16> {
     if bytes.is_empty() || !bytes.iter().all(u8::is_ascii_digit) {
         return None;
