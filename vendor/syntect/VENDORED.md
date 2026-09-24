@@ -146,12 +146,13 @@ A token count, not a wall-clock budget: what #202 actually asked for is a `Durat
 what this patch carries is the token count that a `Duration` layer can be built on top of
 cheaply (checking the clock every N tokens). The count is the deterministic primitive a
 test can assert the exact boundary of; a wall-clock budget cannot be asserted that way on
-a machine that shares its cores with other work. The `Duration` layer itself is part of
-what would be offered back upstream, answering #202 as it was actually asked — it is
-**not** in this vendored copy, because mdmost's own call site needs only the count.
+a machine that shares its cores with other work. The `Duration` layer itself answers #202
+as it was actually asked, and is **not** in this vendored copy — mdmost's own call site
+needs only the count.
 
 This patch was filed upstream as [PR #708](https://github.com/trishume/syntect/pull/708)
-(branch `oetiker:parse-line-token-limit`, commit `f554c9a`, "Refs #202").
+(branch `oetiker:parse-line-token-limit`, commit `f554c9a`, "Refs #202"), which includes
+the `Duration` layer as `parse_line_with_timeout`.
 
 ## This vendor is temporary
 

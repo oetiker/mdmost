@@ -286,7 +286,7 @@ Then:
 5. Re-run the gates, including `cargo tree -d`, the musl static build and the Windows
    compile.
 
-**What to watch, as of 2026-09-22.** PR #706 open and unreviewed since 2026-09-12, no CI
+**What to watch, as of 2026-09-24.** PR #706 open and unreviewed since 2026-09-12, no CI
 run. PR #708, filed against issue #202, open and awaiting review. Nothing merged in the
 repository since May 2026, though PRs merged in 1-9 days through April, and three
 collaborators with write access still comment. Release cadence is roughly annual: 5.3.0
