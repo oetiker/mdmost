@@ -117,17 +117,19 @@ On the lints table: **it fixes nothing today.** Measured on 2026-08-24 with rust
 1.96.0, this tree is clean under `cargo clippy --all-targets --workspace -- -D warnings`
 with the table removed — upstream runs clippy in its own CI too. The table is insurance
 against the toolchain bump that introduces a lint nobody here is going to fix in someone
-else's frozen code, and even then its reach is narrow: it keeps a plain `cargo clippy -p
-pulldown-latex`, run with no extra flags, silent.
+else's frozen code.
 
 What is load-bearing is the other half: mdmost's gate runs `cargo clippy --all-targets
 -p mdmost --no-deps -- -D warnings`. `-p mdmost` alone does not scope the lint to
 mdmost's own code — clippy-driver still lints every workspace member, this crate
 included, the same gap confirmed directly against `vendor/syntect` (see its own
-`VENDORED.md`) — it is `--no-deps` that keeps `-D warnings` off this crate. A lint level
-named on the command line overrides a crate's own `[lints]` table rather than the other
-way around, so even a workspace-wide gate with no `--no-deps` would still fail on this
-crate's code once `-D warnings` is on the command line — the table would do nothing to
-stop it. **Neither half can reach mdmost's own code** — a `[lints]` table applies to the
-package that declares it. If this tree ever stops being read-only, delete the `[lints]`
-table rather than the scoping.
+`VENDORED.md`) — it is `--no-deps` that keeps `-D warnings` off this crate. `-D warnings`
+on the command line only partly overrides the table: it overrides `[lints.rust] warnings
+= "allow"`, so a rustc lint (`dead_code`, confirmed against a throwaway two-crate
+workspace probing this directly) still fails a workspace-wide gate with no `--no-deps`;
+it does *not* override `[lints.clippy] all = "allow"`, so a clippy-only lint (`ptr_arg`,
+`len_zero`, same probe) stays silent even then — `-D warnings` only upgrades lints
+clippy itself would otherwise emit, and `all = "allow"` stops it emitting them at all.
+**Neither half can reach mdmost's own code** — a `[lints]` table applies to the package
+that declares it. If this tree ever stops being read-only, delete the `[lints]` table
+rather than the scoping.

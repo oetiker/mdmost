@@ -47,10 +47,13 @@ jobs:
       # against `vendor/syntect` directly: `cargo clippy -p syntect -- -D warnings` fails
       # today, on the current toolchain, on `mismatched_lifetime_syntaxes` at
       # `yaml_load.rs:818` — one of upstream's own signatures, nothing this task touched.
-      # The vendored manifests' own `[lints]` tables do not help here: a lint level named
-      # on the command line (`-D warnings`) overrides a crate's `[lints]` table rather
-      # than the other way around, confirmed by removing `-D warnings` and watching the
-      # same build go silent. `--no-deps` is the actual scoping the comment above and
+      # The vendored manifests' own `[lints]` tables only partly help here: `-D warnings`
+      # on the command line overrides `[lints.rust] warnings = "allow"`, so that rustc
+      # lint still fails, confirmed by removing `-D warnings` and watching the same build
+      # go silent. It does not override `[lints.clippy] all = "allow"`, though: a
+      # clippy-only lint stays silent under this same table even with `-D warnings` and
+      # no `--no-deps`, confirmed against a throwaway probe crate (both `VENDORED.md`s
+      # carry the same account). `--no-deps` is the actual scoping the comment above and
       # both `VENDORED.md`s describe; without it, "only our code" was not true.
       - name: Run Clippy
         run: cargo clippy --all-targets -p mdmost --no-deps -- -D warnings

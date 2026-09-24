@@ -190,12 +190,13 @@ version = "1.0.0"
 version = "1.0"
 
 # Allows everything, on purpose: insurance against a toolchain bump that introduces a
-# lint nobody here is going to fix in someone else's frozen code. It is not what keeps
-# mdmost's gate off this crate, though -- a lint level named on the command line
-# (`-D warnings`) overrides a crate's own `[lints]` table, not the other way around, so
-# `cargo clippy -p mdmost -- -D warnings` still fails here without `--no-deps` (that flag
-# is what mdmost's gate actually uses; see `.github/workflows/ci.yml`). What this table
-# does do: it keeps a plain `cargo clippy -p syntect`, run with no extra flags, silent.
+# lint nobody here is going to fix in someone else's frozen code. It only partly keeps
+# mdmost's gate off this crate -- `-D warnings` on the command line overrides
+# `[lints.rust] warnings = "allow"`, so `cargo clippy -p mdmost -- -D warnings` still
+# fails here on a rustc lint without `--no-deps` (that flag is what mdmost's gate
+# actually uses; see `.github/workflows/ci.yml`). It does not override
+# `[lints.clippy] all = "allow"`, though: a clippy-only lint stays silent even under
+# `-D warnings` with no `--no-deps` (see VENDORED.md's own account and its probe).
 # If this tree ever stops being read-only, delete this table rather than the scoping.
 [lints.rust]
 warnings = "allow"

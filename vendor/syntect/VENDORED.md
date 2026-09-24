@@ -366,16 +366,19 @@ test target and the dev-dependencies those needed stripped (`criterion`, `getopt
   ```
 
   Insurance against a toolchain bump that introduces a lint nobody here is going to fix
-  in someone else's frozen code. It is not what keeps mdmost's gate off this crate: a
-  lint level named on the command line (`-D warnings`) overrides a crate's own `[lints]`
-  table rather than the other way around, so `cargo clippy -p mdmost -- -D warnings`
-  still fails on this crate's code without `--no-deps` — confirmed directly against
-  `yaml_load.rs:818`'s `mismatched_lifetime_syntaxes` lint on the current toolchain,
-  which this table alone did not silence once `-D warnings` was on the command line.
-  `--no-deps` is what mdmost's gate actually relies on (`.github/workflows/ci.yml`,
-  `README.md`). This table's real effect: a plain `cargo clippy -p syntect`, with no
-  extra flags, stays silent. If this tree ever stops being read-only, delete the table
-  rather than the `--no-deps` scoping.
+  in someone else's frozen code. It is not what keeps mdmost's gate off this crate's
+  rustc lints: `-D warnings` on the command line overrides `[lints.rust] warnings =
+  "allow"`, so `cargo clippy -p mdmost -- -D warnings` still fails on a rustc lint in
+  this crate's code without `--no-deps` — confirmed directly against `yaml_load.rs:818`'s
+  `mismatched_lifetime_syntaxes` lint on the current toolchain, which this table alone
+  did not silence once `-D warnings` was on the command line. It does *not* override
+  `[lints.clippy] all = "allow"`, though: a clippy-only lint stays silent even under
+  `-D warnings` and no `--no-deps`, confirmed against a throwaway two-crate workspace
+  probing `ptr_arg` and `len_zero` the same way — `-D warnings` only upgrades lints
+  clippy itself would otherwise emit, and `all = "allow"` stops it emitting them at all.
+  `--no-deps` is what mdmost's gate actually relies on to keep both kinds off this crate
+  (`.github/workflows/ci.yml`, `README.md`). If this tree ever stops being read-only,
+  delete the table rather than the `--no-deps` scoping.
 - Upstream's four `[profile.dev.package.*]` tables (`aho-corasick`, `fancy-regex`,
   `regex-automata`, `regex-syntax`, each `opt-level = 2`) are dropped. Cargo only reads a
   `[profile]` table from a workspace's *root* manifest; on a workspace member it is
