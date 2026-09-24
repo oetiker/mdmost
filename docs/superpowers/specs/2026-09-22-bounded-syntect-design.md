@@ -226,11 +226,13 @@ write it himself. No PR followed in eight years, and no general iteration cap on
 
 The upstream commit is shaped for upstream, not for us: the token limit as the primitive,
 a `Duration` layer over it answering #202 as asked, the limit defaulting to unlimited, and
-its own tests. `VENDORED.md` records the PR number once filed.
+its own tests. Filed as PR #708 (branch `oetiker:parse-line-token-limit`, commit
+`f554c9a`, "Refs #202"); `VENDORED.md` records it under patch 2.
 
 **Patch 1 is not offered** — it is already PR #706. Our comment on that PR
-(2026-09-22) supplies an independent reproducer. The local refinement in §4 is offered
-only if #706 merges and a maintainer wants it.
+(2026-09-22) supplies an independent reproducer. The local refinement in §4 was offered
+as a comment on #706, at the owner's choice rather than waiting for #706 to merge:
+<https://github.com/trishume/syntect/pull/706#issuecomment-5811758916>.
 
 **Nothing is local-only.** See §3: the one change that would have been — deleting the
 crate's single `unsafe` item — is deliberately not made, so that §11's exit has no blocking
@@ -285,7 +287,7 @@ Then:
    compile.
 
 **What to watch, as of 2026-09-22.** PR #706 open and unreviewed since 2026-09-12, no CI
-run. Issue #202 open since 2018 carrying the owner's standing offer. Nothing merged in the
+run. PR #708, filed against issue #202, open and awaiting review. Nothing merged in the
 repository since May 2026, though PRs merged in 1-9 days through April, and three
 collaborators with write access still comment. Release cadence is roughly annual: 5.3.0
 2025-09-27, 5.2.0 2024-02-07, 5.1.0 2023-07-31, 5.0.0 2022-05-04.

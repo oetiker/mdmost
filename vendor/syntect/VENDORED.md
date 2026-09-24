@@ -26,7 +26,7 @@ before changing anything under it.
 | Patch | File | Upstream | What it fixes |
 | --- | --- | --- | --- |
 | 1 | `src/parsing/parser.rs` | [#706](https://github.com/trishume/syntect/pull/706) by `tontinton`, open and unreviewed since 2026-09-12 — not this project's own work in origin, so not offered upstream again | Two contexts that `set` each other without ever consuming a character loop forever. |
-| 2 | `src/parsing/parser.rs` | [#202](https://github.com/trishume/syntect/issues/202), where the maintainer offered to accept a `Duration`-based version of `parse_line` | No backstop existed for a `.sublime-syntax` shape that drives the token loop without ever tripping patch 1's guards. |
+| 2 | `src/parsing/parser.rs` | [#202](https://github.com/trishume/syntect/issues/202), where the maintainer offered to accept a `Duration`-based version of `parse_line`; filed as [#708](https://github.com/trishume/syntect/pull/708) | No backstop existed for a `.sublime-syntax` shape that drives the token loop without ever tripping patch 1's guards. |
 
 ### Patch 1: break loops between non-consuming `set`s
 
@@ -69,6 +69,9 @@ close a gap #706 leaves open:
   only in `captures`, makes this guard treat a new state as a repeat and skip its `set`;
   the wrong stack can then persist for the rest of the parse. The only guarantee is that
   the parser still advances a character instead, so it can never hang or panic.
+
+These two refinements were offered to the maintainer as a comment on #706:
+<https://github.com/trishume/syntect/pull/706#issuecomment-5811758916>.
 
 **If #706 merges upstream:** both refinements touch the exact lines PR #706 touches
 (`SetStates`'s definition and the `set_states.insert(...)` call). A future re-sync must
@@ -146,6 +149,9 @@ test can assert the exact boundary of; a wall-clock budget cannot be asserted th
 a machine that shares its cores with other work. The `Duration` layer itself is part of
 what would be offered back upstream, answering #202 as it was actually asked — it is
 **not** in this vendored copy, because mdmost's own call site needs only the count.
+
+This patch was filed upstream as [PR #708](https://github.com/trishume/syntect/pull/708)
+(branch `oetiker:parse-line-token-limit`, commit `f554c9a`, "Refs #202").
 
 ## This vendor is temporary
 
