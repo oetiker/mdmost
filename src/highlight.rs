@@ -104,8 +104,11 @@ static BUNDLED_SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::e
 /// means calling `into_builder().build()`, which re-links the context references of every
 /// bundled syntax and cost about 180 ms back when there were seventy-five of them — a
 /// cost every document with any code block would pay, and one that has only grown with
-/// the set. Built on its own, the same two definitions link in about 9 ms, and only a
-/// document that actually contains a TOML or Dockerfile fence pays even that.
+/// the set. Built on its own, the same two definitions link in about 9 ms. That is not
+/// limited to a document with a TOML or Dockerfile fence: [`find_in_sets`] queries this
+/// set first for any fence that names a language at all, so any such fence forces the
+/// build, whether or not it resolves to one of these two syntaxes. A document with no
+/// code block, or only fences with no language tag, still pays nothing.
 ///
 /// A definition that fails to parse is skipped rather than panicking;
 /// `every_extra_syntax_loads` asserts that none currently does, so a broken definition
