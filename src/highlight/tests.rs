@@ -475,5 +475,9 @@ contexts:
     let src = "x\n// task5-outcome-plain-non-limit-probe\n";
     let lines = highlight_with_syntax(Some("broken"), &set, syntax, src, &theme);
     assert_eq!(lines, plain(src, &theme.code));
+    // `outcome()` also reads `Outcome::Plain` back for a key the cache never saw (see
+    // its own doc), so this on its own would pass even if the entry were never stored.
+    // Pin that the call above actually populated the memo before trusting the read.
+    assert_eq!(computed_count(Some("broken"), src, &theme), Some(1));
     assert_eq!(outcome(Some("broken"), src, &theme), Outcome::Plain);
 }
