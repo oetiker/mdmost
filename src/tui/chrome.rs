@@ -16,7 +16,7 @@ use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
 use crate::canvas::meter::{TRACK_INK, meter};
 use crate::search::SearchMode;
-use crate::text::{Align, display_width, truncate_to_width};
+use crate::text::{Align, display_width, ellipsize_name, truncate_to_width};
 use crate::theme::Theme;
 
 use super::app::{App, Focus, Overlay};
@@ -282,7 +282,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
                 term_style(theme.ui.status_accent),
             ),
             TermSpan::styled(
-                crate::text::ellipsize_name(app.title(), cap),
+                ellipsize_name(app.title(), cap),
                 term_style(theme.ui.status_accent.bold()),
             ),
         ],
@@ -676,16 +676,16 @@ fn lay_out(
     let total = |segments: &[Segment]| -> usize { segments.iter().map(|s| s.width).sum() };
     // What the file name, the hovered URL and the notice could each give up if elided
     // away entirely, measured through `ellipsize_name`/`ellipsize` — the functions the
-    // elision below calls — so this cannot drift from what it actually reclaims. All three are shrunk rather than dropped
-    // whole: the URL because design spec §8 leans on it in place of a confirmation
-    // prompt — a safeguard that silently disappears the moment a name is a little too
-    // long would fail exactly when the reader needed it — and the notice because a
-    // `could not re-read /some/path: No such file or directory` is wider than a
-    // sixty-column bar has to give, and a reader shown nothing at all is back to a
-    // stale document with no word of why.
+    // elision below calls — so this cannot drift from what it actually reclaims. All
+    // three are shrunk rather than dropped whole: the URL because design spec §8 leans
+    // on it in place of a confirmation prompt — a safeguard that silently disappears
+    // the moment a name is a little too long would fail exactly when the reader needed
+    // it — and the notice because a `could not re-read /some/path: No such file or
+    // directory` is wider than a sixty-column bar has to give, and a reader shown
+    // nothing at all is back to a stale document with no word of why.
     let elidable = |left: &[Segment], right: &[Segment]| -> usize {
         let title_slack = title(left).map_or(0, |name| {
-            display_width(name).saturating_sub(display_width(&crate::text::ellipsize_name(name, 0)))
+            display_width(name).saturating_sub(display_width(&ellipsize_name(name, 0)))
         });
         let tail_slack: usize = SHRINK_AT_END
             .iter()
@@ -743,7 +743,7 @@ fn lay_out(
             .and_then(|segment| segment.spans.last_mut())
     {
         let room = display_width(&name.content).saturating_sub(used + 1 - width);
-        let short = crate::text::ellipsize_name(&name.content, room);
+        let short = ellipsize_name(&name.content, room);
         used -= display_width(&name.content) - display_width(&short);
         name.content = short.into();
     }
