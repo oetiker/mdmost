@@ -2065,6 +2065,62 @@ fn every_chrome_glyph_is_one_column_wide() {
     }
 }
 
+#[test]
+fn a_nerd_icon_has_two_columns_of_space_before_its_text() {
+    // Terminals draw these icons two cells wide while the width tables count one, so
+    // the icon's second half covers the column after it; one more blank column keeps
+    // the text from reading as welded to the icon. The plain set is drawn at its
+    // measured width and keeps its single space.
+    let nerd = super::icons::Icons::NERD;
+    let plain = super::icons::Icons::PLAIN;
+    let status = |icons: bool| {
+        let mut app = pager_named("# Heading\n\nbody\n", "notes.md", 80, 10);
+        app.set_icons(icons);
+        painted(80, 1, |buffer, area| {
+            super::chrome::draw_status(buffer, area, &app)
+        })
+        .remove(0)
+    };
+    let with = status(true);
+    assert!(
+        with.starts_with(&format!(" {}  notes.md", nerd.file)),
+        "{with:?}"
+    );
+    assert!(
+        with.contains(&format!("{}  Heading", nerd.heading)),
+        "{with:?}"
+    );
+    assert_eq!(crate::text::display_width(&with), 80, "{with:?}");
+    let without = status(false);
+    assert!(
+        without.starts_with(&format!(" {} notes.md", plain.file)),
+        "{without:?}"
+    );
+    assert!(
+        without.contains(&format!("{} Heading", plain.heading)),
+        "{without:?}"
+    );
+
+    let toc = |icons: bool| {
+        let mut app = pager_named("# Heading\n\nbody\n", "notes.md", 80, 10);
+        app.set_icons(icons);
+        painted(30, 5, |buffer, area| {
+            super::chrome::draw_toc(buffer, area, &app)
+        })
+        .remove(0)
+    };
+    assert!(
+        toc(true).contains(&format!(" {}  Contents ", nerd.toc)),
+        "{:?}",
+        toc(true)
+    );
+    assert!(
+        toc(false).contains(&format!(" {} Contents ", plain.toc)),
+        "{:?}",
+        toc(false)
+    );
+}
+
 /// Paints one whole frame exactly as the pager does, and returns it as text rows.
 fn framed(app: &mut App, width: u16, height: u16) -> Vec<String> {
     let backend = ratatui::backend::TestBackend::new(width, height);

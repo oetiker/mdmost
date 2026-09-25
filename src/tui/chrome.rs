@@ -75,14 +75,18 @@ pub fn draw_toc(buffer: &mut Buffer, area: Rect, app: &App) {
     // light theme on a dark terminal reads as a hole (visual review B1).
     buffer.set_style(area, term_style(theme.base()));
     let title = if app.toc_filter().is_empty() {
-        format!(" {} Contents ", icons.toc)
+        format!(" {}{}Contents ", icons.toc, icons.gap)
     } else {
         // A filtered pane says how much of the map it is still showing; without a
         // count a one-hit filter is indistinguishable from a broken table of contents.
         format!(
-            " {} {} {}/{} ",
+            " {}{}{} {}/{} ",
             icons.search,
-            fit(app.toc_filter(), usize::from(area.width).saturating_sub(12)),
+            icons.gap,
+            fit(
+                app.toc_filter(),
+                usize::from(area.width).saturating_sub(11 + display_width(icons.gap)),
+            ),
             app.toc_hits().len(),
             app.toc().len()
         )
@@ -270,7 +274,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         Drop::Title,
         vec![
             TermSpan::styled(
-                format!(" {} ", icons.file),
+                format!(" {}{}", icons.file, icons.gap),
                 term_style(theme.ui.status_accent),
             ),
             TermSpan::styled(
@@ -389,7 +393,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         sep(&mut spans);
         if notice.is_error {
             spans.push(TermSpan::styled(
-                format!("{} ", icons.warning),
+                format!("{}{}", icons.warning, icons.gap),
                 term_style(style),
             ));
         }
@@ -406,7 +410,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         let mut spans = Vec::new();
         sep(&mut spans);
         spans.push(TermSpan::styled(
-            format!("{} ", icons.heading),
+            format!("{}{}", icons.heading, icons.gap),
             term_style(theme.ui.status_bar.dim()),
         ));
         spans.push(TermSpan::styled(
@@ -431,7 +435,12 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
             ));
         }
         spans.push(TermSpan::styled(
-            format!(" {} {} {count} ", icons.search, app.search().query()),
+            format!(
+                " {}{}{} {count} ",
+                icons.search,
+                icons.gap,
+                app.search().query()
+            ),
             term_style(theme.ui.status_bar),
         ));
         right.push(Segment::new(Drop::Search, spans));
@@ -905,7 +914,7 @@ pub fn draw_help(buffer: &mut Buffer, area: Rect, app: &mut App) {
         .border_type(BorderType::Rounded)
         .border_style(term_style(on_panel(theme.ui.help_border, &theme)))
         .title(TermSpan::styled(
-            format!(" {} Keys ", icons.help),
+            format!(" {}{}Keys ", icons.help, icons.gap),
             term_style(on_panel(theme.ui.help_title, &theme)),
         ));
     if tallest > visible {

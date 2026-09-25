@@ -6,6 +6,11 @@
 
 ### Changed
 
+- With Nerd Font icons on, an icon is now followed by two blank columns instead of one,
+  in the status bar, the contents pane, the help overlay and code-block titles. Terminals
+  draw these icons two columns wide, so the text after them looked cramped. With icons off
+  nothing changes.
+
 ### Fixed
 
 ## 0.3.5 - 2026-09-25

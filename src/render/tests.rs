@@ -1313,6 +1313,20 @@ fn a_code_fence_shows_a_language_icon_only_when_icons_are_on() {
     assert!(title.contains('\u{e7a8}'), "{title:?}");
 }
 
+/// A terminal draws a Nerd Font icon two cells wide while every width table counts one,
+/// so the icon's second half covers the column after it. The title carries one more
+/// blank column there, or the language name reads as welded to the icon.
+#[test]
+fn a_code_fence_icon_has_two_columns_of_space_before_the_name() {
+    let markdown = "```rust\ncode\n```\n";
+    let fancy = render_with(markdown, 24, &RenderOptions::new(true, false));
+    let title = fancy.row_text(0);
+    assert!(title.contains("\u{e7a8}  rust "), "{title:?}");
+    assert_eq!(display_width(&title), 24, "{title:?}");
+    // With icons off there is no icon, so nothing about the title changes.
+    assert!(lines(markdown, 24)[0].starts_with("╭ rust ─"));
+}
+
 #[test]
 fn line_numbers_draw_a_themed_gutter() {
     let markdown = "```\none\ntwo\n```\n";
