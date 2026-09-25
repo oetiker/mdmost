@@ -147,6 +147,9 @@ pub enum Outcome {
     Plain,
     /// A parse was attempted and the token-limit guard cut it short.
     Failed,
+    /// Highlighting has not finished yet; the lines are plain from the first unfinished
+    /// line on. Never returned by the blocking path.
+    Pending,
 }
 
 /// One cached block.
@@ -349,7 +352,7 @@ pub const MAX_TOKENS_PER_BYTE: usize = 4;
 /// Saturating arithmetic, so a pathologically long `line` can never overflow this into
 /// a panic. The result is never zero: `MAX_TOKENS_PER_LINE_BASE` alone is already
 /// nonzero, and adding to it cannot lower it.
-fn token_limit_for(line: &str) -> NonZeroUsize {
+pub(crate) fn token_limit_for(line: &str) -> NonZeroUsize {
     let limit =
         MAX_TOKENS_PER_LINE_BASE.saturating_add(MAX_TOKENS_PER_BYTE.saturating_mul(line.len()));
     NonZeroUsize::new(limit).expect("MAX_TOKENS_PER_LINE_BASE keeps the limit above zero")
@@ -521,12 +524,71 @@ fn find_in_sets(token: &str) -> Option<(&'static SyntaxSet, &'static SyntaxRefer
 /// Only [`Self::TokenLimitExceeded`] is reported to the caller as [`Outcome::Failed`];
 /// every other cause degrades silently to [`Outcome::Plain`], exactly as every parser
 /// error was treated before this branch introduced the token-limit guard.
-enum HighlightError {
+pub(crate) enum HighlightError {
     /// [`ParsingError::TokenLimitExceeded`]: the budget the caller passed in was not
     /// enough to finish the line.
     TokenLimitExceeded,
     /// Any other [`ParsingError`], or a `ScopeStack::apply` error.
     Other,
+}
+
+/// A parse that can stop after any line and be continued later.
+///
+/// Holds exactly what `syntect` carries from one line to the next: the parser state and
+/// the scope stack. After [`Parse::line`] returns an error the parse must be discarded —
+/// `syntect` leaves its state undefined mid-line — so a caller that wants to try again
+/// starts a fresh `Parse` from the block's first line.
+pub(crate) struct Parse<'a> {
+    set: &'a SyntaxSet,
+    state: ParseState,
+    stack: ScopeStack,
+}
+
+impl<'a> Parse<'a> {
+    /// A parse positioned before the first line of a block in `syntax`.
+    pub(crate) fn new(set: &'a SyntaxSet, syntax: &'a SyntaxReference) -> Self {
+        Self {
+            set,
+            state: ParseState::new(syntax),
+            stack: ScopeStack::new(),
+        }
+    }
+
+    /// Parses one source line (with its line ending) into a styled [`Line`].
+    pub(crate) fn line(
+        &mut self,
+        raw: &str,
+        styles: &CodeStyles,
+        limit: NonZeroUsize,
+    ) -> Result<Line, HighlightError> {
+        let ops = match self.state.parse_line_with_limit(raw, self.set, Some(limit)) {
+            Ok(ops) => ops,
+            Err(ParsingError::TokenLimitExceeded { .. }) => {
+                return Err(HighlightError::TokenLimitExceeded);
+            }
+            Err(_) => return Err(HighlightError::Other),
+        };
+        let mut line = Line::empty();
+        let mut column = 0usize;
+        let mut style = styles.text;
+        let mut restyle = true;
+        for (text, op) in ScopeRegionIterator::new(&ops, raw) {
+            if !matches!(op, ScopeStackOp::Noop) {
+                self.stack.apply(op).map_err(|_| HighlightError::Other)?;
+                restyle = true;
+            }
+            let text = strip_eol(text);
+            if text.is_empty() {
+                continue;
+            }
+            if restyle {
+                style = scopes::style_for(self.stack.as_slice(), styles);
+                restyle = false;
+            }
+            line.push(Span::new(expand_tabs(text, &mut column), style));
+        }
+        Ok(line)
+    }
 }
 
 /// Highlights `src` with `syntax`, or returns why the parser gave up.
@@ -541,45 +603,14 @@ fn highlight_with(
     styles: &CodeStyles,
     limit_for: &dyn Fn(&str) -> NonZeroUsize,
 ) -> Result<Vec<Line>, HighlightError> {
-    let mut state = ParseState::new(syntax);
-    let mut stack = ScopeStack::new();
-    let mut out = Vec::new();
-
-    for raw in LinesWithEndings::from(src) {
-        let ops = match state.parse_line_with_limit(raw, set, Some(limit_for(raw))) {
-            Ok(ops) => ops,
-            Err(ParsingError::TokenLimitExceeded { .. }) => {
-                return Err(HighlightError::TokenLimitExceeded);
-            }
-            Err(_) => return Err(HighlightError::Other),
-        };
-        let mut line = Line::empty();
-        let mut column = 0usize;
-        let mut style = styles.text;
-        let mut restyle = true;
-
-        for (text, op) in ScopeRegionIterator::new(&ops, raw) {
-            if !matches!(op, ScopeStackOp::Noop) {
-                stack.apply(op).map_err(|_| HighlightError::Other)?;
-                restyle = true;
-            }
-            let text = strip_eol(text);
-            if text.is_empty() {
-                continue;
-            }
-            if restyle {
-                style = scopes::style_for(stack.as_slice(), styles);
-                restyle = false;
-            }
-            line.push(Span::new(expand_tabs(text, &mut column), style));
-        }
-        out.push(line);
-    }
-    Ok(out)
+    let mut parse = Parse::new(set, syntax);
+    LinesWithEndings::from(src)
+        .map(|raw| parse.line(raw, styles, limit_for(raw)))
+        .collect()
 }
 
 /// Renders `src` as plain themed text, one [`Line`] per source line.
-fn plain(src: &str, styles: &CodeStyles) -> Vec<Line> {
+pub(crate) fn plain(src: &str, styles: &CodeStyles) -> Vec<Line> {
     LinesWithEndings::from(src)
         .map(|raw| {
             let mut column = 0usize;

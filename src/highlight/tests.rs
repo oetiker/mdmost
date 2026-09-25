@@ -481,3 +481,24 @@ contexts:
     assert_eq!(computed_count(Some("broken"), src, &theme), Some(1));
     assert_eq!(outcome(Some("broken"), src, &theme), Outcome::Plain);
 }
+
+/// A parse stopped after any line and continued with the same `Parse` gives exactly the
+/// lines an uninterrupted parse gives: the state carried between lines is the whole of
+/// what a resumed parse needs.
+#[test]
+fn a_parse_continued_line_by_line_matches_one_uninterrupted_parse() {
+    let theme = Theme::default();
+    let src = "/* a comment\n   spanning */\nfn main() {\n\tlet s = \"x\";\n}\n";
+    let (set, syntax) = resolve_syntax(Some("rust")).expect("rust resolves");
+    let whole = highlight_with(set, syntax, src, &theme.code, &token_limit_for)
+        .unwrap_or_else(|_| panic!("rust parses"));
+    let mut parse = Parse::new(set, syntax);
+    let stepped: Vec<Line> = LinesWithEndings::from(src)
+        .map(|raw| {
+            parse
+                .line(raw, &theme.code, token_limit_for(raw))
+                .unwrap_or_else(|_| panic!("rust parses"))
+        })
+        .collect();
+    assert_eq!(stepped, whole);
+}
