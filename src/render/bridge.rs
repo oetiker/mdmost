@@ -3,17 +3,19 @@
 //!
 //! The renderer depends on functions it does not own:
 //!
-//! * `crate::highlight::highlight(lang, src, &Theme) -> Vec<Line>`
 //! * `crate::mermaid::render_mermaid_with(src, width, &Theme, Fit) -> Result<Canvas, MermaidError>`
 //! * `crate::math::render_inline(src) -> Result<String, MathError>`
 //! * `crate::math::render_display_natural(src, width, &Theme) -> Result<Canvas, MathError>`
 //!
-//! Routing all four through this module keeps the dependency in one place, so a change
-//! on any side is a change to one function here rather than to every call site.
+//! Routing all three through this module keeps the dependency in one place, so a change
+//! on any side is a change to one function here rather than to every call site. Code
+//! block highlighting used to be a fourth entry here; it is now asked of `Ctx::code`
+//! (see `crate::highlight::CodeSource`), which the renderer needs on a per-render basis
+//! rather than as a fixed function this module can call directly.
 //!
 //! The two math bridges take the document's macro preamble (design spec §16) and do the
 //! concatenation here, on this side of the seam: `src/math/` knows nothing of `doc` and
-//! must not learn, and the four callers must not each spell the join out.
+//! must not learn, and the callers must not each spell the join out.
 //!
 //! Every entry point of `math` that the renderer uses is routed here. There used to be a
 //! second display one, `math::render_display`, deliberately not routed because nothing in
@@ -29,24 +31,7 @@ use std::borrow::Cow;
 use crate::canvas::Canvas;
 use crate::error::{MathError, MermaidError};
 use crate::mermaid::Fit;
-use crate::text::Line;
 use crate::theme::Theme;
-
-/// Turns source code into styled lines.
-pub(crate) fn highlight(language: Option<&str>, src: &str, theme: &Theme) -> Vec<Line> {
-    crate::highlight::highlight(language, src, theme)
-}
-
-/// What became of the last [`highlight`] call for this key. See
-/// `crate::highlight::outcome` for the contract: it reads the memo `highlight` just
-/// wrote, so it must be called after `highlight` for the same `(language, src, theme)`.
-pub(crate) fn outcome(
-    language: Option<&str>,
-    src: &str,
-    theme: &Theme,
-) -> crate::highlight::Outcome {
-    crate::highlight::outcome(language, src, theme)
-}
 
 /// Draws a Mermaid diagram as Unicode box art, degrading as far as `fit` allows.
 ///

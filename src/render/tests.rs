@@ -53,7 +53,7 @@ fn render(markdown: &str, width: u16) -> Canvas {
 fn render_with(markdown: &str, width: u16, options: &RenderOptions) -> Canvas {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
-    let canvas = render_flat(&doc, width, &theme, options);
+    let canvas = render_flat(&doc, width, &theme, options, &crate::highlight::UNCACHED);
     assert_eq!(canvas.width(), width, "canvas must be exactly {width} wide");
     canvas
         .check_invariants()
@@ -1520,7 +1520,13 @@ fn the_default_options_are_icons_on_and_line_numbers_off() {
 fn search_spans_map_source_offsets_onto_the_canvas() {
     let source = "hello brave world\n";
     let doc = Doc::parse(source);
-    let canvas = render_flat(&doc, 40, &Theme::default_dark(), &PLAIN);
+    let canvas = render_flat(
+        &doc,
+        40,
+        &Theme::default_dark(),
+        &PLAIN,
+        &crate::highlight::UNCACHED,
+    );
     // Unwrapped, the whole run is one contiguous mapping.
     assert_eq!(canvas.spans().len(), 1);
     let span = canvas.spans()[0];
@@ -1540,6 +1546,7 @@ fn a_wrap_splits_the_mapping_at_the_line_break() {
         11 + 2 * DOCUMENT_MARGIN,
         &Theme::default_dark(),
         &PLAIN,
+        &crate::highlight::UNCACHED,
     );
     let texts: Vec<(&str, usize, u16)> = canvas
         .spans()
@@ -1569,7 +1576,13 @@ fn search_spans_follow_content_into_lists_quotes_and_cells() {
         "**needle**\n",
     ] {
         let doc = Doc::parse(markdown);
-        let canvas = render_flat(&doc, 30, &Theme::default_dark(), &PLAIN);
+        let canvas = render_flat(
+            &doc,
+            30,
+            &Theme::default_dark(),
+            &PLAIN,
+            &crate::highlight::UNCACHED,
+        );
         let span = canvas
             .spans()
             .iter()
@@ -1586,8 +1599,8 @@ fn rendering_is_deterministic() {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     for width in [13u16, 40, 80] {
-        let first = render_flat(&doc, width, &theme, &PLAIN);
-        let second = render_flat(&doc, width, &theme, &PLAIN);
+        let first = render_flat(&doc, width, &theme, &PLAIN, &crate::highlight::UNCACHED);
+        let second = render_flat(&doc, width, &theme, &PLAIN, &crate::highlight::UNCACHED);
         assert_eq!(first, second, "width {width} is not deterministic");
     }
 }
@@ -1614,7 +1627,13 @@ fn render_block_and_render_blocks_agree_with_the_document_renderer() {
     let markdown = "# Title\n\nbody text\n\n# Another\n";
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
-    let whole = render_flat(&doc, 30 + 2 * DOCUMENT_MARGIN, &theme, &PLAIN);
+    let whole = render_flat(
+        &doc,
+        30 + 2 * DOCUMENT_MARGIN,
+        &theme,
+        &PLAIN,
+        &crate::highlight::UNCACHED,
+    );
     let parts = render_blocks(&doc.root().children, 30, &theme, &PLAIN, doc.source());
     assert_eq!(
         body_rows(&whole),
@@ -1660,7 +1679,7 @@ fn every_row_keeps_a_margin_on_both_sides() {
     let doc = Doc::parse(MARGIN_FIXTURE);
     let theme = Theme::default_dark();
     for width in [20u16, 40, 60, 80, 100, 120] {
-        let canvas = render_flat(&doc, width, &theme, &PLAIN);
+        let canvas = render_flat(&doc, width, &theme, &PLAIN, &crate::highlight::UNCACHED);
         let margin = usize::from(DOCUMENT_MARGIN);
         for row in 0..canvas.height() {
             let text = canvas.row_text(row);
@@ -1954,7 +1973,13 @@ fn a_cluster_wider_than_a_cell_is_charged_the_columns_it_draws() {
     // own text and drags every following span with it.
     let source = "\u{17000}\u{1a57} tail\n";
     let doc = Doc::parse(source);
-    let canvas = render_flat(&doc, 30, &Theme::default_dark(), &PLAIN);
+    let canvas = render_flat(
+        &doc,
+        30,
+        &Theme::default_dark(),
+        &PLAIN,
+        &crate::highlight::UNCACHED,
+    );
     canvas.check_invariants().expect("contract holds");
     for span in canvas.spans() {
         let text = &source[span.source_start..span.source_end];
@@ -2537,7 +2562,7 @@ fn the_line_number_gutter_carries_no_span() {
 
 #[test]
 fn a_tab_in_the_code_maps_to_its_source_byte_not_its_expanded_columns() {
-    // `bridge::highlight` expands the tab to spaces before this line ever reaches the
+    // `ctx.code` expands the tab to spaces before this line ever reaches the
     // canvas (`highlight::expand_tabs`); the source line is 13 bytes, its *drawn* text
     // is 16 columns wide. Measuring `source_end` against the drawn text instead of the
     // raw source line lands three bytes past the end of this line — into the newline
@@ -4625,24 +4650,17 @@ fn a_paragraph_with_display_math_and_other_content_is_not_hoisted() {
 /// arguments. See the plan's finding F1.
 #[test]
 fn a_clipping_code_block_is_highlighted_once_however_often_it_is_laid_out() {
-    // Held for the whole test, not just the assertion: `render_document` itself
-    // drives the cache, and another test's theme switch could clear this test's
-    // entry between that call and the check below. See
-    // `HIGHLIGHT_GLOBALS_TEST_LOCK`'s doc comment for why the highlighter's
-    // `(lang, src)` key alone does not protect against this.
-    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     const CODE: &str =
         "let probe_for_the_clip_search = \"a line far wider than any prose cap set here\";\n";
     let source = format!("Text.\n\n```rust\n{CODE}```\n");
     let doc = Doc::parse(&source);
     let theme = Theme::default_dark();
+    let code = crate::highlight::BlockingSource::new();
 
-    let _ = render_document(&doc, 40, Some(20), &theme, &PLAIN);
+    let _ = render_document_with(&doc, 40, Some(20), &theme, &PLAIN, &code);
 
     assert_eq!(
-        crate::highlight::computed_count(Some("rust"), CODE, &theme),
+        code.computed_count(Some("rust"), CODE),
         Some(1),
         "the clip search must not recompute the highlight"
     );
@@ -4818,34 +4836,23 @@ fn a_wide_fence_in_a_table_cell_does_not_widen_the_table() {
 
 /// A block whose highlight failed says so in its frame's bottom edge.
 ///
-/// The memo is primed through `highlight_with_limit` rather than by stubbing the parser,
-/// so this exercises the path a reader actually reaches. The globals lock is held because
-/// priming the memo under one theme races any other test that switches theme —
-/// `cache_put` clears the whole map on a theme change, keyed on the theme and not on the
-/// entry.
-///
-/// The source carries its own marker comment: the memo is keyed on `(lang, src, theme)`
-/// alone, not on which limit computed the entry, so every test that primes a `Failed`
-/// outcome needs a key no other test — locked or not — also touches.
+/// Rendered through a [`crate::highlight::BlockingSource`] under a deliberately tiny
+/// line limit rather than by stubbing the parser, so this exercises the path a reader
+/// actually reaches.
 #[test]
 fn a_failed_block_captions_its_frame() {
-    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let theme = Theme::default_dark();
     let src = format!(
         "{}\n// task5-render-caption-probe\n",
         crate::highlight::tests::MINIFIED_JS_LINE
     );
-    crate::highlight::highlight_with_limit(
-        Some("js"),
-        &src,
-        &theme,
-        std::num::NonZeroUsize::new(2).expect("two is non-zero"),
-    );
+    let code = crate::highlight::BlockingSource::with_line_limit(|_| {
+        std::num::NonZeroUsize::new(2).expect("two is non-zero")
+    });
 
     let node = code_block("js", &src);
-    let canvas = render_block(&node, 60, &theme, &BUTTONS);
+    let ctx = Ctx::new(&theme, &BUTTONS).with_code(&code);
+    let canvas = block::render_block_ctx(&node, 60, ctx);
     canvas.check_invariants().expect("contract holds");
 
     let bottom = canvas.row_text(canvas.height() - 1);
@@ -4862,17 +4869,10 @@ fn a_failed_block_captions_its_frame() {
 /// would break that silently, so it is pinned here rather than in a comment.
 ///
 /// Two sources, identical in geometry (same line count, same line lengths) but distinct
-/// in their marker's last character, so the memo cannot serve one test's `Highlighted`
-/// entry to the other's `highlight_with_limit` call: a shared key would make the second
-/// call a cache hit that never even consults its own limit, leaving both renders
-/// uncaptioned and this assertion vacuously true. Each render's bottom row is checked
-/// against the caption text directly, so a regression to that shared-key state fails
-/// here instead of passing silently.
+/// in their marker's last character, so the two renders below cannot be confused with
+/// one another. Each render's bottom row is checked against the caption text directly.
 #[test]
 fn a_caption_does_not_change_a_block_s_height() {
-    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let theme = Theme::default_dark();
     let uncaptioned_src = format!(
         "{}\n// task5-render-geometry-probe-a\n",
@@ -4888,23 +4888,22 @@ fn a_caption_does_not_change_a_block_s_height() {
         "the two sources must have identical geometry"
     );
 
-    crate::highlight::highlight(Some("js"), &uncaptioned_src, &theme);
+    let uncaptioned_code = crate::highlight::BlockingSource::new();
     let uncaptioned_node = code_block("js", &uncaptioned_src);
-    let uncaptioned_canvas = render_block(&uncaptioned_node, 60, &theme, &BUTTONS);
+    let uncaptioned_ctx = Ctx::new(&theme, &BUTTONS).with_code(&uncaptioned_code);
+    let uncaptioned_canvas = block::render_block_ctx(&uncaptioned_node, 60, uncaptioned_ctx);
     let uncaptioned_bottom = uncaptioned_canvas.row_text(uncaptioned_canvas.height() - 1);
     assert!(
         !uncaptioned_bottom.contains("highlighting gave up"),
         "the uncaptioned render should carry no caption:\n{uncaptioned_bottom}"
     );
 
-    crate::highlight::highlight_with_limit(
-        Some("js"),
-        &captioned_src,
-        &theme,
-        std::num::NonZeroUsize::new(2).expect("two is non-zero"),
-    );
+    let captioned_code = crate::highlight::BlockingSource::with_line_limit(|_| {
+        std::num::NonZeroUsize::new(2).expect("two is non-zero")
+    });
     let captioned_node = code_block("js", &captioned_src);
-    let captioned_canvas = render_block(&captioned_node, 60, &theme, &BUTTONS);
+    let captioned_ctx = Ctx::new(&theme, &BUTTONS).with_code(&captioned_code);
+    let captioned_canvas = block::render_block_ctx(&captioned_node, 60, captioned_ctx);
     let captioned_bottom = captioned_canvas.row_text(captioned_canvas.height() - 1);
     assert!(
         captioned_bottom.contains("highlighting gave up"),

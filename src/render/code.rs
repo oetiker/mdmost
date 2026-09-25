@@ -339,7 +339,8 @@ fn framed_code(
     ctx: Ctx<'_>,
 ) -> Canvas {
     let theme = ctx.theme;
-    let lines = bridge::highlight(language, literal, theme);
+    let block = ctx.code.block(language, literal, theme);
+    let lines = block.lines;
     // Below four columns there is no room for a frame plus content; the code is shown
     // bare rather than as a box with nothing inside it.
     if width < 4 {
@@ -367,7 +368,7 @@ fn framed_code(
         .then_some(language)
         .flatten()
         .map(|name| title(name, ctx));
-    let note = (bridge::outcome(language, literal, theme) == crate::highlight::Outcome::Failed)
+    let note = (block.outcome == crate::highlight::Outcome::Failed)
         .then(|| outcome_caption("highlighting gave up", ctx));
     let mut out = inner.framed_captioned(
         BorderSet::ROUNDED,
@@ -622,7 +623,7 @@ fn code_area(
     );
     // The raw (unexpanded) text of each line of `literal`, split exactly the way
     // `NodeKind::CodeBlock.lines` was built, so `raw.get(row)` names the same line as
-    // `origins.get(row)`. `bridge::highlight`'s `lines` above have had tabs expanded to
+    // `origins.get(row)`. `ctx.code`'s `lines` above have had tabs expanded to
     // spaces (`highlight::expand_tabs`), which is a display concern; a `SearchSpan`
     // points at document bytes, and a tab is one document byte, not `TAB_WIDTH` of
     // them, so the byte offset below has to be measured against this text instead —
@@ -704,7 +705,7 @@ fn code_area(
 ///
 /// `text` is a line of `literal` as comrak handed it to us — tabs still tabs, nothing
 /// expanded — because that is what a `SearchSpan`'s byte range must measure against:
-/// the document, not `bridge::highlight`'s rendering of it. Tab stops are tracked the
+/// the document, not `ctx.code`'s rendering of it. Tab stops are tracked the
 /// same way `highlight::expand_tabs` computes them when it built the *drawn* line, so
 /// the two walks land on the same column for the same byte even though one produces
 /// spaces and the other counts them.
@@ -768,7 +769,7 @@ pub(super) fn fallback(
     ctx: Ctx<'_>,
 ) -> Canvas {
     let theme = ctx.theme;
-    let lines = bridge::highlight(language, literal, theme);
+    let lines = ctx.code.block(language, literal, theme).lines;
     if width < 4 {
         return code_area(&lines, origins, literal, width, false, ctx);
     }

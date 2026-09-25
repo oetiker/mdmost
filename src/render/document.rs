@@ -37,6 +37,7 @@
 
 use crate::canvas::{Canvas, Cell};
 use crate::doc::{Doc, Node, NodeKind};
+use crate::highlight::{BlockingSource, CodeSource};
 use crate::numbering::Numbering;
 use crate::render::{Ctx, Limits, RenderOptions, margins, render_flat};
 use crate::theme::Theme;
@@ -76,6 +77,8 @@ struct DocCtx<'a> {
     source: &'a str,
     /// The display blocks that define macros and draw nothing (design spec §16).
     macros: &'a [macros::Definition],
+    /// Where code blocks get their lines from; see [`crate::render::Ctx::code`].
+    code: &'a dyn CodeSource,
 }
 
 impl<'a> DocCtx<'a> {
@@ -85,6 +88,7 @@ impl<'a> DocCtx<'a> {
             .numbered(self.numbers)
             .with_source(self.source)
             .with_macros(self.macros)
+            .with_code(self.code)
     }
 }
 
@@ -107,6 +111,26 @@ pub fn render_document(
     theme: &Theme,
     options: &RenderOptions,
 ) -> Canvas {
+    render_document_with(
+        doc,
+        width,
+        body_width,
+        theme,
+        options,
+        &BlockingSource::new(),
+    )
+}
+
+/// [`render_document`], with code blocks taken from `code` — the pager passes its
+/// `Highlighter` here so the first render does not wait for highlighting.
+pub fn render_document_with(
+    doc: &Doc,
+    width: u16,
+    body_width: Option<u16>,
+    theme: &Theme,
+    options: &RenderOptions,
+    code: &dyn CodeSource,
+) -> Canvas {
     let clipped = ClipTest::new(theme);
     let blocks = &doc.root().children;
     // The top level of a document is a sequence of blocks. Should a parser change ever
@@ -114,7 +138,7 @@ pub fn render_document(
     // and this per-block assembly would not — so hand those documents back to the
     // renderer whole rather than laying them out differently here.
     if blocks.iter().any(block::is_inline) {
-        return render_flat(doc, width, theme, options);
+        return render_flat(doc, width, theme, options, code);
     }
 
     let fill = theme.base();
@@ -147,6 +171,7 @@ pub fn render_document(
         numbers: &numbers,
         source: doc.source(),
         macros: &macros,
+        code,
     };
     // The cap in force for every top-level block, carried in `Ctx` rather than passed
     // alongside it. Task 3 reads it from inside a container; here it is set and nothing

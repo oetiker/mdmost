@@ -994,6 +994,7 @@ fn the_overflow_marker_matches_the_renderer() {
         20,
         &crate::theme::Theme::default_dark(),
         &crate::render::RenderOptions::new(false, false),
+        &crate::highlight::UNCACHED,
     );
     let text = canvas.plain_text();
     assert!(
@@ -1015,6 +1016,7 @@ fn the_quote_bar_matches_the_renderer() {
         20,
         &crate::theme::Theme::default_dark(),
         &crate::render::RenderOptions::new(false, false),
+        &crate::highlight::UNCACHED,
     );
     let separator = (0..canvas.height())
         .map(|row| canvas.row_text(row))
@@ -1045,6 +1047,7 @@ fn the_gutter_rule_matches_the_renderer() {
         40,
         &theme,
         &crate::render::RenderOptions::new(false, true),
+        &crate::highlight::UNCACHED,
     );
     let pinned = crate::render::document::pinned_prefix(&canvas);
     let text = canvas.plain_text();
@@ -2663,6 +2666,7 @@ fn an_unnumbered_fence_pins_nothing_however_its_code_is_coloured() {
         &theme,
         // Line numbers *off*: this block has no gutter, so nothing may be pinned.
         &crate::render::RenderOptions::new(false, false),
+        &crate::highlight::UNCACHED,
     );
     let pinned = crate::render::document::pinned_prefix(&canvas);
     assert!(

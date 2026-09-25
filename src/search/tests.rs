@@ -261,7 +261,8 @@ fn hits_for(markdown: &str, query: &str) -> Vec<Hit> {
     let doc = crate::doc::Doc::parse(markdown);
     let theme = crate::theme::Theme::default_dark();
     let options = crate::render::RenderOptions::default();
-    let canvas = crate::render::render_flat(&doc, 40, &theme, &options);
+    let canvas =
+        crate::render::render_flat(&doc, 40, &theme, &options, &crate::highlight::UNCACHED);
     let mut search = Search::new(doc.source(), query, SearchMode::Literal).expect("valid pattern");
     search.locate(doc.source(), &canvas);
     search.hits().to_vec()
