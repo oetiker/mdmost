@@ -1970,6 +1970,39 @@ fn the_help_overlay_shows_the_way_out_at_every_height() {
 }
 
 #[test]
+fn a_long_toc_filter_fills_the_title_exactly() {
+    // The filter is shortened against what the rest of the title actually draws. A
+    // fixed reserve was right only for one width of the `n/m` count: with `1/12` it
+    // cut the filter a column early and left a stray `─` before the corner.
+    let mut source: String = (1..=11).map(|n| format!("# Heading {n}\n\n")).collect();
+    source.push_str("# abcdefghijklmnopqrstuvwxyz\n\ntext\n");
+    for icons in [false, true] {
+        let mut app = pager(&source);
+        app.set_icons(icons);
+        app.act(Action::ToggleToc);
+        app.act(Action::SearchForward);
+        for ch in "abcdefghijklmnopqrstuvwxyz".chars() {
+            app.on_key(Key::char(ch));
+        }
+        assert_eq!(app.toc_hits().len(), 1);
+        let rows = painted(30, 6, |buffer, area| {
+            super::chrome::draw_toc(buffer, area, &app)
+        });
+        let set = super::icons::Icons::new(icons);
+        let budget = 30 - 2 - 2 - crate::text::display_width(set.gap) - " 1/12 ".len();
+        let filter = crate::text::ellipsize("abcdefghijklmnopqrstuvwxyz", budget);
+        assert_eq!(
+            rows[0],
+            format!("╭ {}{}{filter} 1/12 ╮", set.search, set.gap),
+            "icons {icons}"
+        );
+        if !icons {
+            assert_eq!(rows[0], "╭ \u{2315} abcdefghijklmnopqr… 1/12 ╮");
+        }
+    }
+}
+
+#[test]
 fn a_deep_toc_entry_still_says_something_in_a_narrow_pane() {
     // The indent is what gives way when the pane is narrow. If the prefix is allowed
     // to eat the whole width the entry renders as a blank row, which reads as a bug

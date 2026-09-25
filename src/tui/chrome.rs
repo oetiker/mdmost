@@ -79,17 +79,12 @@ pub fn draw_toc(buffer: &mut Buffer, area: Rect, app: &App) {
     } else {
         // A filtered pane says how much of the map it is still showing; without a
         // count a one-hit filter is indistinguishable from a broken table of contents.
-        format!(
-            " {}{}{} {}/{} ",
-            icons.search,
-            icons.gap,
-            fit(
-                app.toc_filter(),
-                usize::from(area.width).saturating_sub(11 + display_width(icons.gap)),
-            ),
-            app.toc_hits().len(),
-            app.toc().len()
-        )
+        // The filter gets exactly what the corners and the other two parts leave.
+        let lead = format!(" {}{}", icons.search, icons.gap);
+        let count = format!(" {}/{} ", app.toc_hits().len(), app.toc().len());
+        let room = usize::from(area.width)
+            .saturating_sub(2 + display_width(&lead) + display_width(&count));
+        format!("{lead}{}{count}", fit(app.toc_filter(), room))
     };
     Block::bordered()
         .border_type(BorderType::Rounded)
