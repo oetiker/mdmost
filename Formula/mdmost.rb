@@ -9,7 +9,7 @@
 class Mdmost < Formula
   desc "Full-screen terminal pager for a single Markdown document"
   homepage "https://github.com/oetiker/mdmost"
-  version "0.3.4"
+  version "0.3.5"
   license "MIT"
 
   # Bottles exist for one reason: without one, Homebrew treats this formula as a source
@@ -35,22 +35,22 @@ class Mdmost < Formula
   on_macos do
     on_arm do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-aarch64-apple-darwin.tar.gz"
-      sha256 "dc12c23aa759a8d8cb932b24c5a0055714e8152247c1c77fe528c846a85ad4f9" # mac-arm
+      sha256 "eb27793b40a870ac31d9ccd3a56cf379c60a6b2b6f66de169bf33cdc8b625fca" # mac-arm
     end
     on_intel do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-x86_64-apple-darwin.tar.gz"
-      sha256 "3ff77c9e11ee38b7f71d37a54e0b6652d8ea2ac1eff970ddff4aff675b5625e2" # mac-x86
+      sha256 "23f2336388b8ef8bef49b75833c1e46f1fad64799dbcd949e4e435253dc77ff4" # mac-x86
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "e5a2fa91f2e349fc3dc651800b1dab86ea6c86a2168d2123c836fd7d7c16a61b" # linux-x86
+      sha256 "3b0d56a645160e98f027c8f84413919db5cd92671a41a23b14dab033cd6bbeee" # linux-x86
     end
     on_arm do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-aarch64-unknown-linux-musl.tar.gz"
-      sha256 "70e43fbde3eb0fceca98ad41b6d1cc2d4e904c1d1c90415b00ff0721c3c1427e" # linux-arm
+      sha256 "0e563744f0a6f33cea318ea77659de5021c0ac4220da7581d837947e59b78f89" # linux-arm
     end
   end
 
