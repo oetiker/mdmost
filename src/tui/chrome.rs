@@ -248,7 +248,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     let icons = Icons::new(app.icons());
     let sep = |spans: &mut Vec<TermSpan<'static>>| {
         spans.push(TermSpan::styled(
-            format!(" {} ", icons.separator),
+            format!(" {}{}", icons.separator, icons.gap),
             term_style(theme.ui.status_bar.dim()),
         ));
     };

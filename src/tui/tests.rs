@@ -2066,6 +2066,57 @@ fn every_chrome_glyph_is_one_column_wide() {
 }
 
 #[test]
+fn the_nerd_separator_has_two_columns_of_space_after_it() {
+    // The separator is a Nerd Font glyph too, drawn two cells wide and measured as
+    // one, so it takes the same gap as the icons. The plain `│` keeps one space.
+    let nerd = super::icons::Icons::NERD;
+    let plain = super::icons::Icons::PLAIN;
+    for width in [80u16, 40] {
+        let status = |icons: bool| {
+            let mut app = pager_named("# Heading\n\nbody\n", "notes.md", width, 10);
+            app.set_icons(icons);
+            painted(width, 1, |buffer, area| {
+                super::chrome::draw_status(buffer, area, &app)
+            })
+            .remove(0)
+        };
+        let with = status(true);
+        assert!(
+            with.starts_with(&format!(
+                " {}  notes.md {}   All ",
+                nerd.file, nerd.separator
+            )),
+            "{with:?}"
+        );
+        assert_eq!(
+            with.matches(&format!(" {}  ", nerd.separator)).count(),
+            with.matches(nerd.separator).count(),
+            "every separator has the gap at {width}: {with:?}"
+        );
+        assert_eq!(
+            crate::text::display_width(&with),
+            usize::from(width),
+            "{with:?}"
+        );
+        let without = status(false);
+        // `{:>4}` pads the position, so the plain bar reads `│  All`: that second
+        // space is the position's own, which is why this pins the whole prefix.
+        assert!(
+            without.starts_with(&format!(
+                " {} notes.md {}  All ",
+                plain.file, plain.separator
+            )),
+            "{without:?}"
+        );
+        assert_eq!(
+            crate::text::display_width(&without),
+            usize::from(width),
+            "{without:?}"
+        );
+    }
+}
+
+#[test]
 fn a_nerd_icon_has_two_columns_of_space_before_its_text() {
     // Terminals draw these icons two cells wide while the width tables count one, so
     // the icon's second half covers the column after it; one more blank column keeps

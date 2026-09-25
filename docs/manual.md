@@ -732,10 +732,10 @@ say nothing about the terminal drawing the pixels.
 
 Plain and icon glyphs occupy **the same display width**, so the document does not
 reflow either way, and no feature depends on icons. Terminals draw an icon two
-columns wide, so an icon is followed by two blank columns where its plain
-substitute is followed by one; labels in the status bar, the contents pane, the
-help overlay and code-block titles are one column wider with icons on. To settle
-the choice by hand instead, see **CONFIGURATION**.
+columns wide, so an icon or a status-bar separator is followed by two blank
+columns where its plain substitute is followed by one; labels in the status bar,
+the contents pane, the help overlay and code-block titles are wider with icons
+on. To settle the choice by hand instead, see **CONFIGURATION**.
 
 ## Emoji width
 

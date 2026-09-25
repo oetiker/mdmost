@@ -6,10 +6,10 @@
 
 ### Changed
 
-- With Nerd Font icons on, an icon is now followed by two blank columns instead of one,
-  in the status bar, the contents pane, the help overlay and code-block titles. Terminals
-  draw these icons two columns wide, so the text after them looked cramped. With icons off
-  nothing changes.
+- With Nerd Font icons on, an icon or a status-bar separator is now followed by two blank
+  columns instead of one, in the status bar, the contents pane, the help overlay and
+  code-block titles. Terminals draw these glyphs two columns wide, so the text after them
+  looked cramped. With icons off nothing changes.
 - A file name too long for the status bar is shortened by dropping a final `.md` first,
   and then by cutting its middle instead of its end, so `2026-09-25-viewport-highlighter.md`
   reads `2026-09-25-view…ghter`. Names that share a date or number prefix now stay

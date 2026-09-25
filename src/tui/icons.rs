@@ -4,7 +4,8 @@
 //! Two sets exist and they are structurally identical, so nothing in the drawing code
 //! needs to know which one is in force: turning icons off simply swaps Nerd Font glyphs
 //! for plain Unicode of the same display width. The one thing that differs in layout is
-//! [`Icons::gap`], the space after an icon, which is a column wider in the Nerd set.
+//! [`Icons::gap`], the space after an icon or a separator, which is a column wider in
+//! the Nerd set.
 //!
 //! Which set is in force is settled before drawing starts — by `--no-icons`, by
 //! `MDMOST_ICONS`, by `icons` in the config file, or, if nobody has said, by
@@ -35,8 +36,8 @@ pub struct Icons {
     pub warning: &'static str,
     /// Marks the horizontal offset when content is scrolled sideways.
     pub horizontal: &'static str,
-    /// The blank columns between an icon and the label after it — two for the Nerd
-    /// set, one for the plain set, for the reason given on
+    /// The blank columns after an icon or a separator, before whatever follows it —
+    /// two for the Nerd set, one for the plain set, for the reason given on
     /// [`crate::render::glyphs::NERD_GAP`]. Not a glyph, so not in [`Self::all`].
     pub gap: &'static str,
 }
