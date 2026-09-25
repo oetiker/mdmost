@@ -17,6 +17,10 @@
 
 ### Fixed
 
+- A long link address shown in brackets after the link text is now cut to the same
+  width whatever it contains. An address with Japanese, Chinese or other double-width
+  characters near the cut came out one column wider than the others.
+
 ## 0.3.5 - 2026-09-25
 
 ### New

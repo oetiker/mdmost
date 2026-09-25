@@ -449,7 +449,7 @@ fn strip_md(name: &str) -> &str {
 ///
 /// The mirror of [`truncate_to_width`]: the cut never lands inside a grapheme cluster,
 /// and a double-width cluster that straddles the limit is left out.
-fn tail_to_width(text: &str, max_width: usize) -> &str {
+pub fn tail_to_width(text: &str, max_width: usize) -> &str {
     let mut width = 0usize;
     for (offset, cluster) in text.grapheme_indices(true).rev() {
         let w = display_width(cluster);
