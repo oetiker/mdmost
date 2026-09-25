@@ -705,26 +705,12 @@ in `to_row`, and `the_flat_walk_and_the_canvas_walk_render_the_same_cells` now c
 the case. A mark
 anywhere else in a row is untouched: it has a cluster before it and composes onto that.
 
-## The highlight guard's budget floor is measured, not chosen, and neither is its cost
+## `syntect`'s cold-compile cost, one line, per syntax
 
-`highlight::budget_for` (finding F3: a `.sublime-syntax` rule that makes
-`ParseState::parse_line` never return, see
-`docs/upstream/2026-09-21-javascript-syntax-hang.md`) originally used a flat 200 ms floor.
-That number covered *parsing* — a 1077-line TypeScript block costs about 1.4 s of honest
-parsing — but not the cost it collided with in practice: `syntect` compiles a syntax's
-regexes once per process and caches the result in the `SyntaxSet` forever after, and that
-one-time cost is charged in full to whichever block happens to use the language first. It
-is not proportional to that block, so a floor sized for parsing cannot absorb it.
-
-The collision was not theoretical. A 200 ms floor broke the test suite outright in a debug
-build: sixteen tests failed deterministically
-(`makefile_recipe_lines_still_parse_with_a_leading_tab` in the lib, fourteen of nineteen in
-`tests/highlight_languages.rs`, one of thirteen in `tests/highlight_robustness.rs`),
-because their very first real highlight of an ordinary language cost more than the floor
-and the guard mistook a cold compile for a hang.
-
-**Measured cold-compile cost, one line, single-threaded, no contention, genuinely first-ever
-per process** (`SyntaxSet` caches per process, so each row needed a fresh binary):
+`syntect` compiles a syntax's regexes once per process and caches the result in the
+`SyntaxSet` forever after; the cost is charged in full to whichever code block first uses
+that language. Measured single-threaded, no contention, genuinely first-ever per process
+(`SyntaxSet` caches per process, so each row needed a fresh binary):
 
 | syntax | release | debug | debug / release |
 |---|---|---|---|
@@ -735,53 +721,96 @@ per process** (`SyntaxSet` caches per process, so each row needed a fresh binary
 | YAML | 7 ms | 72 ms | 10.3x |
 | Makefile | 42 ms | 678 ms | 16.1x |
 
-`RELEASE_FLOOR` starts from four times the worst release figure above (TypeScript, 258 ms
--> 1032 ms), then raised to 1200 ms so it sits comfortably clear of the "never below one
-second" rule this was calibrated against, rather than just past it. `DEBUG_BUDGET_MULTIPLIER`
-is the worst debug/release ratio above (Makefile,
-16.1x), rounded up to 20x, applied to the whole of `budget_for`'s result rather than to the
-floor alone, so a debug build's line-count cap grows by the same factor as its floor. With
-this floor, all sixteen failures disappeared with no change to either integration test
-file — confirming the floor, not the tests, was wrong.
+## The per-line token budget is measured, not chosen
 
-**The guard has a real, measured cost in a release build, and it is not thread-spawn
-overhead.** Task 1's reference document (`/home/oetiker/checkouts/oxutlk/docs/superpowers/
-plans/2026-09-21-media-worker.md`, 36 fenced code blocks) rendered with `--render-once`,
-release binary, interleaved runs on the same machine to cancel out load swings:
+`highlight::highlight_with` bounds every line by a budget `token_limit_for`
+(`src/highlight.rs`) computes as `MAX_TOKENS_PER_LINE_BASE` plus
+`MAX_TOKENS_PER_BYTE` for every byte in the line. `vendor/syntect`'s
+`ParseState::parse_line_with_limit` returns `ParsingError::TokenLimitExceeded` once a
+line's token count passes that budget; the whole block then degrades to plain text, same
+as any other parse error. It is a backstop against a `.sublime-syntax` rule that makes
+`ParseState::parse_line` never return (finding F3, see
+`docs/upstream/2026-09-21-javascript-syntax-hang.md`), not a size policy.
 
-| build | runs (ms) | mean |
-|---|---|---|
-| before the guard (Task 1's memo only) | 1872, 1890, 1857, 1978 | ~1899 ms |
-| with the guard | 2222, 2554, 2284, 2136, 2137 | ~2267 ms |
+A single flat limit does not work. A real, unmodified `jquery.min.js` (Debian's
+`libjs-jquery` package; read from `/usr/share/javascript/jquery/jquery.min.js` to
+measure, never pasted into this repository) is one 88,947-byte line that needs 86,535
+tokens, and `MAX_HIGHLIGHT_BYTES` admits lines up to three times that long: a flat limit
+sized to clear a maximal minified line would also let a *short*, pathological line spend
+that whole budget looping before the guard notices — the F3 reproducer is two lines.
+Scaling the limit by the line's length in bytes keeps a short hostile line cheap to
+bound while a long, legitimately dense one still gets the room it needs. Saturating
+arithmetic in `token_limit_for` keeps this true regardless of `line`'s length: overflow
+is not a realistic risk given `MAX_HIGHLIGHT_BYTES` already caps a whole block, but the
+guard is cheap and removes one more way a document could crash the pager rather than
+just fail to highlight.
 
-That is ~368 ms slower, ~19%, consistent across five interleaved runs — not noise. To find
-out whether that is `std::thread::spawn` plus the `mpsc` round trip, 36 calls to
-`run_within` with a closure that returns immediately were timed against 36 direct calls of
-the same closure, release build: the guarded calls cost 5.67 ms more in total, about 157 µs
-per call. That accounts for roughly 1.5% of the measured 368 ms. **Spawn-and-channel
-overhead is not the dominant cost, and the remaining ~98% is not yet understood** — the
-trivial closure allocated nothing, so this experiment cannot see anything that depends on
-real allocation.
+**Method:** the smallest limit at which a line still parses, found by doubling the limit
+until it succeeds and then binary-searching the boundary, calling only
+`ParseState::parse_line_with_limit` — no instrumentation, so a reviewer can re-run it. A
+fresh `ParseState` is used for each measurement; the first line parsed by a fresh state
+pays one extra token for the zero-width `__start` → `main` push that later lines do not.
 
-An **untested hypothesis**, not yet measured: per-thread `malloc` arenas. glibc gives each
-new thread its own arena, so every one of `syntect`'s parse allocations on the guarded
-thread comes from a fresh, cold arena that has to be `mmap`ed and page-faulted in, and the
-resulting `Vec<Line>` is then freed cross-thread by the caller — 36 times over for this
-document. Faulting in a fresh 2 MiB stack and lost cache locality from running on a
-freshly scheduled thread are two further untested candidates. Measuring any of these
-properly needs a *real* highlight run timed guarded versus direct, not a trivial closure —
-this was not done, and the owner capped the investigation at the one experiment above
-rather than chasing the remaining ~98% further; the cost is accepted regardless of which
-of these turns out to be the actual cause.
+**Measured token cost:**
 
-**The cost is accepted.** Task 1 took this reference document from 6.07 s to 1.83 s; with
-the guard it is ~2.27 s — still 2.7x faster than before the branch, in exchange for a
-pathological block giving up instead of freezing the pager forever. A line-count threshold
-that skips the guard below some size was considered and rejected outright: the F3
-reproducer is two lines, so any such threshold would skip the guard for the exact input it
-exists to survive. A persistent worker thread reused across calls was also considered and
-set aside as a design change outside this plan's scope — it inherits the same abandon
-semantics once the worker itself hangs, plus a new global to manage it. The real answer —
-moving highlighting off the render path entirely with a background/lazy highlighter — was
-designed in conversation before this branch and shelved once Task 1's memo made it far
-less urgent; this measurement is the strongest argument yet for reviving it.
+| line | length (bytes) | tokens | tokens/byte |
+|---|---|---|---|
+| Python — dict comprehension nesting a list comprehension, two filters | 184 | 147 | 0.799 |
+| TypeScript — generic `groupBy` with a typed `reduce` | 295 | 145 | 0.492 |
+| JavaScript — the same `groupBy` without types | 159 | 144 | 0.906 |
+| Rust — `filter`/`fold` building a `HashMap<String, Vec<Item>>` | 216 | 114 | 0.528 |
+| YAML — nested inline flow mapping (services, ports, environment) | 187 | 86 | 0.460 |
+| Makefile — `CFLAGS` assignment with `$(shell …)` and nested `$(…)` | 201 | 37 | 0.184 |
+| JavaScript, minified (synthetic, 30 repeats of a nested-arrow/regex/template-literal unit) | 5,941 | 6,505 | 1.0947 |
+| JavaScript, minified (`jquery.min.js`, real) | 88,947 | 86,535 | 0.9729 |
+
+The synthetic line has the highest measured density of the eight. It is written for
+this measurement, not pasted from a third-party bundle, so it carries no licence or
+attribution duty, and is valid JavaScript (`node --check` accepts it) — a stand-in for
+dense, real-world minified output, not a claim about the densest line any minifier
+could produce. Repeating it (16 copies, each a self-contained statement so the
+concatenation stays valid JavaScript; 95,057 bytes, still one line) scales linearly at
+the same 1.0948 tokens/byte and needs 104,065 tokens — well inside the 382,228-token
+budget `token_limit_for` computes for a line that length, which is what keeps a long,
+dense line covered as it grows.
+
+**The constants:**
+
+```rust
+pub const MAX_TOKENS_PER_LINE_BASE: usize = 2_000;
+pub const MAX_TOKENS_PER_BYTE: usize = 4;
+```
+
+`MAX_TOKENS_PER_LINE_BASE` is more than ten times the highest of the six ordinary-line
+figures above (Python, 147), rounded to a readable number. `MAX_TOKENS_PER_BYTE` is more
+than three times the highest tokens/byte ratio measured (the synthetic line, 1.0947),
+rounded up to an integer. At `MAX_HIGHLIGHT_BYTES` (262,144 bytes) the budget this
+formula computes is 1,050,576 tokens: 3.7x the token cost a line that dense would need if
+it matched the synthetic line's ratio the whole way, and 4.1x `jquery.min.js`'s ratio.
+
+**Wall time, release build:**
+
+| what | size | tokens | time | rate |
+|---|---|---|---|---|
+| cheap `"1+"` line, parsed to its own need | 2,002 B | 2,005 | 5.09 ms | ~2.54 µs/token |
+| `jquery.min.js`, parsed to its own need | 88,947 B | 86,535 | 907 ms | ~10.48 µs/token |
+| 44 self-contained copies of the synthetic minified unit, honestly parsed with no limit | 261,405 B | (fully parses) | 1.90 s | — |
+| a cheap `"1+"` line built with enough repeats to just exceed the largest budget the formula ever computes (1,050,576 tokens, for a line at the `MAX_HIGHLIGHT_BYTES` cap), parsed against that budget until it errors | 1,050,576 B | (errors past 1,050,576) | 2.15 s | ~2.05 µs/token |
+
+Real syntax rules cost more per token than the cheap `"1+"` construct — `jquery.min.js`'s
+measured rate is about 4.1x higher. Applying that rate to the largest budget the formula
+ever computes (1,050,576 tokens, at the `MAX_HIGHLIGHT_BYTES` cap) gives an *estimate* of
+about 11 s for one maximally hostile line that size — an estimate, not an upper bound:
+`jquery.min.js` is real, well-formed minified JavaScript, not a hypothetical pathological
+`.sublime-syntax` rule, and no pathological rule's actual per-token cost has been
+measured, so nothing here rules out it costing more. The directly measured cheap-
+construct figure (2.15 s) is a lower bound for the same budget. Both are for one line.
+
+**There is no cap across blocks any more.** The thread guard this branch replaced
+(`MAX_ABANDONED` and the rest of it) capped how many blocks could be abandoned at once;
+the token budget has no equivalent. A document with several maximally hostile,
+block-size-cap lines pays the full per-line cost for *each one* before that block falls
+back to plain text — at least 2.15 s per such line, more for a pathological rule whose
+tokens cost more than the cheap construct's, with no measured ceiling on how much more.
+The document-level worst case is therefore *(number of such blocks) × (one line's worst
+case)*, not a bounded total.

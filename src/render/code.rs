@@ -367,13 +367,23 @@ fn framed_code(
         .then_some(language)
         .flatten()
         .map(|name| title(name, ctx));
-    let mut out = inner.framed(
+    let note = (bridge::outcome(language, literal, theme) == crate::highlight::Outcome::Failed)
+        .then(|| outcome_caption("highlighting gave up", ctx));
+    let mut out = inner.framed_captioned(
         BorderSet::ROUNDED,
         theme.code.frame,
         title.as_ref(),
+        note.as_ref(),
         theme.code.background,
     );
-    join_gutter(&mut out, gutter, padding, title.as_ref(), None, ctx);
+    join_gutter(
+        &mut out,
+        gutter,
+        padding,
+        title.as_ref(),
+        note.as_ref(),
+        ctx,
+    );
     pin_gutter(&mut out, gutter, padding, title.as_ref());
     // The label and the junction have already taken what they need of the top edge; the
     // button is the third occupant and the only optional one, so it is the one that
@@ -569,6 +579,16 @@ fn title(language: &str, ctx: Ctx<'_>) -> Line {
         line.push(Span::new(format!("{icon} "), theme.code.language));
     }
     line.push(Span::new(language, theme.code.language));
+    line
+}
+
+/// The label drawn into the frame's bottom edge: what happened to this block.
+///
+/// Styled like the overflow marker rather than the language label, because it is a
+/// report about the block and not part of the block's identity.
+fn outcome_caption(text: &str, ctx: Ctx<'_>) -> Line {
+    let mut line = Line::empty();
+    line.push(Span::new(text, ctx.theme.code.overflow_marker));
     line
 }
 

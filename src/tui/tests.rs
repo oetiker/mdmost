@@ -8017,12 +8017,18 @@ fn a_popup_shows_the_source_of_math_that_will_not_draw() {
 // Reading the terminal's answer to `ESC [ 6 n` (`super::probe`).
 // ---------------------------------------------------------------------------
 
+// `column_of` and its helpers are `#[cfg(unix)]` in `super::probe` -- only its Unix
+// `reply` path calls them at run time -- so the tests that exercise them directly
+// carry the same cfg.
+
+#[cfg(unix)]
 #[test]
 fn a_cursor_report_is_read_as_a_column() {
     assert_eq!(super::probe::column_of(b"\x1b[1;3R"), Some(3));
     assert_eq!(super::probe::column_of(b"\x1b[24;80R"), Some(80));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_report_is_found_among_whatever_else_arrived() {
     // A keystroke can land in the same read as the reply, and a terminal is free to
@@ -8031,6 +8037,7 @@ fn a_report_is_found_among_whatever_else_arrived() {
     assert_eq!(super::probe::column_of(b"\x1b[?1;2c\x1b[1;5R"), Some(5));
 }
 
+#[cfg(unix)]
 #[test]
 fn anything_that_is_not_a_report_is_no_answer() {
     for bytes in [

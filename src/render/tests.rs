@@ -1045,6 +1045,15 @@ fn table_with_cell(content: &str) -> crate::doc::Node {
     table
 }
 
+/// Parses a single fenced code block into a node, so a test can hand it straight to
+/// `render_block` without going through a whole document.
+fn code_block(lang: &str, src: &str) -> crate::doc::Node {
+    Doc::parse(&format!("```{lang}\n{src}```\n"))
+        .root()
+        .children[0]
+        .clone()
+}
+
 #[test]
 fn a_list_inside_a_cell_keeps_its_markers() {
     let table = table_with_cell("- one\n- two\n");
@@ -4791,4 +4800,102 @@ fn a_wide_fence_in_a_table_cell_does_not_widen_the_table() {
         without_cap.plain_text(),
         "a document-level prose cap must not change what a table cell draws"
     );
+}
+
+/// A block whose highlight failed says so in its frame's bottom edge.
+///
+/// The memo is primed through `highlight_with_limit` rather than by stubbing the parser,
+/// so this exercises the path a reader actually reaches. The globals lock is held because
+/// priming the memo under one theme races any other test that switches theme —
+/// `cache_put` clears the whole map on a theme change, keyed on the theme and not on the
+/// entry.
+///
+/// The source carries its own marker comment: the memo is keyed on `(lang, src, theme)`
+/// alone, not on which limit computed the entry, so every test that primes a `Failed`
+/// outcome needs a key no other test — locked or not — also touches.
+#[test]
+fn a_failed_block_captions_its_frame() {
+    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let theme = Theme::default_dark();
+    let src = format!(
+        "{}\n// task5-render-caption-probe\n",
+        crate::highlight::tests::MINIFIED_JS_LINE
+    );
+    crate::highlight::highlight_with_limit(
+        Some("js"),
+        &src,
+        &theme,
+        std::num::NonZeroUsize::new(2).expect("two is non-zero"),
+    );
+
+    let node = code_block("js", &src);
+    let canvas = render_block(&node, 60, &theme, &BUTTONS);
+    canvas.check_invariants().expect("contract holds");
+
+    let bottom = canvas.row_text(canvas.height() - 1);
+    assert!(
+        bottom.contains(" highlighting gave up "),
+        "the failed block should caption its bottom edge:\n{bottom}"
+    );
+}
+
+/// The caption costs no row.
+///
+/// Branch B patches colour onto an already-rendered canvas, which is only sound while a
+/// plain block and a highlighted one occupy the same cells. A caption that added a row
+/// would break that silently, so it is pinned here rather than in a comment.
+///
+/// Two sources, identical in geometry (same line count, same line lengths) but distinct
+/// in their marker's last character, so the memo cannot serve one test's `Highlighted`
+/// entry to the other's `highlight_with_limit` call: a shared key would make the second
+/// call a cache hit that never even consults its own limit, leaving both renders
+/// uncaptioned and this assertion vacuously true. Each render's bottom row is checked
+/// against the caption text directly, so a regression to that shared-key state fails
+/// here instead of passing silently.
+#[test]
+fn a_caption_does_not_change_a_block_s_height() {
+    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let theme = Theme::default_dark();
+    let uncaptioned_src = format!(
+        "{}\n// task5-render-geometry-probe-a\n",
+        crate::highlight::tests::MINIFIED_JS_LINE
+    );
+    let captioned_src = format!(
+        "{}\n// task5-render-geometry-probe-b\n",
+        crate::highlight::tests::MINIFIED_JS_LINE
+    );
+    assert_eq!(
+        uncaptioned_src.len(),
+        captioned_src.len(),
+        "the two sources must have identical geometry"
+    );
+
+    crate::highlight::highlight(Some("js"), &uncaptioned_src, &theme);
+    let uncaptioned_node = code_block("js", &uncaptioned_src);
+    let uncaptioned_canvas = render_block(&uncaptioned_node, 60, &theme, &BUTTONS);
+    let uncaptioned_bottom = uncaptioned_canvas.row_text(uncaptioned_canvas.height() - 1);
+    assert!(
+        !uncaptioned_bottom.contains("highlighting gave up"),
+        "the uncaptioned render should carry no caption:\n{uncaptioned_bottom}"
+    );
+
+    crate::highlight::highlight_with_limit(
+        Some("js"),
+        &captioned_src,
+        &theme,
+        std::num::NonZeroUsize::new(2).expect("two is non-zero"),
+    );
+    let captioned_node = code_block("js", &captioned_src);
+    let captioned_canvas = render_block(&captioned_node, 60, &theme, &BUTTONS);
+    let captioned_bottom = captioned_canvas.row_text(captioned_canvas.height() - 1);
+    assert!(
+        captioned_bottom.contains("highlighting gave up"),
+        "the captioned render should carry the caption:\n{captioned_bottom}"
+    );
+
+    assert_eq!(uncaptioned_canvas.height(), captioned_canvas.height());
 }

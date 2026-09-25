@@ -113,15 +113,23 @@ the fork before copying — that is one `git clone` away, and it is the right pl
 targets and their dev-dependencies stripped, plus two additions: `publish = false`, and a
 `[lints]` table that allows everything.
 
-On the lints table, the honest version: **it fixes nothing today.** Measured on
-2026-08-24 with rustc/clippy 1.96.0, this tree is clean under
-`cargo clippy --all-targets --workspace -- -D warnings` with the table removed — upstream
-runs clippy in its own CI too. The table is insurance against the toolchain bump that
-introduces a lint nobody here is going to fix in someone else's frozen code.
+On the lints table: **it fixes nothing today.** Measured on 2026-08-24 with rustc/clippy
+1.96.0, this tree is clean under `cargo clippy --all-targets --workspace -- -D warnings`
+with the table removed — upstream runs clippy in its own CI too. The table is insurance
+against the toolchain bump that introduces a lint nobody here is going to fix in someone
+else's frozen code.
 
-What is load-bearing is the other half: mdmost's gate names its package,
-`cargo clippy --all-targets -p mdmost -- -D warnings`, and trailing args reach only the
-selected package. Were the gate workspace-wide, `-D warnings` would override this table
-and lint upstream's code under our settings anyway. **Neither half can reach mdmost's own
-code** — a `[lints]` table applies to the package that declares it. If this tree ever
-stops being read-only, delete the `[lints]` table rather than the scoping.
+What is load-bearing is the other half: mdmost's gate runs `cargo clippy --all-targets
+-p mdmost --no-deps -- -D warnings`. `-p mdmost` alone does not scope the lint to
+mdmost's own code — clippy-driver still lints every workspace member, this crate
+included, the same gap confirmed directly against `vendor/syntect` (see its own
+`VENDORED.md`) — it is `--no-deps` that keeps `-D warnings` off this crate. `-D warnings`
+on the command line only partly overrides the table: it overrides `[lints.rust] warnings
+= "allow"`, so a rustc lint (`dead_code`, confirmed against a throwaway two-crate
+workspace probing this directly) still fails a workspace-wide gate with no `--no-deps`;
+it does *not* override `[lints.clippy] all = "allow"`, so a clippy-only lint (`ptr_arg`,
+`len_zero`, same probe) stays silent even then — `-D warnings` only upgrades lints
+clippy itself would otherwise emit, and `all = "allow"` stops it emitting them at all.
+**Neither half can reach mdmost's own code** — a `[lints]` table applies to the package
+that declares it. If this tree ever stops being read-only, delete the `[lints]` table
+rather than the scoping.

@@ -33,14 +33,13 @@ mod scopes;
 pub use acknowledgements::syntax_acknowledgements;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{LazyLock, Mutex, PoisonError, mpsc};
-use std::time::Duration;
+use std::num::NonZeroUsize;
+use std::sync::{LazyLock, Mutex, PoisonError};
 
 use syntect::easy::ScopeRegionIterator;
 use syntect::parsing::{
-    ParseState, ScopeStack, ScopeStackOp, SyntaxDefinition, SyntaxReference, SyntaxSet,
-    SyntaxSetBuilder,
+    ParseState, ParsingError, ScopeStack, ScopeStackOp, SyntaxDefinition, SyntaxReference,
+    SyntaxSet, SyntaxSetBuilder,
 };
 use syntect::util::LinesWithEndings;
 
@@ -105,8 +104,11 @@ static BUNDLED_SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::e
 /// means calling `into_builder().build()`, which re-links the context references of every
 /// bundled syntax and cost about 180 ms back when there were seventy-five of them — a
 /// cost every document with any code block would pay, and one that has only grown with
-/// the set. Built on its own, the same two definitions link in about 9 ms, and only a
-/// document that actually contains a TOML or Dockerfile fence pays even that.
+/// the set. Built on its own, the same two definitions link in about 9 ms. That is not
+/// limited to a document with a TOML or Dockerfile fence: [`find_in_sets`] queries this
+/// set first for any fence that names a language at all, so any such fence forces the
+/// build, whether or not it resolves to one of these two syntaxes. A document with no
+/// code block, or only fences with no language tag, still pays nothing.
 ///
 /// A definition that fails to parse is skipped rather than panicking;
 /// `every_extra_syntax_loads` asserts that none currently does, so a broken definition
@@ -127,9 +129,30 @@ static EXTRA_SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
 /// are wanted as a unit.
 const MAX_CACHE_ENTRIES: usize = 256;
 
+/// What became of a block's highlighting attempt.
+///
+/// A renderer reads this after calling [`highlight`] for the same key, to decide
+/// whether the block's frame should say why it has no colour. `Plain` covers an absent
+/// or unknown language tag, the size guards in [`highlight_uncached`], and a parse that
+/// ran but failed for any reason other than the token-limit guard — either `mdmost`
+/// declining to try, or trying and finding nothing worth showing. `Failed` is reserved
+/// for a parse the token-limit guard actually cut short.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// The block was parsed and coloured.
+    Highlighted,
+    /// No attempt was made, or a parse ran and failed for a reason other than the
+    /// token-limit guard: no usable language tag, a size guard tripped first, or
+    /// `highlight_with` returned an error other than the token limit.
+    Plain,
+    /// A parse was attempted and the token-limit guard cut it short.
+    Failed,
+}
+
 /// One cached block.
 struct Entry {
     lines: Vec<Line>,
+    outcome: Outcome,
     /// How many times the highlighter has run for this key. One, unless
     /// something recomputes an entry it already had — which is the defect this
     /// cache exists to stop, and what `computed_count` lets a test assert.
@@ -158,9 +181,8 @@ static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| {
     })
 });
 
-/// Serialises tests that depend on either of this module's two process-global,
-/// `cargo test`-shared pieces of state: [`CACHE`]'s single theme slot and
-/// [`ABANDONED`].
+/// Serialises tests that depend on [`CACHE`]'s single, process-global,
+/// `cargo test`-shared theme slot.
 ///
 /// `cache_put` clears the *whole* map whenever it sees a theme other than the one
 /// it already holds, so a test running under one theme can watch a concurrently
@@ -169,15 +191,6 @@ static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| {
 /// theme, not on the entry. Any test that reads `computed_count` or otherwise
 /// depends on a particular theme staying cached must hold this lock for the span
 /// of its assertions.
-///
-/// `ABANDONED` has the same shape of problem: it is a bare counter with no test
-/// isolation, so a test that deliberately abandons or panics a worker races any
-/// other test doing the same. One lock guards both rather than two separate
-/// locks, because a test can need both at once —
-/// `the_javascript_hang_degrades_to_plain_text` goes through [`highlight`], which
-/// touches the cache and can abandon a thread — and two locks taken in different
-/// orders by different tests is a deadlock waiting to happen that a single lock
-/// cannot have.
 #[cfg(test)]
 pub(crate) static HIGHLIGHT_GLOBALS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
@@ -202,8 +215,9 @@ fn cache_get(lang: Option<&str>, src: &str, theme: &Theme) -> Option<Vec<Line>> 
     })
 }
 
-/// Records `lines` for this key, dropping everything cached for another theme.
-fn cache_put(lang: Option<&str>, src: &str, theme: &Theme, lines: &[Line]) {
+/// Records `lines` and `outcome` for this key, dropping everything cached for another
+/// theme.
+fn cache_put(lang: Option<&str>, src: &str, theme: &Theme, lines: &[Line], outcome: Outcome) {
     with_cache(|cache| {
         if cache.styles != Some(theme.code) {
             cache.entries.clear();
@@ -218,12 +232,35 @@ fn cache_put(lang: Option<&str>, src: &str, theme: &Theme, lines: &[Line]) {
             .entry(key)
             .and_modify(|entry| {
                 entry.lines = lines.to_vec();
+                entry.outcome = outcome;
                 entry.computed += 1;
             })
             .or_insert_with(|| Entry {
                 lines: lines.to_vec(),
+                outcome,
                 computed: 1,
             });
+    })
+}
+
+/// What became of the last [`highlight`] call for this key, or [`Outcome::Plain`] if
+/// the memo does not hold it.
+///
+/// Reads the memo rather than recomputing anything, so it must be called after
+/// [`highlight`] (or [`highlight_with_limit`] in a test) for the same `(lang, src,
+/// theme)` — a key the cache has never seen reads the same as one that declined to
+/// highlight, which is the right default for a caller that races the memo rather than
+/// one that is guaranteed to have primed it.
+pub fn outcome(lang: Option<&str>, src: &str, theme: &Theme) -> Outcome {
+    with_cache(|cache| {
+        if cache.styles != Some(theme.code) {
+            return Outcome::Plain;
+        }
+        let key = (lang.map(str::to_owned), src.to_owned());
+        cache
+            .entries
+            .get(&key)
+            .map_or(Outcome::Plain, |entry| entry.outcome)
     })
 }
 
@@ -285,106 +322,37 @@ const ALIASES: &[(&str, &str)] = &[
     ("text", "txt"),
 ];
 
-/// The longest any one block may be highlighted for, however large it is, in a
-/// release build. A debug build multiplies this along with the rest of
-/// [`budget_for`]'s result by [`DEBUG_BUDGET_MULTIPLIER`]: `cargo test` never
-/// ships, so the only thing the multiplier has to do is stop the same
-/// cold-compile cost that motivates [`RELEASE_FLOOR`] from false-positiving
-/// the guard in an unoptimized binary.
-pub const MAX_HIGHLIGHT_BUDGET: Duration = Duration::from_secs(20);
-
-/// The budget's floor before any per-line allowance, calibrated in a release
-/// build against a genuinely cold (first-ever, single-threaded, uncontended)
-/// compile of six representative bundled syntaxes. The worst was TypeScript
-/// at 258 ms; this is four times that, rounded up, and never below one
-/// second regardless of what a lighter syntax would allow. The full
-/// measured table is in `docs/maintainer-notes.md`.
-const RELEASE_FLOOR: Duration = Duration::from_millis(1200);
-
-/// How much slower the same cold compile is measured to be in an unoptimized
-/// (`cargo test`) build, rounded up for margin. The worst observed
-/// debug/release ratio was Makefile at 16.1x (678 ms against 42 ms); the
-/// others clustered around 10x. See `docs/maintainer-notes.md`.
-const DEBUG_BUDGET_MULTIPLIER: u32 = 20;
-
-/// How long a block of `lines` lines is given before it is abandoned.
+/// The flat part of the per-line token budget computed by [`token_limit_for`]; see
+/// [`MAX_TOKENS_PER_BYTE`] for why the budget is not a single flat constant.
 ///
-/// The floor is not about parsing — it absorbs `syntect`'s one-time cost of
-/// compiling a syntax's regexes, which `SyntaxSet` caches globally once paid,
-/// but which is charged in full to whichever block happens to use that
-/// language first in this process. That cost is not proportional to the
-/// block that pays it, so it cannot be amortised by the per-line term below;
-/// it has to be a floor.
-///
-/// Past the floor, budget grows with the input so that a legitimately large
-/// block is not degraded for being large: a thousand lines of TypeScript
-/// cost about 1.4 s of honest parsing on top of the one-time compile.
-fn budget_for(lines: usize) -> Duration {
-    let scaled =
-        (RELEASE_FLOOR + Duration::from_millis(2) * lines as u32).min(MAX_HIGHLIGHT_BUDGET);
-    if cfg!(debug_assertions) {
-        scaled * DEBUG_BUDGET_MULTIPLIER
-    } else {
-        scaled
-    }
-}
+/// This is a backstop against a syntax whose parse does not terminate (see
+/// `docs/upstream/2026-09-21-javascript-syntax-hang.md`), not a size policy: it must
+/// sit far above anything an ordinary line costs. The highest of six representative
+/// bundled languages, measured by bisecting the limit through
+/// [`syntect::parsing::ParseState::parse_line_with_limit`]'s public API, was 147 tokens
+/// (Python). This constant is more than ten times that, rounded to a readable number.
+/// The full measurement table and method are in `docs/maintainer-notes.md`.
+pub const MAX_TOKENS_PER_LINE_BASE: usize = 2_000;
 
-/// How many abandoned threads are tolerated before the guard stops spawning.
+/// The per-byte part of the per-line token budget computed by [`token_limit_for`].
 ///
-/// An abandoned thread cannot be stopped — Rust has no way to cancel one — so
-/// each costs a core until the process exits. Past this, an uncached block is
-/// plain text rather than another core.
-const MAX_ABANDONED: usize = 2;
+/// At least three times the highest tokens-per-byte ratio measured across six bundled
+/// languages, `jquery.min.js`, and a synthetic minified line: the highest was the
+/// synthetic line at ~1.09 tokens/byte. The full measurement table, method, wall-time
+/// figures and why the budget scales by byte length rather than using a flat limit are
+/// in `docs/maintainer-notes.md`.
+pub const MAX_TOKENS_PER_BYTE: usize = 4;
 
-static ABANDONED: AtomicUsize = AtomicUsize::new(0);
-
-/// Resets [`ABANDONED`] to zero.
+/// The token limit for one source `line`, scaled by its length in bytes: see
+/// [`MAX_TOKENS_PER_LINE_BASE`] and [`MAX_TOKENS_PER_BYTE`].
 ///
-/// [`ABANDONED`] only ever counts up, and it is process-global: a test that
-/// deliberately abandons a thread would otherwise permanently spend one of
-/// [`MAX_ABANDONED`]'s two slots for the rest of the test binary, leaving one
-/// more genuine overrun anywhere else in that process — plausible on a
-/// shared, busy machine even with a calibrated floor — enough to make every
-/// later `highlight()` in the binary silently degrade to plain text. Called
-/// by the one test that deliberately triggers an overrun, right after it.
-#[cfg(test)]
-fn reset_abandoned_for_test() {
-    ABANDONED.store(0, Ordering::Relaxed);
-}
-
-/// Runs `work` on a thread and gives up on it after `budget`.
-///
-/// `None` means the work did not finish in time, or that too many threads have
-/// already been abandoned to risk another.
-fn run_within(
-    budget: Duration,
-    work: impl FnOnce() -> Vec<Line> + Send + 'static,
-) -> Option<Vec<Line>> {
-    if ABANDONED.load(Ordering::Relaxed) >= MAX_ABANDONED {
-        return None;
-    }
-    let (tx, rx) = mpsc::channel();
-    // The result is sent rather than joined: a join would wait for a thread
-    // that may never return, which is the whole thing being defended against.
-    // The send fails harmlessly when this side has already given up.
-    std::thread::Builder::new()
-        .name("mdmost-highlight".to_owned())
-        .spawn(move || {
-            let _ = tx.send(work());
-        })
-        .ok()?;
-    match rx.recv_timeout(budget) {
-        Ok(lines) => Some(lines),
-        // A timeout means the worker is still running past its budget — a thread
-        // is genuinely being abandoned, and the count has to reflect that. A
-        // disconnect means the worker panicked and dropped `tx` without sending;
-        // no thread is left running, so there is nothing to account for.
-        Err(mpsc::RecvTimeoutError::Timeout) => {
-            ABANDONED.fetch_add(1, Ordering::Relaxed);
-            None
-        }
-        Err(mpsc::RecvTimeoutError::Disconnected) => None,
-    }
+/// Saturating arithmetic, so a pathologically long `line` can never overflow this into
+/// a panic. The result is never zero: `MAX_TOKENS_PER_LINE_BASE` alone is already
+/// nonzero, and adding to it cannot lower it.
+fn token_limit_for(line: &str) -> NonZeroUsize {
+    let limit =
+        MAX_TOKENS_PER_LINE_BASE.saturating_add(MAX_TOKENS_PER_BYTE.saturating_mul(line.len()));
+    NonZeroUsize::new(limit).expect("MAX_TOKENS_PER_LINE_BASE keeps the limit above zero")
 }
 
 /// Highlights the body of a fenced code block.
@@ -401,35 +369,102 @@ fn run_within(
 /// than re-run: `highlight` takes no width, so a renderer that lays a block out at
 /// several widths gets the same result each time and would otherwise pay for it again.
 pub fn highlight(lang: Option<&str>, src: &str, theme: &Theme) -> Vec<Line> {
+    highlight_capped(lang, || resolve_syntax(lang), src, theme, token_limit_for)
+}
+
+/// `highlight`, with the per-line token limit overridden to a flat `limit` rather than
+/// [`token_limit_for`]'s scaled one.
+///
+/// Exists so a test can drive a real [`Outcome::Failed`] on a real syntax — a line that
+/// would pass the production budget easily but not a deliberately tiny one — instead of
+/// stubbing the parser. It shares [`highlight_capped`] with [`highlight`], so the two
+/// memoise identically and a call here is exactly what [`outcome`] reads back.
+#[cfg(test)]
+pub(crate) fn highlight_with_limit(
+    lang: Option<&str>,
+    src: &str,
+    theme: &Theme,
+    limit: NonZeroUsize,
+) -> Vec<Line> {
+    highlight_capped(
+        lang,
+        || resolve_syntax(lang),
+        src,
+        theme,
+        move |_line: &str| limit,
+    )
+}
+
+/// `highlight`, with the syntax injected directly rather than resolved from `lang`.
+///
+/// Exists so a test can drive a real, non-limit [`ParsingError`] through the actual
+/// classification in [`highlight_uncached`] — the same code [`Outcome::Plain`] and
+/// [`Outcome::Failed`] are decided by for every production caller — using a syntax the
+/// real global sets ([`EXTRA_SYNTAX_SET`], [`BUNDLED_SYNTAXES`]) do not, and should not,
+/// contain. Reaching the same classification through a bundled syntax's own tag would
+/// mean searching, or ruling out among, 213 bundled syntaxes for one with its own
+/// unresolved context reference, which is outside what a unit test can afford.
+///
+/// `lang` still keys the memo alongside `src` and `theme`, exactly as in [`highlight`];
+/// pick a `src` no other test's key collides with.
+#[cfg(test)]
+pub(crate) fn highlight_with_syntax<'a>(
+    lang: Option<&str>,
+    set: &'a SyntaxSet,
+    syntax: &'a SyntaxReference,
+    src: &str,
+    theme: &Theme,
+) -> Vec<Line> {
+    highlight_capped(lang, || Some((set, syntax)), src, theme, token_limit_for)
+}
+
+/// Shared body of [`highlight`], [`highlight_with_limit`] and [`highlight_with_syntax`]:
+/// consults the memo, and on a miss highlights under `limit_for` and records both the
+/// lines and the [`Outcome`].
+///
+/// `resolve` is a closure rather than an already-resolved syntax so that it runs, if at
+/// all, only where [`highlight_uncached`] used to call [`resolve_syntax`] directly —
+/// after the cache miss and the byte-size guard — rather than unconditionally on every
+/// call, which would build [`EXTRA_SYNTAX_SET`] even for a block the byte-size guard
+/// was about to reject.
+fn highlight_capped<'a>(
+    lang: Option<&str>,
+    resolve: impl FnOnce() -> Option<(&'a SyntaxSet, &'a SyntaxReference)>,
+    src: &str,
+    theme: &Theme,
+    limit_for: impl Fn(&str) -> NonZeroUsize,
+) -> Vec<Line> {
     if let Some(hit) = cache_get(lang, src, theme) {
         return hit;
     }
-    let styles = theme.code;
-    let owned_lang = lang.map(str::to_owned);
-    let owned_src = src.to_owned();
-    let line_count = LinesWithEndings::from(src).count();
-    let lines = run_within(budget_for(line_count), move || {
-        highlight_uncached(owned_lang.as_deref(), &owned_src, &styles)
-    })
-    // A block that overran is cached as plain text, so it is neither
-    // re-attempted on the next layout probe nor on the next resize.
-    .unwrap_or_else(|| plain(src, &theme.code));
-    cache_put(lang, src, theme, &lines);
+    let (lines, outcome) = highlight_uncached(resolve, src, &theme.code, &limit_for);
+    cache_put(lang, src, theme, &lines, outcome);
     lines
 }
 
-/// Highlights without consulting the cache. See [`highlight`] for the contract.
-fn highlight_uncached(lang: Option<&str>, src: &str, styles: &CodeStyles) -> Vec<Line> {
+/// Highlights without consulting the cache. See [`highlight`] for the contract; see
+/// [`highlight_capped`] for why `resolve` is a closure rather than an already-resolved
+/// syntax.
+fn highlight_uncached<'a>(
+    resolve: impl FnOnce() -> Option<(&'a SyntaxSet, &'a SyntaxReference)>,
+    src: &str,
+    styles: &CodeStyles,
+    limit_for: &dyn Fn(&str) -> NonZeroUsize,
+) -> (Vec<Line>, Outcome) {
     if src.len() > MAX_HIGHLIGHT_BYTES {
-        return plain(src, styles);
+        return (plain(src, styles), Outcome::Plain);
     }
-    let Some((set, syntax)) = resolve_syntax(lang) else {
-        return plain(src, styles);
+    let Some((set, syntax)) = resolve() else {
+        return (plain(src, styles), Outcome::Plain);
     };
     if LinesWithEndings::from(src).count() > MAX_HIGHLIGHT_LINES {
-        return plain(src, styles);
+        return (plain(src, styles), Outcome::Plain);
     }
-    highlight_with(set, syntax, src, styles).unwrap_or_else(|| plain(src, styles))
+    match highlight_with(set, syntax, src, styles, limit_for) {
+        Ok(lines) => (lines, Outcome::Highlighted),
+        Err(HighlightError::TokenLimitExceeded) => (plain(src, styles), Outcome::Failed),
+        Err(HighlightError::Other) => (plain(src, styles), Outcome::Plain),
+    }
 }
 
 /// The name of the `syntect` syntax a language tag resolves to, if any.
@@ -481,7 +516,20 @@ fn find_in_sets(token: &str) -> Option<(&'static SyntaxSet, &'static SyntaxRefer
         .map(|syntax| (&*BUNDLED_SYNTAXES, syntax))
 }
 
-/// Highlights `src` with `syntax`, or returns `None` if the parser gave up.
+/// Why [`highlight_with`] produced no lines.
+///
+/// Only [`Self::TokenLimitExceeded`] is reported to the caller as [`Outcome::Failed`];
+/// every other cause degrades silently to [`Outcome::Plain`], exactly as every parser
+/// error was treated before this branch introduced the token-limit guard.
+enum HighlightError {
+    /// [`ParsingError::TokenLimitExceeded`]: the budget the caller passed in was not
+    /// enough to finish the line.
+    TokenLimitExceeded,
+    /// Any other [`ParsingError`], or a `ScopeStack::apply` error.
+    Other,
+}
+
+/// Highlights `src` with `syntax`, or returns why the parser gave up.
 ///
 /// Any parser error degrades the whole block rather than half of it, so the reader
 /// never sees a block that is colourful at the top and plain at the bottom for no
@@ -491,13 +539,20 @@ fn highlight_with(
     syntax: &SyntaxReference,
     src: &str,
     styles: &CodeStyles,
-) -> Option<Vec<Line>> {
+    limit_for: &dyn Fn(&str) -> NonZeroUsize,
+) -> Result<Vec<Line>, HighlightError> {
     let mut state = ParseState::new(syntax);
     let mut stack = ScopeStack::new();
     let mut out = Vec::new();
 
     for raw in LinesWithEndings::from(src) {
-        let ops = state.parse_line(raw, set).ok()?;
+        let ops = match state.parse_line_with_limit(raw, set, Some(limit_for(raw))) {
+            Ok(ops) => ops,
+            Err(ParsingError::TokenLimitExceeded { .. }) => {
+                return Err(HighlightError::TokenLimitExceeded);
+            }
+            Err(_) => return Err(HighlightError::Other),
+        };
         let mut line = Line::empty();
         let mut column = 0usize;
         let mut style = styles.text;
@@ -505,7 +560,7 @@ fn highlight_with(
 
         for (text, op) in ScopeRegionIterator::new(&ops, raw) {
             if !matches!(op, ScopeStackOp::Noop) {
-                stack.apply(op).ok()?;
+                stack.apply(op).map_err(|_| HighlightError::Other)?;
                 restyle = true;
             }
             let text = strip_eol(text);
@@ -520,7 +575,7 @@ fn highlight_with(
         }
         out.push(line);
     }
-    Some(out)
+    Ok(out)
 }
 
 /// Renders `src` as plain themed text, one [`Line`] per source line.
@@ -577,4 +632,4 @@ pub fn plain_style(theme: &Theme) -> Style {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

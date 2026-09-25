@@ -36,14 +36,12 @@
   to take the whole list or quote with it: one over-wide fence in a single item was enough
   to make every sentence in every other item wrap at the terminal width instead of the
   configured body width. Only the wide block itself still reaches past the cap.
-- A fenced block whose language definition never finishes parsing (a bug in the bundled
-  JavaScript grammar `syntect` compiles; see `docs/upstream/`) no longer freezes the
-  pager. Such a block now gives up after a measured budget and renders as plain text
-  instead of hanging forever. Compared to 0.3.4, a 36-block reference document that used
-  to take 6.07 s to first open now takes about 2.27 s — 2.7x faster, most of that from
-  the change above, with the price of this guard folded in. After two blocks are
-  abandoned this way in one session, every later code block that is not already cached
-  falls back to plain text too, silently, for the rest of that session.
+- A JavaScript fence that used to freeze the pager when opened (a bug in the bundled
+  JavaScript grammar; see `docs/upstream/`) now opens normally and is shown in colour
+  like any other code block.
+- A code block whose highlighting runs away is now shown without colour, with
+  "highlighting gave up" in its frame's bottom border, instead of freezing the pager.
+  The rest of the document is unaffected.
 
 ## 0.3.4 - 2026-09-16
 

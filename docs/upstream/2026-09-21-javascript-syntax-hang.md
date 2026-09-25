@@ -48,5 +48,32 @@ does not do.
 
 ## What was not measured
 
-No rule inside the `.sublime-syntax` definition has been identified as the cause. Nobody
-has gone looking, and this report does not speculate about which rule it is.
+No rule inside the `.sublime-syntax` definition was identified as the cause by this
+report. See the section below, added later.
+
+## Root cause, found upstream (2026-09-22)
+
+`syntect` PR [#706](https://github.com/trishume/syntect/pull/706), open and unreviewed
+since 2026-09-12, reports the same hang from a reproducer of the same shape (`x /*`) and
+diagnoses it: `expression-statement-continuation` matches empty, because the `/` of `/*`
+is in its operator class, and the rule for "rest of the line is blanks and comments, then
+end of line" also matches empty. The two hand the position back to each other.
+
+The loop is not caught because `parse_next_token`'s guard remembers only a non-consuming
+**push**. A `set` leaves the stack depth unchanged, so it neither arms nor trips the
+guard. `parser.rs` says as much in the comment beside the guard. That is engine-
+independent, which is why this report's two backends both hang.
+
+It also explains why the merged stack-depth cap (PR #597, a limit of 100 pushes) does not
+fire here: this loop never grows the stack.
+
+Related upstream reports of the same class, all open: issue #460 (the same JavaScript
+symptom, reported 2023-06-21, never root-caused), #650 (Perl POD), #656 (non-consuming
+multi-context push).
+
+This report's reproducer was posted upstream on 2026-09-22, on PR #706
+([comment](https://github.com/trishume/syntect/pull/706#issuecomment-5774175118)) and on
+issue #460 ([comment](https://github.com/trishume/syntect/issues/460#issuecomment-5774175313)),
+the second linking #460 to #706 as its likely root cause. No new issue was opened, and
+nothing about a step budget was raised there — that belongs on issue #202. Do not post
+this again.

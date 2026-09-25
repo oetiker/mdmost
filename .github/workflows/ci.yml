@@ -32,20 +32,37 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      # Both checks name `-p mdmost`. This is a workspace now, and its other member is
-      # `vendor/pulldown-latex` — someone else's code, frozen at an upstream commit, that
-      # nobody here is going to restyle. Naming the package is what keeps our standards
-      # applied to our code and only to our code; `vendor/pulldown-latex/Cargo.toml`
-      # carries the other half of the story.
-      #
-      # Measured on 2026-08-24, both checks are green over the vendored crate as well, so
-      # this is not hiding a failure today. It is refusing to inherit one from a toolchain
-      # bump, in code this repository has no business editing.
+      # Both checks name `-p mdmost`. This is a workspace now, and its other members are
+      # `vendor/pulldown-latex` and `vendor/syntect` — someone else's code, frozen at an
+      # upstream release, that nobody here is going to restyle. Naming the package is
+      # what keeps our standards applied to our code and only to our code;
+      # `vendor/pulldown-latex/Cargo.toml` and `vendor/syntect/Cargo.toml` carry the
+      # other half of the story.
       - name: Check formatting
         run: cargo fmt --check -p mdmost
 
+      # `--no-deps` is load-bearing, not a style preference: `cargo clippy -p mdmost`
+      # alone still lints every *workspace member* (not just mdmost) with clippy-driver,
+      # because that substitution is workspace-wide rather than scoped by `-p`. Confirmed
+      # against `vendor/syntect` directly: `cargo clippy -p syntect -- -D warnings` fails
+      # today, on the current toolchain, on `mismatched_lifetime_syntaxes` at
+      # `yaml_load.rs:818` — one of upstream's own signatures, nothing this task touched.
+      # The vendored manifests' own `[lints]` tables only partly help here: `-D warnings`
+      # on the command line overrides `[lints.rust] warnings = "allow"`, so that rustc
+      # lint still fails, confirmed by removing `-D warnings` and watching the same build
+      # go silent. It does not override `[lints.clippy] all = "allow"`, though: a
+      # clippy-only lint stays silent under this same table even with `-D warnings` and
+      # no `--no-deps`, confirmed against a throwaway probe crate (both `VENDORED.md`s
+      # carry the same account). `--no-deps` is the actual scoping the comment above and
+      # both `VENDORED.md`s describe; without it, "only our code" was not true.
       - name: Run Clippy
-        run: cargo clippy --all-targets -p mdmost -- -D warnings
+        run: cargo clippy --all-targets -p mdmost --no-deps -- -D warnings
+
+      # `[patch.crates-io]` is ignored in silence if the vendored version stops satisfying
+      # two-face's requirement. Two syntect crates compile and the failure surfaces as a
+      # type error naming `SyntaxSet` twice.
+      - name: One syntect only
+        run: cargo tree -p syntect --quiet
 
   test:
     name: Test
@@ -80,6 +97,44 @@ jobs:
       # patches added. If these go red, one of the four has been lost.
       - name: Run the vendored crate's tests
         run: cargo test -p pulldown-latex
+
+      # syntect's own tests need real Sublime Text package and theme content that
+      # upstream's own repo pulls from four git submodules, none of which vendor/syntect
+      # carries (see vendor/syntect/VENDORED.md for why: ~20 MB of independently-licensed,
+      # actively-changing third-party content, going into a directory the vendoring's own
+      # exit plan deletes within a year). Seven of the tests that need it are in
+      # `parsing::parser::tests` -- the exact file both syntect patches modify -- so
+      # living with a skip list here would leave the two patches' most important
+      # regression net unexercised. Instead: fetch each submodule at the exact commit
+      # `v5.3.0`'s own tree pins it to (never a branch -- a branch moves), straight from
+      # upstream, with nothing kept or redistributed by this repository. If any fetch
+      # fails, this step fails and stays failed -- no silent fallback to the skip list.
+      - name: Fetch syntect's test fixtures (not vendored, not redistributed)
+        run: |
+          set -eu
+          cd vendor/syntect/testdata
+          fetch() {
+            name="$1"; url="$2"; sha="$3"
+            mkdir "$name"
+            cd "$name"
+            git init -q
+            git fetch --depth 1 "$url" "$sha"
+            git checkout -q FETCH_HEAD
+            rm -rf .git
+            cd ..
+          }
+          fetch Packages https://github.com/sublimehq/Packages fa6b8629c95041bf262d4c1dab95c456a0530122
+          fetch Solarized https://github.com/braver/Solarized.git bcd6234b4f5f96d3fd27db079268b5757053072a
+          fetch spacegray https://github.com/kkga/spacegray.git 2703e93f559e212ef3895edd10d861a4383ce93d
+          fetch InspiredGitHub.tmtheme https://github.com/sethlopezme/InspiredGitHub.tmtheme.git 18ddb271179e118cfc2dd83abf88b915b7328a25
+
+      # The vendored syntect's own suite, for the same reason pulldown-latex's runs: the
+      # patches in vendor/syntect/src/parsing/parser.rs add their regression tests to the
+      # inline `mod tests` there. If these go red, a patch has been lost. No `--skip`
+      # here -- the fixtures the step above fetched make the full 134 run (113 lib + 8
+      # error_handling + 13 doctests; see vendor/syntect/VENDORED.md).
+      - name: Run the vendored syntect's tests
+        run: cargo test -p syntect
 
   windows:
     name: Windows compile

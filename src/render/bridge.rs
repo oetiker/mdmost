@@ -37,6 +37,17 @@ pub(crate) fn highlight(language: Option<&str>, src: &str, theme: &Theme) -> Vec
     crate::highlight::highlight(language, src, theme)
 }
 
+/// What became of the last [`highlight`] call for this key. See
+/// `crate::highlight::outcome` for the contract: it reads the memo `highlight` just
+/// wrote, so it must be called after `highlight` for the same `(language, src, theme)`.
+pub(crate) fn outcome(
+    language: Option<&str>,
+    src: &str,
+    theme: &Theme,
+) -> crate::highlight::Outcome {
+    crate::highlight::outcome(language, src, theme)
+}
+
 /// Draws a Mermaid diagram as Unicode box art, degrading as far as `fit` allows.
 ///
 /// Named for what it returns rather than mirroring `mermaid::render_mermaid`, so the

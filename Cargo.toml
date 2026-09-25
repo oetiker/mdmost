@@ -1,14 +1,25 @@
-# One member, and it is not ours. `vendor/pulldown-latex` is someone else's crate copied
-# in at a known commit; `vendor/pulldown-latex/VENDORED.md` says which commit, which four
-# patches it carries, and what has to be true before that directory and this table are
-# both deleted again.
+# Two members, and neither is ours. `vendor/pulldown-latex` and `vendor/syntect` are
+# someone else's crates copied in at a known commit/release each; their own
+# `VENDORED.md`s say which, what each carries, and what has to be true before that
+# directory and its share of this table are deleted again.
 #
-# It is a separate crate rather than a module of mdmost on purpose. `#![forbid(unsafe_code)]`
-# at `src/lib.rs:47` is crate-level, so it does not reach across this boundary and
-# upstream's three `unsafe` blocks need no rewriting -- the same way ratatui's and
+# Each is a separate crate rather than a module of mdmost on purpose. `#![forbid(unsafe_code)]`
+# at mdmost's `src/lib.rs:47` is crate-level, so it does not reach across either boundary
+# and neither crate's `unsafe` blocks need rewriting -- the same way ratatui's and
 # bumpalo's never did.
 [workspace]
-members = ["vendor/pulldown-latex"]
+members = ["vendor/pulldown-latex", "vendor/syntect"]
+
+# `two-face` depends on `syntect` as well, so a plain path dependency would compile two
+# copies whose `SyntaxSet` types do not interoperate — `two_face::syntax::extra_newlines()`
+# would return a type `ParseState::new` refuses, and the error would name `SyntaxSet`
+# twice. `[patch]` redirects every requirement in the graph to one copy.
+#
+# The patch applies only while the vendored version satisfies what two-face asks for,
+# `^5.3.0`. A pre-release version would not, and cargo would ignore this table in
+# silence. `tests/vendoring.rs` fails if that ever happens.
+[patch.crates-io]
+syntect = { path = "vendor/syntect" }
 
 [package]
 name = "mdmost"
