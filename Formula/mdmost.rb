@@ -26,9 +26,9 @@ class Mdmost < Formula
   # runner image available for each architecture.
   # BOTTLE-START
   bottle do
-    root_url "https://github.com/oetiker/mdmost/releases/download/v0.3.4"
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "1380132de11e1f14963f07fec98dcc3671ab1e70e2ca3162974300ba6c8785d5"
-    sha256 cellar: :any_skip_relocation, sequoia: "368354df439676e89ab18ed8dbffe7e99f20b1bed3eff7632f8952c774183d37"
+    root_url "https://github.com/oetiker/mdmost/releases/download/v0.3.5"
+    sha256 cellar: :any_skip_relocation, arm64_sonoma: "ac581e16812a2ee94cbec2f5ea320ff64a5e37fc5f7e3fdb1bcef522d6437227"
+    sha256 cellar: :any_skip_relocation, sequoia: "2597325c61774103f83350bad50b2d217904136f2b0fea71d1a5fb339f24d969"
   end
   # BOTTLE-END
 
