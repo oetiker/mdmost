@@ -8865,8 +8865,8 @@ fn a_long_file_name_is_capped_so_the_breadcrumb_fits_at_eighty_columns() {
         rows[0]
     );
     assert!(
-        rows[0].contains("a-rather-long-file-\u{2026}"),
-        "the name is elided to twenty columns: {:?}",
+        rows[0].contains(" a-rather-long-\u{2026}ument \u{2502}"),
+        "the name loses `.md`, then its middle, to fit twenty columns: {:?}",
         rows[0]
     );
     // A name that already fits the cap is left alone.
@@ -8875,6 +8875,45 @@ fn a_long_file_name_is_capped_so_the_breadcrumb_fits_at_eighty_columns() {
         super::chrome::draw_status(buffer, area, &app)
     });
     assert!(rows[0].contains("notes.md"), "{:?}", rows[0]);
+    // A name that fits the cap once `.md` is gone loses only that.
+    let app = pager_named(
+        "# Introduction and overview\n\nbody\n",
+        "abcdefghijklmnopqrs.md",
+        80,
+        10,
+    );
+    let rows = painted(80, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        rows[0].contains(" abcdefghijklmnopqrs \u{2502}") && !rows[0].contains('\u{2026}'),
+        "{:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn a_name_shortened_to_fit_a_narrow_bar_keeps_its_end() {
+    // The width-driven elision in `lay_out` shortens the name past the cap; it must use
+    // the same rule as the cap, so the end of the name is still on screen.
+    for width in [36u16, 40, 44] {
+        let app = pager_named(WIDE, "a-rather-long-file-name.md", width, 12);
+        let rows = painted(width, 1, |buffer, area| {
+            super::chrome::draw_status(buffer, area, &app)
+        });
+        let row = &rows[0];
+        assert!(!row.contains(".md"), "at {width}: {row:?}");
+        let at = row.find('\u{2026}').expect("the name is shortened");
+        assert!(
+            row[at..].chars().nth(1).is_some_and(|c| !c.is_whitespace()),
+            "the ellipsis is followed by the end of the name at {width}: {row:?}"
+        );
+        assert_eq!(
+            crate::text::display_width(row),
+            usize::from(width),
+            "{row:?}"
+        );
+    }
 }
 
 #[test]

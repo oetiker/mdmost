@@ -392,6 +392,75 @@ pub fn ellipsize(text: &str, width: usize) -> String {
     format!("{}{ELLIPSIS}", truncate_to_width(text, width - 1))
 }
 
+/// Shortens a file name to at most `width` display columns.
+///
+/// The end-elided [`ellipsize`] keeps a name's start and loses the end, and file names
+/// that share a prefix — dated notes, numbered chapters — then all read the same. So a
+/// name that does not fit is shortened in this order, stopping at the first that fits:
+///
+/// 1. A final `.md`, in any case, is dropped. It says nothing in a Markdown pager.
+/// 2. With 11 or more columns of room, the last 5 columns are kept behind `…` and the
+///    start fills the rest: `2026-09-25-view…ghter`.
+/// 3. With less, `…` goes in the middle, and the start gets the odd column.
+///
+/// Cuts land on grapheme cluster boundaries. A column the end cannot use because a
+/// double-width cluster would straddle it goes to the start, so the result is at most
+/// one column narrower than `width`, and never wider.
+pub fn ellipsize_name(text: &str, width: usize) -> String {
+    if display_width(text) <= width {
+        return text.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let stem = strip_md(text);
+    if display_width(stem) <= width {
+        return stem.to_string();
+    }
+    let room = width - display_width(ELLIPSIS);
+    let tail_room = if width >= NAME_MIDDLE_FROM {
+        NAME_TAIL
+    } else {
+        room / 2
+    };
+    let tail = tail_to_width(stem, tail_room);
+    let head = truncate_to_width(stem, room - display_width(tail));
+    format!("{head}{ELLIPSIS}{tail}")
+}
+
+/// The room from which [`ellipsize_name`] keeps a fixed-width end rather than halves.
+const NAME_MIDDLE_FROM: usize = 11;
+
+/// The columns of a name's end that [`ellipsize_name`] keeps once it has the room.
+const NAME_TAIL: usize = 5;
+
+/// `name` without a final `.md` in any case — unless that would leave nothing.
+fn strip_md(name: &str) -> &str {
+    let cut = name.len().saturating_sub(3);
+    match (name.get(..cut), name.get(cut..)) {
+        (Some(stem), Some(suffix)) if !stem.is_empty() && suffix.eq_ignore_ascii_case(".md") => {
+            stem
+        }
+        _ => name,
+    }
+}
+
+/// The longest end of `text` at most `max_width` display columns wide.
+///
+/// The mirror of [`truncate_to_width`]: the cut never lands inside a grapheme cluster,
+/// and a double-width cluster that straddles the limit is left out.
+fn tail_to_width(text: &str, max_width: usize) -> &str {
+    let mut width = 0usize;
+    for (offset, cluster) in text.grapheme_indices(true).rev() {
+        let w = display_width(cluster);
+        if width + w > max_width {
+            return &text[offset + cluster.len()..];
+        }
+        width += w;
+    }
+    text
+}
+
 /// Splits `text` at `at_width` display columns, returning the part before and after.
 ///
 /// As with [`truncate_to_width`], a cluster that straddles the split point is not
