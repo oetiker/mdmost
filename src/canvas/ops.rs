@@ -5,7 +5,9 @@
 //! from. Every one of them preserves the canvas contract described in
 //! [`crate::canvas`].
 
-use super::{Anchor, Atom, BorderSet, Canvas, Cell, Hotspot, Pin, SearchSpan, TargetRebase};
+use super::{
+    Anchor, Atom, BorderSet, Canvas, Cell, CodeRow, Hotspot, Pin, SearchSpan, TargetRebase,
+};
 use crate::error::CanvasError;
 use crate::text::{Align, Line, display_width};
 use crate::theme::Style;
@@ -384,6 +386,11 @@ impl Canvas {
             col: s.col.saturating_add(left16),
             ..*s
         }));
+        self.code_rows.extend(src.code_rows.iter().map(|r| CodeRow {
+            row: r.row + top,
+            col: r.col.saturating_add(left16),
+            ..*r
+        }));
     }
 
     /// Translates and merges `src`'s pins into `self`.
@@ -585,6 +592,15 @@ impl Canvas {
             .map(|s| SearchSpan {
                 row: s.row - start,
                 ..*s
+            })
+            .collect();
+        out.code_rows = self
+            .code_rows
+            .iter()
+            .filter(|r| (start..end).contains(&r.row))
+            .map(|r| CodeRow {
+                row: r.row - start,
+                ..*r
             })
             .collect();
         out.pins = self

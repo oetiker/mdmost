@@ -4932,3 +4932,41 @@ fn a_caption_does_not_change_a_block_s_height() {
 
     assert_eq!(uncaptioned_canvas.height(), captioned_canvas.height());
 }
+
+/// Every drawn code line records where it landed, and a blocking render records none.
+#[test]
+fn a_keyed_code_block_records_one_code_row_per_line() {
+    use crate::highlight::{CodeBlock, CodeSource, Uncached};
+
+    #[derive(Debug)]
+    struct Keyed;
+    impl CodeSource for Keyed {
+        fn block(&self, lang: Option<&str>, src: &str, theme: &Theme) -> CodeBlock {
+            CodeBlock {
+                key: Some(42),
+                ..Uncached.block(lang, src, theme)
+            }
+        }
+    }
+    let theme = Theme::default();
+    let options = RenderOptions::default();
+    let doc = Doc::parse("```rust\nfn a() {}\nfn b() {}\n```\n");
+    let keyed = render_document_with(&doc, 60, None, &theme, &options, &Keyed);
+    let rows: Vec<(u64, usize)> = keyed
+        .code_rows()
+        .iter()
+        .map(|r| (r.block, r.line))
+        .collect();
+    assert_eq!(rows, vec![(42, 0), (42, 1)]);
+    for row in keyed.code_rows() {
+        let text: String = keyed
+            .row_text(row.row)
+            .chars()
+            .skip(usize::from(row.col))
+            .take(usize::from(row.cols))
+            .collect();
+        assert!(text.starts_with("fn "), "row {row:?} points at {text:?}");
+    }
+    let blocking = render_document(&doc, 60, None, &theme, &options);
+    assert!(blocking.code_rows().is_empty());
+}

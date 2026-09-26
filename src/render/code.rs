@@ -32,7 +32,7 @@
 //! `tui::tests::the_gutter_rule_matches_the_renderer` pins the published column to the
 //! layout drawn here.
 
-use crate::canvas::{Atom, BorderSet, Canvas, SearchSpan};
+use crate::canvas::{Atom, BorderSet, Canvas, CodeRow, SearchSpan};
 use crate::doc::SourceSpan;
 use crate::error::MermaidError;
 use crate::mermaid::Fit;
@@ -344,7 +344,7 @@ fn framed_code(
     // Below four columns there is no room for a frame plus content; the code is shown
     // bare rather than as a box with nothing inside it.
     if width < 4 {
-        return code_area(&lines, origins, literal, width, false, ctx);
+        return code_area(&lines, origins, literal, width, false, block.key, ctx);
     }
     // The frame takes two columns and the interior padding one more on each side, so
     // code sits inside its box the way a table cell sits inside its column.
@@ -360,6 +360,7 @@ fn framed_code(
         literal,
         area_width,
         ctx.options.line_numbers,
+        block.key,
         ctx,
     );
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
@@ -607,6 +608,7 @@ fn code_area(
     literal: &str,
     width: u16,
     numbered: bool,
+    key: Option<u64>,
     ctx: Ctx<'_>,
 ) -> Canvas {
     let theme = ctx.theme;
@@ -647,6 +649,26 @@ fn code_area(
             out.write_str(row, digits + 1, GUTTER_RULE, theme.code.frame);
         }
         out.write_line(row, gutter, line, theme.code.background);
+        if let Some(block) = key {
+            // Colour for this line may arrive after layout; record which cells it will
+            // restyle. The same per-row clip question as the search span below: a row
+            // with content past the budget loses its last column to the marker.
+            let code_budget = budget.saturating_sub(gutter);
+            let content_width = display_width(line.text().trim_end_matches(' '));
+            let cols = if content_width > code_budget {
+                code_budget.saturating_sub(display_width(OVERFLOW_MARKER))
+            } else {
+                line.width().min(code_budget)
+            };
+            out.add_code_row(CodeRow {
+                block,
+                line: row,
+                row,
+                col: u16::try_from(gutter).unwrap_or(u16::MAX),
+                cols: u16::try_from(cols).unwrap_or(u16::MAX),
+                base: theme.code.background,
+            });
+        }
         // The gutter is chrome and is not in the document, so the span starts where the
         // code does. `origins` is empty for a block rendered without a mapping — a
         // fragment, or a construction site that has none — and then this block behaves
@@ -770,9 +792,10 @@ pub(super) fn fallback(
     ctx: Ctx<'_>,
 ) -> Canvas {
     let theme = ctx.theme;
-    let lines = ctx.code.block(language, literal, theme).lines;
+    let block = ctx.code.block(language, literal, theme);
+    let lines = block.lines;
     if width < 4 {
-        return code_area(&lines, origins, literal, width, false, ctx);
+        return code_area(&lines, origins, literal, width, false, block.key, ctx);
     }
     let padding = if width > 2 + 2 * CODE_PADDING {
         CODE_PADDING
@@ -786,6 +809,7 @@ pub(super) fn fallback(
         literal,
         area_width,
         ctx.options.line_numbers,
+        block.key,
         ctx,
     )
     .indent(padding, padding, theme.code.background);
