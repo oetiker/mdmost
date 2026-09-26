@@ -28,10 +28,12 @@
 //! canvas — which has no notion of a tab — receives only printable text.
 
 mod acknowledgements;
+mod pager;
 mod scopes;
 mod source;
 
 pub use acknowledgements::syntax_acknowledgements;
+pub use pager::{Highlighter, PAGER_LINE_TOKENS};
 pub(crate) use source::UNCACHED;
 pub use source::{BlockingSource, CodeBlock, CodeSource, Uncached};
 
