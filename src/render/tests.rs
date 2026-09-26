@@ -4884,9 +4884,10 @@ fn a_failed_block_s_caption_is_ellipsized_and_styled_like_other_captions() {
 
 /// The caption costs no row.
 ///
-/// Branch B patches colour onto an already-rendered canvas, which is only sound while a
-/// plain block and a highlighted one occupy the same cells. A caption that added a row
-/// would break that silently, so it is pinned here rather than in a comment.
+/// The pager patches colour onto an already-rendered canvas (`Highlighter::advance`,
+/// called from `App::highlight_slice`), which is only sound while a plain block and a
+/// highlighted one occupy the same cells. A caption that added a row would break that
+/// silently, so it is pinned here rather than in a comment.
 ///
 /// Two sources, identical in geometry (same line count, same line lengths) but distinct
 /// in their marker's last character, so the two renders below cannot be confused with

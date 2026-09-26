@@ -244,7 +244,9 @@ pub(crate) struct Ctx<'a> {
     /// Where code blocks get their lines from (see `crate::highlight::CodeSource`).
     ///
     /// A fresh context highlights on every request; `render_document_with` and the
-    /// public block entry points replace it with a memoising or a deferred source.
+    /// other public block entry points (`render_block`, `render_block_numbered`,
+    /// `render_blocks`) replace it with a memoising or a deferred source.
+    /// `render_table`, the remaining public entry point, keeps this uncached default.
     pub code: &'a dyn crate::highlight::CodeSource,
 }
 

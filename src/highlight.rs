@@ -131,7 +131,7 @@ static EXTRA_SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
 ///
 /// A [`CodeSource`] hands this back alongside a block's lines, so the renderer can
 /// decide whether the block's frame should say why it has no colour. `Plain` covers an
-/// absent or unknown language tag, the size guards in [`highlight_uncached`], and a
+/// absent or unknown language tag, the size guards in `highlight_uncached`, and a
 /// parse that ran but failed for any reason other than the token-limit guard — either
 /// `mdmost` declining to try, or trying and finding nothing worth showing. `Failed` is
 /// reserved for a parse the token-limit guard actually cut short.

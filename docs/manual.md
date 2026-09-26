@@ -429,7 +429,7 @@ bundled Dockerfile emits a whole `RUN` line as one span.
 In the pager, code is drawn uncoloured first. Colour is added to the blocks on screen,
 then to the blocks up to one screen above and below. A block with a line too long to
 colour quickly is left uncoloured and its frame says `highlighting gave up`;
-`--render-once` colours such a block.
+`--render-once` allows a much longer line before it gives up the same way.
 
 ## Line length
 

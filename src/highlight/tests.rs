@@ -202,9 +202,9 @@ fn each_syntax_is_paired_with_its_own_set() {
     assert!(set.find_syntax_by_name(&syntax.name).is_some());
 }
 
-/// A key no other test uses, so this test's entry is never confused with another
-/// test's. Each `BlockingSource` below is its own instance, memoising nothing beyond
-/// its own scope, so no lock against a concurrently running test is needed here.
+/// An arbitrary probe line, named so a wrong key is easy to spot in a failure. Each
+/// `BlockingSource` below is its own instance, memoising nothing beyond its own scope,
+/// so no lock against a concurrently running test is needed here.
 const TASK1_SRC: &str = "let task1_unique_probe = 1;\n";
 
 #[test]

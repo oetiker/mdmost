@@ -373,7 +373,7 @@ impl Canvas {
         self.merge_hotspots(src, top, u16::try_from(left).unwrap_or(u16::MAX), rebase);
     }
 
-    /// Translates and merges `src`'s anchors and spans into `self`.
+    /// Translates and merges `src`'s anchors, search spans and code rows into `self`.
     fn merge_metadata(&mut self, src: &Canvas, top: usize, left: usize) {
         self.anchors.extend(src.anchors.iter().map(|a| Anchor {
             id: a.id.clone(),
