@@ -4970,3 +4970,108 @@ fn a_keyed_code_block_records_one_code_row_per_line() {
     let blocking = render_document(&doc, 60, None, &theme, &options);
     assert!(blocking.code_rows().is_empty());
 }
+
+/// Fences at top level, in a list, in a quote and in a table cell; a tab, a CJK line, and
+/// the same fence twice. The pager's plain-then-patched canvas must equal the blocking
+/// render cell for cell.
+const EQUIVALENCE_DOC: &str = "\
+# Equivalence
+
+```rust
+fn main() {
+\tlet s = \"漢字 and tabs\";
+}
+```
+
+- item
+
+  ```python
+  def f(x):
+      return x  # comment
+  ```
+
+> ```sh
+> echo \"$HOME\" | grep -v x
+> ```
+
+| code |
+|------|
+| `x` |
+
+```rust
+fn main() {
+\tlet s = \"漢字 and tabs\";
+}
+```
+";
+
+/// Advances `h` until every code row `canvas` recorded has finished, painting each
+/// line as it completes — the same loop the pager runs between key presses
+/// (`crate::tui::App::highlight_slice`), driven here to exhaustion instead of one
+/// budget's worth.
+fn drain_pending_code(canvas: &mut Canvas, h: &mut crate::highlight::Highlighter) {
+    let mut keys: Vec<u64> = canvas.code_rows().iter().map(|r| r.block).collect();
+    keys.dedup();
+    for key in keys {
+        while h.outcome(key) == Some(crate::highlight::Outcome::Pending) {
+            for index in h.advance(key, &mut || false) {
+                if let Some(line) = h.line(key, index) {
+                    canvas.paint_code_line(key, index, &line);
+                }
+            }
+        }
+    }
+}
+
+/// The pager draws a document at once, from a [`crate::highlight::Highlighter`] that
+/// answers every fence in plain text before it has parsed a single one, then patches
+/// colour in as parsing finishes. Once every block has finished, the result must be
+/// indistinguishable from a render that waited for [`crate::highlight::BlockingSource`]
+/// up front — a reader who never touches a key must see the same page either way.
+///
+/// Compares `rows()`, not the two canvases outright: the patched canvas also carries
+/// `code_rows`, which the blocking one never records (see
+/// `a_keyed_code_block_records_one_code_row_per_line` above), so a whole-value
+/// `assert_eq!` could never pass.
+#[test]
+fn the_pager_s_patched_canvas_equals_the_blocking_render() {
+    let theme = Theme::default_dark();
+    let doc = Doc::parse(EQUIVALENCE_DOC);
+    for width in [40u16, 80, 120] {
+        let blocking = render_document(&doc, width, Some(72), &theme, &PLAIN);
+        let mut h = crate::highlight::Highlighter::new();
+        let mut canvas = render_document_with(&doc, width, Some(72), &theme, &PLAIN, &h);
+        assert!(
+            !canvas.code_rows().is_empty(),
+            "width {width}: no code rows recorded, the patch path was not exercised"
+        );
+        h.end_render();
+        drain_pending_code(&mut canvas, &mut h);
+        assert_eq!(canvas.rows(), blocking.rows(), "width {width}");
+    }
+
+    // A fenced block inside a table cell cannot be written in GFM pipe syntax (see
+    // `a_wide_fence_in_a_table_cell_does_not_widen_the_table` above), so build that tree
+    // directly. A table cell is rendered as its own sub-canvas and blitted into the
+    // table's (`Canvas::blit`), which is where a lost or mistranslated `code_rows` would
+    // show up first.
+    let table = table_with_cell("```rust\nfn cell() {\n    42\n}\n```\n");
+    for width in [40u16, 80, 120] {
+        let blocking_code = crate::highlight::BlockingSource::new();
+        let blocking = block::render_block_ctx(
+            &table,
+            width,
+            Ctx::new(&theme, &PLAIN).with_code(&blocking_code),
+        );
+        let mut h = crate::highlight::Highlighter::new();
+        let mut canvas =
+            block::render_block_ctx(&table, width, Ctx::new(&theme, &PLAIN).with_code(&h));
+        assert!(
+            !canvas.code_rows().is_empty(),
+            "width {width}: the table cell recorded no code rows"
+        );
+        h.end_render();
+        drain_pending_code(&mut canvas, &mut h);
+        assert_eq!(canvas.rows(), blocking.rows(), "table cell, width {width}");
+    }
+}
