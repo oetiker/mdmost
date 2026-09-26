@@ -41,7 +41,6 @@ pub(crate) fn pager_limit_for(line: &str) -> NonZeroUsize {
 type Syntax = (&'static SyntaxSet, &'static SyntaxReference);
 
 struct Block {
-    #[allow(dead_code)] // kept for parity with the design's field list; not read yet
     lang: Option<String>,
     src: String,
     /// Byte ranges of the source lines, line endings included.
@@ -85,7 +84,7 @@ impl Default for Highlighter {
 }
 
 impl Highlighter {
-    /// A highlighter capped at [`pager_limit_for`] — the full per-line budget, but never
+    /// A highlighter capped at `pager_limit_for` — the full per-line budget, but never
     /// above [`PAGER_LINE_TOKENS`].
     pub fn new() -> Self {
         Self::with_line_limit(pager_limit_for)
@@ -156,14 +155,9 @@ impl Highlighter {
             .parked
             .iter()
             .position(|(parked_key, _, _)| *parked_key == key)
+            .and_then(|pos| inner.parked.remove(pos))
         {
-            Some(pos) => {
-                let (_, parse, next) = inner
-                    .parked
-                    .remove(pos)
-                    .expect("position() just returned this index");
-                (parse, next)
-            }
+            Some((_, parse, next)) => (parse, next),
             None => (Parse::new(set, syntax), 0usize),
         };
 
@@ -230,8 +224,9 @@ impl Highlighter {
             .map(|(&key, _)| key)
             .collect();
         for key in stale {
-            inner.blocks.remove(&key);
-            inner.keys.retain(|_, &mut k| k != key);
+            if let Some(block) = inner.blocks.remove(&key) {
+                inner.keys.remove(&(block.lang, block.src));
+            }
             inner.parked.retain(|(parked_key, _, _)| *parked_key != key);
         }
         inner.generation += 1;

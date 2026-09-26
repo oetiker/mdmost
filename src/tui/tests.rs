@@ -9060,6 +9060,52 @@ fn a_reload_that_removes_a_parked_block_does_not_panic() {
     assert!(app.highlighter().parked_keys().is_empty());
 }
 
+#[test]
+fn a_line_over_the_pager_budget_fails_and_uncolours_the_lines_ahead_of_it() {
+    // Two short lines that parse and are painted before the block reaches the line
+    // that trips the token guard: `MINIFIED_JS_LINE` needs 6,505 tokens, over
+    // `PAGER_LINE_TOKENS` (5,500), so the third line fails deterministically.
+    let source = format!(
+        "```js\nlet a = 1;\nlet b = 2;\n{}\n```\n\n",
+        crate::highlight::tests::MINIFIED_JS_LINE
+    );
+    let mut app = pager(&source);
+    let mut clock = Clock::default();
+    let mut calls = 0u32;
+
+    // First slice: stop right after the second short line, before the oversized one,
+    // so the block parks still `Pending` with two lines coloured on the canvas.
+    highlight_tick_at(&mut app, &mut || clock.step(Duration::ZERO), &mut || {
+        calls += 1;
+        calls >= 2
+    });
+    let block = app.canvas().code_rows()[0].block;
+    assert_eq!(app.highlighter().outcome(block), Some(Outcome::Pending));
+    let plain = app.theme().code.background.patch(app.theme().code.text);
+    assert!(
+        all_code_styles(&mut app).iter().any(|s| *s != plain),
+        "a short line should be coloured before the block fails"
+    );
+
+    // Second slice: the oversized line trips the token-limit guard, so the block
+    // gives up and the next render redraws the whole thing plain, with a caption.
+    while app.has_highlight_work() {
+        highlight_tick_at(&mut app, &mut || clock.step(Duration::ZERO), &mut || false);
+    }
+    assert_eq!(app.highlighter().outcome(block), Some(Outcome::Failed));
+
+    let canvas = app.canvas();
+    let bottom = canvas.row_text(canvas.height() - 1);
+    assert!(
+        bottom.contains("highlighting gave up"),
+        "the frame should caption the failure:\n{bottom}"
+    );
+    assert!(
+        all_code_styles(&mut app).iter().all(|s| *s == plain),
+        "colour painted before the failure survived it"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Drawing an emoji-presentation sequence on a terminal that measures it narrow
 // (`super::draw`, `crate::text::presentation_base`).
