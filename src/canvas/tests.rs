@@ -1277,3 +1277,80 @@ fn a_merge_keeps_the_rows_of_one_control_together() {
         "one control was split into two by the rebase"
     );
 }
+
+fn code_row(row: usize, col: u16, cols: u16) -> CodeRow {
+    CodeRow {
+        block: 7,
+        line: 0,
+        row,
+        col,
+        cols,
+        base: Style::default(),
+    }
+}
+
+#[test]
+fn code_rows_travel_with_cells_through_blit_append_and_indent() {
+    let mut inner = Canvas::new(10, 2, Style::default());
+    inner.add_code_row(code_row(1, 2, 5));
+    let mut outer = Canvas::new(20, 4, Style::default());
+    outer.blit(1, 3, &inner, Style::default());
+    assert_eq!(outer.code_rows(), &[code_row(2, 5, 5)]);
+
+    let mut stacked = Canvas::new(20, 3, Style::default());
+    stacked.append(&outer, Style::default());
+    assert_eq!(stacked.code_rows(), &[code_row(5, 5, 5)]);
+
+    let indented = inner.indent(4, 0, Style::default());
+    assert_eq!(indented.code_rows(), &[code_row(1, 6, 5)]);
+
+    let framed = inner.framed_captioned(
+        BorderSet::ROUNDED,
+        Style::default(),
+        None,
+        None,
+        Style::default(),
+    );
+    assert_eq!(framed.code_rows(), &[code_row(2, 3, 5)]);
+}
+
+#[test]
+fn slice_rows_keeps_only_code_rows_inside_the_slice() {
+    let mut canvas = Canvas::new(10, 4, Style::default());
+    canvas.add_code_row(code_row(0, 0, 3));
+    canvas.add_code_row(code_row(2, 0, 3));
+    let slice = canvas.slice_rows(1, 2);
+    assert_eq!(slice.code_rows(), &[code_row(1, 0, 3)]);
+}
+
+#[test]
+fn painting_a_code_line_restyles_only_its_drawn_columns() {
+    let base = Style::default();
+    let keyword = Style::new().fg(Color::hex(0xff0000));
+    let mut canvas = Canvas::new(10, 1, base);
+    canvas.write_str(0, 2, "let xy", base);
+    canvas.add_code_row(CodeRow {
+        block: 7,
+        line: 0,
+        row: 0,
+        col: 2,
+        cols: 4,
+        base,
+    });
+    let mut line = Line::empty();
+    line.push(Span::new("let", keyword));
+    line.push(Span::new(" xy", base));
+    canvas.paint_code_line(7, 0, &line);
+    let styles: Vec<Style> = canvas
+        .row(0)
+        .unwrap_or_default()
+        .iter()
+        .map(|c| c.style())
+        .collect();
+    assert_eq!(styles[1], base);
+    assert_eq!(&styles[2..5], &[keyword; 3]);
+    assert_eq!(styles[5], base); // inside cols, span style is base
+    assert_eq!(styles[6], base); // outside cols: untouched
+    canvas.paint_code_line(8, 0, &line); // unknown block: no effect, no panic
+    canvas.paint_code_line(7, 9, &line); // unknown line: no effect, no panic
+}

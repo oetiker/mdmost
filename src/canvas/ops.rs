@@ -5,7 +5,9 @@
 //! from. Every one of them preserves the canvas contract described in
 //! [`crate::canvas`].
 
-use super::{Anchor, Atom, BorderSet, Canvas, Cell, Hotspot, Pin, SearchSpan, TargetRebase};
+use super::{
+    Anchor, Atom, BorderSet, Canvas, Cell, CodeRow, Hotspot, Pin, SearchSpan, TargetRebase,
+};
 use crate::error::CanvasError;
 use crate::text::{Align, Line, display_width};
 use crate::theme::Style;
@@ -371,7 +373,7 @@ impl Canvas {
         self.merge_hotspots(src, top, u16::try_from(left).unwrap_or(u16::MAX), rebase);
     }
 
-    /// Translates and merges `src`'s anchors and spans into `self`.
+    /// Translates and merges `src`'s anchors, search spans and code rows into `self`.
     fn merge_metadata(&mut self, src: &Canvas, top: usize, left: usize) {
         self.anchors.extend(src.anchors.iter().map(|a| Anchor {
             id: a.id.clone(),
@@ -383,6 +385,11 @@ impl Canvas {
             row: s.row + top,
             col: s.col.saturating_add(left16),
             ..*s
+        }));
+        self.code_rows.extend(src.code_rows.iter().map(|r| CodeRow {
+            row: r.row + top,
+            col: r.col.saturating_add(left16),
+            ..*r
         }));
     }
 
@@ -551,8 +558,9 @@ impl Canvas {
 
     /// Returns rows `start..start + len` as a canvas of the same width.
     ///
-    /// Anchors, spans, pins and hotspots falling inside the slice are translated; the
-    /// rest are dropped.
+    /// Anchors, spans, code rows, pins and hotspots falling inside the slice are
+    /// translated; an atom is translated and *clipped* to the slice rather than dropped
+    /// (see the comment on `out.atoms` below); anything else is dropped.
     ///
     /// **A hotspot keeps its `target` verbatim, and that is load-bearing.** The slice is a
     /// different canvas but it is a *view of this one*, so two slices of the same wrapped
@@ -585,6 +593,15 @@ impl Canvas {
             .map(|s| SearchSpan {
                 row: s.row - start,
                 ..*s
+            })
+            .collect();
+        out.code_rows = self
+            .code_rows
+            .iter()
+            .filter(|r| (start..end).contains(&r.row))
+            .map(|r| CodeRow {
+                row: r.row - start,
+                ..*r
             })
             .collect();
         out.pins = self

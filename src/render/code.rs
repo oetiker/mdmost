@@ -32,7 +32,7 @@
 //! `tui::tests::the_gutter_rule_matches_the_renderer` pins the published column to the
 //! layout drawn here.
 
-use crate::canvas::{Atom, BorderSet, Canvas, SearchSpan};
+use crate::canvas::{Atom, BorderSet, Canvas, CodeRow, SearchSpan};
 use crate::doc::SourceSpan;
 use crate::error::MermaidError;
 use crate::mermaid::Fit;
@@ -339,11 +339,12 @@ fn framed_code(
     ctx: Ctx<'_>,
 ) -> Canvas {
     let theme = ctx.theme;
-    let lines = bridge::highlight(language, literal, theme);
+    let block = ctx.code.block(language, literal, theme);
+    let lines = block.lines;
     // Below four columns there is no room for a frame plus content; the code is shown
     // bare rather than as a box with nothing inside it.
     if width < 4 {
-        return code_area(&lines, origins, literal, width, false, ctx);
+        return code_area(&lines, origins, literal, width, false, block.key, ctx);
     }
     // The frame takes two columns and the interior padding one more on each side, so
     // code sits inside its box the way a table cell sits inside its column.
@@ -359,6 +360,7 @@ fn framed_code(
         literal,
         area_width,
         ctx.options.line_numbers,
+        block.key,
         ctx,
     );
     let gutter = gutter_width(lines.len(), area_width, ctx.options.line_numbers);
@@ -367,8 +369,8 @@ fn framed_code(
         .then_some(language)
         .flatten()
         .map(|name| title(name, ctx));
-    let note = (bridge::outcome(language, literal, theme) == crate::highlight::Outcome::Failed)
-        .then(|| outcome_caption("highlighting gave up", ctx));
+    let note = (block.outcome == crate::highlight::Outcome::Failed)
+        .then(|| bottom_caption("highlighting gave up", width, ctx));
     let mut out = inner.framed_captioned(
         BorderSet::ROUNDED,
         theme.code.frame,
@@ -585,14 +587,15 @@ fn title(language: &str, ctx: Ctx<'_>) -> Line {
     line
 }
 
-/// The label drawn into the frame's bottom edge: what happened to this block.
+/// The label drawn into a code frame's bottom edge: what happened to this block.
 ///
-/// Styled like the overflow marker rather than the language label, because it is a
-/// report about the block and not part of the block's identity.
-fn outcome_caption(text: &str, ctx: Ctx<'_>) -> Line {
-    let mut line = Line::empty();
-    line.push(Span::new(text, ctx.theme.code.overflow_marker));
-    line
+/// Shared by a block whose highlighting gave up and by a diagram or formula that fell
+/// back to its source, so every such report looks the same. The bottom edge is as long
+/// as the block; a caption longer than that is elided rather than hard-cut, so it never
+/// ends mid-word against the corner glyph.
+fn bottom_caption(text: &str, width: u16, ctx: Ctx<'_>) -> Line {
+    let room = usize::from(width).saturating_sub(4);
+    Line::styled(crate::text::ellipsize(text, room), ctx.theme.block.caption)
 }
 
 /// Writes code lines at `width` columns, clipping rather than wrapping.
@@ -605,6 +608,7 @@ fn code_area(
     literal: &str,
     width: u16,
     numbered: bool,
+    key: Option<u64>,
     ctx: Ctx<'_>,
 ) -> Canvas {
     let theme = ctx.theme;
@@ -622,7 +626,7 @@ fn code_area(
     );
     // The raw (unexpanded) text of each line of `literal`, split exactly the way
     // `NodeKind::CodeBlock.lines` was built, so `raw.get(row)` names the same line as
-    // `origins.get(row)`. `bridge::highlight`'s `lines` above have had tabs expanded to
+    // `origins.get(row)`. `ctx.code`'s `lines` above have had tabs expanded to
     // spaces (`highlight::expand_tabs`), which is a display concern; a `SearchSpan`
     // points at document bytes, and a tab is one document byte, not `TAB_WIDTH` of
     // them, so the byte offset below has to be measured against this text instead —
@@ -645,6 +649,26 @@ fn code_area(
             out.write_str(row, digits + 1, GUTTER_RULE, theme.code.frame);
         }
         out.write_line(row, gutter, line, theme.code.background);
+        if let Some(block) = key {
+            // Colour for this line may arrive after layout; record which cells it will
+            // restyle. The same per-row clip question as the search span below: a row
+            // with content past the budget loses its last column to the marker.
+            let code_budget = budget.saturating_sub(gutter);
+            let content_width = display_width(line.text().trim_end_matches(' '));
+            let cols = if content_width > code_budget {
+                code_budget.saturating_sub(display_width(OVERFLOW_MARKER))
+            } else {
+                line.width().min(code_budget)
+            };
+            out.add_code_row(CodeRow {
+                block,
+                line: row,
+                row,
+                col: u16::try_from(gutter).unwrap_or(u16::MAX),
+                cols: u16::try_from(cols).unwrap_or(u16::MAX),
+                base: theme.code.background,
+            });
+        }
         // The gutter is chrome and is not in the document, so the span starts where the
         // code does. `origins` is empty for a block rendered without a mapping — a
         // fragment, or a construction site that has none — and then this block behaves
@@ -704,7 +728,7 @@ fn code_area(
 ///
 /// `text` is a line of `literal` as comrak handed it to us — tabs still tabs, nothing
 /// expanded — because that is what a `SearchSpan`'s byte range must measure against:
-/// the document, not `bridge::highlight`'s rendering of it. Tab stops are tracked the
+/// the document, not `ctx.code`'s rendering of it. Tab stops are tracked the
 /// same way `highlight::expand_tabs` computes them when it built the *drawn* line, so
 /// the two walks land on the same column for the same byte even though one produces
 /// spaces and the other counts them.
@@ -768,9 +792,10 @@ pub(super) fn fallback(
     ctx: Ctx<'_>,
 ) -> Canvas {
     let theme = ctx.theme;
-    let lines = bridge::highlight(language, literal, theme);
+    let block = ctx.code.block(language, literal, theme);
+    let lines = block.lines;
     if width < 4 {
-        return code_area(&lines, origins, literal, width, false, ctx);
+        return code_area(&lines, origins, literal, width, false, block.key, ctx);
     }
     let padding = if width > 2 + 2 * CODE_PADDING {
         CODE_PADDING
@@ -784,17 +809,12 @@ pub(super) fn fallback(
         literal,
         area_width,
         ctx.options.line_numbers,
+        block.key,
         ctx,
     )
     .indent(padding, padding, theme.code.background);
     let title = Line::styled(language.unwrap_or_default(), theme.code.language);
-    // The bottom edge is as long as the block; a caption longer than that is elided
-    // rather than hard-cut, so it never ends mid-word against the corner glyph.
-    let room = usize::from(width).saturating_sub(4);
-    let caption = Line::styled(
-        crate::text::ellipsize(&caption.to_string(), room),
-        theme.block.caption,
-    );
+    let caption = bottom_caption(&caption.to_string(), width, ctx);
     let mut out = inner.framed_captioned(
         BorderSet::ROUNDED,
         theme.code.frame,

@@ -25,7 +25,7 @@
 use std::io::{self, Write};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event, KeyCode as XKeyCode, KeyEvent, KeyEventKind,
@@ -41,7 +41,11 @@ use super::watch::Watcher;
 use super::{chrome, draw};
 
 /// How long the loop waits for input before checking the termination flag.
-const POLL_INTERVAL: Duration = Duration::from_millis(120);
+pub(super) const POLL_INTERVAL: Duration = Duration::from_millis(120);
+
+/// How long one highlighting slice may run before the loop looks at input again.
+/// Measured in `docs/maintainer-notes.md`.
+pub(super) const SLICE_BUDGET: Duration = Duration::from_millis(10);
 
 /// What waiting for input found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -269,7 +273,7 @@ fn event_loop(
         }
         // Waiting is ours, not `crossterm`'s, so that a terminal which has gone away
         // is seen as what it is rather than as a descriptor that is endlessly ready.
-        let waited = input.wait(POLL_INTERVAL)?;
+        let waited = input.wait(wait_timeout(app))?;
         redraw = true;
         if waited == Wait::Gone {
             return Err(terminal_gone());
@@ -291,8 +295,12 @@ fn event_loop(
         // accepted: it needs input to arrive at the same instant as the hangup,
         // where what this replaced was exposed the whole time it sat idle. Closing
         // it properly means owning the descriptor and parsing terminal input here,
-        // which is `crossterm`'s job.
+        // which is `crossterm`'s job. Colouring adds no window of its own: between
+        // lines it asks `input`, not `crossterm`, and a hangup it sees ends the slice
+        // and is reported by the wait above on the next time round.
         if !crossterm::event::poll(Duration::ZERO)? {
+            // Nothing to answer: spend the moment on colour. Input always goes first.
+            highlight_tick(app, input);
             continue;
         }
         let mut event = Some(crossterm::event::read()?);
@@ -347,6 +355,38 @@ pub(super) fn reload_tick_at(app: &mut App, watcher: &mut Watcher, at: std::time
             true,
         ),
     }
+}
+
+/// How long the loop may sleep: not at all while highlighting has work.
+pub(super) fn wait_timeout(app: &App) -> Duration {
+    if app.has_highlight_work() {
+        Duration::ZERO
+    } else {
+        POLL_INTERVAL
+    }
+}
+
+/// Colours code for one slice, stopping early when input arrives.
+///
+/// The probe between lines is [`Input::wait`], not `crossterm`'s `poll`: on a hung-up
+/// terminal `poll` never returns (see [`Input`]), and a hangup alone makes the
+/// descriptor readable, so closing the terminal while colour arrives would spin. A
+/// hangup or an error ends the slice like a key does; the loop's own wait then sees it.
+/// No event can be waiting inside `crossterm` here: the loop only colours after
+/// `crossterm` reported nothing pending, and nothing reads the descriptor in between.
+fn highlight_tick(app: &mut App, input: &Input) {
+    highlight_tick_at(app, &mut Instant::now, &mut || {
+        !matches!(input.wait(Duration::ZERO), Ok(Wait::Timeout))
+    });
+}
+
+/// [`highlight_tick`], against a clock and an input probe the caller supplies, for tests.
+pub(super) fn highlight_tick_at(
+    app: &mut App,
+    clock: &mut dyn FnMut() -> Instant,
+    input_waiting: &mut dyn FnMut() -> bool,
+) {
+    app.highlight_slice(SLICE_BUDGET, clock, input_waiting);
 }
 
 /// Dispatches a key event.

@@ -53,7 +53,7 @@ fn render(markdown: &str, width: u16) -> Canvas {
 fn render_with(markdown: &str, width: u16, options: &RenderOptions) -> Canvas {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
-    let canvas = render_flat(&doc, width, &theme, options);
+    let canvas = render_flat(&doc, width, &theme, options, &crate::highlight::UNCACHED);
     assert_eq!(canvas.width(), width, "canvas must be exactly {width} wide");
     canvas
         .check_invariants()
@@ -1520,7 +1520,13 @@ fn the_default_options_are_icons_on_and_line_numbers_off() {
 fn search_spans_map_source_offsets_onto_the_canvas() {
     let source = "hello brave world\n";
     let doc = Doc::parse(source);
-    let canvas = render_flat(&doc, 40, &Theme::default_dark(), &PLAIN);
+    let canvas = render_flat(
+        &doc,
+        40,
+        &Theme::default_dark(),
+        &PLAIN,
+        &crate::highlight::UNCACHED,
+    );
     // Unwrapped, the whole run is one contiguous mapping.
     assert_eq!(canvas.spans().len(), 1);
     let span = canvas.spans()[0];
@@ -1540,6 +1546,7 @@ fn a_wrap_splits_the_mapping_at_the_line_break() {
         11 + 2 * DOCUMENT_MARGIN,
         &Theme::default_dark(),
         &PLAIN,
+        &crate::highlight::UNCACHED,
     );
     let texts: Vec<(&str, usize, u16)> = canvas
         .spans()
@@ -1569,7 +1576,13 @@ fn search_spans_follow_content_into_lists_quotes_and_cells() {
         "**needle**\n",
     ] {
         let doc = Doc::parse(markdown);
-        let canvas = render_flat(&doc, 30, &Theme::default_dark(), &PLAIN);
+        let canvas = render_flat(
+            &doc,
+            30,
+            &Theme::default_dark(),
+            &PLAIN,
+            &crate::highlight::UNCACHED,
+        );
         let span = canvas
             .spans()
             .iter()
@@ -1586,8 +1599,8 @@ fn rendering_is_deterministic() {
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
     for width in [13u16, 40, 80] {
-        let first = render_flat(&doc, width, &theme, &PLAIN);
-        let second = render_flat(&doc, width, &theme, &PLAIN);
+        let first = render_flat(&doc, width, &theme, &PLAIN, &crate::highlight::UNCACHED);
+        let second = render_flat(&doc, width, &theme, &PLAIN, &crate::highlight::UNCACHED);
         assert_eq!(first, second, "width {width} is not deterministic");
     }
 }
@@ -1614,7 +1627,13 @@ fn render_block_and_render_blocks_agree_with_the_document_renderer() {
     let markdown = "# Title\n\nbody text\n\n# Another\n";
     let doc = Doc::parse(markdown);
     let theme = Theme::default_dark();
-    let whole = render_flat(&doc, 30 + 2 * DOCUMENT_MARGIN, &theme, &PLAIN);
+    let whole = render_flat(
+        &doc,
+        30 + 2 * DOCUMENT_MARGIN,
+        &theme,
+        &PLAIN,
+        &crate::highlight::UNCACHED,
+    );
     let parts = render_blocks(&doc.root().children, 30, &theme, &PLAIN, doc.source());
     assert_eq!(
         body_rows(&whole),
@@ -1660,7 +1679,7 @@ fn every_row_keeps_a_margin_on_both_sides() {
     let doc = Doc::parse(MARGIN_FIXTURE);
     let theme = Theme::default_dark();
     for width in [20u16, 40, 60, 80, 100, 120] {
-        let canvas = render_flat(&doc, width, &theme, &PLAIN);
+        let canvas = render_flat(&doc, width, &theme, &PLAIN, &crate::highlight::UNCACHED);
         let margin = usize::from(DOCUMENT_MARGIN);
         for row in 0..canvas.height() {
             let text = canvas.row_text(row);
@@ -1954,7 +1973,13 @@ fn a_cluster_wider_than_a_cell_is_charged_the_columns_it_draws() {
     // own text and drags every following span with it.
     let source = "\u{17000}\u{1a57} tail\n";
     let doc = Doc::parse(source);
-    let canvas = render_flat(&doc, 30, &Theme::default_dark(), &PLAIN);
+    let canvas = render_flat(
+        &doc,
+        30,
+        &Theme::default_dark(),
+        &PLAIN,
+        &crate::highlight::UNCACHED,
+    );
     canvas.check_invariants().expect("contract holds");
     for span in canvas.spans() {
         let text = &source[span.source_start..span.source_end];
@@ -2537,7 +2562,7 @@ fn the_line_number_gutter_carries_no_span() {
 
 #[test]
 fn a_tab_in_the_code_maps_to_its_source_byte_not_its_expanded_columns() {
-    // `bridge::highlight` expands the tab to spaces before this line ever reaches the
+    // `ctx.code` expands the tab to spaces before this line ever reaches the
     // canvas (`highlight::expand_tabs`); the source line is 13 bytes, its *drawn* text
     // is 16 columns wide. Measuring `source_end` against the drawn text instead of the
     // raw source line lands three bytes past the end of this line — into the newline
@@ -4625,24 +4650,17 @@ fn a_paragraph_with_display_math_and_other_content_is_not_hoisted() {
 /// arguments. See the plan's finding F1.
 #[test]
 fn a_clipping_code_block_is_highlighted_once_however_often_it_is_laid_out() {
-    // Held for the whole test, not just the assertion: `render_document` itself
-    // drives the cache, and another test's theme switch could clear this test's
-    // entry between that call and the check below. See
-    // `HIGHLIGHT_GLOBALS_TEST_LOCK`'s doc comment for why the highlighter's
-    // `(lang, src)` key alone does not protect against this.
-    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     const CODE: &str =
         "let probe_for_the_clip_search = \"a line far wider than any prose cap set here\";\n";
     let source = format!("Text.\n\n```rust\n{CODE}```\n");
     let doc = Doc::parse(&source);
     let theme = Theme::default_dark();
+    let code = crate::highlight::BlockingSource::new();
 
-    let _ = render_document(&doc, 40, Some(20), &theme, &PLAIN);
+    let _ = render_document_with(&doc, 40, Some(20), &theme, &PLAIN, &code);
 
     assert_eq!(
-        crate::highlight::computed_count(Some("rust"), CODE, &theme),
+        code.computed_count(Some("rust"), CODE),
         Some(1),
         "the clip search must not recompute the highlight"
     );
@@ -4818,34 +4836,23 @@ fn a_wide_fence_in_a_table_cell_does_not_widen_the_table() {
 
 /// A block whose highlight failed says so in its frame's bottom edge.
 ///
-/// The memo is primed through `highlight_with_limit` rather than by stubbing the parser,
-/// so this exercises the path a reader actually reaches. The globals lock is held because
-/// priming the memo under one theme races any other test that switches theme —
-/// `cache_put` clears the whole map on a theme change, keyed on the theme and not on the
-/// entry.
-///
-/// The source carries its own marker comment: the memo is keyed on `(lang, src, theme)`
-/// alone, not on which limit computed the entry, so every test that primes a `Failed`
-/// outcome needs a key no other test — locked or not — also touches.
+/// Rendered through a [`crate::highlight::BlockingSource`] under a deliberately tiny
+/// line limit rather than by stubbing the parser, so this exercises the path a reader
+/// actually reaches.
 #[test]
 fn a_failed_block_captions_its_frame() {
-    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let theme = Theme::default_dark();
     let src = format!(
         "{}\n// task5-render-caption-probe\n",
         crate::highlight::tests::MINIFIED_JS_LINE
     );
-    crate::highlight::highlight_with_limit(
-        Some("js"),
-        &src,
-        &theme,
-        std::num::NonZeroUsize::new(2).expect("two is non-zero"),
-    );
+    let code = crate::highlight::BlockingSource::with_line_limit(|_| {
+        std::num::NonZeroUsize::new(2).expect("two is non-zero")
+    });
 
     let node = code_block("js", &src);
-    let canvas = render_block(&node, 60, &theme, &BUTTONS);
+    let ctx = Ctx::new(&theme, &BUTTONS).with_code(&code);
+    let canvas = block::render_block_ctx(&node, 60, ctx);
     canvas.check_invariants().expect("contract holds");
 
     let bottom = canvas.row_text(canvas.height() - 1);
@@ -4855,24 +4862,38 @@ fn a_failed_block_captions_its_frame() {
     );
 }
 
+/// A narrow frame shortens the caption with an ellipsis rather than cutting it off, and
+/// the caption is drawn in the same style as a Mermaid or math failure caption.
+#[test]
+fn a_failed_block_s_caption_is_ellipsized_and_styled_like_other_captions() {
+    let theme = Theme::default_dark();
+    let options = PLAIN;
+    let source = crate::highlight::BlockingSource::with_line_limit(|_| std::num::NonZeroUsize::MIN);
+    let doc = Doc::parse("```rust\nfn main() {}\n```\n");
+    let node = &doc.root().children[0];
+    let canvas = block::render_block_ctx(node, 16, Ctx::new(&theme, &options).with_code(&source));
+    let bottom = canvas.row_text(canvas.height() - 1);
+    assert!(bottom.contains('…'), "caption not ellipsized: {bottom:?}");
+    let cells = canvas.row(canvas.height() - 1).unwrap_or_default();
+    let caption_cell = cells
+        .iter()
+        .find(|cell| cell.text() == "h")
+        .expect("caption starts with 'h'");
+    assert_eq!(caption_cell.style(), theme.block.caption);
+}
+
 /// The caption costs no row.
 ///
-/// Branch B patches colour onto an already-rendered canvas, which is only sound while a
-/// plain block and a highlighted one occupy the same cells. A caption that added a row
-/// would break that silently, so it is pinned here rather than in a comment.
+/// The pager patches colour onto an already-rendered canvas (`Highlighter::advance`,
+/// called from `App::highlight_slice`), which is only sound while a plain block and a
+/// highlighted one occupy the same cells. A caption that added a row would break that
+/// silently, so it is pinned here rather than in a comment.
 ///
 /// Two sources, identical in geometry (same line count, same line lengths) but distinct
-/// in their marker's last character, so the memo cannot serve one test's `Highlighted`
-/// entry to the other's `highlight_with_limit` call: a shared key would make the second
-/// call a cache hit that never even consults its own limit, leaving both renders
-/// uncaptioned and this assertion vacuously true. Each render's bottom row is checked
-/// against the caption text directly, so a regression to that shared-key state fails
-/// here instead of passing silently.
+/// in their marker's last character, so the two renders below cannot be confused with
+/// one another. Each render's bottom row is checked against the caption text directly.
 #[test]
 fn a_caption_does_not_change_a_block_s_height() {
-    let _guard = crate::highlight::HIGHLIGHT_GLOBALS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let theme = Theme::default_dark();
     let uncaptioned_src = format!(
         "{}\n// task5-render-geometry-probe-a\n",
@@ -4888,23 +4909,22 @@ fn a_caption_does_not_change_a_block_s_height() {
         "the two sources must have identical geometry"
     );
 
-    crate::highlight::highlight(Some("js"), &uncaptioned_src, &theme);
+    let uncaptioned_code = crate::highlight::BlockingSource::new();
     let uncaptioned_node = code_block("js", &uncaptioned_src);
-    let uncaptioned_canvas = render_block(&uncaptioned_node, 60, &theme, &BUTTONS);
+    let uncaptioned_ctx = Ctx::new(&theme, &BUTTONS).with_code(&uncaptioned_code);
+    let uncaptioned_canvas = block::render_block_ctx(&uncaptioned_node, 60, uncaptioned_ctx);
     let uncaptioned_bottom = uncaptioned_canvas.row_text(uncaptioned_canvas.height() - 1);
     assert!(
         !uncaptioned_bottom.contains("highlighting gave up"),
         "the uncaptioned render should carry no caption:\n{uncaptioned_bottom}"
     );
 
-    crate::highlight::highlight_with_limit(
-        Some("js"),
-        &captioned_src,
-        &theme,
-        std::num::NonZeroUsize::new(2).expect("two is non-zero"),
-    );
+    let captioned_code = crate::highlight::BlockingSource::with_line_limit(|_| {
+        std::num::NonZeroUsize::new(2).expect("two is non-zero")
+    });
     let captioned_node = code_block("js", &captioned_src);
-    let captioned_canvas = render_block(&captioned_node, 60, &theme, &BUTTONS);
+    let captioned_ctx = Ctx::new(&theme, &BUTTONS).with_code(&captioned_code);
+    let captioned_canvas = block::render_block_ctx(&captioned_node, 60, captioned_ctx);
     let captioned_bottom = captioned_canvas.row_text(captioned_canvas.height() - 1);
     assert!(
         captioned_bottom.contains("highlighting gave up"),
@@ -4912,4 +4932,232 @@ fn a_caption_does_not_change_a_block_s_height() {
     );
 
     assert_eq!(uncaptioned_canvas.height(), captioned_canvas.height());
+}
+
+/// Every drawn code line records where it landed, and a blocking render records none.
+#[test]
+fn a_keyed_code_block_records_one_code_row_per_line() {
+    use crate::highlight::{CodeBlock, CodeSource, Uncached};
+
+    #[derive(Debug)]
+    struct Keyed;
+    impl CodeSource for Keyed {
+        fn block(&self, lang: Option<&str>, src: &str, theme: &Theme) -> CodeBlock {
+            CodeBlock {
+                key: Some(42),
+                ..Uncached.block(lang, src, theme)
+            }
+        }
+    }
+    let theme = Theme::default();
+    let options = RenderOptions::default();
+    let doc = Doc::parse("```rust\nfn a() {}\nfn b() {}\n```\n");
+    let keyed = render_document_with(&doc, 60, None, &theme, &options, &Keyed);
+    let rows: Vec<(u64, usize)> = keyed
+        .code_rows()
+        .iter()
+        .map(|r| (r.block, r.line))
+        .collect();
+    assert_eq!(rows, vec![(42, 0), (42, 1)]);
+    for row in keyed.code_rows() {
+        let text: String = keyed
+            .row_text(row.row)
+            .chars()
+            .skip(usize::from(row.col))
+            .take(usize::from(row.cols))
+            .collect();
+        assert!(text.starts_with("fn "), "row {row:?} points at {text:?}");
+    }
+    let blocking = render_document(&doc, 60, None, &theme, &options);
+    assert!(blocking.code_rows().is_empty());
+}
+
+/// Fences at top level, in a list and in a quote; a tab, a CJK line, and the same fence
+/// twice. Its table cell holds only inline code — a fence cannot sit in a GFM pipe-table
+/// cell — so that case is covered separately below, on a hand-built tree. The pager's
+/// plain-then-patched canvas must equal the blocking render cell for cell.
+const EQUIVALENCE_DOC: &str = "\
+# Equivalence
+
+```rust
+fn main() {
+\tlet s = \"漢字 and tabs\";
+}
+```
+
+- item
+
+  ```python
+  def f(x):
+      return x  # comment
+  ```
+
+> ```sh
+> echo \"$HOME\" | grep -v x
+> ```
+
+| code |
+|------|
+| `x` |
+
+```rust
+fn main() {
+\tlet s = \"漢字 and tabs\";
+}
+```
+";
+
+/// Advances `h` until every code row `canvas` recorded has finished, painting each
+/// line as it completes — the same loop the pager runs between key presses
+/// (`crate::tui::App::highlight_slice`), driven here to exhaustion instead of one
+/// budget's worth.
+fn drain_pending_code(canvas: &mut Canvas, h: &mut crate::highlight::Highlighter) {
+    let mut keys: Vec<u64> = canvas.code_rows().iter().map(|r| r.block).collect();
+    keys.dedup();
+    for key in keys {
+        while h.outcome(key) == Some(crate::highlight::Outcome::Pending) {
+            for index in h.advance(key, &mut || false) {
+                if let Some(line) = h.line(key, index) {
+                    canvas.paint_code_line(key, index, &line);
+                }
+            }
+        }
+    }
+}
+
+/// The pager draws a document at once, from a [`crate::highlight::Highlighter`] that
+/// answers every fence in plain text before it has parsed a single one, then patches
+/// colour in as parsing finishes. Once every block has finished, the result must be
+/// indistinguishable from a render that waited for [`crate::highlight::BlockingSource`]
+/// up front — a reader who never touches a key must see the same page either way.
+///
+/// Compares `rows()`, not the two canvases outright: the patched canvas also carries
+/// `code_rows`, which the blocking one never records (see
+/// `a_keyed_code_block_records_one_code_row_per_line` above), so a whole-value
+/// `assert_eq!` could never pass.
+#[test]
+fn the_pager_s_patched_canvas_equals_the_blocking_render() {
+    let theme = Theme::default_dark();
+    let doc = Doc::parse(EQUIVALENCE_DOC);
+    for width in [40u16, 80, 120] {
+        let blocking = render_document(&doc, width, Some(72), &theme, &PLAIN);
+        let mut h = crate::highlight::Highlighter::new();
+        let mut canvas = render_document_with(&doc, width, Some(72), &theme, &PLAIN, &h);
+        assert!(
+            !canvas.code_rows().is_empty(),
+            "width {width}: no code rows recorded, the patch path was not exercised"
+        );
+        h.end_render();
+        drain_pending_code(&mut canvas, &mut h);
+        assert_eq!(canvas.rows(), blocking.rows(), "width {width}");
+    }
+
+    // A fenced block inside a table cell cannot be written in GFM pipe syntax (see
+    // `a_wide_fence_in_a_table_cell_does_not_widen_the_table` above), so build that tree
+    // directly. A table cell is rendered as its own sub-canvas and blitted into the
+    // table's (`Canvas::blit`), which is where a lost or mistranslated `code_rows` would
+    // show up first.
+    let table = table_with_cell("```rust\nfn cell() {\n    42\n}\n```\n");
+    for width in [40u16, 80, 120] {
+        let blocking_code = crate::highlight::BlockingSource::new();
+        let blocking = block::render_block_ctx(
+            &table,
+            width,
+            Ctx::new(&theme, &PLAIN).with_code(&blocking_code),
+        );
+        let mut h = crate::highlight::Highlighter::new();
+        let mut canvas =
+            block::render_block_ctx(&table, width, Ctx::new(&theme, &PLAIN).with_code(&h));
+        assert!(
+            !canvas.code_rows().is_empty(),
+            "width {width}: the table cell recorded no code rows"
+        );
+        h.end_render();
+        drain_pending_code(&mut canvas, &mut h);
+        assert_eq!(canvas.rows(), blocking.rows(), "table cell, width {width}");
+    }
+}
+
+/// A faithful replica of `App::wanted_blocks` (`src/tui/app.rs`), against a canvas's
+/// `code_rows()` directly rather than through `App`, so this timing test needs no
+/// terminal. Viewport at the top (`top = 0`), height 50: the same view range, halo
+/// range, collect, `sort_unstable` and `contains` dedup `wanted_blocks` runs per tick.
+fn wanted_blocks_replica(rows: &[crate::canvas::CodeRow]) -> Vec<u64> {
+    let height = 50usize;
+    let top = 0usize;
+    let view = top..top.saturating_add(height);
+    let halo = top.saturating_sub(height)..top.saturating_add(2 * height);
+    let mut out: Vec<u64> = Vec::new();
+    for range in [view, halo] {
+        let mut hits: Vec<(usize, u64)> = rows
+            .iter()
+            .filter(|r| range.contains(&r.row))
+            .map(|r| (r.row, r.block))
+            .collect();
+        hits.sort_unstable();
+        for (_, block) in hits {
+            if !out.contains(&block) {
+                out.push(block);
+            }
+        }
+    }
+    out
+}
+
+/// Time to first screen, before and after the pager draws first: the median of 10
+/// blocking renders (`render_document`, which highlights synchronously) against 10
+/// draw-first renders (`render_document_with`, a fresh [`crate::highlight::Highlighter`]
+/// each time, which returns before any block is coloured) of the document named by the
+/// `MDMOST_TIMING_DOC` environment variable, at width 100. Also times 1,000 calls to
+/// [`wanted_blocks_replica`] against the last draw-first canvas's `code_rows()` (a
+/// blocking render keeps no code rows, so the replica has to run against the draw-first
+/// one), each result forced through [`std::hint::black_box`] so the optimizer cannot
+/// discard the call. Run by hand:
+/// `MDMOST_TIMING_DOC=<path> cargo test --release --lib time_to_first_screen -- --ignored --nocapture`.
+#[test]
+#[ignore = "measurement, not a check"]
+fn time_to_first_screen() {
+    let path =
+        std::env::var("MDMOST_TIMING_DOC").expect("set MDMOST_TIMING_DOC to a markdown file");
+    let source = std::fs::read_to_string(&path).expect("read MDMOST_TIMING_DOC");
+    let doc = Doc::parse(&source);
+    let theme = Theme::default_dark();
+
+    let mut blocking = Vec::new();
+    for _ in 0..10 {
+        let start = std::time::Instant::now();
+        let _ = render_document(&doc, 100, None, &theme, &PLAIN);
+        blocking.push(start.elapsed());
+    }
+    blocking.sort();
+
+    let mut draw_first = Vec::new();
+    let mut last_canvas = None;
+    for _ in 0..10 {
+        let h = crate::highlight::Highlighter::new();
+        let start = std::time::Instant::now();
+        let canvas = render_document_with(&doc, 100, None, &theme, &PLAIN, &h);
+        draw_first.push(start.elapsed());
+        last_canvas = Some(canvas);
+    }
+    draw_first.sort();
+
+    let canvas = last_canvas.expect("ran at least once");
+    let rows = canvas.code_rows();
+    let mut wanted = Vec::new();
+    for _ in 0..1_000 {
+        let start = std::time::Instant::now();
+        let out = wanted_blocks_replica(std::hint::black_box(rows));
+        std::hint::black_box(out);
+        wanted.push(start.elapsed());
+    }
+    wanted.sort();
+
+    println!(
+        "blocking median {:?}, draw-first median {:?}, wanted_blocks replica median {:?} over {} code rows",
+        blocking[blocking.len() / 2],
+        draw_first[draw_first.len() / 2],
+        wanted[wanted.len() / 2],
+        rows.len(),
+    );
 }

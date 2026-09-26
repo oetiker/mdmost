@@ -6,6 +6,11 @@
 
 ### Changed
 
+- Documents with many code blocks open at once: code is shown uncoloured first, and
+  colour is added to the blocks on screen and about one screen around them.
+- In the pager, a code block with one very long line, such as minified JavaScript, is
+  shown uncoloured with `highlighting gave up` in its frame; `--render-once` tolerates a
+  much longer line before showing the same caption.
 - With Nerd Font icons on, an icon or a status-bar separator is now followed by two blank
   columns instead of one, in the status bar, the contents pane, the help overlay and
   code-block titles. Terminals draw these glyphs two columns wide, so the text after them
@@ -23,6 +28,9 @@
 - A long link address shown in parentheses after the link text is now cut to the same
   width whatever it contains. An address with Japanese, Chinese or other double-width
   characters near the cut came out one column wider than the others.
+- The `highlighting gave up` caption ends in `…` when the frame is too narrow for it,
+  and is drawn in the same colour as the captions of diagrams and formulas that could
+  not be drawn.
 
 ## 0.3.5 - 2026-09-25
 

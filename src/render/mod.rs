@@ -61,7 +61,7 @@ use glyphs::Glyphs;
 
 pub use block::{render_block, render_block_numbered, render_blocks};
 pub(crate) use diagram::{Limits, diagram};
-pub use document::render_document;
+pub use document::{render_document, render_document_with};
 pub use inline::wrap;
 pub use table::render_table;
 
@@ -241,6 +241,13 @@ pub(crate) struct Ctx<'a> {
     /// nested in a list or a quote escalates on its own instead of dragging the whole
     /// container out to the terminal width.
     pub measure: Option<crate::render::document::Measure>,
+    /// Where code blocks get their lines from (see `crate::highlight::CodeSource`).
+    ///
+    /// A fresh context highlights on every request; `render_document_with` and the
+    /// other public block entry points (`render_block`, `render_block_numbered`,
+    /// `render_blocks`) replace it with a memoising or a deferred source.
+    /// `render_table`, the remaining public entry point, keeps this uncached default.
+    pub code: &'a dyn crate::highlight::CodeSource,
 }
 
 /// The deepest table nesting that is rendered; deeper tables degrade to their text.
@@ -264,7 +271,13 @@ impl<'a> Ctx<'a> {
             source: "",
             macros: &[],
             measure: None,
+            code: &crate::highlight::UNCACHED,
         }
+    }
+
+    /// The same context, taking code blocks from `code`.
+    pub(crate) fn with_code(self, code: &'a dyn crate::highlight::CodeSource) -> Self {
+        Self { code, ..self }
     }
 
     /// The same context, rendering the headings of a numbered document.
@@ -370,7 +383,13 @@ impl<'a> Ctx<'a> {
 /// edge or to the scrollbar next to it. The inset is applied once, here, rather than
 /// by every block renderer: block renderers still receive a plain width budget and
 /// still return a canvas exactly that wide.
-pub(crate) fn render_flat(doc: &Doc, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
+pub(crate) fn render_flat(
+    doc: &Doc,
+    width: u16,
+    theme: &Theme,
+    options: &RenderOptions,
+    code: &dyn crate::highlight::CodeSource,
+) -> Canvas {
     // Computed once, here, from the whole document — never at parse time (design spec
     // §3), and never per block, which could not answer the question anyway.
     let numbers = Numbering::enabled(doc, options.section_numbers);
@@ -379,7 +398,8 @@ pub(crate) fn render_flat(doc: &Doc, width: u16, theme: &Theme, options: &Render
     let ctx = Ctx::new(theme, options)
         .numbered(&numbers)
         .with_source(doc.source())
-        .with_macros(&macros);
+        .with_macros(&macros)
+        .with_code(code);
     let margin = margins(width);
     let body_width = width - 2 * margin;
     let blocks = &doc.root().children;

@@ -814,3 +814,58 @@ back to plain text — at least 2.15 s per such line, more for a pathological ru
 tokens cost more than the cheap construct's, with no measured ceiling on how much more.
 The document-level worst case is therefore *(number of such blocks) × (one line's worst
 case)*, not a bounded total.
+
+## Pager slices
+
+Measured 2026-09-26, shared host, so every figure below is a range, not a fact about one
+run.
+
+**Tokens per millisecond**, release build, `highlight::pager::tests::tokens_per_millisecond`
+(single-line parse of the synthetic minified-JavaScript unit, 6,505 tokens, median of 20
+samples), three interleaved runs, plus three more runs taken later on a busier host:
+
+| run | tokens/ms |
+|---|---|
+| 1 | 123.8 |
+| 2 | 121.6 |
+| 3 | 119.9 |
+| 4 (busier host) | 90.2 |
+| 5 (busier host) | 84.3 |
+| 6 (busier host) | 81.7 |
+
+`PAGER_LINE_TOKENS` (`src/highlight/pager.rs`) is 5,500: 50 ms times the lowest of the
+first three (interleaved) runs (119.9 tokens/ms = 5,995), rounded down to a readable
+number. At runs 4-6's rates, a 5,500-token line takes about 61-67 ms — above the 50 ms
+target, which is what a busier host does to this budget.
+
+`SLICE_BUDGET` (`src/tui/term.rs`) stays at 10 ms. Not yet tried in a terminal to check
+for visible lag.
+
+**Time to first screen**, release build, `render::tests::time_to_first_screen`, against
+the 36-fence document `docs/superpowers/plans/2026-09-21-media-worker.md` (`oxutlk`
+project), width 100, median of 10 renders per call, seven runs across two measurement
+passes:
+
+| render | time |
+|---|---|
+| `render_document` (blocking: every block coloured before it returns) | 836 ms - 1.13 s |
+| `render_document_with` + a fresh `Highlighter` (draws plain, colours later) | 168-228 ms |
+
+The same test also calls a faithful replica of `App::wanted_blocks` (`src/tui/app.rs`)
+against the draw-first canvas's `code_rows()` — same view range, halo range, collect,
+`sort_unstable` and dedup, viewport at the top with height 50 — 1,000 times per run, each
+result forced through `std::hint::black_box`. Median over three runs: 1.8-2.2 µs for the
+document's 1,110 code rows. `wanted_blocks` itself is computed up to twice per run-loop
+iteration while there is highlighting work left: once by `wait_timeout` (through
+`has_highlight_work`, deciding whether the loop can block on input) and once inside
+`highlight_slice` (picking which blocks to advance).
+
+**`--render-once`**, same document, width 100, five runs each, interleaved with a
+release build of v0.3.5 in a separate `CARGO_TARGET_DIR`:
+
+| binary | time |
+|---|---|
+| v0.3.5 | 1.785-1.978 s |
+| this branch | 1.779-1.838 s |
+
+This branch's `--render-once` is not slower than v0.3.5's.

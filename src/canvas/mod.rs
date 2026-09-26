@@ -310,6 +310,30 @@ impl Atom {
     }
 }
 
+/// Where one line of a code block was drawn, so that its colour can arrive after layout.
+///
+/// A sixth metadata channel, beside anchors, spans, pins, hotspots and atoms. The pager draws a
+/// document before its code is highlighted and patches the colour in later
+/// (`tui::App::highlight_slice`); this records which cells belong to which source line.
+/// It travels with cells, like a [`SearchSpan`], so a block inside a list, a quote or a
+/// table cell is found where it was placed. `cols` stops before a clip marker, so
+/// painting never recolours the marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodeRow {
+    /// The code source's key for the block (`highlight::CodeBlock::key`).
+    pub block: u64,
+    /// The source line index within the block.
+    pub line: usize,
+    /// The canvas row.
+    pub row: usize,
+    /// The canvas column of the line's first code column.
+    pub col: u16,
+    /// How many columns of the line are drawn, stopping before a clip marker.
+    pub cols: u16,
+    /// The style each span is patched onto, as `Canvas::write_line` did.
+    pub base: Style,
+}
+
 /// A rectangle of styled cells, exactly [`Canvas::width`] columns wide on every row.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Canvas {
@@ -322,6 +346,7 @@ pub struct Canvas {
     /// The next id [`Canvas::next_target`] issues.
     next_target: usize,
     atoms: Vec<Atom>,
+    code_rows: Vec<CodeRow>,
 }
 
 impl Canvas {
@@ -343,6 +368,7 @@ impl Canvas {
             hotspots: Vec::new(),
             next_target: 0,
             atoms: Vec::new(),
+            code_rows: Vec::new(),
         }
     }
 
@@ -488,6 +514,44 @@ impl Canvas {
     pub fn add_atom(&mut self, atom: Atom) {
         if atom.rows > 0 && atom.cols > 0 && atom.source_end > atom.source_start {
             self.atoms.push(atom);
+        }
+    }
+
+    /// The code rows recorded by the renderer.
+    pub fn code_rows(&self) -> &[CodeRow] {
+        &self.code_rows
+    }
+
+    /// Records where a code line was drawn.
+    pub fn add_code_row(&mut self, row: CodeRow) {
+        self.code_rows.push(row);
+    }
+
+    /// Restyles every drawn copy of `line` of `block` from `text`'s spans.
+    ///
+    /// Each span's style is patched onto the row's `base`, exactly as
+    /// [`Canvas::write_line`] combined them, so a painted line is cell-for-cell what a
+    /// line written highlighted would have been. Symbols are never touched. A block or
+    /// line with no recorded row is ignored.
+    pub fn paint_code_line(&mut self, block: u64, line: usize, text: &Line) {
+        let rows: Vec<CodeRow> = self
+            .code_rows
+            .iter()
+            .filter(|r| r.block == block && r.line == line)
+            .copied()
+            .collect();
+        for r in rows {
+            let end = usize::from(r.cols);
+            let mut x = 0usize;
+            for span in &text.spans {
+                if x >= end {
+                    break;
+                }
+                let w = display_width(&span.text);
+                let len = w.min(end - x);
+                self.set_style(r.row, usize::from(r.col) + x, len, r.base.patch(span.style));
+                x += w;
+            }
         }
     }
 
@@ -807,6 +871,14 @@ impl Canvas {
                     "row {index}: cells claim {} columns but the assembled row draws \
                      {drawn} — adjacent cells are re-joining",
                     self.width
+                ));
+            }
+        }
+        for code_row in &self.code_rows {
+            if code_row.row >= self.rows.len() {
+                return Err(format!(
+                    "code row for block {} line {}: row {} out of range",
+                    code_row.block, code_row.line, code_row.row
                 ));
             }
         }

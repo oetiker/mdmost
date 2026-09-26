@@ -6,10 +6,13 @@
 //! module drives the real application logic, and [`super::draw`] is left with nothing
 //! but painting.
 
+use std::time::{Duration, Instant};
+
 use crate::canvas::meter::EIGHTHS;
 use crate::canvas::{Canvas, HotspotKind};
 use crate::config::{Action, Config, Key, KeyCode};
 use crate::doc::Doc;
+use crate::highlight::{Highlighter, Outcome};
 use crate::render::RenderOptions;
 use crate::search::{Search, SearchMode};
 use crate::theme::Theme;
@@ -289,6 +292,9 @@ pub struct App {
     options: AppOptions,
     theme: Theme,
     cache: RenderCache,
+    /// The code source every render draws from: plain at first, coloured as
+    /// [`App::highlight_slice`] gets to each block.
+    highlighter: Highlighter,
     toc: Toc,
     search: Search,
     /// Viewport size in cells, status bar included.
@@ -401,6 +407,7 @@ impl App {
             options,
             theme,
             cache: RenderCache::default(),
+            highlighter: Highlighter::new(),
             toc,
             search: Search::empty(),
             size: (80, 24),
@@ -983,16 +990,18 @@ impl App {
             &self.theme,
             options,
             || {
-                crate::render::render_document(
+                crate::render::render_document_with(
                     &self.doc,
                     width,
                     self.config.body_width,
                     &self.theme,
                     &options,
+                    &self.highlighter,
                 )
             },
         );
         if stale {
+            self.highlighter.end_render();
             self.toc.attach_anchors(self.cache.canvas().anchors());
             self.search.locate(self.doc.source(), self.cache.canvas());
             // A mouse selection is a rectangle of *cells*, and a new render is a new
@@ -1024,6 +1033,79 @@ impl App {
             // it.
             self.popup = None;
             self.clamp();
+        }
+    }
+
+    /// The code source the document is rendered from.
+    #[cfg(test)]
+    pub(super) fn highlighter(&self) -> &Highlighter {
+        &self.highlighter
+    }
+
+    /// The blocks worth highlighting now, most wanted first: those on screen, then those
+    /// within one screen above or below (viewport-highlighter design, §7).
+    pub(super) fn wanted_blocks(&self) -> Vec<u64> {
+        let height = self.viewport_height();
+        let top = self.scroll;
+        let view = top..top.saturating_add(height);
+        let halo = top.saturating_sub(height)..top.saturating_add(2 * height);
+        let rows = self.cache.canvas().code_rows();
+        let mut out: Vec<u64> = Vec::new();
+        for range in [view, halo] {
+            let mut hits: Vec<(usize, u64)> = rows
+                .iter()
+                .filter(|r| range.contains(&r.row))
+                .map(|r| (r.row, r.block))
+                .collect();
+            hits.sort_unstable();
+            for (_, block) in hits {
+                if !out.contains(&block) {
+                    out.push(block);
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether any wanted block still has lines to colour.
+    pub(super) fn has_highlight_work(&self) -> bool {
+        self.wanted_blocks()
+            .into_iter()
+            .any(|key| self.highlighter.outcome(key) == Some(Outcome::Pending))
+    }
+
+    /// Colours wanted blocks for up to `budget`, patching each finished line into the
+    /// rendered canvas. Stops early when `input_waiting` says a key is pending. A block
+    /// that gave up forces one re-render, which draws it plain with its caption.
+    pub(super) fn highlight_slice(
+        &mut self,
+        budget: Duration,
+        clock: &mut dyn FnMut() -> Instant,
+        input_waiting: &mut dyn FnMut() -> bool,
+    ) {
+        let deadline = clock() + budget;
+        for key in self.wanted_blocks() {
+            if self.highlighter.outcome(key) != Some(Outcome::Pending) {
+                continue;
+            }
+            let mut out_of_time = false;
+            let finished = self.highlighter.advance(key, &mut || {
+                out_of_time = clock() >= deadline || input_waiting();
+                out_of_time
+            });
+            if self.highlighter.take_failed() {
+                self.cache.invalidate();
+                return;
+            }
+            let canvas = self.cache.canvas_mut();
+            for index in finished {
+                if let Some(line) = self.highlighter.line(key, index) {
+                    canvas.paint_code_line(key, index, &line);
+                }
+            }
+            if out_of_time {
+                return;
+            }
         }
     }
 

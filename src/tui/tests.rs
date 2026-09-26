@@ -12,8 +12,13 @@ use super::help;
 use crate::canvas::HotspotKind;
 use crate::canvas::meter::{EIGHTHS, LOWER_BLOCKS, TRACK_INK, TROUGH};
 use crate::config::{Action, Config, Key, KeyBindings, KeyCode};
+use std::time::Duration;
+
+use super::term::{POLL_INTERVAL, highlight_tick_at, wait_timeout};
 use crate::doc::Doc;
+use crate::highlight::Outcome;
 use crate::search::SearchMode;
+use crate::theme::Style;
 
 /// A document with enough headings and body to scroll through.
 const SAMPLE: &str = "\
@@ -994,6 +999,7 @@ fn the_overflow_marker_matches_the_renderer() {
         20,
         &crate::theme::Theme::default_dark(),
         &crate::render::RenderOptions::new(false, false),
+        &crate::highlight::UNCACHED,
     );
     let text = canvas.plain_text();
     assert!(
@@ -1015,6 +1021,7 @@ fn the_quote_bar_matches_the_renderer() {
         20,
         &crate::theme::Theme::default_dark(),
         &crate::render::RenderOptions::new(false, false),
+        &crate::highlight::UNCACHED,
     );
     let separator = (0..canvas.height())
         .map(|row| canvas.row_text(row))
@@ -1045,6 +1052,7 @@ fn the_gutter_rule_matches_the_renderer() {
         40,
         &theme,
         &crate::render::RenderOptions::new(false, true),
+        &crate::highlight::UNCACHED,
     );
     let pinned = crate::render::document::pinned_prefix(&canvas);
     let text = canvas.plain_text();
@@ -2663,6 +2671,7 @@ fn an_unnumbered_fence_pins_nothing_however_its_code_is_coloured() {
         &theme,
         // Line numbers *off*: this block has no gutter, so nothing may be pinned.
         &crate::render::RenderOptions::new(false, false),
+        &crate::highlight::UNCACHED,
     );
     let pinned = crate::render::document::pinned_prefix(&canvas);
     assert!(
@@ -8469,9 +8478,22 @@ fn pager_watching(source: &str, path: &std::path::Path) -> App {
 /// test cross a two-second window in a microsecond and get the same answer every run.
 struct Clock(std::time::Instant);
 
+impl Default for Clock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Clock {
     fn new() -> Self {
         Self(std::time::Instant::now())
+    }
+
+    /// The current instant, then moves the clock on by `by`.
+    fn step(&mut self, by: std::time::Duration) -> std::time::Instant {
+        let now = self.0;
+        self.0 += by;
+        now
     }
 
     /// `seconds` after the clock was made.
@@ -8828,6 +8850,259 @@ fn a_change_made_while_re_reading_is_off_arrives_when_it_is_switched_on() {
         app.doc().source(),
         "# Two\n\nWritten while nobody was looking.\n",
         "switching it back on did not pick up the change made while it was off"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Colour arriving between key presses (`super::term::highlight_tick_at`, design spec
+// §7 of the viewport-highlighter design).
+// ---------------------------------------------------------------------------
+
+/// A document with enough code to fill several screens.
+fn code_heavy(blocks: usize) -> String {
+    (0..blocks)
+        .map(|i| format!("```rust\nfn f{i}() {{ let x = {i}; }}\n```\n\n"))
+        .collect()
+}
+
+/// One code block of three lines, so that one parsed line leaves it part-way through.
+const THREE_LINE_BLOCK: &str = "```rust\nfn a() {}\nfn b() {}\nfn c() {}\n```\n\n";
+
+/// The styles of the code cells drawn on canvas row `row`.
+fn code_style_at(app: &mut App, row: usize) -> Vec<Style> {
+    let canvas = app.canvas();
+    canvas
+        .code_rows()
+        .iter()
+        .filter(|r| r.row == row)
+        .flat_map(|r| {
+            canvas.row(r.row).unwrap_or_default()
+                [usize::from(r.col)..usize::from(r.col) + usize::from(r.cols)]
+                .iter()
+                .map(|c| c.style())
+        })
+        .collect()
+}
+
+/// The styles of every code cell on the canvas.
+fn all_code_styles(app: &mut App) -> Vec<Style> {
+    let rows: Vec<usize> = app.canvas().code_rows().iter().map(|r| r.row).collect();
+    rows.into_iter()
+        .flat_map(|row| code_style_at(app, row))
+        .collect()
+}
+
+/// Ticks until no wanted block has lines left to colour.
+fn highlight_all(app: &mut App) {
+    let mut clock = Clock::default();
+    while app.has_highlight_work() {
+        highlight_tick_at(
+            app,
+            &mut || clock.step(Duration::from_millis(1)),
+            &mut || false,
+        );
+    }
+}
+
+#[test]
+fn the_first_render_is_plain_and_ticks_colour_the_viewport_first() {
+    let mut app = pager(&code_heavy(60));
+    let plain = app.theme().code.text;
+    let first = app.canvas().code_rows()[0].row;
+    assert!(
+        code_style_at(&mut app, first)
+            .iter()
+            .all(|s| *s == app.theme().code.background.patch(plain))
+    );
+    assert!(app.has_highlight_work());
+    let mut clock = Clock::default();
+    highlight_tick_at(
+        &mut app,
+        &mut || clock.step(Duration::from_millis(1)),
+        &mut || false,
+    );
+    assert!(
+        code_style_at(&mut app, first)
+            .iter()
+            .any(|s| *s != app.theme().code.background.patch(plain))
+    );
+}
+
+#[test]
+fn highlighting_stops_at_the_halo_and_the_loop_goes_back_to_waiting() {
+    let mut app = pager(&code_heavy(200));
+    let mut clock = Clock::default();
+    while app.has_highlight_work() {
+        highlight_tick_at(
+            &mut app,
+            &mut || clock.step(Duration::from_millis(1)),
+            &mut || false,
+        );
+    }
+    assert_eq!(wait_timeout(&app), POLL_INTERVAL);
+    let height = app.viewport_height();
+    let last = app.canvas().code_rows().last().copied().expect("code rows");
+    assert!(last.row > 3 * height, "fixture must extend past the halo");
+    let far = last.block;
+    assert_eq!(app.highlighter().outcome(far), Some(Outcome::Pending));
+}
+
+#[test]
+fn a_slice_stops_at_its_budget_on_the_injected_clock() {
+    let mut app = pager(&code_heavy(60));
+    let mut clock = Clock::default();
+    // Each clock read advances 4 ms; a 10 ms budget is spent after the third read.
+    highlight_tick_at(
+        &mut app,
+        &mut || clock.step(Duration::from_millis(4)),
+        &mut || false,
+    );
+    let done = app
+        .wanted_blocks()
+        .iter()
+        .filter(|&&k| app.highlighter().outcome(k) == Some(Outcome::Highlighted))
+        .count();
+    assert_eq!(done, 3);
+}
+
+#[test]
+fn waiting_input_ends_a_slice_after_one_line() {
+    let mut app = pager(&code_heavy(60));
+    let mut clock = Clock::default();
+    highlight_tick_at(&mut app, &mut || clock.step(Duration::ZERO), &mut || true);
+    let done = app
+        .wanted_blocks()
+        .iter()
+        .filter(|&&k| app.highlighter().outcome(k) == Some(Outcome::Highlighted))
+        .count();
+    assert_eq!(done, 1);
+}
+
+#[test]
+fn a_theme_switch_mid_parse_shows_plain_code_in_the_new_theme() {
+    let mut app = pager(&code_heavy(60));
+    let mut clock = Clock::default();
+    highlight_tick_at(&mut app, &mut || clock.step(Duration::ZERO), &mut || true);
+    let old = app.theme().name.clone();
+
+    app.act(Action::CycleTheme);
+    assert_ne!(app.theme().name, old, "the fixture must change the theme");
+    let new = app.theme().clone();
+    let plain = new.code.background.patch(new.code.text);
+    let styles = all_code_styles(&mut app);
+    assert!(!styles.is_empty());
+    assert!(
+        styles.iter().all(|s| *s == plain),
+        "colour from the old theme survived the switch"
+    );
+
+    highlight_all(&mut app);
+    assert!(
+        all_code_styles(&mut app).iter().any(|s| *s != plain),
+        "colour did not return in the new theme"
+    );
+}
+
+#[test]
+fn a_resize_mid_parse_keeps_finished_colour_and_patches_new_positions() {
+    let source = THREE_LINE_BLOCK.repeat(10);
+    let mut app = pager(&source);
+    let mut clock = Clock::default();
+    highlight_tick_at(&mut app, &mut || clock.step(Duration::ZERO), &mut || true);
+
+    app.resize(50, 12);
+    let rows = app.canvas().code_rows().to_vec();
+    let first = rows[0].block;
+    let row_of = |line: usize| {
+        rows.iter()
+            .find(|r| r.block == first && r.line == line)
+            .map(|r| r.row)
+            .expect("line drawn")
+    };
+    let plain = app.theme().code.background.patch(app.theme().code.text);
+    assert!(
+        code_style_at(&mut app, row_of(0))
+            .iter()
+            .any(|s| *s != plain),
+        "the finished line lost its colour in the reflow"
+    );
+    assert!(
+        code_style_at(&mut app, row_of(2))
+            .iter()
+            .all(|s| *s == plain),
+        "an unparsed line was drawn coloured"
+    );
+
+    highlight_all(&mut app);
+    let blocking = crate::render::render_document(
+        app.doc(),
+        app.content_width(),
+        app.config().body_width,
+        app.theme(),
+        &app.render_options(),
+    );
+    assert_eq!(app.canvas().rows(), blocking.rows());
+}
+
+#[test]
+fn a_reload_that_removes_a_parked_block_does_not_panic() {
+    let mut app = pager(THREE_LINE_BLOCK);
+    let mut clock = Clock::default();
+    highlight_tick_at(&mut app, &mut || clock.step(Duration::ZERO), &mut || true);
+    let parked = app.canvas().code_rows()[0].block;
+    assert_eq!(app.highlighter().parked_keys(), vec![parked]);
+
+    app.reload(Doc::parse("# none\n"));
+    let _ = app.canvas();
+    highlight_tick_at(&mut app, &mut || clock.step(Duration::ZERO), &mut || true);
+    assert!(!app.has_highlight_work());
+    assert_eq!(app.highlighter().outcome(parked), None);
+    assert!(app.highlighter().parked_keys().is_empty());
+}
+
+#[test]
+fn a_line_over_the_pager_budget_fails_and_uncolours_the_lines_ahead_of_it() {
+    // Two short lines that parse and are painted before the block reaches the line
+    // that trips the token guard: `MINIFIED_JS_LINE` needs 6,505 tokens, over
+    // `PAGER_LINE_TOKENS` (5,500), so the third line fails deterministically.
+    let source = format!(
+        "```js\nlet a = 1;\nlet b = 2;\n{}\n```\n\n",
+        crate::highlight::tests::MINIFIED_JS_LINE
+    );
+    let mut app = pager(&source);
+    let mut clock = Clock::default();
+    let mut calls = 0u32;
+
+    // First slice: stop right after the second short line, before the oversized one,
+    // so the block parks still `Pending` with two lines coloured on the canvas.
+    highlight_tick_at(&mut app, &mut || clock.step(Duration::ZERO), &mut || {
+        calls += 1;
+        calls >= 2
+    });
+    let block = app.canvas().code_rows()[0].block;
+    assert_eq!(app.highlighter().outcome(block), Some(Outcome::Pending));
+    let plain = app.theme().code.background.patch(app.theme().code.text);
+    assert!(
+        all_code_styles(&mut app).iter().any(|s| *s != plain),
+        "a short line should be coloured before the block fails"
+    );
+
+    // Second slice: the oversized line trips the token-limit guard, so the block
+    // gives up and the next render redraws the whole thing plain, with a caption.
+    while app.has_highlight_work() {
+        highlight_tick_at(&mut app, &mut || clock.step(Duration::ZERO), &mut || false);
+    }
+    assert_eq!(app.highlighter().outcome(block), Some(Outcome::Failed));
+
+    let canvas = app.canvas();
+    let bottom = canvas.row_text(canvas.height() - 1);
+    assert!(
+        bottom.contains("highlighting gave up"),
+        "the frame should caption the failure:\n{bottom}"
+    );
+    assert!(
+        all_code_styles(&mut app).iter().all(|s| *s == plain),
+        "colour painted before the failure survived it"
     );
 }
 

@@ -202,44 +202,42 @@ fn each_syntax_is_paired_with_its_own_set() {
     assert!(set.find_syntax_by_name(&syntax.name).is_some());
 }
 
-/// A key no other test uses, so this test's entry is never confused with another
-/// test's. It does not by itself protect against another test's theme switch —
-/// see [`HIGHLIGHT_GLOBALS_TEST_LOCK`], which every test that touches the cache
-/// holds for that reason.
+/// An arbitrary probe line, named so a wrong key is easy to spot in a failure. Each
+/// `BlockingSource` below is its own instance, memoising nothing beyond its own scope,
+/// so no lock against a concurrently running test is needed here.
 const TASK1_SRC: &str = "let task1_unique_probe = 1;\n";
 
 #[test]
-fn a_second_highlight_of_the_same_block_is_not_recomputed() {
-    let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    let theme = Theme::default_dark();
-    assert_eq!(computed_count(Some("rust"), TASK1_SRC, &theme), None);
-
-    let first = highlight(Some("rust"), TASK1_SRC, &theme);
-    assert_eq!(computed_count(Some("rust"), TASK1_SRC, &theme), Some(1));
-
-    let second = highlight(Some("rust"), TASK1_SRC, &theme);
-    assert_eq!(computed_count(Some("rust"), TASK1_SRC, &theme), Some(1));
+fn a_blocking_source_highlights_a_block_once_per_instance() {
+    let theme = Theme::default();
+    let source = BlockingSource::new();
+    assert_eq!(source.computed_count(Some("rust"), TASK1_SRC), None);
+    let first = source.block(Some("rust"), TASK1_SRC, &theme);
+    let second = source.block(Some("rust"), TASK1_SRC, &theme);
     assert_eq!(first, second);
+    assert_eq!(first.outcome, Outcome::Highlighted);
+    assert_eq!(first.key, None);
+    assert_eq!(source.computed_count(Some("rust"), TASK1_SRC), Some(1));
 }
 
-/// The cache is keyed on the theme's code styles, so a second theme is a miss
-/// rather than a wrong-coloured hit.
 #[test]
-fn a_different_theme_recomputes_rather_than_reusing_the_colours() {
-    let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    const SRC: &str = "let task1_theme_probe = 2;\n";
+fn a_blocking_source_recomputes_for_another_theme() {
     let dark = Theme::default_dark();
     let light = Theme::default_light();
+    let source = BlockingSource::new();
+    let a = source.block(Some("rust"), TASK1_SRC, &dark);
+    let b = source.block(Some("rust"), TASK1_SRC, &light);
+    assert_ne!(a.lines, b.lines);
+    assert_eq!(source.computed_count(Some("rust"), TASK1_SRC), Some(1));
+}
 
-    let in_dark = highlight(Some("rust"), SRC, &dark);
-    let in_light = highlight(Some("rust"), SRC, &light);
-
-    assert_eq!(in_dark.len(), in_light.len());
-    assert_ne!(in_dark, in_light, "the two themes colour code differently");
+#[test]
+fn a_blocking_source_under_a_tiny_limit_reports_failed_and_plain_lines() {
+    let theme = Theme::default();
+    let source = BlockingSource::with_line_limit(|_| NonZeroUsize::MIN);
+    let block = source.block(Some("rust"), "fn main() {}\n", &theme);
+    assert_eq!(block.outcome, Outcome::Failed);
+    assert_eq!(block.lines, plain("fn main() {}\n", &theme.code));
 }
 
 /// The two lines from `docs/upstream/2026-09-21-javascript-syntax-hang.md`.
@@ -343,49 +341,40 @@ fn the_budget_grows_with_the_line_by_the_exact_formula() {
 #[test]
 fn an_untagged_block_is_plain_not_failed() {
     let theme = Theme::default();
-    let src = "just text\n";
-    highlight(None, src, &theme);
-    assert_eq!(outcome(None, src, &theme), Outcome::Plain);
+    let source = BlockingSource::new();
+    let block = source.block(None, "just text\n", &theme);
+    assert_eq!(block.outcome, Outcome::Plain);
 }
 
 #[test]
 fn an_unknown_tag_is_plain_not_failed() {
     let theme = Theme::default();
-    let src = "just text\n";
-    highlight(Some("no-such-language"), src, &theme);
-    assert_eq!(
-        outcome(Some("no-such-language"), src, &theme),
-        Outcome::Plain
-    );
+    let source = BlockingSource::new();
+    let block = source.block(Some("no-such-language"), "just text\n", &theme);
+    assert_eq!(block.outcome, Outcome::Plain);
 }
 
 #[test]
 fn a_highlighted_block_says_so() {
     let theme = Theme::default();
-    let src = "fn main() {}\n";
-    highlight(Some("rust"), src, &theme);
-    assert_eq!(outcome(Some("rust"), src, &theme), Outcome::Highlighted);
+    let source = BlockingSource::new();
+    let block = source.block(Some("rust"), "fn main() {}\n", &theme);
+    assert_eq!(block.outcome, Outcome::Highlighted);
 }
 
 /// For `Failed`, drive a real token-limit error rather than a stub, so the test
 /// exercises the path a reader would hit: the minified line from Task 4 under a
 /// deliberately tiny limit, via the `#[cfg(test)]` seam rather than a mutable constant.
-///
-/// The source carries its own marker comment on a second line: the memo is keyed on
-/// `(lang, src, theme)` alone, not on which limit computed the entry, so every test that
-/// primes a `Failed` outcome needs a key no other test — locked or not — also touches.
 /// The first line alone already exceeds a limit of two tokens, so the second line never
 /// reaches the parser.
 #[test]
 fn a_block_that_exceeds_its_token_budget_is_failed() {
-    let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
     let theme = Theme::default();
     let src = format!("{MINIFIED_JS_LINE}\n// task5-highlight-outcome-probe\n");
-    let lines = highlight_with_limit(Some("js"), &src, &theme, NonZeroUsize::new(2).unwrap());
-    assert_eq!(lines, plain(&src, &theme.code));
-    assert_eq!(outcome(Some("js"), &src, &theme), Outcome::Failed);
+    let source = BlockingSource::with_line_limit(|_| NonZeroUsize::new(2).unwrap());
+    let block = source.block(Some("js"), &src, &theme);
+    assert_eq!(block.lines, plain(&src, &theme.code));
+    assert_eq!(block.outcome, Outcome::Failed);
 }
 
 /// A parser error that is not the token limit must degrade silently to `Plain`, not
@@ -439,18 +428,15 @@ contexts:
 
 /// The same non-limit parser error, but pinned through the production path rather than
 /// `highlight_with` alone: `highlight_with_syntax` (the `#[cfg(test)]` seam that injects
-/// a syntax the way `highlight_with_limit` injects a token limit) drives it through
-/// `highlight_capped`'s memo and `highlight_uncached`'s own `match` -- the code that
-/// actually decides `Outcome::Plain` for every production caller of `highlight`. The
-/// test above exercises `highlight_with`'s classification in isolation; this one pins
-/// that a non-limit error reaches `Outcome::Plain` end to end, so a mutation of
-/// `highlight_uncached`'s `Err(HighlightError::Other) =>` arm to `Outcome::Failed`
-/// fails here even though it leaves the test above untouched.
+/// a syntax the way `BlockingSource::with_line_limit` injects a token limit) drives it
+/// through `highlight_uncached`'s own `match` -- the code that actually decides
+/// `Outcome::Plain` for every production caller of `highlight`. The test above exercises
+/// `highlight_with`'s classification in isolation; this one pins that a non-limit error
+/// reaches `Outcome::Plain` end to end, so a mutation of `highlight_uncached`'s
+/// `Err(HighlightError::Other) =>` arm to `Outcome::Failed` fails here even though it
+/// leaves the test above untouched.
 #[test]
 fn a_non_limit_parse_error_gives_outcome_plain_on_the_production_path() {
-    let _guard = HIGHLIGHT_GLOBALS_TEST_LOCK
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
     let source = "\
 name: broken
 scope: source.broken
@@ -469,15 +455,29 @@ contexts:
         .expect("the broken syntax should be in the set");
 
     let theme = Theme::default();
-    // The marker line is never reached -- the error fires on the first line -- but the
-    // memo is keyed on `(lang, src, theme)` alone, so it keeps this call's key from
-    // colliding with any other test's.
     let src = "x\n// task5-outcome-plain-non-limit-probe\n";
-    let lines = highlight_with_syntax(Some("broken"), &set, syntax, src, &theme);
+    let (lines, outcome) = highlight_with_syntax(Some("broken"), &set, syntax, src, &theme);
     assert_eq!(lines, plain(src, &theme.code));
-    // `outcome()` also reads `Outcome::Plain` back for a key the cache never saw (see
-    // its own doc), so this on its own would pass even if the entry were never stored.
-    // Pin that the call above actually populated the memo before trusting the read.
-    assert_eq!(computed_count(Some("broken"), src, &theme), Some(1));
-    assert_eq!(outcome(Some("broken"), src, &theme), Outcome::Plain);
+    assert_eq!(outcome, Outcome::Plain);
+}
+
+/// A parse stopped after any line and continued with the same `Parse` gives exactly the
+/// lines an uninterrupted parse gives: the state carried between lines is the whole of
+/// what a resumed parse needs.
+#[test]
+fn a_parse_continued_line_by_line_matches_one_uninterrupted_parse() {
+    let theme = Theme::default();
+    let src = "/* a comment\n   spanning */\nfn main() {\n\tlet s = \"x\";\n}\n";
+    let (set, syntax) = resolve_syntax(Some("rust")).expect("rust resolves");
+    let whole = highlight_with(set, syntax, src, &theme.code, &token_limit_for)
+        .unwrap_or_else(|_| panic!("rust parses"));
+    let mut parse = Parse::new(set, syntax);
+    let stepped: Vec<Line> = LinesWithEndings::from(src)
+        .map(|raw| {
+            parse
+                .line(raw, &theme.code, token_limit_for(raw))
+                .unwrap_or_else(|_| panic!("rust parses"))
+        })
+        .collect();
+    assert_eq!(stepped, whole);
 }

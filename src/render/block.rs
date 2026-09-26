@@ -65,7 +65,8 @@ pub(crate) fn heading_rule(level: u8) -> Option<&'static str> {
 /// with no surrounding `$…$` rather than to the verbatim bytes design spec §5.3
 /// describes. Use [`render_block_numbered`] when that matters.
 pub fn render_block(node: &Node, width: u16, theme: &Theme, options: &RenderOptions) -> Canvas {
-    render_block_ctx(node, width, Ctx::new(theme, options))
+    let code = crate::highlight::BlockingSource::new();
+    render_block_ctx(node, width, Ctx::new(theme, options).with_code(&code))
 }
 
 /// Renders one block of a document whose sections are numbered (design spec §9.3).
@@ -93,12 +94,14 @@ pub fn render_block_numbered(
     numbers: &Numbering,
     source: &str,
 ) -> Canvas {
+    let code = crate::highlight::BlockingSource::new();
     render_block_ctx(
         node,
         width,
         Ctx::new(theme, options)
             .numbered(numbers)
-            .with_source(source),
+            .with_source(source)
+            .with_code(&code),
     )
 }
 
@@ -116,10 +119,13 @@ pub fn render_blocks(
     options: &RenderOptions,
     source: &str,
 ) -> Canvas {
+    let code = crate::highlight::BlockingSource::new();
     render_sequence(
         nodes,
         width,
-        Ctx::new(theme, options).with_source(source),
+        Ctx::new(theme, options)
+            .with_source(source)
+            .with_code(&code),
         true,
     )
 }
