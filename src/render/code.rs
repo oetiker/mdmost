@@ -576,7 +576,10 @@ fn title(language: &str, ctx: Ctx<'_>) -> Line {
     let theme = ctx.theme;
     let mut line = Line::empty();
     if let Some(icon) = ctx.glyphs.language(Some(language)) {
-        line.push(Span::new(format!("{icon} "), theme.code.language));
+        line.push(Span::new(
+            format!("{icon}{}", ctx.glyphs.gap),
+            theme.code.language,
+        ));
     }
     line.push(Span::new(language, theme.code.language));
     line

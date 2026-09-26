@@ -6,7 +6,23 @@
 
 ### Changed
 
+- With Nerd Font icons on, an icon or a status-bar separator is now followed by two blank
+  columns instead of one, in the status bar, the contents pane, the help overlay and
+  code-block titles. Terminals draw these glyphs two columns wide, so the text after them
+  looked cramped. With icons off nothing changes.
+- A file name too long for the status bar is shortened by dropping a final `.md` first,
+  and then by cutting its middle instead of its end, so `2026-09-25-viewport-highlighter.md`
+  reads `2026-09-25-view…ghter`. Names that share a date or number prefix now stay
+  distinguishable.
+
 ### Fixed
+
+- While the contents pane is filtered, a long filter in the pane's title is now cut to
+  fit exactly. Depending on the width of the match count, such as `1/12` or `10/100`, it
+  was cut one or two columns too early or one column too late.
+- A long link address shown in parentheses after the link text is now cut to the same
+  width whatever it contains. An address with Japanese, Chinese or other double-width
+  characters near the cut came out one column wider than the others.
 
 ## 0.3.5 - 2026-09-25
 

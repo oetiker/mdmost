@@ -136,6 +136,21 @@ const BULLETS: [&str; 4] = ["*", ">", "+", "-"];
 /// when the two Font Awesome boxes turned out to be the same drawing at two sizes.
 const TASK_BOXES: (&str, &str) = ("[x]", "[ ]");
 
+/// The blank columns between a Nerd Font icon and the text after it.
+///
+/// Two, not one. Terminals draw these icons two cells wide while every width table,
+/// `unicode-width` included, counts one, so the icon's second half covers the column
+/// after it and a single space leaves the text touching the icon. The extra column is
+/// measured like any other, so layout budgets for it without being told. The plain
+/// substitutes are drawn at their measured width and keep one space ([`PLAIN_GAP`]).
+///
+/// The chrome's own glyph set (`tui::icons`) uses the same pair, so an icon in the
+/// status bar and one in a code frame's title sit at the same distance from their text.
+pub(crate) const NERD_GAP: &str = "  ";
+
+/// The blank column between a plain-Unicode substitute and the text after it.
+pub(crate) const PLAIN_GAP: &str = " ";
+
 /// The glyphs used for one rendering pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Glyphs {
@@ -147,6 +162,8 @@ pub(crate) struct Glyphs {
     pub task_unchecked: &'static str,
     /// Whether a code fence shows a language icon in front of its name.
     pub code_icons: bool,
+    /// The blank columns between an icon and the text after it; see [`NERD_GAP`].
+    pub gap: &'static str,
 }
 
 impl Glyphs {
@@ -161,6 +178,7 @@ impl Glyphs {
         task_checked: TASK_BOXES.0,
         task_unchecked: TASK_BOXES.1,
         code_icons: false,
+        gap: PLAIN_GAP,
     };
 
     /// Nerd Font glyphs, the default look where a Nerd Font is detected.
@@ -196,6 +214,7 @@ impl Glyphs {
         task_checked: TASK_BOXES.0,
         task_unchecked: TASK_BOXES.1,
         code_icons: true,
+        gap: NERD_GAP,
     };
 
     /// The set to use for the given `icons` setting.

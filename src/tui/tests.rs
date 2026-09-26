@@ -1970,6 +1970,75 @@ fn the_help_overlay_shows_the_way_out_at_every_height() {
 }
 
 #[test]
+fn a_long_toc_filter_fills_the_title_exactly() {
+    // The filter is shortened against what the rest of the title actually draws. A
+    // fixed reserve was right only for one width of the `n/m` count: with `1/12` it
+    // cut the filter a column early and left a stray `─` before the corner.
+    let mut source: String = (1..=11).map(|n| format!("# Heading {n}\n\n")).collect();
+    source.push_str("# abcdefghijklmnopqrstuvwxyz\n\ntext\n");
+    for icons in [false, true] {
+        let mut app = pager(&source);
+        app.set_icons(icons);
+        app.act(Action::ToggleToc);
+        app.act(Action::SearchForward);
+        for ch in "abcdefghijklmnopqrstuvwxyz".chars() {
+            app.on_key(Key::char(ch));
+        }
+        assert_eq!(app.toc_hits().len(), 1);
+        let rows = painted(30, 6, |buffer, area| {
+            super::chrome::draw_toc(buffer, area, &app)
+        });
+        let set = super::icons::Icons::new(icons);
+        let budget = 30 - 2 - 2 - crate::text::display_width(set.gap) - " 1/12 ".len();
+        let filter = crate::text::ellipsize("abcdefghijklmnopqrstuvwxyz", budget);
+        assert_eq!(
+            rows[0],
+            format!("╭ {}{}{filter} 1/12 ╮", set.search, set.gap),
+            "icons {icons}"
+        );
+        if !icons {
+            assert_eq!(rows[0], "╭ \u{2315} abcdefghijklmnopqr… 1/12 ╮");
+        }
+    }
+}
+
+#[test]
+fn a_long_toc_filter_fills_the_title_exactly_beside_a_wide_count() {
+    // The other side of the old fixed reserve: a six-column count such as `10/100`
+    // left the title a column too long for the pane.
+    let mut source: String = (1..=90).map(|n| format!("# Heading {n}\n\n")).collect();
+    for n in 1..=10 {
+        source.push_str(&format!("# abcdefghijklmnopqrstuvwxyz {n}\n\n"));
+    }
+    source.push_str("text\n");
+    for icons in [false, true] {
+        let mut app = pager(&source);
+        app.set_icons(icons);
+        app.act(Action::ToggleToc);
+        app.act(Action::SearchForward);
+        for ch in "abcdefghijklmnopqrstuvwxyz".chars() {
+            app.on_key(Key::char(ch));
+        }
+        assert_eq!(app.toc_hits().len(), 10);
+        assert_eq!(app.toc().len(), 100);
+        let rows = painted(30, 6, |buffer, area| {
+            super::chrome::draw_toc(buffer, area, &app)
+        });
+        let set = super::icons::Icons::new(icons);
+        let budget = 30 - 2 - 2 - crate::text::display_width(set.gap) - " 10/100 ".len();
+        let filter = crate::text::ellipsize("abcdefghijklmnopqrstuvwxyz", budget);
+        assert_eq!(
+            rows[0],
+            format!("╭ {}{}{filter} 10/100 ╮", set.search, set.gap),
+            "icons {icons}"
+        );
+        if !icons {
+            assert_eq!(rows[0], "╭ \u{2315} abcdefghijklmnop… 10/100 ╮");
+        }
+    }
+}
+
+#[test]
 fn a_deep_toc_entry_still_says_something_in_a_narrow_pane() {
     // The indent is what gives way when the pane is narrow. If the prefix is allowed
     // to eat the whole width the entry renders as a blank row, which reads as a bug
@@ -2063,6 +2132,113 @@ fn every_chrome_glyph_is_one_column_wide() {
             );
         }
     }
+}
+
+#[test]
+fn the_nerd_separator_has_two_columns_of_space_after_it() {
+    // The separator is a Nerd Font glyph too, drawn two cells wide and measured as
+    // one, so it takes the same gap as the icons. The plain `│` keeps one space.
+    let nerd = super::icons::Icons::NERD;
+    let plain = super::icons::Icons::PLAIN;
+    for width in [80u16, 40] {
+        let status = |icons: bool| {
+            let mut app = pager_named("# Heading\n\nbody\n", "notes.md", width, 10);
+            app.set_icons(icons);
+            painted(width, 1, |buffer, area| {
+                super::chrome::draw_status(buffer, area, &app)
+            })
+            .remove(0)
+        };
+        let with = status(true);
+        assert!(
+            with.starts_with(&format!(
+                " {}  notes.md {}   All ",
+                nerd.file, nerd.separator
+            )),
+            "{with:?}"
+        );
+        assert_eq!(
+            with.matches(&format!(" {}  ", nerd.separator)).count(),
+            with.matches(nerd.separator).count(),
+            "every separator has the gap at {width}: {with:?}"
+        );
+        assert_eq!(
+            crate::text::display_width(&with),
+            usize::from(width),
+            "{with:?}"
+        );
+        let without = status(false);
+        // `{:>4}` pads the position, so the plain bar reads `│  All`: that second
+        // space is the position's own, which is why this pins the whole prefix.
+        assert!(
+            without.starts_with(&format!(
+                " {} notes.md {}  All ",
+                plain.file, plain.separator
+            )),
+            "{without:?}"
+        );
+        assert_eq!(
+            crate::text::display_width(&without),
+            usize::from(width),
+            "{without:?}"
+        );
+    }
+}
+
+#[test]
+fn a_nerd_icon_has_two_columns_of_space_before_its_text() {
+    // Terminals draw these icons two cells wide while the width tables count one, so
+    // the icon's second half covers the column after it; one more blank column keeps
+    // the text from reading as welded to the icon. The plain set is drawn at its
+    // measured width and keeps its single space.
+    let nerd = super::icons::Icons::NERD;
+    let plain = super::icons::Icons::PLAIN;
+    let status = |icons: bool| {
+        let mut app = pager_named("# Heading\n\nbody\n", "notes.md", 80, 10);
+        app.set_icons(icons);
+        painted(80, 1, |buffer, area| {
+            super::chrome::draw_status(buffer, area, &app)
+        })
+        .remove(0)
+    };
+    let with = status(true);
+    assert!(
+        with.starts_with(&format!(" {}  notes.md", nerd.file)),
+        "{with:?}"
+    );
+    assert!(
+        with.contains(&format!("{}  Heading", nerd.heading)),
+        "{with:?}"
+    );
+    assert_eq!(crate::text::display_width(&with), 80, "{with:?}");
+    let without = status(false);
+    assert!(
+        without.starts_with(&format!(" {} notes.md", plain.file)),
+        "{without:?}"
+    );
+    assert!(
+        without.contains(&format!("{} Heading", plain.heading)),
+        "{without:?}"
+    );
+
+    let toc = |icons: bool| {
+        let mut app = pager_named("# Heading\n\nbody\n", "notes.md", 80, 10);
+        app.set_icons(icons);
+        painted(30, 5, |buffer, area| {
+            super::chrome::draw_toc(buffer, area, &app)
+        })
+        .remove(0)
+    };
+    assert!(
+        toc(true).contains(&format!(" {}  Contents ", nerd.toc)),
+        "{:?}",
+        toc(true)
+    );
+    assert!(
+        toc(false).contains(&format!(" {} Contents ", plain.toc)),
+        "{:?}",
+        toc(false)
+    );
 }
 
 /// Paints one whole frame exactly as the pager does, and returns it as text rows.
@@ -8809,8 +8985,8 @@ fn a_long_file_name_is_capped_so_the_breadcrumb_fits_at_eighty_columns() {
         rows[0]
     );
     assert!(
-        rows[0].contains("a-rather-long-file-\u{2026}"),
-        "the name is elided to twenty columns: {:?}",
+        rows[0].contains(" a-rather-long-\u{2026}ument \u{2502}"),
+        "the name loses `.md`, then its middle, to fit twenty columns: {:?}",
         rows[0]
     );
     // A name that already fits the cap is left alone.
@@ -8819,6 +8995,45 @@ fn a_long_file_name_is_capped_so_the_breadcrumb_fits_at_eighty_columns() {
         super::chrome::draw_status(buffer, area, &app)
     });
     assert!(rows[0].contains("notes.md"), "{:?}", rows[0]);
+    // A name that fits the cap once `.md` is gone loses only that.
+    let app = pager_named(
+        "# Introduction and overview\n\nbody\n",
+        "abcdefghijklmnopqrs.md",
+        80,
+        10,
+    );
+    let rows = painted(80, 1, |buffer, area| {
+        super::chrome::draw_status(buffer, area, &app)
+    });
+    assert!(
+        rows[0].contains(" abcdefghijklmnopqrs \u{2502}") && !rows[0].contains('\u{2026}'),
+        "{:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn a_name_shortened_to_fit_a_narrow_bar_keeps_its_end() {
+    // The width-driven elision in `lay_out` shortens the name past the cap; it must use
+    // the same rule as the cap, so the end of the name is still on screen.
+    for width in [36u16, 40, 44] {
+        let app = pager_named(WIDE, "a-rather-long-file-name.md", width, 12);
+        let rows = painted(width, 1, |buffer, area| {
+            super::chrome::draw_status(buffer, area, &app)
+        });
+        let row = &rows[0];
+        assert!(!row.contains(".md"), "at {width}: {row:?}");
+        let at = row.find('\u{2026}').expect("the name is shortened");
+        assert!(
+            row[at..].chars().nth(1).is_some_and(|c| !c.is_whitespace()),
+            "the ellipsis is followed by the end of the name at {width}: {row:?}"
+        );
+        assert_eq!(
+            crate::text::display_width(row),
+            usize::from(width),
+            "{row:?}"
+        );
+    }
 }
 
 #[test]

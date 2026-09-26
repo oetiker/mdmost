@@ -686,6 +686,108 @@ fn ellipsize_never_exceeds_its_budget() {
 }
 
 #[test]
+fn ellipsize_name_leaves_a_name_that_fits_alone() {
+    assert_eq!(ellipsize_name("notes.md", 8), "notes.md");
+    assert_eq!(ellipsize_name("notes.md", 30), "notes.md");
+    assert_eq!(ellipsize_name("", 0), "");
+    assert_eq!(ellipsize_name("notes.md", 0), "");
+}
+
+#[test]
+fn ellipsize_name_drops_a_final_md_before_anything_else() {
+    assert_eq!(
+        ellipsize_name("2026-09-25-viewport.md", 21),
+        "2026-09-25-viewport"
+    );
+    assert_eq!(
+        ellipsize_name("2026-09-25-viewport.md", 19),
+        "2026-09-25-viewport"
+    );
+    // Any case, but only a final `.md`.
+    assert_eq!(ellipsize_name("README.MD", 8), "README");
+    assert_eq!(ellipsize_name("notes.Md", 5), "notes");
+    assert_eq!(ellipsize_name("a.md.txt", 7), "a.m…txt");
+    assert_eq!(ellipsize_name("notes.markdown", 10), "notes…down");
+    // A name that is nothing but the suffix keeps it, rather than showing nothing.
+    assert_eq!(ellipsize_name(".md", 2), ".…");
+}
+
+#[test]
+fn ellipsize_name_keeps_the_last_five_columns_from_eleven_up() {
+    assert_eq!(
+        ellipsize_name("2026-09-25-viewport-highlighter.md", 21),
+        "2026-09-25-view…ghter"
+    );
+    assert_eq!(ellipsize_name("abcdefghijklmnop", 11), "abcde…lmnop");
+    assert_eq!(ellipsize_name("abcdefghijklmnop", 15), "abcdefghi…lmnop");
+}
+
+#[test]
+fn ellipsize_name_cuts_in_the_middle_below_eleven() {
+    // The start gets the odd column.
+    assert_eq!(ellipsize_name("abcdefghijklmnop", 10), "abcde…mnop");
+    assert_eq!(ellipsize_name("abcdefghijklmnop", 9), "abcd…mnop");
+    assert_eq!(ellipsize_name("abcdefghijklmnop", 4), "ab…p");
+    assert_eq!(ellipsize_name("abcdefghijklmnop", 2), "a…");
+    assert_eq!(ellipsize_name("abcdefghijklmnop", 1), "…");
+    assert_eq!(ellipsize_name("abcdefghijklmnop.md", 10), "abcde…mnop");
+}
+
+#[test]
+fn ellipsize_name_never_splits_a_wide_cluster() {
+    // A column the end cannot use goes to the start, so only one side comes up short.
+    assert_eq!(
+        ellipsize_name("日本語のテキストファイル.md", 11),
+        "日本語…イル"
+    );
+    assert_eq!(ellipsize_name("日本語のテキスト", 10), "日本…スト");
+    assert_eq!(ellipsize_name("日本語", 3), "日…");
+    assert_eq!(
+        ellipsize_name(&format!("{ZWJ}{ZWJ}{ZWJ}{ZWJ}{ZWJ}{ZWJ}{ZWJ}.md"), 12),
+        format!("{ZWJ}{ZWJ}{ZWJ}…{ZWJ}{ZWJ}")
+    );
+    assert_eq!(
+        ellipsize_name(&format!("caf{COMBINING}-and-more-caf{COMBINING}"), 11),
+        format!("caf{COMBINING}-…-caf{COMBINING}")
+    );
+}
+
+#[test]
+fn ellipsize_name_never_exceeds_its_budget() {
+    let samples = [
+        "plain-name-that-is-quite-long.md",
+        "日本語のテキスト.md",
+        WIDE_PLUS_SPACING_MARK,
+        ZWJ,
+        FLAG,
+        COMBINING,
+        "mixed 日本 \u{17000}\u{1A57} tail.MD",
+        ".md",
+        "\u{1b}[31m.md",
+    ];
+    for text in samples {
+        for width in 0..40usize {
+            let cut = ellipsize_name(text, width);
+            assert!(
+                display_width(&cut) <= width,
+                "{text:?} at {width}: {cut:?} draws {}",
+                display_width(&cut)
+            );
+        }
+    }
+    // And, where it has to cut, it is at most one column short of the room it had.
+    for text in ["plain-name-that-is-quite-long", "日本語のテキストファイル"] {
+        for width in 1..display_width(text) {
+            let cut = ellipsize_name(text, width);
+            assert!(
+                display_width(&cut) + 1 >= width,
+                "{text:?} at {width}: {cut:?} is more than one column short"
+            );
+        }
+    }
+}
+
+#[test]
 fn truncate_to_width_costs_a_wide_cluster_honestly() {
     // Three columns of content, two columns of budget: the cluster cannot fit at all.
     assert_eq!(truncate_to_width(WIDE_PLUS_SPACING_MARK, 2), "");

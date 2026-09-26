@@ -709,15 +709,21 @@ fn link(node: &Node, url: &str, style: Style, ctx: Ctx<'_>, ids: &mut usize, out
 /// The end-elided sibling of this is [`crate::text::ellipsize`]; a URL needs the
 /// *middle* dropped instead, because it carries its meaning at both ends — the host at
 /// the front and the document name at the back.
+///
+/// The result is never wider than `budget` and never splits a grapheme cluster. The
+/// end is cut first, and a column it cannot use because a double-width cluster would
+/// straddle the cut goes to the start, which otherwise gets the odd column.
 pub(crate) fn elide_middle(text: &str, budget: usize) -> String {
-    if display_width(text) <= budget || budget < 3 {
+    if display_width(text) <= budget {
         return text.to_string();
     }
-    let head = (budget - 1).div_ceil(2);
-    let tail = budget - 1 - head;
-    let front = crate::text::truncate_to_width(text, head);
-    let back = crate::text::split_at_width(text, display_width(text) - tail).1;
-    format!("{front}…{back}")
+    if budget == 0 {
+        return String::new();
+    }
+    let room = budget - display_width(crate::text::ELLIPSIS);
+    let back = crate::text::tail_to_width(text, room / 2);
+    let front = crate::text::truncate_to_width(text, room - display_width(back));
+    format!("{front}{}{back}", crate::text::ELLIPSIS)
 }
 
 /// The display width of inline content when it is not wrapped at all.
@@ -856,5 +862,65 @@ mod tests {
             pieces[0].origin.is_none(),
             "a trimmed atom keeps no source at all"
         );
+    }
+
+    /// Checks that `cut` is `text`, or a whole-cluster start of it, `…`, and a
+    /// whole-cluster end of it, drawing no more than `budget` columns.
+    fn assert_elided(text: &str, budget: usize) {
+        let cut = elide_middle(text, budget);
+        assert!(
+            display_width(&cut) <= budget,
+            "{text:?} at {budget}: {cut:?} draws {}",
+            display_width(&cut)
+        );
+        if cut == text || cut.is_empty() {
+            return;
+        }
+        let bounds: Vec<usize> = crate::text::graphemes(text)
+            .scan(0, |at, cluster| {
+                *at += cluster.len();
+                Some(*at)
+            })
+            .chain([0])
+            .collect();
+        let (head, tail) = cut.split_once('…').expect("a shortened text is marked");
+        assert!(
+            text.starts_with(head) && bounds.contains(&head.len()),
+            "{text:?} at {budget}: the start {head:?} splits a cluster"
+        );
+        assert!(
+            text.ends_with(tail) && bounds.contains(&(text.len() - tail.len())),
+            "{text:?} at {budget}: the end {tail:?} splits a cluster"
+        );
+    }
+
+    #[test]
+    fn elide_middle_never_exceeds_its_budget_at_a_wide_cut() {
+        // A double-width cluster straddling the end's cut used to go to the end whole,
+        // one column over budget: `ab…日f`.
+        assert_eq!(elide_middle("abcde日f", 5), "abc…f");
+        assert_eq!(elide_middle("ab日cdef", 5), "ab…ef");
+        assert_eq!(elide_middle("日本語テキスト", 6), "日…ト");
+        assert_eq!(elide_middle("a日b", 3), "a…b");
+        for text in [
+            "abcde日f",
+            "ab日cdef",
+            "日本語テキスト",
+            "https://例え.jp/パス/ファイル",
+            "\u{1f469}\u{200d}\u{1f4bb}\u{1f469}\u{200d}\u{1f4bb}x\u{1f469}\u{200d}\u{1f4bb}",
+            "e\u{0301}e\u{0301}e\u{0301}e\u{0301}e\u{0301}",
+        ] {
+            for budget in 0..=display_width(text) + 1 {
+                assert_elided(text, budget);
+            }
+        }
+    }
+
+    #[test]
+    fn elide_middle_respects_a_budget_below_three() {
+        assert_eq!(elide_middle("abcdef", 2), "a…");
+        assert_eq!(elide_middle("abcdef", 1), "…");
+        assert_eq!(elide_middle("abcdef", 0), "");
+        assert_eq!(elide_middle("ab", 2), "ab");
     }
 }

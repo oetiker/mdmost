@@ -3,11 +3,15 @@
 //!
 //! Two sets exist and they are structurally identical, so nothing in the drawing code
 //! needs to know which one is in force: turning icons off simply swaps Nerd Font glyphs
-//! for plain Unicode of the same display width.
+//! for plain Unicode of the same display width. The one thing that differs in layout is
+//! [`Icons::gap`], the space after an icon or a separator, which is a column wider in
+//! the Nerd set.
 //!
 //! Which set is in force is settled before drawing starts — by `--no-icons`, by
 //! `MDMOST_ICONS`, by `icons` in the config file, or, if nobody has said, by
 //! [`crate::nerdfont`] detecting whether a font that can draw them is installed.
+
+use crate::render::glyphs::{NERD_GAP, PLAIN_GAP};
 
 /// The glyphs the status bar, table of contents and help overlay draw with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +36,10 @@ pub struct Icons {
     pub warning: &'static str,
     /// Marks the horizontal offset when content is scrolled sideways.
     pub horizontal: &'static str,
+    /// The blank columns after an icon or a separator, before whatever follows it —
+    /// two for the Nerd set, one for the plain set, for the reason given on
+    /// [`crate::render::glyphs::NERD_GAP`]. Not a glyph, so not in [`Self::all`].
+    pub gap: &'static str,
 }
 
 impl Icons {
@@ -51,6 +59,7 @@ impl Icons {
         // Plain in both sets: an arrow that renders double-width in some terminals
         // would shift the whole status bar.
         horizontal: "\u{2194}",
+        gap: NERD_GAP,
     };
 
     /// The plain-Unicode fallback, for terminals without a Nerd Font.
@@ -65,6 +74,7 @@ impl Icons {
         separator: "\u{2502}",
         warning: "!",
         horizontal: "\u{2194}",
+        gap: PLAIN_GAP,
     };
 
     /// Picks a glyph set.

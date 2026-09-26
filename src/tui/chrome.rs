@@ -16,7 +16,7 @@ use ratatui::widgets::{Block, BorderType, Clear, Widget};
 
 use crate::canvas::meter::{TRACK_INK, meter};
 use crate::search::SearchMode;
-use crate::text::{Align, display_width, truncate_to_width};
+use crate::text::{Align, display_width, ellipsize_name, truncate_to_width};
 use crate::theme::Theme;
 
 use super::app::{App, Focus, Overlay};
@@ -75,17 +75,16 @@ pub fn draw_toc(buffer: &mut Buffer, area: Rect, app: &App) {
     // light theme on a dark terminal reads as a hole (visual review B1).
     buffer.set_style(area, term_style(theme.base()));
     let title = if app.toc_filter().is_empty() {
-        format!(" {} Contents ", icons.toc)
+        format!(" {}{}Contents ", icons.toc, icons.gap)
     } else {
         // A filtered pane says how much of the map it is still showing; without a
         // count a one-hit filter is indistinguishable from a broken table of contents.
-        format!(
-            " {} {} {}/{} ",
-            icons.search,
-            fit(app.toc_filter(), usize::from(area.width).saturating_sub(12)),
-            app.toc_hits().len(),
-            app.toc().len()
-        )
+        // The filter gets exactly what the corners and the other two parts leave.
+        let lead = format!(" {}{}", icons.search, icons.gap);
+        let count = format!(" {}/{} ", app.toc_hits().len(), app.toc().len());
+        let room = usize::from(area.width)
+            .saturating_sub(2 + display_width(&lead) + display_width(&count));
+        format!("{lead}{}{count}", fit(app.toc_filter(), room))
     };
     Block::bordered()
         .border_type(BorderType::Rounded)
@@ -244,7 +243,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     let icons = Icons::new(app.icons());
     let sep = |spans: &mut Vec<TermSpan<'static>>| {
         spans.push(TermSpan::styled(
-            format!(" {} ", icons.separator),
+            format!(" {}{}", icons.separator, icons.gap),
             term_style(theme.ui.status_bar.dim()),
         ));
     };
@@ -265,16 +264,20 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
     // name on an eighty-column terminal used to keep every one of its characters while
     // the breadcrumb and then the meter were dropped around it — the tail of a name the
     // reader chose themselves, kept at the cost of what is on screen right now.
+    //
+    // The cap and the width-driven elision in `lay_out` both shorten the name with
+    // `crate::text::ellipsize_name`, which drops `.md` first and then keeps the name's
+    // end: names that share a date or a number prefix differ at the end.
     let cap = (usize::from(area.width) / TITLE_SHARE).max(TITLE_FLOOR);
     left.push(Segment::new(
         Drop::Title,
         vec![
             TermSpan::styled(
-                format!(" {} ", icons.file),
+                format!(" {}{}", icons.file, icons.gap),
                 term_style(theme.ui.status_accent),
             ),
             TermSpan::styled(
-                fit(app.title(), cap),
+                ellipsize_name(app.title(), cap),
                 term_style(theme.ui.status_accent.bold()),
             ),
         ],
@@ -389,7 +392,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         sep(&mut spans);
         if notice.is_error {
             spans.push(TermSpan::styled(
-                format!("{} ", icons.warning),
+                format!("{}{}", icons.warning, icons.gap),
                 term_style(style),
             ));
         }
@@ -406,7 +409,7 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
         let mut spans = Vec::new();
         sep(&mut spans);
         spans.push(TermSpan::styled(
-            format!("{} ", icons.heading),
+            format!("{}{}", icons.heading, icons.gap),
             term_style(theme.ui.status_bar.dim()),
         ));
         spans.push(TermSpan::styled(
@@ -431,7 +434,12 @@ pub fn draw_status(buffer: &mut Buffer, area: Rect, app: &App) {
             ));
         }
         spans.push(TermSpan::styled(
-            format!(" {} {} {count} ", icons.search, app.search().query()),
+            format!(
+                " {}{}{} {count} ",
+                icons.search,
+                icons.gap,
+                app.search().query()
+            ),
             term_style(theme.ui.status_bar),
         ));
         right.push(Segment::new(Drop::Search, spans));
@@ -662,17 +670,17 @@ fn lay_out(
 ) -> Vec<TermSpan<'static>> {
     let total = |segments: &[Segment]| -> usize { segments.iter().map(|s| s.width).sum() };
     // What the file name, the hovered URL and the notice could each give up if elided
-    // away entirely, measured through `fit`/`ellipsize` so this cannot drift from what
-    // the elision below actually reclaims. All three are shrunk rather than dropped
-    // whole: the URL because design spec §8 leans on it in place of a confirmation
-    // prompt — a safeguard that silently disappears the moment a name is a little too
-    // long would fail exactly when the reader needed it — and the notice because a
-    // `could not re-read /some/path: No such file or directory` is wider than a
-    // sixty-column bar has to give, and a reader shown nothing at all is back to a
-    // stale document with no word of why.
+    // away entirely, measured through `ellipsize_name`/`ellipsize` — the functions the
+    // elision below calls — so this cannot drift from what it actually reclaims. All
+    // three are shrunk rather than dropped whole: the URL because design spec §8 leans
+    // on it in place of a confirmation prompt — a safeguard that silently disappears
+    // the moment a name is a little too long would fail exactly when the reader needed
+    // it — and the notice because a `could not re-read /some/path: No such file or
+    // directory` is wider than a sixty-column bar has to give, and a reader shown
+    // nothing at all is back to a stale document with no word of why.
     let elidable = |left: &[Segment], right: &[Segment]| -> usize {
         let title_slack = title(left).map_or(0, |name| {
-            display_width(name).saturating_sub(display_width(&fit(name, 0)))
+            display_width(name).saturating_sub(display_width(&ellipsize_name(name, 0)))
         });
         let tail_slack: usize = SHRINK_AT_END
             .iter()
@@ -730,7 +738,7 @@ fn lay_out(
             .and_then(|segment| segment.spans.last_mut())
     {
         let room = display_width(&name.content).saturating_sub(used + 1 - width);
-        let short = fit(&name.content, room);
+        let short = ellipsize_name(&name.content, room);
         used -= display_width(&name.content) - display_width(&short);
         name.content = short.into();
     }
@@ -905,7 +913,7 @@ pub fn draw_help(buffer: &mut Buffer, area: Rect, app: &mut App) {
         .border_type(BorderType::Rounded)
         .border_style(term_style(on_panel(theme.ui.help_border, &theme)))
         .title(TermSpan::styled(
-            format!(" {} Keys ", icons.help),
+            format!(" {}{}Keys ", icons.help, icons.gap),
             term_style(on_panel(theme.ui.help_title, &theme)),
         ));
     if tallest > visible {
