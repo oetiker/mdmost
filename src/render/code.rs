@@ -369,7 +369,7 @@ fn framed_code(
         .flatten()
         .map(|name| title(name, ctx));
     let note = (block.outcome == crate::highlight::Outcome::Failed)
-        .then(|| outcome_caption("highlighting gave up", ctx));
+        .then(|| bottom_caption("highlighting gave up", width, ctx));
     let mut out = inner.framed_captioned(
         BorderSet::ROUNDED,
         theme.code.frame,
@@ -586,14 +586,15 @@ fn title(language: &str, ctx: Ctx<'_>) -> Line {
     line
 }
 
-/// The label drawn into the frame's bottom edge: what happened to this block.
+/// The label drawn into a code frame's bottom edge: what happened to this block.
 ///
-/// Styled like the overflow marker rather than the language label, because it is a
-/// report about the block and not part of the block's identity.
-fn outcome_caption(text: &str, ctx: Ctx<'_>) -> Line {
-    let mut line = Line::empty();
-    line.push(Span::new(text, ctx.theme.code.overflow_marker));
-    line
+/// Shared by a block whose highlighting gave up and by a diagram or formula that fell
+/// back to its source, so every such report looks the same. The bottom edge is as long
+/// as the block; a caption longer than that is elided rather than hard-cut, so it never
+/// ends mid-word against the corner glyph.
+fn bottom_caption(text: &str, width: u16, ctx: Ctx<'_>) -> Line {
+    let room = usize::from(width).saturating_sub(4);
+    Line::styled(crate::text::ellipsize(text, room), ctx.theme.block.caption)
 }
 
 /// Writes code lines at `width` columns, clipping rather than wrapping.
@@ -789,13 +790,7 @@ pub(super) fn fallback(
     )
     .indent(padding, padding, theme.code.background);
     let title = Line::styled(language.unwrap_or_default(), theme.code.language);
-    // The bottom edge is as long as the block; a caption longer than that is elided
-    // rather than hard-cut, so it never ends mid-word against the corner glyph.
-    let room = usize::from(width).saturating_sub(4);
-    let caption = Line::styled(
-        crate::text::ellipsize(&caption.to_string(), room),
-        theme.block.caption,
-    );
+    let caption = bottom_caption(&caption.to_string(), width, ctx);
     let mut out = inner.framed_captioned(
         BorderSet::ROUNDED,
         theme.code.frame,

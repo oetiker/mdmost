@@ -4862,6 +4862,26 @@ fn a_failed_block_captions_its_frame() {
     );
 }
 
+/// A narrow frame shortens the caption with an ellipsis rather than cutting it off, and
+/// the caption is drawn in the same style as a Mermaid or math failure caption.
+#[test]
+fn a_failed_block_s_caption_is_ellipsized_and_styled_like_other_captions() {
+    let theme = Theme::default_dark();
+    let options = PLAIN;
+    let source = crate::highlight::BlockingSource::with_line_limit(|_| std::num::NonZeroUsize::MIN);
+    let doc = Doc::parse("```rust\nfn main() {}\n```\n");
+    let node = &doc.root().children[0];
+    let canvas = block::render_block_ctx(node, 16, Ctx::new(&theme, &options).with_code(&source));
+    let bottom = canvas.row_text(canvas.height() - 1);
+    assert!(bottom.contains('…'), "caption not ellipsized: {bottom:?}");
+    let cells = canvas.row(canvas.height() - 1).unwrap_or_default();
+    let caption_cell = cells
+        .iter()
+        .find(|cell| cell.text() == "h")
+        .expect("caption starts with 'h'");
+    assert_eq!(caption_cell.style(), theme.block.caption);
+}
+
 /// The caption costs no row.
 ///
 /// Branch B patches colour onto an already-rendered canvas, which is only sound while a
