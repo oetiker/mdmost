@@ -103,6 +103,18 @@ impl RenderCache {
         &self.canvas
     }
 
+    /// The rendered canvas, for restyling cells after layout (colour arriving from the
+    /// highlighter). Callers must not change symbols: `reach` and `pinned` were
+    /// measured from them.
+    pub fn canvas_mut(&mut self) -> &mut Canvas {
+        &mut self.canvas
+    }
+
+    /// Forgets the key, so the next `refresh` renders again.
+    pub fn invalidate(&mut self) {
+        self.key = None;
+    }
+
     /// How far each row of the cached canvas may be scrolled sideways.
     ///
     /// See [`crate::render::document::scroll_reach`]; one entry per canvas row.
