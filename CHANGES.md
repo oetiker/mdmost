@@ -20,7 +20,7 @@
 - While the contents pane is filtered, a long filter in the pane's title is now cut to
   fit exactly. Depending on the width of the match count, such as `1/12` or `10/100`, it
   was cut one or two columns too early or one column too late.
-- A long link address shown in brackets after the link text is now cut to the same
+- A long link address shown in parentheses after the link text is now cut to the same
   width whatever it contains. An address with Japanese, Chinese or other double-width
   characters near the cut came out one column wider than the others.
 
