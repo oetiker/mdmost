@@ -178,3 +178,42 @@ fn more_than_256_blocks_are_each_highlighted_once() {
         assert_eq!(h.advance(key, &mut || false), 0..0);
     }
 }
+
+/// Tokens per millisecond on this machine, release build. Run by hand:
+/// `cargo test --release --lib tokens_per_millisecond -- --ignored --nocapture`.
+#[test]
+#[ignore = "measurement, not a check"]
+fn tokens_per_millisecond() {
+    use crate::highlight::tests::MINIFIED_JS_LINE;
+    let (set, syntax) = resolve_syntax(Some("js")).expect("js resolves");
+    let theme = Theme::default();
+    let raw = format!("{MINIFIED_JS_LINE}\n");
+    let unlimited = NonZeroUsize::new(usize::MAX).unwrap_or(NonZeroUsize::MIN);
+    let mut samples = Vec::new();
+    for _ in 0..20 {
+        let mut parse = Parse::new(set, syntax);
+        let start = std::time::Instant::now();
+        let _ = parse.line(&raw, &theme.code, unlimited);
+        samples.push(start.elapsed());
+    }
+    samples.sort();
+    let median = samples[samples.len() / 2];
+    // Token count: the smallest limit that does not fail, by bisection.
+    let (mut lo, mut hi) = (1usize, 1_000_000usize);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let limit = NonZeroUsize::new(mid).unwrap_or(NonZeroUsize::MIN);
+        if Parse::new(set, syntax)
+            .line(&raw, &theme.code, limit)
+            .is_ok()
+        {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    println!(
+        "{lo} tokens in {median:?}: {:.1} tokens/ms",
+        lo as f64 / median.as_secs_f64() / 1000.0
+    );
+}

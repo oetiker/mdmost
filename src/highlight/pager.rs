@@ -25,7 +25,7 @@ use crate::theme::{CodeStyles, Theme};
 ///
 /// One line cannot be split across slices: `syntect` cannot resume inside a line. This
 /// bounds how long one line can hold up a key press. Measured in `docs/maintainer-notes.md`.
-pub const PAGER_LINE_TOKENS: NonZeroUsize = match NonZeroUsize::new(4_500) {
+pub const PAGER_LINE_TOKENS: NonZeroUsize = match NonZeroUsize::new(5_500) {
     Some(n) => n,
     None => NonZeroUsize::MIN,
 };

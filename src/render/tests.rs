@@ -5076,3 +5076,52 @@ fn the_pager_s_patched_canvas_equals_the_blocking_render() {
         assert_eq!(canvas.rows(), blocking.rows(), "table cell, width {width}");
     }
 }
+
+/// Time to first screen, before and after the pager draws first: the median of 10
+/// blocking renders (`render_document`, which highlights synchronously) against 10
+/// draw-first renders (`render_document_with`, a fresh [`crate::highlight::Highlighter`]
+/// each time, which returns before any block is coloured) of the document named by the
+/// `MDMOST_TIMING_DOC` environment variable, at width 100. Also times one scan of
+/// `code_rows()` over the last draw-first canvas — a blocking render keeps no code rows,
+/// so this is the same walk a viewport repaint does per tick, on the only canvas that
+/// carries them. Run by hand:
+/// `MDMOST_TIMING_DOC=<path> cargo test --release --lib time_to_first_screen -- --ignored --nocapture`.
+#[test]
+#[ignore = "measurement, not a check"]
+fn time_to_first_screen() {
+    let path =
+        std::env::var("MDMOST_TIMING_DOC").expect("set MDMOST_TIMING_DOC to a markdown file");
+    let source = std::fs::read_to_string(&path).expect("read MDMOST_TIMING_DOC");
+    let doc = Doc::parse(&source);
+    let theme = Theme::default_dark();
+
+    let mut blocking = Vec::new();
+    for _ in 0..10 {
+        let start = std::time::Instant::now();
+        let _ = render_document(&doc, 100, None, &theme, &PLAIN);
+        blocking.push(start.elapsed());
+    }
+    blocking.sort();
+
+    let mut draw_first = Vec::new();
+    let mut last_canvas = None;
+    for _ in 0..10 {
+        let h = crate::highlight::Highlighter::new();
+        let start = std::time::Instant::now();
+        let canvas = render_document_with(&doc, 100, None, &theme, &PLAIN, &h);
+        draw_first.push(start.elapsed());
+        last_canvas = Some(canvas);
+    }
+    draw_first.sort();
+
+    let canvas = last_canvas.expect("ran at least once");
+    let start = std::time::Instant::now();
+    let rows = canvas.code_rows().len();
+    let scan = start.elapsed();
+
+    println!(
+        "blocking median {:?}, draw-first median {:?}, code_rows scan {rows} rows in {scan:?}",
+        blocking[blocking.len() / 2],
+        draw_first[draw_first.len() / 2],
+    );
+}

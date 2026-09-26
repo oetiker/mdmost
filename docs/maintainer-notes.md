@@ -814,3 +814,47 @@ back to plain text — at least 2.15 s per such line, more for a pathological ru
 tokens cost more than the cheap construct's, with no measured ceiling on how much more.
 The document-level worst case is therefore *(number of such blocks) × (one line's worst
 case)*, not a bounded total.
+
+## Pager slices
+
+Measured 2026-09-26, shared host, so every figure below is a range, not a fact about one
+run.
+
+**Tokens per millisecond**, release build, `highlight::pager::tests::tokens_per_millisecond`
+(single-line parse of the synthetic minified-JavaScript unit, 6,505 tokens, median of 20
+samples), three interleaved runs:
+
+| run | tokens/ms |
+|---|---|
+| 1 | 123.8 |
+| 2 | 121.6 |
+| 3 | 119.9 |
+
+`PAGER_LINE_TOKENS` (`src/highlight/pager.rs`) is 5,500: 50 ms times the lowest measured
+rate (119.9 tokens/ms = 5,995), rounded down to a readable number.
+
+`SLICE_BUDGET` (`src/tui/term.rs`) stays at 10 ms. The terminal trial that would show
+whether 10 ms causes visible lag (Task 7 Step 5) has not been run yet; that is still open,
+owned by the controller.
+
+**Time to first screen**, release build, `render::tests::time_to_first_screen`, against
+the 36-fence document `docs/superpowers/plans/2026-09-21-media-worker.md` (`oxutlk`
+project), width 100, median of 10 renders per call, four runs:
+
+| render | time |
+|---|---|
+| `render_document` (blocking: every block coloured before it returns) | 836-863 ms |
+| `render_document_with` + a fresh `Highlighter` (draws plain, colours later) | 172-178 ms |
+
+The same test scans `code_rows()` over the draw-first canvas once — the walk a viewport
+repaint does every tick — which took 30-51 ns for the document's 1,110 code rows.
+
+**`--render-once`**, same document, width 100, five runs each, interleaved with a
+release build of v0.3.5 in a separate `CARGO_TARGET_DIR`:
+
+| binary | time |
+|---|---|
+| v0.3.5 | 1.785-1.978 s |
+| this branch | 1.779-1.838 s |
+
+This branch's `--render-once` is not slower than v0.3.5's.
