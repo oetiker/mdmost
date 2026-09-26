@@ -295,10 +295,12 @@ fn event_loop(
         // accepted: it needs input to arrive at the same instant as the hangup,
         // where what this replaced was exposed the whole time it sat idle. Closing
         // it properly means owning the descriptor and parsing terminal input here,
-        // which is `crossterm`'s job.
+        // which is `crossterm`'s job. Colouring adds no window of its own: between
+        // lines it asks `input`, not `crossterm`, and a hangup it sees ends the slice
+        // and is reported by the wait above on the next time round.
         if !crossterm::event::poll(Duration::ZERO)? {
             // Nothing to answer: spend the moment on colour. Input always goes first.
-            highlight_tick(app);
+            highlight_tick(app, input);
             continue;
         }
         let mut event = Some(crossterm::event::read()?);
@@ -365,9 +367,16 @@ pub(super) fn wait_timeout(app: &App) -> Duration {
 }
 
 /// Colours code for one slice, stopping early when input arrives.
-fn highlight_tick(app: &mut App) {
+///
+/// The probe between lines is [`Input::wait`], not `crossterm`'s `poll`: on a hung-up
+/// terminal `poll` never returns (see [`Input`]), and a hangup alone makes the
+/// descriptor readable, so closing the terminal while colour arrives would spin. A
+/// hangup or an error ends the slice like a key does; the loop's own wait then sees it.
+/// No event can be waiting inside `crossterm` here: the loop only colours after
+/// `crossterm` reported nothing pending, and nothing reads the descriptor in between.
+fn highlight_tick(app: &mut App, input: &Input) {
     highlight_tick_at(app, &mut Instant::now, &mut || {
-        crossterm::event::poll(Duration::ZERO).unwrap_or(true)
+        !matches!(input.wait(Duration::ZERO), Ok(Wait::Timeout))
     });
 }
 
