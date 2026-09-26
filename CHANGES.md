@@ -6,6 +6,14 @@
 
 ### Changed
 
+### Fixed
+
+## 0.4.0 - 2026-09-26
+
+### New
+
+### Changed
+
 - Documents with many code blocks open at once: code is shown uncoloured first, and
   colour is added to the blocks on screen and about one screen around them.
 - In the pager, a code block with one very long line, such as minified JavaScript, is
