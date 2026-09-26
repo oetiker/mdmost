@@ -5077,14 +5077,41 @@ fn the_pager_s_patched_canvas_equals_the_blocking_render() {
     }
 }
 
+/// A faithful replica of `App::wanted_blocks` (`src/tui/app.rs`), against a canvas's
+/// `code_rows()` directly rather than through `App`, so this timing test needs no
+/// terminal. Viewport at the top (`top = 0`), height 50: the same view range, halo
+/// range, collect, `sort_unstable` and `contains` dedup `wanted_blocks` runs per tick.
+fn wanted_blocks_replica(rows: &[crate::canvas::CodeRow]) -> Vec<u64> {
+    let height = 50usize;
+    let top = 0usize;
+    let view = top..top.saturating_add(height);
+    let halo = top.saturating_sub(height)..top.saturating_add(2 * height);
+    let mut out: Vec<u64> = Vec::new();
+    for range in [view, halo] {
+        let mut hits: Vec<(usize, u64)> = rows
+            .iter()
+            .filter(|r| range.contains(&r.row))
+            .map(|r| (r.row, r.block))
+            .collect();
+        hits.sort_unstable();
+        for (_, block) in hits {
+            if !out.contains(&block) {
+                out.push(block);
+            }
+        }
+    }
+    out
+}
+
 /// Time to first screen, before and after the pager draws first: the median of 10
 /// blocking renders (`render_document`, which highlights synchronously) against 10
 /// draw-first renders (`render_document_with`, a fresh [`crate::highlight::Highlighter`]
 /// each time, which returns before any block is coloured) of the document named by the
-/// `MDMOST_TIMING_DOC` environment variable, at width 100. Also times one scan of
-/// `code_rows()` over the last draw-first canvas — a blocking render keeps no code rows,
-/// so this is the same walk a viewport repaint does per tick, on the only canvas that
-/// carries them. Run by hand:
+/// `MDMOST_TIMING_DOC` environment variable, at width 100. Also times 1,000 calls to
+/// [`wanted_blocks_replica`] against the last draw-first canvas's `code_rows()` (a
+/// blocking render keeps no code rows, so the replica has to run against the draw-first
+/// one), each result forced through [`std::hint::black_box`] so the optimizer cannot
+/// discard the call. Run by hand:
 /// `MDMOST_TIMING_DOC=<path> cargo test --release --lib time_to_first_screen -- --ignored --nocapture`.
 #[test]
 #[ignore = "measurement, not a check"]
@@ -5115,13 +5142,21 @@ fn time_to_first_screen() {
     draw_first.sort();
 
     let canvas = last_canvas.expect("ran at least once");
-    let start = std::time::Instant::now();
-    let rows = canvas.code_rows().len();
-    let scan = start.elapsed();
+    let rows = canvas.code_rows();
+    let mut wanted = Vec::new();
+    for _ in 0..1_000 {
+        let start = std::time::Instant::now();
+        let out = wanted_blocks_replica(std::hint::black_box(rows));
+        std::hint::black_box(out);
+        wanted.push(start.elapsed());
+    }
+    wanted.sort();
 
     println!(
-        "blocking median {:?}, draw-first median {:?}, code_rows scan {rows} rows in {scan:?}",
+        "blocking median {:?}, draw-first median {:?}, wanted_blocks replica median {:?} over {} code rows",
         blocking[blocking.len() / 2],
         draw_first[draw_first.len() / 2],
+        wanted[wanted.len() / 2],
+        rows.len(),
     );
 }

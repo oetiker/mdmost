@@ -839,15 +839,20 @@ owned by the controller.
 
 **Time to first screen**, release build, `render::tests::time_to_first_screen`, against
 the 36-fence document `docs/superpowers/plans/2026-09-21-media-worker.md` (`oxutlk`
-project), width 100, median of 10 renders per call, four runs:
+project), width 100, median of 10 renders per call, seven runs across two measurement
+passes:
 
 | render | time |
 |---|---|
-| `render_document` (blocking: every block coloured before it returns) | 836-863 ms |
-| `render_document_with` + a fresh `Highlighter` (draws plain, colours later) | 172-178 ms |
+| `render_document` (blocking: every block coloured before it returns) | 836 ms - 1.13 s |
+| `render_document_with` + a fresh `Highlighter` (draws plain, colours later) | 168-228 ms |
 
-The same test scans `code_rows()` over the draw-first canvas once — the walk a viewport
-repaint does every tick — which took 30-51 ns for the document's 1,110 code rows.
+The same test also calls a faithful replica of `App::wanted_blocks` (`src/tui/app.rs`,
+the call that picks which blocks to colour next, run once per highlighting tick) against
+the draw-first canvas's `code_rows()` — same view range, halo range, collect,
+`sort_unstable` and dedup, viewport at the top with height 50 — 1,000 times per run, each
+result forced through `std::hint::black_box`. Median over three runs: 1.8-2.2 µs for the
+document's 1,110 code rows.
 
 **`--render-once`**, same document, width 100, five runs each, interleaved with a
 release build of v0.3.5 in a separate `CARGO_TARGET_DIR`:
