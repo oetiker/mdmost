@@ -312,7 +312,7 @@ impl Atom {
 
 /// Where one line of a code block was drawn, so that its colour can arrive after layout.
 ///
-/// A fifth metadata channel, beside anchors, spans, pins and hotspots. The pager draws a
+/// A sixth metadata channel, beside anchors, spans, pins, hotspots and atoms. The pager draws a
 /// document before its code is highlighted and patches the colour in later
 /// (`tui::App::highlight_slice`); this records which cells belong to which source line.
 /// It travels with cells, like a [`SearchSpan`], so a block inside a list, a quote or a

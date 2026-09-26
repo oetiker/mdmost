@@ -558,8 +558,9 @@ impl Canvas {
 
     /// Returns rows `start..start + len` as a canvas of the same width.
     ///
-    /// Anchors, spans, pins and hotspots falling inside the slice are translated; the
-    /// rest are dropped.
+    /// Anchors, spans, code rows, pins and hotspots falling inside the slice are
+    /// translated; an atom is translated and *clipped* to the slice rather than dropped
+    /// (see the comment on `out.atoms` below); anything else is dropped.
     ///
     /// **A hotspot keeps its `target` verbatim, and that is load-bearing.** The slice is a
     /// different canvas but it is a *view of this one*, so two slices of the same wrapped
