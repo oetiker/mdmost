@@ -4971,9 +4971,10 @@ fn a_keyed_code_block_records_one_code_row_per_line() {
     assert!(blocking.code_rows().is_empty());
 }
 
-/// Fences at top level, in a list, in a quote and in a table cell; a tab, a CJK line, and
-/// the same fence twice. The pager's plain-then-patched canvas must equal the blocking
-/// render cell for cell.
+/// Fences at top level, in a list and in a quote; a tab, a CJK line, and the same fence
+/// twice. Its table cell holds only inline code — a fence cannot sit in a GFM pipe-table
+/// cell — so that case is covered separately below, on a hand-built tree. The pager's
+/// plain-then-patched canvas must equal the blocking render cell for cell.
 const EQUIVALENCE_DOC: &str = "\
 # Equivalence
 
