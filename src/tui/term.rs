@@ -283,6 +283,9 @@ fn event_loop(
         if let Some(watcher) = watched.as_deref_mut() {
             reload_tick(app, watcher);
         }
+        // A drag held on the top or bottom edge sends no events, so its scrolling is
+        // driven from here; `wait_timeout` wakes the loop for it.
+        app.drag_autoscroll(Instant::now());
         // The descriptor was live a moment ago, so `crossterm` may look at it. Zero
         // timeout: the waiting has already been done, and asking even when nothing
         // arrived is what hands over events its parser is still holding from an
@@ -357,10 +360,13 @@ pub(super) fn reload_tick_at(app: &mut App, watcher: &mut Watcher, at: std::time
     }
 }
 
-/// How long the loop may sleep: not at all while highlighting has work.
+/// How long the loop may sleep: not at all while highlighting has work, and only one
+/// auto-scroll step while a drag rests on the top or bottom edge.
 pub(super) fn wait_timeout(app: &App) -> Duration {
     if app.has_highlight_work() {
         Duration::ZERO
+    } else if app.drag_autoscroll_pending() {
+        super::app::AUTOSCROLL_STEP
     } else {
         POLL_INTERVAL
     }

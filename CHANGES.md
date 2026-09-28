@@ -8,6 +8,11 @@
 
 ### Fixed
 
+- With `--mouse`, dragging a selection to the top or bottom row of the document now
+  keeps scrolling while the pointer rests there, and speeds up the longer it is held.
+  Before, the document moved one row only each time the pointer moved, so selecting
+  more than a screenful seemed not to work.
+
 ## 0.4.0 - 2026-09-26
 
 ### New
