@@ -288,6 +288,14 @@ pub enum NodeKind {
         /// The optional title.
         title: String,
     },
+    /// A YAML front matter block: `---` lines around it, at the very start of the file.
+    ///
+    /// Not Markdown, so it is not drawn as the document; renderers draw one control that
+    /// opens it in a popup.
+    FrontMatter {
+        /// The text between the two `---` lines, with its trailing newline.
+        yaml: String,
+    },
     /// Raw HTML that `mdmost` deliberately does not support.
     ///
     /// **Renderers must skip these nodes entirely.** The literal is retained only so

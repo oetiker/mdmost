@@ -4,9 +4,18 @@
 
 ### New
 
+- YAML front matter at the top of a file (between two `---` lines) is shown as a
+  `[Frontmatter]` control. A click on it, or `f` and `Enter`, opens the YAML in a
+  popup as a coloured code block.
+
 ### Changed
 
 ### Fixed
+
+- YAML front matter no longer renders as a horizontal rule followed by a heading made
+  of its YAML lines, and its first line no longer appears in the contents pane.
+- HTML comments such as `<!-- TODO -->` no longer show as a dim `⟨html⟩` marker; they
+  leave no trace in the document, in a sentence or in a table cell.
 
 ## 0.4.0 - 2026-09-26
 

@@ -11,7 +11,7 @@
 //! Nodes of kind [`NodeKind::SkippedHtml`] never reach the canvas: they collapse to a
 //! dim `⟨html⟩` marker (design spec §2).
 
-use crate::canvas::{Anchor, BorderSet, Canvas};
+use crate::canvas::{Anchor, BorderSet, Canvas, Hotspot, HotspotKind};
 use crate::doc::{ListInfo, Node, NodeKind};
 use crate::numbering::Numbering;
 use crate::text::{Align, Line, Span, display_width, pad_to_width, repeat_to_width};
@@ -289,6 +289,7 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         }
         NodeKind::Image { url, .. } => image(node, url, width, ctx),
         NodeKind::SkippedHtml { .. } => html_marker(width, ctx),
+        NodeKind::FrontMatter { .. } => front_matter(width, ctx),
         // A display formula is drawn where it can be and shown as its own framed source
         // where it cannot. The framed source is not a placeholder: it is the permanent
         // failure path of design spec §9, and a formula that will not parse or will not
@@ -870,6 +871,31 @@ fn image(node: &Node, url: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
 }
 
 /// The collapsed marker that stands in for raw HTML.
+/// What the front matter control says.
+///
+/// ASCII, like `[copy]` (see [`super::button`]): a mark the reader acts on must look the
+/// same in every terminal.
+pub(crate) const FRONT_MATTER_LABEL: &str = "[Frontmatter]";
+
+/// The one row front matter draws as: a control that opens the YAML in a popup.
+///
+/// Drawn whether or not the mouse was captured, like a footnote marker: `f` reaches it
+/// from the keyboard, so it is never a control nobody can press.
+fn front_matter(width: u16, ctx: Ctx<'_>) -> Canvas {
+    let mut out = Canvas::from_text(width, FRONT_MATTER_LABEL, ctx.theme.text.footnote_ref);
+    let target = out.next_target();
+    out.add_hotspot(Hotspot {
+        row: 0,
+        col: 0,
+        cols: u16::try_from(display_width(FRONT_MATTER_LABEL))
+            .unwrap_or(u16::MAX)
+            .min(width),
+        kind: HotspotKind::FrontMatter,
+        target,
+    });
+    out
+}
+
 fn html_marker(width: u16, ctx: Ctx<'_>) -> Canvas {
     Canvas::from_text(width, HTML_MARKER, ctx.theme.text.dim)
 }

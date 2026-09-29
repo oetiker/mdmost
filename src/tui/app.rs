@@ -1757,6 +1757,7 @@ impl App {
             HotspotKind::Footnote { id } => {
                 self.open_footnote(&id, activation.row, activation.col);
             }
+            HotspotKind::FrontMatter => self.open_front_matter(activation.row, activation.col),
             // `Copy` and `Open` touch the clipboard and the display server, which the
             // state machine may not (design spec §13); `super::term::activate` owns them.
             HotspotKind::Copy { .. } | HotspotKind::Open { .. } => {}
@@ -1791,22 +1792,9 @@ impl App {
             self.notify(format!("no footnote named {id}"), true);
             return;
         }
-        let screen = (self.viewport_width(), self.popup_screen_height());
-        if !popup::fits(screen) {
-            self.notify("the terminal is too small for a footnote popup", false);
+        let Some((anchor, screen)) = self.popup_anchor(row, col, "footnote") else {
             return;
-        }
-        // [`App::cursor_step`] now scrolls the cursor into view the instant `f`/`F`
-        // move it, so the keyboard route no longer hands this a marker off screen in
-        // practice. This guard is kept anyway: a box anchored to a cell that is not on
-        // the viewport would be a box pointing nowhere, and there is no other reason
-        // to trust `row`/`col` blindly here than the invariant above, which lives in a
-        // different method and could drift out of sync with this one.
-        if self.viewport_cell(row, col).is_none() {
-            self.reveal(row);
-            self.ensure_rendered();
-        }
-        let anchor = self.viewport_cell(row, col).unwrap_or((0, 0));
+        };
         let width = popup::inner_width(screen.0);
         // `copy_button: false`, whatever the pager is running with: a `[copy]` on a code
         // fence inside the popup would be a control, and controls inside a popup are
@@ -1837,13 +1825,109 @@ impl App {
                 label,
             )
         };
+        self.show_popup(canvas, label, anchor, screen, "footnote");
+    }
+
+    /// Opens the popup holding the front matter's YAML, anchored to the `[Frontmatter]`
+    /// control drawn at canvas `(row, col)`.
+    ///
+    /// The YAML is handed to the ordinary renderer as a `yaml` code block, the same way
+    /// [`App::open_footnote`] hands over a note: the popup gets the code frame and the
+    /// colouring every other code block gets, and no rendering of its own.
+    fn open_front_matter(&mut self, row: usize, col: u16) {
+        self.ensure_rendered();
+        let Some(node) = self
+            .doc
+            .root()
+            .children
+            .first()
+            .filter(|node| matches!(node.kind, crate::doc::NodeKind::FrontMatter { .. }))
+        else {
+            return;
+        };
+        let crate::doc::NodeKind::FrontMatter { yaml } = &node.kind else {
+            return;
+        };
+        let code = crate::doc::Node::new(
+            crate::doc::NodeKind::CodeBlock {
+                info: "yaml".to_string(),
+                language: Some("yaml".to_string()),
+                literal: yaml.clone(),
+                fenced: true,
+                lines: vec![crate::doc::SourceSpan::default(); yaml.lines().count()],
+            },
+            crate::doc::SourceSpan::default(),
+        );
+        let Some((anchor, screen)) = self.popup_anchor(row, col, "front matter") else {
+            return;
+        };
+        // No `[copy]` inside a popup, for the reason `open_footnote` gives.
+        let options = RenderOptions {
+            copy_button: false,
+            ..self.render_options()
+        };
+        let canvas = crate::render::render_blocks(
+            std::slice::from_ref(&code),
+            popup::inner_width(screen.0),
+            &self.theme,
+            &options,
+            self.doc.source(),
+        );
+        self.show_popup(
+            canvas,
+            "Frontmatter".to_string(),
+            anchor,
+            screen,
+            "front matter",
+        );
+    }
+
+    /// Where a popup for the control drawn at canvas `(row, col)` is anchored in the
+    /// document area, and the area it may use; `None`, with a notice, when the terminal
+    /// is too small for one. `what` names the popup in that notice.
+    fn popup_anchor(
+        &mut self,
+        row: usize,
+        col: u16,
+        what: &str,
+    ) -> Option<((u16, u16), (u16, u16))> {
+        let screen = (self.viewport_width(), self.popup_screen_height());
+        if !popup::fits(screen) {
+            self.notify(
+                format!("the terminal is too small for a {what} popup"),
+                false,
+            );
+            return None;
+        }
+        // [`App::cursor_step`] now scrolls the cursor into view the instant `f`/`F`
+        // move it, so the keyboard route no longer hands this a marker off screen in
+        // practice. This guard is kept anyway: a box anchored to a cell that is not on
+        // the viewport would be a box pointing nowhere, and there is no other reason
+        // to trust `row`/`col` blindly here than the invariant above, which lives in a
+        // different method and could drift out of sync with this one.
+        if self.viewport_cell(row, col).is_none() {
+            self.reveal(row);
+            self.ensure_rendered();
+        }
+        Some((self.viewport_cell(row, col).unwrap_or((0, 0)), screen))
+    }
+
+    /// Puts up a popup holding `canvas`, titled `label`, beside the control at `anchor`.
+    fn show_popup(
+        &mut self,
+        canvas: crate::canvas::Canvas,
+        label: String,
+        anchor: (u16, u16),
+        screen: (u16, u16),
+        what: &str,
+    ) {
         // `None` when neither the room above the marker nor the room below it can hold a
         // box that does not cover the marker itself (see `popup::place`). Reported, not
         // swallowed: a marker that reacts to a click and then does nothing visible is
         // exactly the control design spec §1.1 refuses to offer.
         match Popup::new(canvas, label, anchor, screen, self.theme.base()) {
             Some(popup) => self.popup = Some(popup),
-            None => self.notify("no room beside the marker for the footnote", false),
+            None => self.notify(format!("no room beside the marker for the {what}"), false),
         }
     }
 

@@ -618,7 +618,9 @@ fn activate(app: &mut App, activation: Activation) {
         // `App::activate` owns them; only `Copy` and `Open` need this function's I/O.
         // The whole activation goes over, not just the kind: a footnote popup is
         // anchored to the cell the marker was drawn in, and that cell is here.
-        kind @ (HotspotKind::Anchor { .. } | HotspotKind::Footnote { .. }) => {
+        kind @ (HotspotKind::Anchor { .. }
+        | HotspotKind::Footnote { .. }
+        | HotspotKind::FrontMatter) => {
             app.activate(Activation { row, col, kind });
         }
     }

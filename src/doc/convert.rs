@@ -20,6 +20,9 @@ pub(super) fn options<'a>(math: crate::doc::MathSyntax) -> Options<'a> {
     options.extension.tasklist = true;
     options.extension.autolink = true;
     options.extension.footnotes = true;
+    // A `---` block at the very start of the file is YAML front matter. comrak only looks
+    // there, so a `---` further down stays a rule or a setext underline.
+    options.extension.front_matter_delimiter = Some("---".to_owned());
     // Both, or neither. `math_dollars` covers `$…$` and `$$…$$`; `math_code` covers the
     // `` $`…`$ `` form. Turning one on without the other would accept a syntax GitHub
     // writers do not distinguish between. A ```` ```math ```` fence is neither of them:
@@ -422,6 +425,83 @@ fn entity_len(src: &str) -> Option<usize> {
     Some(name.len() + 2)
 }
 
+/// Whether raw HTML is nothing but `<!-- … -->` comments and the whitespace between them.
+///
+/// A comment is the author talking to themselves, not content that could not be shown,
+/// so it leaves no node at all: no `⟨html⟩` marker, no blank row. HTML that holds
+/// anything else besides a comment keeps its marker.
+fn is_comment_only(html: &str) -> bool {
+    let mut rest = html.trim_start();
+    while !rest.is_empty() {
+        let Some(body) = rest.strip_prefix("<!--") else {
+            return false;
+        };
+        let Some(end) = body.find("-->") else {
+            return false;
+        };
+        rest = body[end + 3..].trim_start();
+    }
+    !html.trim().is_empty()
+}
+
+/// Whether `node` is raw HTML made only of comments, which [`convert`] drops.
+fn is_comment<'a>(node: &'a AstNode<'a>) -> bool {
+    match &node.data.borrow().value {
+        NodeValue::HtmlBlock(html) => is_comment_only(&html.literal),
+        NodeValue::HtmlInline(html) => is_comment_only(html),
+        _ => false,
+    }
+}
+
+/// The YAML between the delimiter lines of a front matter block.
+///
+/// comrak hands over the block as written: the opening `---` line, the YAML, the closing
+/// `---` line and any blank lines after it.
+fn front_matter_yaml(block: &str) -> String {
+    let mut yaml = String::new();
+    for line in block.split_inclusive('\n').skip(1) {
+        if line.trim_end() == "---" {
+            break;
+        }
+        yaml.push_str(line);
+    }
+    yaml
+}
+
+/// Closes the gap an inline comment leaves between two words.
+///
+/// `Before <!-- note --> after` would otherwise read `Before  after`, with the space on
+/// each side of the comment. The text after the gap loses its leading whitespace, and
+/// its source span moves by the same bytes, so a selection still copies exactly what is
+/// drawn. Only done when the source really starts with that whitespace; a node whose
+/// text and source disagree is left alone.
+fn close_gap(before: Option<&Node>, after: &mut Node, source: &str) {
+    let Some(Node {
+        kind: NodeKind::Text(prev),
+        ..
+    }) = before
+    else {
+        return;
+    };
+    if !prev.ends_with(char::is_whitespace) {
+        return;
+    }
+    let NodeKind::Text(text) = &mut after.kind else {
+        return;
+    };
+    let trimmed = text.len() - text.trim_start().len();
+    let span = after.source;
+    if trimmed == 0
+        || source
+            .get(span.start..span.end)
+            .is_none_or(|slice| !slice.starts_with(&text[..trimmed]))
+    {
+        return;
+    }
+    text.drain(..trimmed);
+    after.source = SourceSpan::new(span.start + trimmed, span.end);
+}
+
 /// Whether an inline HTML tag is a `<br>` in any of its accepted spellings.
 fn is_line_break(html: &str) -> bool {
     let inner = html
@@ -474,7 +554,10 @@ fn convert<'a>(
     let ast = node.data.borrow();
     let source = offsets.span(ast.sourcepos);
     let kind = match &ast.value {
-        NodeValue::Document | NodeValue::FrontMatter(_) => NodeKind::Document,
+        NodeValue::Document => NodeKind::Document,
+        NodeValue::FrontMatter(text) => NodeKind::FrontMatter {
+            yaml: front_matter_yaml(text),
+        },
         NodeValue::Heading(h) => NodeKind::Heading {
             level: h.level,
             // The id is patched in below, once the children are known.
@@ -601,10 +684,18 @@ fn convert<'a>(
     let mut owned = Node::new(kind, source);
     // Raw HTML is dropped wholesale: no children are converted.
     if !matches!(owned.kind, NodeKind::SkippedHtml { .. }) {
-        owned.children = node
-            .children()
-            .map(|child| convert(child, offsets, math, slugger, headings))
-            .collect();
+        let mut dropped = false;
+        for child in node.children() {
+            if is_comment(child) {
+                dropped = true;
+                continue;
+            }
+            let mut converted = convert(child, offsets, math, slugger, headings);
+            if std::mem::take(&mut dropped) {
+                close_gap(owned.children.last(), &mut converted, offsets.source);
+            }
+            owned.children.push(converted);
+        }
     }
 
     if let NodeKind::Heading { level, id } = &mut owned.kind {

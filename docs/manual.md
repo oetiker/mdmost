@@ -228,6 +228,14 @@ The note is drawn by the ordinary renderer at the width of the box, so emphasis,
 code spans, nested lists and tables inside a footnote all render. The cursor keys
 scroll the box while the document behind it holds still.
 
+## Front matter
+
+A block of YAML between two `---` lines at the very start of the file is front
+matter. It is drawn as one `[Frontmatter]` control, not as text. A click on it,
+or `f` and `Enter`, opens the YAML in a box like a footnote, drawn as a `yaml`
+code block. A `---` anywhere else in the document is a horizontal rule or a
+heading underline, as in plain Markdown.
+
 # SELECTING AND COPYING
 
 With `--mouse` (or `mouse = true`) a left drag over the document selects, and the
@@ -601,7 +609,8 @@ one per nesting level, and the task boxes are `[ ]` and `[x]`. Both are ASCII
 whether or not a Nerd Font is present.
 
 **HTML and raster images are not rendered.** Raw HTML in the source is skipped
-rather than rendered or shown. An image becomes a captioned placeholder carrying
+rather than rendered or shown, and a dim `⟨html⟩` marks where it was. HTML that
+holds only `<!-- … -->` comments leaves no marker and no blank row. An image becomes a captioned placeholder carrying
 its alt text and its target. There is no sixel support and no kitty graphics
 protocol.
 
