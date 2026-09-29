@@ -137,9 +137,6 @@ pub struct Activation {
     pub col: u16,
     /// What activating it does.
     pub kind: HotspotKind,
-    /// Whether the control is the popup's own `[copy]`, in its border, rather than one
-    /// drawn in the document; `row` and `col` then name no document cell.
-    pub in_popup: bool,
 }
 
 /// What handling one key produced, for [`super::term`] to act on.
@@ -350,14 +347,6 @@ pub struct App {
     /// `None` means no click is in flight — either none was started, or a drag cancelled
     /// the one that was, permanently for that gesture.
     pressed: Option<usize>,
-    /// Whether a press landed on the popup's own `[copy]`, in its border, for as long as
-    /// a release could still turn it into a click.
-    ///
-    /// Beside [`App::pressed`] rather than in it, because that button is no hotspot of
-    /// the document's canvas and has no target id: the popup draws it on its border at
-    /// paint time. The same rules govern it — a drag cancels it for good, a release
-    /// takes it whatever the answer.
-    popup_copy_pressed: bool,
     /// The control showing its `[copied]` flash, and when it started.
     copied_flash: Option<(usize, u16, std::time::Instant)>,
     /// The control the pointer is over, as an index into the canvas's hotspots.
@@ -446,7 +435,6 @@ impl App {
             pending_copy: None,
             copy_button: false,
             pressed: None,
-            popup_copy_pressed: false,
             copied_flash: None,
             hover: None,
             cursor: None,
@@ -1039,7 +1027,6 @@ impl App {
             // caused (a resize, a toggled option) and the click is theirs to repeat; a
             // click that fired the wrong link would not be.
             self.pressed = None;
-            self.popup_copy_pressed = false;
             // And the footnote popup, one step further still: it is anchored to the cell
             // its marker was drawn in, and a reflow moves that cell. The box would keep
             // its place on screen while the sentence it belongs to moved out from under
@@ -1375,20 +1362,6 @@ impl App {
             self.scroll_popup(delta);
             return;
         }
-        // The sideways keys, for the same reason: the front matter's YAML is laid out at
-        // its natural width and read by scrolling the box sideways, and a `→` that moved
-        // the document instead would dismiss the box the reader was reading. A footnote
-        // has nothing to the side, so there the keys do nothing — as the vertical keys
-        // do for a note that fits — rather than close it.
-        if self.popup.is_some() && matches!(action, Action::ScrollLeft | Action::ScrollRight) {
-            let steps = isize::try_from(times).unwrap_or(isize::MAX);
-            self.scroll_popup_sideways(if action == Action::ScrollLeft {
-                -steps
-            } else {
-                steps
-            });
-            return;
-        }
         let lines =
             |per: usize| -> isize { isize::try_from(per.saturating_mul(times)).unwrap_or(0) };
         match action {
@@ -1426,8 +1399,8 @@ impl App {
             // document behind it.
             Action::CursorNext | Action::CursorPrev => {}
             Action::ScrollLeft => {
-                // Called for its other duties; a popup never gets here, because the
-                // sideways keys scroll it instead (see the top of this function).
+                // Sideways is still the document moving under the anchor, so the popup
+                // goes for the same reason it does on a vertical scroll.
                 self.moved_document();
                 self.hscroll = self
                     .hscroll
@@ -1824,10 +1797,9 @@ impl App {
         };
         let width = popup::inner_width(screen.0);
         // `copy_button: false`, whatever the pager is running with: a `[copy]` on a code
-        // fence inside the popup would be a control, and controls inside a popup's note
-        // are inert (design spec §1.1). A button that cannot be pressed is worse than no
-        // button (§4), so the renderer is told not to draw one. The only control a popup
-        // has is the one on its own border (see `open_front_matter`).
+        // fence inside the popup would be a control, and controls inside a popup are
+        // inert (design spec §1.1). A button that cannot be pressed is worse than no
+        // button (§4), so the renderer is told not to draw one.
         let options = RenderOptions {
             copy_button: false,
             ..self.render_options()
@@ -1853,7 +1825,7 @@ impl App {
                 label,
             )
         };
-        self.show_popup(canvas, label, None, anchor, screen, "footnote");
+        self.show_popup(canvas, label, anchor, screen, "footnote");
     }
 
     /// Opens the popup holding the front matter's YAML, anchored to the `[Frontmatter]`
@@ -1862,12 +1834,6 @@ impl App {
     /// The YAML is handed to the ordinary renderer as a `yaml` code block, the same way
     /// [`App::open_footnote`] hands over a note: the popup gets the code frame and the
     /// colouring every other code block gets, and no rendering of its own.
-    ///
-    /// Two things differ from a footnote. The block is laid out at its natural width
-    /// when that is wider than the box, because code never wraps and would otherwise be
-    /// cut at the frame; the box stays at its cap and scrolls sideways over it. And the
-    /// popup gets a `[copy]` in its border for the YAML, because the front matter is
-    /// drawn nowhere else a reader could select it from.
     fn open_front_matter(&mut self, row: usize, col: u16) {
         self.ensure_rendered();
         let Some(node) = self
@@ -1882,8 +1848,6 @@ impl App {
         let crate::doc::NodeKind::FrontMatter { yaml } = &node.kind else {
             return;
         };
-        // Owned, so the document is no longer borrowed when the anchor is worked out.
-        let yaml = yaml.clone();
         let code = crate::doc::Node::new(
             crate::doc::NodeKind::CodeBlock {
                 info: "yaml".to_string(),
@@ -1897,22 +1861,14 @@ impl App {
         let Some((anchor, screen)) = self.popup_anchor(row, col, "front matter") else {
             return;
         };
-        // No `[copy]` on the code frame inside the popup, for the reason `open_footnote`
-        // gives; the popup's own border carries the one this YAML gets.
+        // No `[copy]` inside a popup, for the reason `open_footnote` gives.
         let options = RenderOptions {
             copy_button: false,
             ..self.render_options()
         };
-        let natural = crate::render::code::natural_width(
-            &yaml,
-            crate::render::Ctx::new(&self.theme, &options),
-        );
-        let width = popup::inner_width(screen.0)
-            .max(u16::try_from(natural).unwrap_or(u16::MAX))
-            .min(popup::MAX_CANVAS_WIDTH);
         let canvas = crate::render::render_blocks(
             std::slice::from_ref(&code),
-            width,
+            popup::inner_width(screen.0),
             &self.theme,
             &options,
             self.doc.source(),
@@ -1920,7 +1876,6 @@ impl App {
         self.show_popup(
             canvas,
             "Frontmatter".to_string(),
-            Some(yaml),
             anchor,
             screen,
             "front matter",
@@ -1957,13 +1912,11 @@ impl App {
         Some((self.viewport_cell(row, col).unwrap_or((0, 0)), screen))
     }
 
-    /// Puts up a popup holding `canvas`, titled `label`, beside the control at `anchor`;
-    /// `copy` is what a `[copy]` in its border copies, if it has one.
+    /// Puts up a popup holding `canvas`, titled `label`, beside the control at `anchor`.
     fn show_popup(
         &mut self,
         canvas: crate::canvas::Canvas,
         label: String,
-        copy: Option<String>,
         anchor: (u16, u16),
         screen: (u16, u16),
         what: &str,
@@ -1973,12 +1926,7 @@ impl App {
         // swallowed: a marker that reacts to a click and then does nothing visible is
         // exactly the control design spec §1.1 refuses to offer.
         match Popup::new(canvas, label, anchor, screen, self.theme.base()) {
-            Some(popup) => {
-                self.popup = Some(match copy {
-                    Some(text) => popup.with_copy(text),
-                    None => popup,
-                });
-            }
+            Some(popup) => self.popup = Some(popup),
             None => self.notify(format!("no room beside the marker for the {what}"), false),
         }
     }
@@ -2448,8 +2396,7 @@ impl App {
     /// # A press while a footnote popup is up
     ///
     /// Inside the box, the popup swallows it: no control fires, no selection starts, and
-    /// the popup stays — except on the `[copy]` in its border, which is recorded as a
-    /// click in flight exactly as a document button is. Outside it, the popup is dismissed (design spec §6) and the press
+    /// the popup stays. Outside it, the popup is dismissed (design spec §6) and the press
     /// then does what it always did — the click is not eaten by the dismissal, because a
     /// reader who clicks a link beside an open note means to follow it.
     pub fn press_hotspot(&mut self, x: u16, y: u16) -> bool {
@@ -2459,10 +2406,6 @@ impl App {
                 // Claimed outright, exactly as a `[copy]` button claims one: there is no
                 // document text under the box to select.
                 self.pressed = None;
-                self.popup_copy_pressed = self.on_popup_copy_button(x, y);
-                if self.popup_copy_pressed {
-                    self.clear_notice();
-                }
                 return true;
             }
             self.close_popup();
@@ -2500,21 +2443,6 @@ impl App {
     /// enforces itself no matter which side the reflow lands on.
     pub fn release_hotspot(&mut self, x: u16, y: u16) -> Option<Activation> {
         self.ensure_rendered();
-        // The popup's border button, which the canvas knows nothing about. A release off
-        // it fires nothing, as a release off a document button does.
-        if std::mem::take(&mut self.popup_copy_pressed) {
-            self.pressed = None;
-            if !self.on_popup_copy_button(x, y) {
-                return None;
-            }
-            let text = self.popup.as_ref()?.copy_text()?.to_string();
-            return Some(Activation {
-                row: 0,
-                col: 0,
-                kind: HotspotKind::Copy { text, html: None },
-                in_popup: true,
-            });
-        }
         let pressed = self.pressed.take()?;
         let spot = self.hotspot_at(x, y)?;
         if spot.target != pressed {
@@ -2524,7 +2452,6 @@ impl App {
             row: spot.row,
             col: spot.col,
             kind: spot.kind.clone(),
-            in_popup: false,
         })
     }
 
@@ -2537,7 +2464,6 @@ impl App {
     /// the first drag event rather than merely compared against on release.
     pub fn cancel_hotspot_press(&mut self) {
         self.pressed = None;
-        self.popup_copy_pressed = false;
     }
 
     /// Puts the pointer at document-area column `x`, row `y`.
@@ -2703,7 +2629,6 @@ impl App {
             row: spot.row,
             col: spot.col,
             kind: spot.kind.clone(),
-            in_popup: false,
         })
     }
 
@@ -2730,49 +2655,6 @@ impl App {
     pub fn scroll_popup(&mut self, delta: isize) {
         if let Some(popup) = self.popup.as_mut() {
             popup.scroll_by(delta);
-        }
-    }
-
-    /// Scrolls the note inside the popup sideways by `steps` times the step the
-    /// document's own sideways scroll moves by, clamped at both ends.
-    ///
-    /// The same argument as [`App::scroll_popup`]: the note moves and the document does
-    /// not, so the box stays anchored to its control.
-    pub fn scroll_popup_sideways(&mut self, steps: isize) {
-        if let Some(popup) = self.popup.as_mut() {
-            popup.hscroll_by(
-                steps.saturating_mul(isize::try_from(HSCROLL_STEP).unwrap_or(isize::MAX)),
-            );
-        }
-    }
-
-    /// The document-area cell the popup's border `[copy]` starts in, when one is drawn.
-    ///
-    /// Drawn only where the document's own copy buttons are — once mouse capture was
-    /// granted ([`App::set_copy_button`]) — for the reason those are: a button nobody can
-    /// press is worse than no button (design spec §4). The painter and the hit test both
-    /// ask this, so the button is pressed where it is drawn.
-    pub fn popup_copy_button(&self) -> Option<(u16, u16)> {
-        if !self.copy_button {
-            return None;
-        }
-        let popup = self.popup.as_ref()?;
-        let col = popup.copy_button_col()?;
-        let area = popup.area();
-        Some((area.left.saturating_add(col), area.top))
-    }
-
-    /// Whether document-area cell `(x, y)` is on the popup's border `[copy]`.
-    fn on_popup_copy_button(&self, x: u16, y: u16) -> bool {
-        let label = u16::try_from(crate::render::button::LABEL.len()).unwrap_or(u16::MAX);
-        self.popup_copy_button()
-            .is_some_and(|(left, top)| y == top && x >= left && x < left.saturating_add(label))
-    }
-
-    /// Records that the popup's border `[copy]` was just pressed, for its flash.
-    pub fn flash_popup_copied(&mut self) {
-        if let Some(popup) = self.popup.as_mut() {
-            popup.flash_copied();
         }
     }
 

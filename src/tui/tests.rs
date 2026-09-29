@@ -7661,7 +7661,6 @@ fn activation(kind: HotspotKind) -> super::app::Activation {
         row: 0,
         col: 0,
         kind,
-        in_popup: false,
     }
 }
 
@@ -7682,56 +7681,24 @@ fn found_on_frame(app: &mut App, width: u16, height: u16, needle: &str) -> Optio
 
 /// The popup's box as the reader sees it: `(left, top, width, height)`, in cells.
 ///
-/// Read from the corner glyphs the border actually painted. The top-left corner is the
-/// first `╭` on the screen, so the document *behind* the box must be plain prose — a
-/// code fence or a table above the popup would draw the same corner. The other corners
-/// are looked for on the popup's own top row and in its own left column, so a code frame
-/// drawn *inside* the box, as the front matter's is, cannot be mistaken for them.
+/// Read from the corner glyphs the border actually painted, which is why the documents
+/// these tests use are plain prose — a code fence or a table in one would draw the same
+/// rounded corners and this would find those instead.
 fn popup_box(app: &mut App, width: u16, height: u16) -> (u16, u16, u16, u16) {
     let rows = framed(app, width, height);
-    let column_of = |line: &str, at: usize| crate::text::display_width(&line[..at]);
-    let (left, top) = rows
-        .iter()
-        .enumerate()
-        .find_map(|(y, line)| Some((column_of(line, line.find('\u{256d}')?), y)))
-        .unwrap_or_else(|| panic!("no popup drawn: {rows:?}"));
-    let right = rows[top]
-        .char_indices()
-        .filter(|(_, ch)| *ch == '\u{256e}')
-        .map(|(at, _)| column_of(&rows[top], at))
-        .find(|column| *column > left)
-        .expect("a top-right corner");
-    let bottom = rows
-        .iter()
-        .enumerate()
-        .skip(top + 1)
-        .find(|(_, line)| {
-            line.char_indices()
-                .any(|(at, ch)| ch == '\u{2570}' && column_of(line, at) == left)
+    let corner = |glyph: char| -> Option<(u16, u16)> {
+        rows.iter().enumerate().find_map(|(y, line)| {
+            let at = line.find(glyph)?;
+            Some((
+                u16::try_from(crate::text::display_width(&line[..at])).ok()?,
+                u16::try_from(y).ok()?,
+            ))
         })
-        .map(|(y, _)| y)
-        .expect("a bottom-left corner");
-    let cell = |n: usize| u16::try_from(n).expect("a screen cell");
-    (
-        cell(left),
-        cell(top),
-        cell(right - left + 1),
-        cell(bottom - top + 1),
-    )
-}
-
-/// The popup's top and bottom border rows, as painted.
-fn popup_borders(app: &mut App, width: u16, height: u16) -> (String, String) {
-    let (left, top, box_width, box_height) = popup_box(app, width, height);
-    let rows = framed(app, width, height);
-    let border = |y: u16| {
-        rows[usize::from(y)]
-            .chars()
-            .skip(usize::from(left))
-            .take(usize::from(box_width))
-            .collect::<String>()
     };
-    (border(top), border(top + box_height - 1))
+    let (left, top) = corner('\u{256d}').unwrap_or_else(|| panic!("no popup drawn: {rows:?}"));
+    let (right, _) = corner('\u{256e}').expect("a top-right corner");
+    let (_, bottom) = corner('\u{2570}').expect("a bottom-left corner");
+    (left, top, right - left + 1, bottom - top + 1)
 }
 
 /// The text drawn inside the popup's border, one string per row.
@@ -9407,246 +9374,19 @@ fn the_front_matter_control_opens_from_the_keyboard() {
     );
 }
 
-/// Opens the front matter popup of `source` with a click on its control.
-fn open_front_matter(source: &str, width: u16, height: u16) -> App {
-    let mut app = pager_at(source, width, height);
-    open_front_matter_of(&mut app, width, height);
-    app
-}
-
-/// Clicks the `[Frontmatter]` control of an already built pager.
-fn open_front_matter_of(app: &mut App, width: u16, height: u16) {
-    let (x, y) = painted_at(app, width, height, "[Frontmatter]");
-    super::term::on_mouse(app, press_at(x, y), width, height);
-    super::term::on_mouse(app, release_at(x, y), width, height);
-    assert!(app.popup().is_some(), "the control did not open a popup");
-}
-
 #[test]
-fn a_long_front_matter_line_scrolls_sideways_in_the_popup() {
-    // The YAML is laid out at its natural width, so nothing is cut: the box stays at
-    // its cap and the line runs on past its right edge, to be reached with `→`.
+fn a_long_front_matter_line_stays_inside_the_popup() {
     let source = format!(
-        "---\ndescription: {}END\nshort: yes\n---\n\nText.\n",
+        "---\ndescription: {}\nshort: yes\n---\n\nText.\n",
         "word ".repeat(40)
     );
-    let mut app = open_front_matter(&source, 80, 24);
-    let (left, _, width, _) = popup_box(&mut app, 80, 24);
-    assert!(left + width <= 80, "the box stays on screen");
-    assert!(width <= super::popup::MAX_WIDTH, "and within its cap");
-    let text = popup_text_of(&mut app, 80, 24).join("\n");
-    assert!(text.contains("description: word"), "{text}");
-    assert!(text.contains("short: yes"), "{text}");
-    assert!(!text.contains("END"), "the end is out of sight: {text}");
-    assert!(
-        !text.contains('\u{203a}'),
-        "and not clipped with a marker: {text}"
-    );
-    let (_, bottom) = popup_borders(&mut app, 80, 24);
-    assert!(
-        bottom.contains('\u{2192}'),
-        "a hint says there is more: {bottom}"
-    );
-    assert!(!bottom.contains('\u{2190}'), "{bottom}");
-
-    for _ in 0..40 {
-        app.act(Action::ScrollRight);
-    }
-    assert!(app.popup().is_some(), "`→` scrolls the popup, not the page");
-    assert_eq!(app.hscroll(), 0, "the document did not move");
-    let text = popup_text_of(&mut app, 80, 24).join("\n");
-    assert!(
-        text.contains("END"),
-        "`→` reaches the end of the line: {text}"
-    );
-    let (_, bottom) = popup_borders(&mut app, 80, 24);
-    assert!(bottom.contains('\u{2190}'), "{bottom}");
-    assert!(
-        !bottom.contains('\u{2192}'),
-        "nothing more to the right: {bottom}"
-    );
-
-    for _ in 0..40 {
-        app.act(Action::ScrollLeft);
-    }
-    assert_eq!(app.popup().map(super::popup::Popup::hscroll), Some(0));
-    let text = popup_text_of(&mut app, 80, 24).join("\n");
-    assert!(
-        text.contains("description: word"),
-        "back at the start: {text}"
-    );
-}
-
-#[test]
-fn a_front_matter_popup_that_fits_offers_no_sideways_hint() {
-    let mut app = open_front_matter(FRONT_MATTER, 80, 24);
-    app.act(Action::ScrollRight);
-    assert_eq!(app.popup().map(super::popup::Popup::hscroll), Some(0));
-    let (_, bottom) = popup_borders(&mut app, 80, 24);
-    assert!(
-        !bottom.contains('\u{2190}') && !bottom.contains('\u{2192}'),
-        "{bottom}"
-    );
-}
-
-#[test]
-fn sideways_keys_leave_a_footnote_popup_open() {
-    // A note is wrapped at the box's width, so it has nothing to the side; the keys do
-    // nothing rather than close it, as the vertical keys do for a note that fits.
-    let mut app = open_footnote("a[^n] and a longer line of text\n\n[^n]: note\n", 80, 24);
-    app.act(Action::ScrollRight);
-    app.act(Action::ScrollLeft);
-    assert!(app.popup().is_some());
-    assert_eq!(app.popup().map(super::popup::Popup::hscroll), Some(0));
-}
-
-#[test]
-fn the_horizontal_wheel_over_the_popup_scrolls_it_sideways() {
-    let source = format!(
-        "---\ndescription: {}END\n---\n\nText.\n",
-        "word ".repeat(40)
-    );
-    let mut app = open_front_matter(&source, 80, 24);
-    let (left, top, _, _) = popup_box(&mut app, 80, 24);
-    let wheel = |kind| button_event(kind, left + 3, top + 2);
-    super::term::on_mouse(
-        &mut app,
-        wheel(crossterm::event::MouseEventKind::ScrollRight),
-        80,
-        24,
-    );
-    let moved = app.popup().map_or(0, super::popup::Popup::hscroll);
-    assert!(moved > 0, "the wheel moved the YAML sideways");
-    super::term::on_mouse(
-        &mut app,
-        wheel(crossterm::event::MouseEventKind::ScrollLeft),
-        80,
-        24,
-    );
-    assert_eq!(app.popup().map(super::popup::Popup::hscroll), Some(0));
-}
-
-#[test]
-fn the_front_matter_popup_border_offers_a_copy_button() {
-    let mut app = pager_at(FRONT_MATTER, 80, 24);
-    app.set_copy_button(true);
-    open_front_matter_of(&mut app, 80, 24);
-    let (top, _) = popup_borders(&mut app, 80, 24);
-    assert!(top.contains("[copy]"), "{top}");
-    let (x, y) = painted_at(&mut app, 80, 24, "[copy]");
-    let activation = click_hotspot(&mut app, x, y).expect("the click landed");
-    assert!(activation.in_popup, "the button is the popup's");
-    assert_eq!(
-        copy_payload(activation),
-        ("title: Hello\ntags: [a, b]\n".to_string(), None),
-        "the YAML only, without its delimiters"
-    );
-    assert!(app.popup().is_some(), "copying leaves the popup up");
-    assert!(app.selection().is_none(), "and selects nothing");
-}
-
-#[test]
-fn the_popup_copy_button_flashes_in_the_border() {
-    let mut app = pager_at(FRONT_MATTER, 80, 24);
-    app.set_copy_button(true);
-    open_front_matter_of(&mut app, 80, 24);
-    app.flash_popup_copied();
-    let (top, _) = popup_borders(&mut app, 80, 24);
-    assert!(top.contains("[copied]"), "{top}");
-    assert!(!top.contains("[copy]"), "{top}");
-}
-
-#[test]
-fn a_click_elsewhere_in_the_front_matter_popup_does_nothing() {
-    let mut app = pager_at(FRONT_MATTER, 80, 24);
-    app.set_copy_button(true);
-    open_front_matter_of(&mut app, 80, 24);
-    let (x, y) = painted_at(&mut app, 80, 24, "title: Hello");
-    assert!(click_hotspot(&mut app, x, y).is_none());
-    let (left, top, _, _) = popup_box(&mut app, 80, 24);
-    assert!(
-        click_hotspot(&mut app, left + 2, top).is_none(),
-        "the title is not a button"
-    );
-    assert!(app.popup().is_some());
-    assert!(app.selection().is_none());
-}
-
-#[test]
-fn a_footnote_popup_offers_no_copy_button() {
-    let mut app = pager_at("a[^n]\n\n[^n]: a note long enough to be wide\n", 80, 24);
-    app.set_copy_button(true);
-    let (x, y) = painted_at(&mut app, 80, 24, "[1]");
+    let mut app = pager_at(&source, 80, 24);
+    let (x, y) = painted_at(&mut app, 80, 24, "[Frontmatter]");
     super::term::on_mouse(&mut app, press_at(x, y), 80, 24);
     super::term::on_mouse(&mut app, release_at(x, y), 80, 24);
-    let (top, _) = popup_borders(&mut app, 80, 24);
-    assert!(!top.contains("[copy]"), "{top}");
-}
-
-#[test]
-fn the_popup_copy_button_needs_the_mouse() {
-    let mut app = open_front_matter(FRONT_MATTER, 80, 24);
-    let (top, _) = popup_borders(&mut app, 80, 24);
-    assert!(!top.contains("[copy]"), "{top}");
-}
-
-#[test]
-fn a_drag_over_the_front_matter_control_copies_the_block() {
-    // The control is the block: a drag that starts on it takes the front matter whole,
-    // delimiters included, the way a drag on a diagram's box art takes the diagram.
-    let mut app = pager_at(FRONT_MATTER, 80, 24);
-    let (x, y) = painted_at(&mut app, 80, 24, "[Frontmatter]");
-    super::term::on_mouse(&mut app, press_at(x + 2, y), 80, 24);
-    super::term::on_mouse(&mut app, drag_to(x + 6, y), 80, 24);
-    app.end_selection();
-    let extract = app
-        .take_pending_copy()
-        .expect("the drag selected something");
-    assert_eq!(extract.text, "---\ntitle: Hello\ntags: [a, b]\n---\n");
-    assert!(extract.from_source, "the copy is Markdown source");
-    assert!(app.popup().is_none(), "a drag is not a click");
-}
-
-#[test]
-fn a_drag_from_the_front_matter_control_into_the_heading_copies_both() {
-    let mut app = pager_at(FRONT_MATTER, 80, 24);
-    let (x, y) = painted_at(&mut app, 80, 24, "[Frontmatter]");
-    let (hx, hy) = painted_at(&mut app, 80, 24, "Heading");
-    super::term::on_mouse(&mut app, press_at(x, y), 80, 24);
-    super::term::on_mouse(&mut app, drag_to(hx + 6, hy), 80, 24);
-    app.end_selection();
-    let extract = app
-        .take_pending_copy()
-        .expect("the drag selected something");
-    assert!(
-        extract
-            .text
-            .starts_with("---\ntitle: Hello\ntags: [a, b]\n---\n"),
-        "{:?}",
-        extract.text
-    );
-    assert!(
-        extract.text.trim_end().ends_with("# Heading"),
-        "{:?}",
-        extract.text
-    );
-}
-
-#[test]
-fn a_wide_glyph_cut_by_the_sideways_scroll_is_drawn_as_a_space() {
-    // The frame's `│ ` and `k: ` put the first wide glyph on an odd column, so one
-    // sideways step of eight columns lands on the second half of one. That half is drawn
-    // as a space: an empty cell there would slide the rest of the row one column left.
-    let source = format!("---\nk: {}\n---\n\nText.\n", "\u{65e5}".repeat(60));
-    let mut app = open_front_matter(&source, 80, 24);
-    app.act(Action::ScrollRight);
-    let rows = popup_text_of(&mut app, 80, 24);
-    let row = rows
-        .iter()
-        .find(|row| row.contains('\u{65e5}'))
-        .expect("the YAML line is on show");
-    assert!(
-        row.starts_with("  \u{65e5}"),
-        "pad, then the cut half: {row:?}"
-    );
+    let (left, _, width, _) = popup_box(&mut app, 80, 24);
+    assert!(left + width <= 80, "the box stays on screen");
+    let text = popup_text_of(&mut app, 80, 24);
+    assert!(text.join("\n").contains("description: word"), "{text:?}");
+    assert!(text.join("\n").contains("short: yes"), "{text:?}");
 }

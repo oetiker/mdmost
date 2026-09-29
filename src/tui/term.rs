@@ -492,19 +492,6 @@ pub(super) fn on_mouse(app: &mut App, event: MouseEvent, width: u16, height: u16
                 app.on_scroll(delta, in_toc);
             }
         }
-        // The sideways wheel, over an open popup only: it scrolls the note sideways for
-        // the reason the vertical wheel scrolls it up and down. Anywhere else it does
-        // what it did before popups could scroll sideways, which is nothing.
-        MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
-            let (x, y) = local();
-            if in_doc && app.popup_contains(x, y) {
-                app.scroll_popup_sideways(if event.kind == MouseEventKind::ScrollLeft {
-                    -1
-                } else {
-                    1
-                });
-            }
-        }
         // The scrollbar. Its track is the body area — everything but the status bar —
         // exactly as `draw`'s `bar_area` is. Note what the drag and the release do
         // *not* look at: the column. A one-column bar is impossible to stay on while
@@ -607,7 +594,7 @@ fn copy_selection(app: &mut App) {
 fn activate(app: &mut App, activation: Activation) {
     // Kept before the kind is moved out, so the two arms that hand the activation on can
     // put it back together.
-    let (row, col, in_popup) = (activation.row, activation.col, activation.in_popup);
+    let (row, col) = (activation.row, activation.col);
     match activation.kind {
         HotspotKind::Copy { text, html } => {
             let what = super::clipboard::Copied::for_button(html.as_deref());
@@ -615,13 +602,7 @@ fn activate(app: &mut App, activation: Activation) {
             // The byte count is the plain payload's: it is what every reader receives,
             // and a reader on a remote host never got the HTML at all.
             app.report_copy(text.len(), what, &delivery);
-            // The popup's border button flashes on the border; its `row` and `col` name
-            // no document cell, and flashing that cell would light a random button.
-            if in_popup {
-                app.flash_popup_copied();
-            } else {
-                app.flash_copied(row, col);
-            }
+            app.flash_copied(activation.row, activation.col);
         }
         HotspotKind::Open { url } => {
             // No flash on success: [`copied_flash`](super::draw) paints the literal word
@@ -640,12 +621,7 @@ fn activate(app: &mut App, activation: Activation) {
         kind @ (HotspotKind::Anchor { .. }
         | HotspotKind::Footnote { .. }
         | HotspotKind::FrontMatter) => {
-            app.activate(Activation {
-                row,
-                col,
-                kind,
-                in_popup,
-            });
+            app.activate(Activation { row, col, kind });
         }
     }
 }

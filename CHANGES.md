@@ -6,16 +6,9 @@
 
 - YAML front matter at the top of a file (between two `---` lines) is shown as a
   `[Frontmatter]` control. A click on it, or `f` and `Enter`, opens the YAML in a
-  popup as a coloured code block, which `Left` and `Right` or the sideways mouse wheel
-  scroll when a line is wider than the popup.
-- The front matter popup has a `[copy]` button in its top border that copies the YAML,
-  and a drag over the `[Frontmatter]` control copies the whole block with its `---`
-  lines.
+  popup as a coloured code block.
 
 ### Changed
-
-- `Left` and `Right` no longer close an open footnote popup; they do nothing while it is
-  open.
 
 ### Fixed
 

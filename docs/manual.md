@@ -226,8 +226,7 @@ at most 60 columns wide.
 
 The note is drawn by the ordinary renderer at the width of the box, so emphasis,
 code spans, nested lists and tables inside a footnote all render. The cursor keys
-scroll the box while the document behind it holds still. `Left` and `Right` do
-nothing while a footnote box is open. Links inside the box are inert.
+scroll the box while the document behind it holds still.
 
 ## Front matter
 
@@ -236,14 +235,6 @@ matter. It is drawn as one `[Frontmatter]` control, not as text. A click on it,
 or `f` and `Enter`, opens the YAML in a box like a footnote, drawn as a `yaml`
 code block. A `---` anywhere else in the document is a horizontal rule or a
 heading underline, as in plain Markdown.
-
-A YAML line wider than the box is not cut. `Left` and `Right`, or the sideways
-mouse wheel over the box, scroll the box sideways, and arrows in its bottom border
-show on which side there is more.
-
-With the mouse captured, the box has a `[copy]` button in its top border that
-copies the YAML without its `---` lines. A drag over the `[Frontmatter]` control
-copies the whole block, `---` lines included.
 
 # SELECTING AND COPYING
 

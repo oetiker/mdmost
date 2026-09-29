@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! The footnote and front matter popup: where the box goes, and what is in it.
+//! The footnote popup: where the box goes, and what is in it.
 //!
 //! Two things live here, and neither of them draws anything or touches an [`App`]:
 //! the pure geometry ([`place`]) that answers where a box anchored to a marker cell
@@ -14,10 +14,6 @@
 //! `render_sequence` walk [`crate::render::render_document`] enters for every top-level
 //! block — at the box's inner width. Emphasis, code spans, nested lists and tables
 //! inside a footnote therefore work without a line of code here knowing they exist.
-//!
-//! The front matter's YAML takes the same path, as a `yaml` code block. Code never
-//! wraps, so it is the one note laid out wider than its box when a line asks for it;
-//! the box keeps its size and scrolls sideways over it.
 //!
 //! This module holds no renderer of its own, and if one ever appears in it that is the
 //! signal the shared path has been left.
@@ -40,13 +36,6 @@ pub const MAX_WIDTH: u16 = 60;
 /// the screen has become a second document, and the reader has lost the paragraph they
 /// asked the question from.
 pub const MAX_HEIGHT: u16 = 12;
-
-/// The widest a popup's note is ever laid out, however long a line of it is.
-///
-/// A popup's note is laid out wider than its box only when it is code, which never
-/// wraps (see [`Popup`]); this bounds the canvas a single absurd line could ask for, at
-/// the same 2048 columns `render::document` stops widening a block of the page at.
-pub const MAX_CANVAS_WIDTH: u16 = 2048;
 
 /// Columns the box spends on chrome: one border and one pad on each side.
 ///
@@ -253,11 +242,6 @@ pub fn definition<'a>(root: &'a Node, name: &str) -> Option<&'a Node> {
 /// It carries its own rendered note. That is the point of the design: the note was laid
 /// out by the ordinary renderer at the box's inner width and nothing repaints or
 /// re-measures it afterwards, so the painter has only to copy cells.
-///
-/// The one exception to "at the box's inner width" is the front matter popup, whose YAML
-/// is code: code never wraps, so it is laid out at its natural width and the box scrolls
-/// sideways over it ([`Popup::hscroll_by`]). A note is wrapped at the box's width and
-/// has nothing to the side, so for a footnote the sideways scroll is always zero.
 #[derive(Debug, Clone)]
 pub struct Popup {
     /// The note, rendered at [`Area::inner`]'s width by the ordinary renderer.
@@ -269,30 +253,13 @@ pub struct Popup {
     label: String,
     /// The first note row on show.
     scroll: usize,
-    /// The first note column on show.
-    hscroll: u16,
-    /// How many columns of the canvas are drawn in, as [`used_width`] measured them.
-    ///
-    /// What the sideways scroll is bounded by, rather than the canvas's own width: a
-    /// canvas is as wide as the budget it was rendered at, and scrolling into blank
-    /// budget would show the reader nothing and tell them there was more.
-    content_width: u16,
-    /// What the `[copy]` in the top border puts on the clipboard; `None` draws no button.
-    ///
-    /// A footnote has none: its note is prose the reader can select in the document
-    /// itself. The front matter's YAML is drawn nowhere else, so its popup is the only
-    /// place a reader can take it from.
-    copy: Option<String>,
-    /// When the border's `[copy]` was last pressed, for its `[copied]` flash.
-    copied_at: Option<std::time::Instant>,
 }
 
 impl Popup {
     /// Builds a popup holding `canvas`, anchored to the marker at `anchor`.
     ///
     /// `None` when there is no room for a box that does not cover its own marker; see
-    /// [`place`]. The box is sized to what the canvas draws, up to [`MAX_WIDTH`] however
-    /// wide the canvas is; anything wider is reached with the sideways scroll.
+    /// [`place`].
     pub fn new(
         canvas: Canvas,
         label: String,
@@ -309,20 +276,7 @@ impl Popup {
             canvas,
             label,
             scroll: 0,
-            hscroll: 0,
-            content_width: content.0,
-            copy: None,
-            copied_at: None,
         })
-    }
-
-    /// The same popup, with a `[copy]` in its top border that copies `text`.
-    #[must_use]
-    pub fn with_copy(self, text: String) -> Self {
-        Self {
-            copy: Some(text),
-            ..self
-        }
     }
 
     /// Where the box sits.
@@ -340,63 +294,9 @@ impl Popup {
         &self.label
     }
 
-    /// The border's title as it is drawn, padding included.
-    ///
-    /// Here rather than in the painter because the `[copy]` beside it has to know how
-    /// wide it is: [`Popup::copy_button_col`] and the painter must not disagree.
-    pub fn title(&self) -> String {
-        format!(" [{}] ", self.label)
-    }
-
-    /// What the border's `[copy]` copies, if the popup has one.
-    pub fn copy_text(&self) -> Option<&str> {
-        self.copy.as_deref()
-    }
-
-    /// The column of the box, counted from its left edge, the border's `[copy]` label
-    /// starts in; `None` when the popup has nothing to copy or the border is too narrow.
-    ///
-    /// The geometry of `render::button::place`, on the popup's border instead of a code
-    /// frame's: the label sits two columns in from the right corner, the nine columns
-    /// [`crate::render::button::REGION`] reserves end one column short of it so that
-    /// `[copied]` fits in the same place, and the button declines rather than run into
-    /// the title with less than two columns between them.
-    pub fn copy_button_col(&self) -> Option<u16> {
-        self.copy.as_ref()?;
-        let width = self.area.width;
-        let region_start = width.checked_sub(crate::render::button::REGION + 1)?;
-        // The title starts one column in, after the corner.
-        let title_end = u16::try_from(crate::text::display_width(&self.title()))
-            .unwrap_or(u16::MAX)
-            .saturating_add(1);
-        if region_start < title_end.saturating_add(2) {
-            return None;
-        }
-        let label = u16::try_from(crate::render::button::LABEL.len()).unwrap_or(u16::MAX);
-        Some(width.saturating_sub(label + 2))
-    }
-
-    /// Records that the border's `[copy]` was just pressed.
-    pub fn flash_copied(&mut self) {
-        self.copied_at = Some(std::time::Instant::now());
-    }
-
-    /// Whether the border's button still shows `[copied]`; the same
-    /// [`super::app::FLASH_FOR`] as a document button's flash.
-    pub fn is_flashing(&self) -> bool {
-        self.copied_at.is_some_and(|at| {
-            at.elapsed() < std::time::Duration::from_millis(super::app::FLASH_FOR)
-        })
-    }
-
     /// The first note row on show.
     pub fn scroll(&self) -> usize {
         self.scroll
-    }
-
-    /// The first note column on show.
-    pub fn hscroll(&self) -> u16 {
-        self.hscroll
     }
 
     /// How many rows of note the box shows at once.
@@ -407,12 +307,6 @@ impl Popup {
     /// The largest valid scroll offset: zero for a note that fits.
     pub fn max_scroll(&self) -> usize {
         self.canvas.height().saturating_sub(self.visible_rows())
-    }
-
-    /// The largest valid sideways offset: zero for a note that fits the box's width,
-    /// which every footnote does.
-    pub fn max_hscroll(&self) -> u16 {
-        self.content_width.saturating_sub(self.area.inner().width)
     }
 
     /// How many rows of note are still below the box. Zero when it all fits.
@@ -432,20 +326,6 @@ impl Popup {
             self.scroll.saturating_sub(delta.unsigned_abs())
         };
         self.scroll = target.min(self.max_scroll());
-    }
-
-    /// Scrolls the note sideways by `delta` columns, clamped at both ends.
-    ///
-    /// The same argument as [`Popup::scroll_by`], sideways: the note moves and the
-    /// document stays where it is.
-    pub fn hscroll_by(&mut self, delta: isize) {
-        let by = u16::try_from(delta.unsigned_abs()).unwrap_or(u16::MAX);
-        let target = if delta >= 0 {
-            self.hscroll.saturating_add(by)
-        } else {
-            self.hscroll.saturating_sub(by)
-        };
-        self.hscroll = target.min(self.max_hscroll());
     }
 
     /// Whether document-area cell `(x, y)` is inside the box.

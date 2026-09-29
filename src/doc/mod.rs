@@ -292,10 +292,6 @@ pub enum NodeKind {
     ///
     /// Not Markdown, so it is not drawn as the document; renderers draw one control that
     /// opens it in a popup.
-    ///
-    /// The node's [`source`](Node::source) runs from the opening `---` to the end of the
-    /// closing `---` line, newline included, so a copy of the control pastes back as the
-    /// block it stands for.
     FrontMatter {
         /// The text between the two `---` lines, with its trailing newline.
         yaml: String,
