@@ -931,6 +931,17 @@ pub(crate) fn natural_width(literal: &str, ctx: Ctx<'_>) -> usize {
     longest + gutter + chrome_width()
 }
 
+/// The narrowest a fenced code block can be framed with the whole of its `language`
+/// title in the top edge: the title, the space on each side of it, one column of rule
+/// before the right corner, and the two corners.
+///
+/// [`natural_width`] measures the code and not the title, so a block of short lines
+/// laid out at its natural width would cut its own title; a caller that lays a block
+/// out at its natural width asks for the larger of the two.
+pub(crate) fn titled_width(language: &str, ctx: Ctx<'_>) -> usize {
+    title(language, ctx).width() + 2 + 1 + 2
+}
+
 /// The columns a framed code block spends on chrome: two border columns plus padding.
 pub(crate) const fn chrome_width() -> usize {
     2 + 2 * CODE_PADDING as usize

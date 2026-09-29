@@ -248,6 +248,34 @@ pub fn definition<'a>(root: &'a Node, name: &str) -> Option<&'a Node> {
         .find_map(|child| definition(child, name))
 }
 
+/// A popup's border title for `label`, padding included.
+fn title_of(label: &str) -> String {
+    format!(" [{label}] ")
+}
+
+/// The narrowest box whose top border holds `title` whole and, with `button`, the
+/// `[copy]` beside it.
+///
+/// The title starts one column in, after the corner, and is followed by at least one
+/// column of rule. The button's geometry is `render::button::place`'s: the
+/// [`crate::render::button::REGION`] it reserves for `[copied]` ends one column short of
+/// the right corner, and it keeps two columns of rule between itself and the title.
+/// [`Popup::copy_button_col`] draws the button exactly when the box is this wide, so
+/// the two cannot disagree.
+fn border_width(title: &str, button: bool) -> u16 {
+    let title_end = u16::try_from(crate::text::display_width(title))
+        .unwrap_or(u16::MAX)
+        .saturating_add(1);
+    if button {
+        title_end
+            .saturating_add(2)
+            .saturating_add(crate::render::button::REGION + 1)
+    } else {
+        // One column of rule, then the corner.
+        title_end.saturating_add(2)
+    }
+}
+
 /// The footnote popup that is up.
 ///
 /// It carries its own rendered note. That is the point of the design: the note was laid
@@ -293,15 +321,30 @@ impl Popup {
     /// `None` when there is no room for a box that does not cover its own marker; see
     /// [`place`]. The box is sized to what the canvas draws, up to [`MAX_WIDTH`] however
     /// wide the canvas is; anything wider is reached with the sideways scroll.
+    ///
+    /// `copy` is what a `[copy]` in the top border copies; `None` draws no button.
+    ///
+    /// # Never narrower than its own border
+    ///
+    /// A note narrower than the border's title, or than the title and the `[copy]`
+    /// beside it, would cut the one and drop the other: the front matter's YAML can be a
+    /// single `a: 1`, and a box that hugged it would read `[Frontmatt` with no button,
+    /// when the button is what that popup is for. So the box asks [`place`] for at least
+    /// [`Popup::border_width`] columns, and the note sits at the left of the extra room.
+    /// The extra is blank, not content: the sideways scroll is still bounded by what the
+    /// note draws.
     pub fn new(
         canvas: Canvas,
         label: String,
+        copy: Option<String>,
         anchor: (u16, u16),
         screen: (u16, u16),
         fill: Style,
     ) -> Option<Self> {
+        let used = used_width(&canvas, fill);
+        let border = border_width(&title_of(&label), copy.is_some());
         let content = (
-            used_width(&canvas, fill),
+            used.max(border.saturating_sub(CHROME_COLS)),
             u16::try_from(canvas.height()).unwrap_or(u16::MAX),
         );
         Some(Self {
@@ -310,19 +353,10 @@ impl Popup {
             label,
             scroll: 0,
             hscroll: 0,
-            content_width: content.0,
-            copy: None,
+            content_width: used,
+            copy,
             copied_at: None,
         })
-    }
-
-    /// The same popup, with a `[copy]` in its top border that copies `text`.
-    #[must_use]
-    pub fn with_copy(self, text: String) -> Self {
-        Self {
-            copy: Some(text),
-            ..self
-        }
     }
 
     /// Where the box sits.
@@ -345,7 +379,7 @@ impl Popup {
     /// Here rather than in the painter because the `[copy]` beside it has to know how
     /// wide it is: [`Popup::copy_button_col`] and the painter must not disagree.
     pub fn title(&self) -> String {
-        format!(" [{}] ", self.label)
+        title_of(&self.label)
     }
 
     /// What the border's `[copy]` copies, if the popup has one.
@@ -364,12 +398,7 @@ impl Popup {
     pub fn copy_button_col(&self) -> Option<u16> {
         self.copy.as_ref()?;
         let width = self.area.width;
-        let region_start = width.checked_sub(crate::render::button::REGION + 1)?;
-        // The title starts one column in, after the corner.
-        let title_end = u16::try_from(crate::text::display_width(&self.title()))
-            .unwrap_or(u16::MAX)
-            .saturating_add(1);
-        if region_start < title_end.saturating_add(2) {
+        if width < border_width(&self.title(), true) {
             return None;
         }
         let label = u16::try_from(crate::render::button::LABEL.len()).unwrap_or(u16::MAX);

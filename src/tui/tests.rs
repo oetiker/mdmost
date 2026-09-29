@@ -7725,11 +7725,11 @@ fn popup_borders(app: &mut App, width: u16, height: u16) -> (String, String) {
     let (left, top, box_width, box_height) = popup_box(app, width, height);
     let rows = framed(app, width, height);
     let border = |y: u16| {
-        rows[usize::from(y)]
-            .chars()
-            .skip(usize::from(left))
-            .take(usize::from(box_width))
-            .collect::<String>()
+        columns_of(
+            &rows[usize::from(y)],
+            usize::from(left),
+            usize::from(left + box_width),
+        )
     };
     (border(top), border(top + box_height - 1))
 }
@@ -7738,15 +7738,30 @@ fn popup_borders(app: &mut App, width: u16, height: u16) -> (String, String) {
 fn popup_text_of(app: &mut App, width: u16, height: u16) -> Vec<String> {
     let (left, top, box_width, box_height) = popup_box(app, width, height);
     let rows = framed(app, width, height);
+    let from = usize::from(left) + 1;
+    let to = usize::from(left + box_width) - 1;
     (top + 1..top + box_height - 1)
-        .map(|y| {
-            rows[usize::from(y)]
-                .chars()
-                .skip(usize::from(left) + 1)
-                .take(usize::from(box_width) - 2)
-                .collect::<String>()
-        })
+        .map(|y| columns_of(&rows[usize::from(y)], from, to))
         .collect()
+}
+
+/// The characters of a painted row that start in display columns `from..to`.
+///
+/// By column, not by `char`: a wide glyph is one `char` and two columns, so counting
+/// chars would read past the right edge of a box on any row that holds one.
+fn columns_of(line: &str, from: usize, to: usize) -> String {
+    let mut column = 0;
+    let mut out = String::new();
+    for ch in line.chars() {
+        if column >= to {
+            break;
+        }
+        if column >= from {
+            out.push(ch);
+        }
+        column += crate::text::display_width(ch.encode_utf8(&mut [0u8; 4]));
+    }
+    out
 }
 
 /// Opens the footnote the way a reader with a mouse does: press and release on the
@@ -9640,13 +9655,89 @@ fn a_wide_glyph_cut_by_the_sideways_scroll_is_drawn_as_a_space() {
     let source = format!("---\nk: {}\n---\n\nText.\n", "\u{65e5}".repeat(60));
     let mut app = open_front_matter(&source, 80, 24);
     app.act(Action::ScrollRight);
+    let (_, _, box_width, _) = popup_box(&mut app, 80, 24);
     let rows = popup_text_of(&mut app, 80, 24);
     let row = rows
         .iter()
         .find(|row| row.contains('\u{65e5}'))
         .expect("the YAML line is on show");
+    assert_eq!(
+        crate::text::display_width(row),
+        usize::from(box_width) - 2,
+        "the row stays inside the box: {row:?}"
+    );
     assert!(
         row.starts_with("  \u{65e5}"),
         "pad, then the cut half: {row:?}"
+    );
+}
+
+#[test]
+fn a_short_front_matter_opens_a_narrow_popup() {
+    // The code frame hugs its longest line, so the box sizes to the YAML rather than to
+    // the cap.
+    let mut app = open_front_matter("---\na: 1\n---\n\nText.\n", 80, 24);
+    let (_, _, width, _) = popup_box(&mut app, 80, 24);
+    assert!(width <= 30, "the box hugs the YAML: {width} columns");
+    let (top, _) = popup_borders(&mut app, 80, 24);
+    assert!(
+        top.contains(" [Frontmatter] "),
+        "the box keeps its title: {top}"
+    );
+    let text = popup_text_of(&mut app, 80, 24).join("\n");
+    assert!(text.contains(" yaml "), "the frame keeps its title: {text}");
+    assert!(text.contains("a: 1"), "{text}");
+}
+
+#[test]
+fn a_narrow_front_matter_popup_still_holds_its_copy_button() {
+    // The button is the point of this popup, so a box too narrow for the title and the
+    // button beside it is widened just enough to hold both.
+    let mut app = pager_at("---\na: 1\n---\n\nText.\n", 80, 24);
+    app.set_copy_button(true);
+    open_front_matter_of(&mut app, 80, 24);
+    let (_, _, width, _) = popup_box(&mut app, 80, 24);
+    let (top, _) = popup_borders(&mut app, 80, 24);
+    assert!(
+        top.contains("[Frontmatter]") && top.contains("[copy]"),
+        "{top}"
+    );
+    assert!(width <= 30, "and no wider than that: {width} columns");
+}
+
+#[test]
+fn the_pointer_over_the_popup_copy_button_lights_it() {
+    // The border button takes the hovered ink a document button does, and nothing else
+    // in the popup does: the note's text is not a control.
+    let mut app = pager_at(FRONT_MATTER, 80, 24);
+    app.set_copy_button(true);
+    open_front_matter_of(&mut app, 80, 24);
+    let (x, y) = painted_at(&mut app, 80, 24, "[copy]");
+    let (tx, ty) = painted_at(&mut app, 80, 24, "title: Hello");
+    let resting = button_inks(&mut app, 80, 24, (x, y));
+    let text_resting = button_inks(&mut app, 80, 24, (tx, ty));
+
+    assert!(
+        app.set_pointer(x, y),
+        "arriving on the button is a change worth a repaint"
+    );
+    assert!(!app.set_pointer(x + 1, y), "moving along it is not");
+    let hovered = button_inks(&mut app, 80, 24, (x, y));
+    let theme = app.theme();
+    let border = crate::theme::Style {
+        bg: theme.base().bg,
+        ..theme.ui.help_border
+    };
+    let expected = super::draw::term_style(theme.hovered(border)).fg;
+    assert_eq!(hovered, vec![expected; resting.len()]);
+    assert_ne!(hovered, resting, "which is not the ink it had at rest");
+    assert_eq!(app.hovered(), None, "no document control is hovered");
+
+    assert!(app.set_pointer(tx, ty), "leaving the button is a change");
+    assert_eq!(button_inks(&mut app, 80, 24, (x, y)), resting);
+    assert_eq!(
+        button_inks(&mut app, 80, 24, (tx, ty)),
+        text_resting,
+        "the note's text does not light"
     );
 }

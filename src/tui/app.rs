@@ -358,6 +358,13 @@ pub struct App {
     /// paint time. The same rules govern it — a drag cancels it for good, a release
     /// takes it whatever the answer.
     popup_copy_pressed: bool,
+    /// Whether the pointer is on the popup's border `[copy]`.
+    ///
+    /// Beside [`App::hover`] rather than in it, for the reason [`App::popup_copy_pressed`]
+    /// is beside [`App::pressed`]: the button is no hotspot of the document's canvas.
+    /// It is the one thing in a popup that lights; the note's own controls are inert
+    /// and are never hit-tested at all.
+    popup_copy_hover: bool,
     /// The control showing its `[copied]` flash, and when it started.
     copied_flash: Option<(usize, u16, std::time::Instant)>,
     /// The control the pointer is over, as an index into the canvas's hotspots.
@@ -447,6 +454,7 @@ impl App {
             copy_button: false,
             pressed: None,
             popup_copy_pressed: false,
+            popup_copy_hover: false,
             copied_flash: None,
             hover: None,
             cursor: None,
@@ -1863,9 +1871,10 @@ impl App {
     /// [`App::open_footnote`] hands over a note: the popup gets the code frame and the
     /// colouring every other code block gets, and no rendering of its own.
     ///
-    /// Two things differ from a footnote. The block is laid out at its natural width
-    /// when that is wider than the box, because code never wraps and would otherwise be
-    /// cut at the frame; the box stays at its cap and scrolls sideways over it. And the
+    /// Two things differ from a footnote. The block is laid out at its natural width,
+    /// not at the box's, because code never wraps and would otherwise be cut at the
+    /// frame; the box sizes itself to that, up to its cap, and scrolls sideways over
+    /// the rest. And the
     /// popup gets a `[copy]` in its border for the YAML, because the front matter is
     /// drawn nowhere else a reader could select it from.
     fn open_front_matter(&mut self, row: usize, col: u16) {
@@ -1903,12 +1912,14 @@ impl App {
             copy_button: false,
             ..self.render_options()
         };
-        let natural = crate::render::code::natural_width(
-            &yaml,
-            crate::render::Ctx::new(&self.theme, &options),
-        );
-        let width = popup::inner_width(screen.0)
-            .max(u16::try_from(natural).unwrap_or(u16::MAX))
+        // The frame hugs the longest line, so a short YAML gets a small box and a long
+        // one is scrolled sideways rather than cut; never so narrow that the frame's
+        // own `yaml` title is cut instead.
+        let ctx = crate::render::Ctx::new(&self.theme, &options);
+        let natural = crate::render::code::natural_width(&yaml, ctx)
+            .max(crate::render::code::titled_width("yaml", ctx));
+        let width = u16::try_from(natural)
+            .unwrap_or(u16::MAX)
             .min(popup::MAX_CANVAS_WIDTH);
         let canvas = crate::render::render_blocks(
             std::slice::from_ref(&code),
@@ -1972,13 +1983,8 @@ impl App {
         // box that does not cover the marker itself (see `popup::place`). Reported, not
         // swallowed: a marker that reacts to a click and then does nothing visible is
         // exactly the control design spec §1.1 refuses to offer.
-        match Popup::new(canvas, label, anchor, screen, self.theme.base()) {
-            Some(popup) => {
-                self.popup = Some(match copy {
-                    Some(text) => popup.with_copy(text),
-                    None => popup,
-                });
-            }
+        match Popup::new(canvas, label, copy, anchor, screen, self.theme.base()) {
+            Some(popup) => self.popup = Some(popup),
             None => self.notify(format!("no room beside the marker for the {what}"), false),
         }
     }
@@ -2548,10 +2554,15 @@ impl App {
     /// re-laying-out the document for a hand sliding across a paragraph. Sweeping along
     /// one six-column label is one change on the way in and one on the way out; the
     /// four columns in between ask for nothing, and [`super::term`] draws nothing.
+    ///
+    /// The popup's border `[copy]` counts as a control here too, so arriving on it and
+    /// leaving it are changes like any other.
     pub fn set_pointer(&mut self, x: u16, y: u16) -> bool {
         self.ensure_rendered();
         let at = self.hotspot_index_at(x, y);
-        std::mem::replace(&mut self.hover, at) != at
+        let on_button = self.on_popup_copy_button(x, y);
+        let button_changed = std::mem::replace(&mut self.popup_copy_hover, on_button) != on_button;
+        (std::mem::replace(&mut self.hover, at) != at) | button_changed
     }
 
     /// Takes the pointer off the document entirely.
@@ -2561,7 +2572,7 @@ impl App {
     /// a change on the same terms as [`App::set_pointer`], so leaving an already-empty
     /// document costs nothing.
     pub fn clear_pointer(&mut self) -> bool {
-        self.hover.take().is_some()
+        std::mem::take(&mut self.popup_copy_hover) | self.hover.take().is_some()
     }
 
     /// The control under the pointer, as an index into `canvas.hotspots()`.
@@ -2760,6 +2771,14 @@ impl App {
         let col = popup.copy_button_col()?;
         let area = popup.area();
         Some((area.left.saturating_add(col), area.top))
+    }
+
+    /// Whether the pointer is on the popup's border `[copy]`, while one is drawn.
+    ///
+    /// Read by [`super::draw`], like [`App::hovered`]. Checked against the button being
+    /// there now, so a popup that closed under a resting pointer leaves nothing lit.
+    pub fn popup_copy_hovered(&self) -> bool {
+        self.popup_copy_hover && self.popup_copy_button().is_some()
     }
 
     /// Whether document-area cell `(x, y)` is on the popup's border `[copy]`.

@@ -870,7 +870,6 @@ fn image(node: &Node, url: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     )
 }
 
-/// The collapsed marker that stands in for raw HTML.
 /// What the front matter control says.
 ///
 /// ASCII, like `[copy]` (see [`super::button`]): a mark the reader acts on must look the
@@ -915,6 +914,7 @@ fn front_matter(node: &Node, yaml: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     out
 }
 
+/// The collapsed marker that stands in for raw HTML.
 fn html_marker(width: u16, ctx: Ctx<'_>) -> Canvas {
     Canvas::from_text(width, HTML_MARKER, ctx.theme.text.dim)
 }

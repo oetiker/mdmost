@@ -887,7 +887,7 @@ fn footnote_popup(buffer: &mut Buffer, area: Rect, app: &App) {
         ));
     }
     block.render(rect, buffer);
-    popup_copy_button(buffer, area, app, term_style(on_page(theme.ui.help_border)));
+    popup_copy_button(buffer, area, app, on_page(theme.ui.help_border));
 
     // The note itself: canvas cells straight into buffer cells, from the row the reader
     // has scrolled to. The inner region is the border plus one column of padding on each
@@ -938,18 +938,23 @@ fn footnote_popup(buffer: &mut Buffer, area: Rect, app: &App) {
 /// [`App::popup_copy_button`]'s answer, which the hit test asks too, and `[copied]`
 /// starts two columns left of the label for the reason the document flash does — that
 /// is where the reserved region begins.
-fn popup_copy_button(buffer: &mut Buffer, area: Rect, app: &App, style: TermStyle) {
+fn popup_copy_button(buffer: &mut Buffer, area: Rect, app: &App, style: Style) {
     let Some((x, y)) = app.popup_copy_button() else {
         return;
     };
     let flashing = app
         .popup()
         .is_some_and(crate::tui::popup::Popup::is_flashing);
-    let (x, label) = if flashing {
-        (x.saturating_sub(2), crate::render::button::FLASH)
+    // Under the pointer it takes the hovered ink a document button takes
+    // ([`hover_highlight`]); the flash wins, as it says what the click just did.
+    let (x, label, style) = if flashing {
+        (x.saturating_sub(2), crate::render::button::FLASH, style)
+    } else if app.popup_copy_hovered() {
+        (x, crate::render::button::LABEL, app.theme().hovered(style))
     } else {
-        (x, crate::render::button::LABEL)
+        (x, crate::render::button::LABEL, style)
     };
+    let style = term_style(style);
     buffer.set_string(
         area.x.saturating_add(x),
         area.y.saturating_add(y),
