@@ -9333,3 +9333,35 @@ fn a_long_notice_is_elided_rather_than_dropped_on_a_narrow_bar() {
         rows[0]
     );
 }
+
+// Front matter: drawn inline as an italic label, a `yaml` code block and a rule.
+
+const FRONT_MATTER: &str = "---\ntitle: Hello\ntags: [a, b]\n---\n\n# Heading\n\nText.\n";
+
+#[test]
+fn a_drag_over_a_front_matter_line_copies_that_source_line() {
+    let mut app = pager_at(FRONT_MATTER, 80, 24);
+    let (x, y) = painted_at(&mut app, 80, 24, "tags: [a, b]");
+    app.begin_selection(x, y);
+    app.drag_selection(x + 11, y);
+    app.end_selection();
+    let extract = app.take_pending_copy().expect("the drag selected text");
+    assert_eq!(extract.text, "tags: [a, b]");
+    assert!(extract.from_source, "the copy is the document's own bytes");
+}
+
+#[test]
+fn the_front_matter_draws_no_control() {
+    // The keyboard cursor has nothing to land on: the label is text, and the YAML's
+    // `[copy]` is only drawn once the mouse is captured.
+    let mut app = pager_at(FRONT_MATTER, 80, 24);
+    app.on_key(Key::char('f'));
+    assert!(
+        app.on_key(Key::plain(KeyCode::Enter))
+            .into_activation()
+            .is_none()
+    );
+    let text = framed(&mut app, 80, 24).join("\n");
+    assert!(text.contains("Frontmatter"), "{text}");
+    assert!(!text.contains("[Frontmatter]"), "{text}");
+}

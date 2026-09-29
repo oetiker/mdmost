@@ -573,6 +573,15 @@ syntax-highlighted code block with a dim caption stating the reason.
 
 Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
 
+## Front matter
+
+A block of YAML between two `---` lines at the very start of the file is front
+matter. It is drawn as an italic *Frontmatter* label followed by the YAML as a
+`yaml` code block. The code block is an ordinary one: it has the
+`[copy]` button, and a drag over it copies the YAML lines from the source. A
+`---` anywhere else in the document is a horizontal rule or a heading underline,
+as in plain Markdown.
+
 ## Layout rules
 
 **Layout is width-driven.** No layout decision is taken at parse time, so a
@@ -601,7 +610,8 @@ one per nesting level, and the task boxes are `[ ]` and `[x]`. Both are ASCII
 whether or not a Nerd Font is present.
 
 **HTML and raster images are not rendered.** Raw HTML in the source is skipped
-rather than rendered or shown. An image becomes a captioned placeholder carrying
+rather than rendered or shown, and a dim `⟨html⟩` marks where it was. HTML that
+holds only `<!-- … -->` comments leaves no marker and no blank row. An image becomes a captioned placeholder carrying
 its alt text and its target. There is no sixel support and no kitty graphics
 protocol.
 
