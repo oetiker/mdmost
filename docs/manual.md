@@ -576,8 +576,8 @@ Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
 ## Front matter
 
 A block of YAML between two `---` lines at the very start of the file is front
-matter. It is drawn as an italic *Frontmatter* label, the YAML as a `yaml` code
-block, and a horizontal rule. The code block is an ordinary one: it has the
+matter. It is drawn as an italic *Frontmatter* label followed by the YAML as a
+`yaml` code block. The code block is an ordinary one: it has the
 `[copy]` button, and a drag over it copies the YAML lines from the source. A
 `---` anywhere else in the document is a horizontal rule or a heading underline,
 as in plain Markdown.

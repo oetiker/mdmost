@@ -290,9 +290,9 @@ pub enum NodeKind {
     },
     /// A YAML front matter block: `---` lines around it, at the very start of the file.
     ///
-    /// Not Markdown, so it is not drawn as the document. Renderers draw it as the three
-    /// blocks a writer would use to show it: an italic `Frontmatter` label, the YAML as
-    /// a `yaml` code block, and a rule.
+    /// Not Markdown, so it is not drawn as the document. Renderers draw it as the two
+    /// blocks a writer would use to show it: an italic `Frontmatter` label and the YAML
+    /// as a `yaml` code block.
     FrontMatter {
         /// The text between the two `---` lines, with its trailing newline.
         yaml: String,

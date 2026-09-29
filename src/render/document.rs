@@ -181,9 +181,9 @@ pub fn render_document_with(
         ..doc_ctx.ctx()
     };
     for (index, node) in blocks.iter().enumerate() {
-        // Front matter is three blocks on the page, each placed as a top-level block
-        // of its own: the YAML's code block is widened and scrolled like any other,
-        // without taking the label and the rule along with it.
+        // Front matter is two blocks on the page, each placed as a top-level block of
+        // its own: the YAML's code block is widened and scrolled like any other,
+        // without taking the label along with it.
         let front_matter = block::front_matter_blocks(node);
         let nodes = front_matter
             .as_ref()

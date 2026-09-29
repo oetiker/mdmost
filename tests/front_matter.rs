@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 //! A YAML front matter block at the top of a file is not Markdown.
 //!
-//! It is drawn as an italic `Frontmatter` label, the YAML as a `yaml` code block, and a
-//! rule: the three blocks a writer would use to show it. Here: what the renderer and
+//! It is drawn as an italic `Frontmatter` label and the YAML as a `yaml` code block:
+//! the two blocks a writer would use to show it. Here: what the renderer and
 //! the parser make of it.
 
 use mdmost::canvas::{Canvas, HotspotKind};
@@ -28,10 +28,10 @@ fn rows(source: &str) -> Vec<String> {
         .collect()
 }
 
-/// The same document with its front matter written out as the three blocks it is
-/// drawn as.
+/// The same document with its front matter written out as the two blocks it is drawn
+/// as.
 const EQUIVALENT: &str =
-    "*Frontmatter*\n\n```yaml\ntitle: Hello\ntags: [a, b]\n```\n\n---\n\n# Heading\n\nText.\n";
+    "*Frontmatter*\n\n```yaml\ntitle: Hello\ntags: [a, b]\n```\n\n# Heading\n\nText.\n";
 
 /// The document rendered at 60 columns with `options`.
 fn canvas_with(source: &str, options: &RenderOptions) -> Canvas {
@@ -59,9 +59,9 @@ fn cells(canvas: &Canvas) -> Vec<(String, Vec<mdmost::theme::Style>)> {
 }
 
 #[test]
-fn front_matter_draws_as_a_label_a_yaml_block_and_a_rule() {
+fn front_matter_draws_as_a_label_and_a_yaml_block() {
     // Cell for cell, text and style, what the document would draw if the front matter
-    // were written as `*Frontmatter*`, a `yaml` fence and a `---` rule.
+    // were written as `*Frontmatter*` and a `yaml` fence.
     let options = RenderOptions::new(false, false);
     assert_eq!(
         cells(&canvas_with(SOURCE, &options)),
@@ -94,27 +94,23 @@ fn the_label_is_italic_and_the_yaml_is_framed() {
 }
 
 #[test]
-fn the_delimiters_are_never_drawn_and_one_rule_follows_the_yaml() {
+fn no_rule_is_drawn_between_the_front_matter_and_the_document() {
+    // Neither the `---` delimiters nor a rule of their own: the heading follows the
+    // YAML's frame directly.
     let rule = rows("a\n\n---\n")[1].clone();
     let rows = rows(SOURCE);
     let heading = rows
         .iter()
         .position(|row| row == "Heading")
         .expect("the heading");
-    let rules = rows[..heading].iter().filter(|row| **row == rule).count();
-    assert_eq!(rules, 1, "{rows:?}");
+    assert!(!rows[..heading].contains(&rule), "{rows:?}");
     assert!(
         !rows.iter().any(|row| row == "---"),
         "no delimiter line: {rows:?}"
     );
-    let closing = rows[..heading]
-        .iter()
-        .rposition(|row| row.starts_with('\u{2570}'))
-        .expect("the frame's bottom edge");
-    assert_eq!(
-        rows[closing + 1],
-        rule,
-        "the rule follows the YAML: {rows:?}"
+    assert!(
+        rows[heading - 1].starts_with('\u{2570}'),
+        "the heading follows the frame's bottom edge: {rows:?}"
     );
 }
 

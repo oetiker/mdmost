@@ -5,8 +5,8 @@
 ### New
 
 - YAML front matter at the top of a file (between two `---` lines) is shown as an
-  italic *Frontmatter* label, the YAML as a coloured code block with its `[copy]`
-  button, and a horizontal rule.
+  italic *Frontmatter* label followed by the YAML as a coloured code block with its
+  `[copy]` button.
 
 ### Changed
 

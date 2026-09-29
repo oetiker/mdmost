@@ -296,7 +296,7 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         NodeKind::Image { url, .. } => image(node, url, width, ctx),
         NodeKind::SkippedHtml { .. } => html_marker(width, ctx),
         // Reached only when front matter is rendered on its own; a sequence expands it
-        // into its three blocks before it gets here.
+        // into its two blocks before it gets here.
         NodeKind::FrontMatter { .. } => front_matter_blocks(node)
             .map(|blocks| render_sequence(&blocks, width, ctx, true))
             .unwrap_or_else(|| Canvas::empty(width)),
@@ -880,20 +880,20 @@ fn image(node: &Node, url: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     )
 }
 
-/// The three blocks front matter is drawn as: an italic `Frontmatter` label, the YAML
-/// as a `yaml` code block, and a rule. `None` for any other node.
+/// The two blocks front matter is drawn as: an italic `Frontmatter` label and the YAML
+/// as a `yaml` code block. `None` for any other node.
 ///
 /// Built as nodes and handed to the ordinary block path rather than drawn here, so the
 /// YAML gets everything a code block gets — colouring, the `[copy]` button, the
 /// widening and sideways scroll of a wide block, search — and the page looks exactly
-/// as if the writer had put those three blocks there. The label and the rule have no
-/// source of their own and carry an empty span; the code block carries the YAML's
+/// as if the writer had put those two blocks there. The label has no source of its
+/// own and carries an empty span; the code block carries the YAML's
 /// per-line spans, so a drag over it copies the document's own bytes.
 ///
 /// The caller renders them as siblings — [`render_sequence`] and
 /// [`super::document`]'s top-level loop both do — so each is placed and spaced as a
 /// block of its own.
-pub(crate) fn front_matter_blocks(node: &Node) -> Option<[Node; 3]> {
+pub(crate) fn front_matter_blocks(node: &Node) -> Option<[Node; 2]> {
     let NodeKind::FrontMatter { yaml, lines } = &node.kind else {
         return None;
     };
@@ -913,7 +913,7 @@ pub(crate) fn front_matter_blocks(node: &Node) -> Option<[Node; 3]> {
         },
         empty,
     );
-    Some([label, code, Node::new(NodeKind::ThematicBreak, empty)])
+    Some([label, code])
 }
 
 /// The collapsed marker that stands in for raw HTML.
