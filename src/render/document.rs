@@ -181,17 +181,26 @@ pub fn render_document_with(
         ..doc_ctx.ctx()
     };
     for (index, node) in blocks.iter().enumerate() {
-        let part = match banner.take() {
-            Some(banner) if index == 0 => placed(banner, measure, fill),
-            _ => place(node, measure, ctx, &clipped, fill),
-        };
-        if part.is_empty() {
-            continue;
+        // Front matter is two blocks on the page, each placed as a top-level block of
+        // its own: the YAML's code block is widened and scrolled like any other,
+        // without taking the label along with it.
+        let front_matter = block::front_matter_blocks(node);
+        let nodes = front_matter
+            .as_ref()
+            .map_or(std::slice::from_ref(node), |blocks| blocks.as_slice());
+        for node in nodes {
+            let part = match banner.take() {
+                Some(banner) if index == 0 => placed(banner, measure, fill),
+                _ => place(node, measure, ctx, &clipped, fill),
+            };
+            if part.is_empty() {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push_blank_row(fill);
+            }
+            out.append(&part, fill);
         }
-        if !out.is_empty() {
-            out.push_blank_row(fill);
-        }
-        out.append(&part, fill);
     }
     // `append` widens `out` to the widest part, but a document of nothing but empty
     // blocks never appends at all.

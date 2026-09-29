@@ -4,6 +4,10 @@
 
 ### New
 
+- YAML front matter at the top of a file (between two `---` lines) is shown as an
+  italic *Frontmatter* label followed by the YAML as a coloured code block with its
+  `[copy]` button.
+
 ### Changed
 
 ### Fixed
@@ -12,6 +16,10 @@
   keeps scrolling while the pointer rests there, and speeds up the longer it is held.
   Before, the document moved one row only each time the pointer moved, so selecting
   more than a screenful seemed not to work.
+- YAML front matter no longer renders as a horizontal rule followed by a heading made
+  of its YAML lines, and its first line no longer appears in the contents pane.
+- HTML comments such as `<!-- TODO -->` no longer show as a dim `⟨html⟩` marker; they
+  leave no trace in the document, in a sentence or in a table cell.
 
 ## 0.4.0 - 2026-09-26
 

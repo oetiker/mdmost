@@ -94,6 +94,40 @@ fn html_blocks_and_inline_html_are_marked_skipped_and_carry_no_children() {
 }
 
 #[test]
+fn html_that_is_only_comments_leaves_no_node() {
+    let doc = Doc::parse(
+        "a\n\n<!-- block -->\n\n<!--\nmulti\nline\n-->\n\n<!-- one --> <!-- two -->\n\nb <!-- inline --> c\n",
+    );
+    assert_eq!(
+        count(&doc, |n| matches!(n.kind, NodeKind::SkippedHtml { .. })),
+        0,
+        "a comment is not skipped HTML, it is nothing"
+    );
+    assert_eq!(count(&doc, |n| matches!(n.kind, NodeKind::Paragraph)), 2);
+}
+
+#[test]
+fn html_mixing_a_comment_with_a_tag_is_still_skipped_html() {
+    let doc = Doc::parse("<!-- note --><div>x</div>\n\na <!-- c --><b>b</b>\n");
+    assert_eq!(
+        count(&doc, |n| matches!(
+            n.kind,
+            NodeKind::SkippedHtml { block: true, .. }
+        )),
+        1,
+        "the block holds a real tag, so it keeps its marker"
+    );
+    assert_eq!(
+        count(&doc, |n| matches!(
+            n.kind,
+            NodeKind::SkippedHtml { block: false, .. }
+        )),
+        2,
+        "only the inline comment goes; <b> and </b> stay"
+    );
+}
+
+#[test]
 fn skipped_html_contributes_no_plain_text() {
     let doc = Doc::parse("a <b>bold</b> c\n");
     let paragraph =
@@ -1177,4 +1211,19 @@ fn a_document_collects_its_macro_candidates_in_order() {
         1,
         "the backslash pass makes display nodes too"
     );
+}
+
+#[test]
+fn the_text_after_a_dropped_comment_stays_faithful_to_its_source() {
+    let source = "Before <!-- note --> after.\n";
+    let nodes = text_nodes(source);
+    assert_eq!(
+        nodes,
+        vec![
+            ("Before ".to_string(), 0, 7),
+            ("after.".to_string(), 21, 27)
+        ],
+        "one space between the words, and the span skips the byte it no longer draws"
+    );
+    assert_faithful(source, &nodes);
 }
