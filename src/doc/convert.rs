@@ -555,9 +555,17 @@ fn convert<'a>(
     let source = offsets.span(ast.sourcepos);
     let kind = match &ast.value {
         NodeValue::Document => NodeKind::Document,
-        NodeValue::FrontMatter(text) => NodeKind::FrontMatter {
-            yaml: front_matter_yaml(text),
-        },
+        NodeValue::FrontMatter(text) => {
+            let yaml = front_matter_yaml(text);
+            // The search starts on the line after the opening `---`, so a YAML line
+            // made only of dashes cannot be matched against the delimiter itself.
+            let opener = text.find('\n').map_or(text.len(), |at| at + 1);
+            let body = SourceSpan::new(source.start + opener, source.end);
+            NodeKind::FrontMatter {
+                lines: code_lines(offsets, body, &yaml),
+                yaml,
+            }
+        }
         NodeValue::Heading(h) => NodeKind::Heading {
             level: h.level,
             // The id is patched in below, once the children are known.

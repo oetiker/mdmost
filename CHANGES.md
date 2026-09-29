@@ -4,9 +4,9 @@
 
 ### New
 
-- YAML front matter at the top of a file (between two `---` lines) is shown as a
-  `[Frontmatter]` control. A click on it, or `f` and `Enter`, opens the YAML in a
-  popup as a coloured code block.
+- YAML front matter at the top of a file (between two `---` lines) is shown as an
+  italic *Frontmatter* label, the YAML as a coloured code block with its `[copy]`
+  button, and a horizontal rule.
 
 ### Changed
 

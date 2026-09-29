@@ -161,9 +161,6 @@ pub enum HotspotKind {
         /// The footnote's identifier as the document spells it.
         id: String,
     },
-    /// The `[Frontmatter]` control. There is only ever one front matter block, so
-    /// nothing needs to say which.
-    FrontMatter,
 }
 
 /// A region of a row that is a control, and what activating it does.

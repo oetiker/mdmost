@@ -9334,59 +9334,34 @@ fn a_long_notice_is_elided_rather_than_dropped_on_a_narrow_bar() {
     );
 }
 
-// Front matter: a `[Frontmatter]` control whose popup shows the YAML as a code block.
+// Front matter: drawn inline as an italic label, a `yaml` code block and a rule.
 
 const FRONT_MATTER: &str = "---\ntitle: Hello\ntags: [a, b]\n---\n\n# Heading\n\nText.\n";
 
 #[test]
-fn clicking_the_front_matter_control_opens_its_yaml() {
+fn a_drag_over_a_front_matter_line_copies_that_source_line() {
     let mut app = pager_at(FRONT_MATTER, 80, 24);
-    let (x, y) = painted_at(&mut app, 80, 24, "[Frontmatter]");
-    super::term::on_mouse(&mut app, press_at(x, y), 80, 24);
-    super::term::on_mouse(&mut app, release_at(x, y), 80, 24);
-    assert_eq!(
-        app.popup().map(super::popup::Popup::label),
-        Some("Frontmatter")
-    );
-    let text = popup_text_of(&mut app, 80, 24).join("\n");
-    assert!(text.contains("title: Hello"), "{text}");
-    assert!(text.contains("tags: [a, b]"), "{text}");
-    assert!(
-        !text.contains("---"),
-        "the delimiters are not part of the YAML: {text}"
-    );
+    let (x, y) = painted_at(&mut app, 80, 24, "tags: [a, b]");
+    app.begin_selection(x, y);
+    app.drag_selection(x + 11, y);
+    app.end_selection();
+    let extract = app.take_pending_copy().expect("the drag selected text");
+    assert_eq!(extract.text, "tags: [a, b]");
+    assert!(extract.from_source, "the copy is the document's own bytes");
 }
 
 #[test]
-fn the_front_matter_control_opens_from_the_keyboard() {
+fn the_front_matter_draws_no_control() {
+    // The keyboard cursor has nothing to land on: the label is text, and the YAML's
+    // `[copy]` is only drawn once the mouse is captured.
     let mut app = pager_at(FRONT_MATTER, 80, 24);
     app.on_key(Key::char('f'));
-    // `Enter` hands the activation to the event loop, which passes a pure-state kind
-    // straight back to `App::activate`; this does the loop's half.
-    let activation = app
-        .on_key(Key::plain(KeyCode::Enter))
-        .into_activation()
-        .expect("the cursor sits on the control");
-    app.activate(activation);
-    assert_eq!(
-        app.popup().map(super::popup::Popup::label),
-        Some("Frontmatter")
+    assert!(
+        app.on_key(Key::plain(KeyCode::Enter))
+            .into_activation()
+            .is_none()
     );
-}
-
-#[test]
-fn a_long_front_matter_line_stays_inside_the_popup() {
-    let source = format!(
-        "---\ndescription: {}\nshort: yes\n---\n\nText.\n",
-        "word ".repeat(40)
-    );
-    let mut app = pager_at(&source, 80, 24);
-    let (x, y) = painted_at(&mut app, 80, 24, "[Frontmatter]");
-    super::term::on_mouse(&mut app, press_at(x, y), 80, 24);
-    super::term::on_mouse(&mut app, release_at(x, y), 80, 24);
-    let (left, _, width, _) = popup_box(&mut app, 80, 24);
-    assert!(left + width <= 80, "the box stays on screen");
-    let text = popup_text_of(&mut app, 80, 24);
-    assert!(text.join("\n").contains("description: word"), "{text:?}");
-    assert!(text.join("\n").contains("short: yes"), "{text:?}");
+    let text = framed(&mut app, 80, 24).join("\n");
+    assert!(text.contains("Frontmatter"), "{text}");
+    assert!(!text.contains("[Frontmatter]"), "{text}");
 }

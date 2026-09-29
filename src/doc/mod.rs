@@ -290,11 +290,16 @@ pub enum NodeKind {
     },
     /// A YAML front matter block: `---` lines around it, at the very start of the file.
     ///
-    /// Not Markdown, so it is not drawn as the document; renderers draw one control that
-    /// opens it in a popup.
+    /// Not Markdown, so it is not drawn as the document. Renderers draw it as the three
+    /// blocks a writer would use to show it: an italic `Frontmatter` label, the YAML as
+    /// a `yaml` code block, and a rule.
     FrontMatter {
         /// The text between the two `---` lines, with its trailing newline.
         yaml: String,
+        /// Where each line of `yaml` came from in the document source, as
+        /// [`NodeKind::CodeBlock::lines`] records it for a code block: the YAML is drawn
+        /// as one, and a drag over it copies these bytes.
+        lines: Vec<SourceSpan>,
     },
     /// Raw HTML that `mdmost` deliberately does not support.
     ///

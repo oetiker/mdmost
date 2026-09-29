@@ -11,8 +11,8 @@
 //! Nodes of kind [`NodeKind::SkippedHtml`] never reach the canvas: they collapse to a
 //! dim `⟨html⟩` marker (design spec §2).
 
-use crate::canvas::{Anchor, BorderSet, Canvas, Hotspot, HotspotKind};
-use crate::doc::{ListInfo, Node, NodeKind};
+use crate::canvas::{Anchor, BorderSet, Canvas};
+use crate::doc::{ListInfo, Node, NodeKind, SourceSpan};
 use crate::numbering::Numbering;
 use crate::text::{Align, Line, Span, display_width, pad_to_width, repeat_to_width};
 use crate::theme::{Style, Theme};
@@ -172,6 +172,12 @@ pub(crate) fn render_sequence(nodes: &[Node], width: u16, ctx: Ctx<'_>, spaced: 
                 false,
                 &mut out,
             );
+        } else if let Some(blocks) = front_matter_blocks(&nodes[index]) {
+            for block in &blocks {
+                let (part, set_off) = render_block_set_off(block, width, ctx, &clip, fill);
+                push(&part, set_off, &mut out);
+            }
+            index += 1;
         } else {
             let (part, set_off) = render_block_set_off(&nodes[index], width, ctx, &clip, fill);
             push(&part, set_off, &mut out);
@@ -289,7 +295,11 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         }
         NodeKind::Image { url, .. } => image(node, url, width, ctx),
         NodeKind::SkippedHtml { .. } => html_marker(width, ctx),
-        NodeKind::FrontMatter { .. } => front_matter(width, ctx),
+        // Reached only when front matter is rendered on its own; a sequence expands it
+        // into its three blocks before it gets here.
+        NodeKind::FrontMatter { .. } => front_matter_blocks(node)
+            .map(|blocks| render_sequence(&blocks, width, ctx, true))
+            .unwrap_or_else(|| Canvas::empty(width)),
         // A display formula is drawn where it can be and shown as its own framed source
         // where it cannot. The framed source is not a placeholder: it is the permanent
         // failure path of design spec §9, and a formula that will not parse or will not
@@ -870,32 +880,43 @@ fn image(node: &Node, url: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     )
 }
 
-/// The collapsed marker that stands in for raw HTML.
-/// What the front matter control says.
+/// The three blocks front matter is drawn as: an italic `Frontmatter` label, the YAML
+/// as a `yaml` code block, and a rule. `None` for any other node.
 ///
-/// ASCII, like `[copy]` (see [`super::button`]): a mark the reader acts on must look the
-/// same in every terminal.
-pub(crate) const FRONT_MATTER_LABEL: &str = "[Frontmatter]";
-
-/// The one row front matter draws as: a control that opens the YAML in a popup.
+/// Built as nodes and handed to the ordinary block path rather than drawn here, so the
+/// YAML gets everything a code block gets — colouring, the `[copy]` button, the
+/// widening and sideways scroll of a wide block, search — and the page looks exactly
+/// as if the writer had put those three blocks there. The label and the rule have no
+/// source of their own and carry an empty span; the code block carries the YAML's
+/// per-line spans, so a drag over it copies the document's own bytes.
 ///
-/// Drawn whether or not the mouse was captured, like a footnote marker: `f` reaches it
-/// from the keyboard, so it is never a control nobody can press.
-fn front_matter(width: u16, ctx: Ctx<'_>) -> Canvas {
-    let mut out = Canvas::from_text(width, FRONT_MATTER_LABEL, ctx.theme.text.footnote_ref);
-    let target = out.next_target();
-    out.add_hotspot(Hotspot {
-        row: 0,
-        col: 0,
-        cols: u16::try_from(display_width(FRONT_MATTER_LABEL))
-            .unwrap_or(u16::MAX)
-            .min(width),
-        kind: HotspotKind::FrontMatter,
-        target,
-    });
-    out
+/// The caller renders them as siblings — [`render_sequence`] and
+/// [`super::document`]'s top-level loop both do — so each is placed and spaced as a
+/// block of its own.
+pub(crate) fn front_matter_blocks(node: &Node) -> Option<[Node; 3]> {
+    let NodeKind::FrontMatter { yaml, lines } = &node.kind else {
+        return None;
+    };
+    let empty = SourceSpan::default();
+    let mut label = Node::new(NodeKind::Paragraph, empty);
+    let mut emph = Node::new(NodeKind::Emph, empty);
+    emph.children
+        .push(Node::new(NodeKind::Text("Frontmatter".to_string()), empty));
+    label.children.push(emph);
+    let code = Node::new(
+        NodeKind::CodeBlock {
+            info: "yaml".to_string(),
+            language: Some("yaml".to_string()),
+            literal: yaml.clone(),
+            fenced: true,
+            lines: lines.clone(),
+        },
+        empty,
+    );
+    Some([label, code, Node::new(NodeKind::ThematicBreak, empty)])
 }
 
+/// The collapsed marker that stands in for raw HTML.
 fn html_marker(width: u16, ctx: Ctx<'_>) -> Canvas {
     Canvas::from_text(width, HTML_MARKER, ctx.theme.text.dim)
 }

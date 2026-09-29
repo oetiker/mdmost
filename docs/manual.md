@@ -228,14 +228,6 @@ The note is drawn by the ordinary renderer at the width of the box, so emphasis,
 code spans, nested lists and tables inside a footnote all render. The cursor keys
 scroll the box while the document behind it holds still.
 
-## Front matter
-
-A block of YAML between two `---` lines at the very start of the file is front
-matter. It is drawn as one `[Frontmatter]` control, not as text. A click on it,
-or `f` and `Enter`, opens the YAML in a box like a footnote, drawn as a `yaml`
-code block. A `---` anywhere else in the document is a horizontal rule or a
-heading underline, as in plain Markdown.
-
 # SELECTING AND COPYING
 
 With `--mouse` (or `mouse = true`) a left drag over the document selects, and the
@@ -580,6 +572,15 @@ syntax-highlighted code block with a dim caption stating the reason.
   scale is chosen from the available width.
 
 Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
+
+## Front matter
+
+A block of YAML between two `---` lines at the very start of the file is front
+matter. It is drawn as an italic *Frontmatter* label, the YAML as a `yaml` code
+block, and a horizontal rule. The code block is an ordinary one: it has the
+`[copy]` button, and a drag over it copies the YAML lines from the source. A
+`---` anywhere else in the document is a horizontal rule or a heading underline,
+as in plain Markdown.
 
 ## Layout rules
 
