@@ -45,6 +45,13 @@ const MAX_REPEAT: usize = 10_000;
 /// the label back. Nothing here schedules a wake-up.
 pub const FLASH_FOR: u64 = 600;
 
+/// How often a drag held at the top or bottom edge scrolls the document.
+///
+/// A terminal reports a drag only when the pointer enters a new cell, so a hand resting
+/// on the edge sends nothing at all. The event loop wakes at this interval instead, for
+/// as long as there is somewhere to scroll to (see [`App::drag_autoscroll`]).
+pub const AUTOSCROLL_STEP: Duration = Duration::from_millis(50);
+
 /// Where `offset` in `old` ends up in `new`, for one contiguous edit.
 ///
 /// The reading position is remembered as a byte offset into the document source, and an
@@ -325,6 +332,16 @@ pub struct App {
     search_mode: SearchMode,
     /// The mouse selection, in canvas coordinates. See [`super::select`].
     selection: Option<Selection>,
+    /// Where the pointer of the drag in progress is, in document-area cells.
+    ///
+    /// Kept because edge auto-scroll must go on extending the selection to the row under
+    /// the pointer while no mouse event arrives.
+    drag_pointer: Option<(u16, u16)>,
+    /// When the drag entered the edge it rests on, and when it last scrolled.
+    ///
+    /// `None` until the first tick after the pointer entered the edge: the entering
+    /// drag event has no clock, and it already scrolled one row itself.
+    edge_clock: Option<(Instant, Instant)>,
     /// Text a finished drag produced, waiting for the event loop to put it on the
     /// clipboard.
     ///
@@ -432,6 +449,8 @@ impl App {
             search_backward: false,
             search_mode: SearchMode::Literal,
             selection: None,
+            drag_pointer: None,
+            edge_clock: None,
             pending_copy: None,
             copy_button: false,
             pressed: None,
@@ -2162,22 +2181,46 @@ impl App {
         self.ensure_rendered();
         self.clear_notice();
         self.selection = Some(Selection::started(self.canvas_pos(x, y)));
+        // The press point counts as where the pointer already was, so a press on the
+        // edge row arms nothing: selecting a word on the last row must not scroll it
+        // away. Moving off the edge and back arms it.
+        self.drag_pointer = Some((x, y));
+        self.edge_clock = None;
+    }
+
+    /// Which way the document scrolls with the pointer on document-area row `y`: up
+    /// on the first row, down on the last, not at all in between.
+    fn edge_direction(&self, y: u16) -> isize {
+        if y == 0 {
+            -1
+        } else if usize::from(y) + 1 >= self.viewport_height() {
+            1
+        } else {
+            0
+        }
     }
 
     /// Extends the drag to document-area column `x`, row `y`.
     ///
-    /// A drag that leaves the top or bottom of the viewport scrolls it by a row, which
-    /// is the only way to select more than a screenful. The selection itself is stored
-    /// in canvas coordinates, so the scroll moves the window and not the highlight.
+    /// A drag that enters the top or bottom row of the viewport scrolls it by a row at
+    /// once; from then on [`App::drag_autoscroll`] keeps scrolling for as long as the
+    /// pointer stays there. Further motion along the edge adds nothing, so a shaky hand
+    /// scrolls no faster than a still one. The selection itself is stored in canvas
+    /// coordinates, so the scroll moves the window and not the highlight.
     pub fn drag_selection(&mut self, x: u16, y: u16) {
         let Some(mut selection) = self.selection.filter(|s| s.is_dragging()) else {
             return;
         };
-        let height = self.viewport_height();
-        if y == 0 {
-            self.scroll_by(-1);
-        } else if usize::from(y) + 1 >= height {
-            self.scroll_by(1);
+        let edge = self.edge_direction(y);
+        let was = self
+            .drag_pointer
+            .map_or(0, |(_, before)| self.edge_direction(before));
+        self.drag_pointer = Some((x, y));
+        if edge != was {
+            self.edge_clock = None;
+            if edge != 0 {
+                self.scroll_by(edge);
+            }
         }
         selection.drag_to(self.canvas_pos(x, y));
         self.selection = Some(selection);
@@ -2199,6 +2242,8 @@ impl App {
             return;
         };
         selection.finish();
+        self.drag_pointer = None;
+        self.edge_clock = None;
         if selection.is_click() {
             self.selection = None;
             return;
@@ -2209,6 +2254,60 @@ impl App {
             super::select::extract(self.cache.canvas(), self.doc.source(), selection);
         if self.pending_copy.is_none() {
             self.notify("nothing to copy there", false);
+        }
+    }
+
+    /// Whether a drag rests on an edge with document left to scroll towards, which is
+    /// when the event loop has to wake for [`App::drag_autoscroll`].
+    pub fn drag_autoscroll_pending(&self) -> bool {
+        if !self.selection.is_some_and(Selection::is_dragging) {
+            return false;
+        }
+        let Some((_, y)) = self.drag_pointer else {
+            return false;
+        };
+        match self.edge_direction(y) {
+            -1 => self.scroll > 0,
+            1 => self.scroll < self.max_scroll(),
+            _ => false,
+        }
+    }
+
+    /// Scrolls a drag held on the top or bottom edge, and extends the selection to the
+    /// row that scrolls under the pointer.
+    ///
+    /// Called by the event loop on every wake-up, with the time of the wake-up. It scrolls
+    /// at most once per [`AUTOSCROLL_STEP`], so a wake-up caused by some other event
+    /// does not speed it up. The longer the pointer rests on the edge, the more rows a
+    /// step moves: one in the first second, two in the next, four after that.
+    pub fn drag_autoscroll(&mut self, now: Instant) {
+        if !self.drag_autoscroll_pending() {
+            self.edge_clock = None;
+            return;
+        }
+        let Some((since, last)) = self.edge_clock else {
+            self.edge_clock = Some((now, now));
+            return;
+        };
+        if now.saturating_duration_since(last) < AUTOSCROLL_STEP {
+            return;
+        }
+        self.edge_clock = Some((since, now));
+        let held = now.saturating_duration_since(since);
+        let rows = if held < Duration::from_secs(1) {
+            1
+        } else if held < Duration::from_secs(2) {
+            2
+        } else {
+            4
+        };
+        let Some((x, y)) = self.drag_pointer else {
+            return;
+        };
+        self.scroll_by(self.edge_direction(y) * rows);
+        if let Some(mut selection) = self.selection {
+            selection.drag_to(self.canvas_pos(x, y));
+            self.selection = Some(selection);
         }
     }
 

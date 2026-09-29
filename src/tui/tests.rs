@@ -7,12 +7,12 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 
-use super::app::{App, AppOptions, Focus, Overlay, PromptKind};
+use super::app::{AUTOSCROLL_STEP, App, AppOptions, Focus, Overlay, PromptKind};
 use super::help;
 use crate::canvas::HotspotKind;
 use crate::canvas::meter::{EIGHTHS, LOWER_BLOCKS, TRACK_INK, TROUGH};
 use crate::config::{Action, Config, Key, KeyBindings, KeyCode};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::term::{POLL_INTERVAL, highlight_tick_at, wait_timeout};
 use crate::doc::Doc;
@@ -5203,6 +5203,153 @@ fn dragging_past_the_bottom_of_the_viewport_scrolls() {
         app.scroll(),
         1,
         "a drag at the last row pulls the document up"
+    );
+}
+
+// Edge auto-scroll while a drag is held. A terminal reports a drag only when the
+// pointer crosses into a new cell, so a hand resting on the last row sends nothing;
+// the scrolling has to come from the loop's clock, not from mouse events.
+
+/// A document far taller than the 11-row test viewport.
+fn tall_doc() -> String {
+    (0..200).map(|i| format!("Paragraph {i}.\n\n")).collect()
+}
+
+/// Starts a drag and brings the pointer to the bottom row of the viewport.
+fn drag_to_bottom_edge(app: &mut App) {
+    app.begin_selection(1, 0);
+    let last = u16::try_from(app.viewport_height() - 1).expect("small viewport");
+    app.drag_selection(1, last);
+}
+
+/// The last canvas row the selection covers.
+fn selection_end(app: &App) -> usize {
+    *app.selection().expect("a selection").rows().end()
+}
+
+#[test]
+fn a_drag_held_still_at_the_bottom_edge_keeps_scrolling() {
+    let mut app = pager(&tall_doc());
+    drag_to_bottom_edge(&mut app);
+    assert_eq!(app.scroll(), 1, "entering the edge scrolls at once");
+    let t0 = Instant::now();
+    app.drag_autoscroll(t0);
+    for step in 1..=10 {
+        app.drag_autoscroll(t0 + AUTOSCROLL_STEP * step);
+    }
+    assert_eq!(app.scroll(), 11, "one row per step while the hand rests");
+    assert_eq!(
+        selection_end(&app),
+        app.scroll() + app.viewport_height() - 1,
+        "the loose end follows the row under the pointer"
+    );
+}
+
+#[test]
+fn motion_along_the_edge_does_not_add_speed() {
+    let mut app = pager(&tall_doc());
+    drag_to_bottom_edge(&mut app);
+    let last = u16::try_from(app.viewport_height() - 1).expect("small viewport");
+    app.drag_selection(5, last);
+    app.drag_selection(9, last);
+    assert_eq!(
+        app.scroll(),
+        1,
+        "only the clock scrolls once the pointer is at the edge, so a shaky hand \
+         does not scroll faster than a still one"
+    );
+}
+
+#[test]
+fn edge_autoscroll_is_rate_limited() {
+    let mut app = pager(&tall_doc());
+    drag_to_bottom_edge(&mut app);
+    let t0 = Instant::now();
+    app.drag_autoscroll(t0);
+    app.drag_autoscroll(t0 + AUTOSCROLL_STEP);
+    app.drag_autoscroll(t0 + AUTOSCROLL_STEP);
+    app.drag_autoscroll(t0 + AUTOSCROLL_STEP + Duration::from_millis(1));
+    assert_eq!(
+        app.scroll(),
+        2,
+        "a wake-up caused by some other event must not scroll early"
+    );
+}
+
+#[test]
+fn edge_autoscroll_speeds_up_while_held() {
+    let mut app = pager(&tall_doc());
+    drag_to_bottom_edge(&mut app);
+    let t0 = Instant::now();
+    app.drag_autoscroll(t0);
+    for step in 1..=60 {
+        app.drag_autoscroll(t0 + AUTOSCROLL_STEP * step);
+    }
+    let before = app.scroll();
+    app.drag_autoscroll(t0 + AUTOSCROLL_STEP * 61);
+    assert_eq!(
+        app.scroll() - before,
+        4,
+        "after three seconds, four rows a step"
+    );
+}
+
+#[test]
+fn a_drag_held_at_the_top_edge_scrolls_up() {
+    let mut app = pager(&tall_doc());
+    app.scroll_to(100);
+    app.begin_selection(1, 5);
+    app.drag_selection(1, 0);
+    assert_eq!(app.scroll(), 99);
+    let t0 = Instant::now();
+    app.drag_autoscroll(t0);
+    app.drag_autoscroll(t0 + AUTOSCROLL_STEP);
+    assert_eq!(app.scroll(), 98);
+    assert_eq!(
+        *app.selection().expect("a selection").rows().start(),
+        98,
+        "the loose end follows the top row"
+    );
+}
+
+#[test]
+fn edge_autoscroll_stops_when_the_drag_ends() {
+    let mut app = pager(&tall_doc());
+    drag_to_bottom_edge(&mut app);
+    assert_eq!(
+        wait_timeout(&app),
+        AUTOSCROLL_STEP,
+        "the loop wakes to scroll"
+    );
+    app.end_selection();
+    let _ = app.take_pending_copy();
+    app.drag_autoscroll(Instant::now());
+    app.drag_autoscroll(Instant::now() + AUTOSCROLL_STEP);
+    assert_eq!(app.scroll(), 1);
+    assert_eq!(wait_timeout(&app), POLL_INTERVAL);
+}
+
+#[test]
+fn edge_autoscroll_stops_when_the_pointer_leaves_the_edge() {
+    let mut app = pager(&tall_doc());
+    drag_to_bottom_edge(&mut app);
+    app.drag_selection(1, 4);
+    let t0 = Instant::now();
+    app.drag_autoscroll(t0);
+    app.drag_autoscroll(t0 + AUTOSCROLL_STEP);
+    assert_eq!(app.scroll(), 1);
+    assert_eq!(wait_timeout(&app), POLL_INTERVAL);
+}
+
+#[test]
+fn edge_autoscroll_idles_at_the_end_of_the_document() {
+    let mut app = pager(&tall_doc());
+    app.scroll_to(usize::MAX);
+    drag_to_bottom_edge(&mut app);
+    assert_eq!(
+        wait_timeout(&app),
+        POLL_INTERVAL,
+        "nothing left to scroll, so the loop does not wake for it"
     );
 }
 

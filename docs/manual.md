@@ -237,6 +237,14 @@ text; over a bold word, `**bold**`; over a link, `[text](url)`; across a code
 fence, the fence and its content verbatim. A drag across rows that were reflowed
 copies the line breaks of the source. `Esc` clears the highlight.
 
+A selection can be longer than the screen. While the button is held, the mouse
+wheel scrolls the document and the selection grows with it. Moving the pointer
+onto the top or bottom row of the document also scrolls, and the scrolling goes
+on while the pointer rests there: one row every 50 ms in the first second, two
+rows per step in the next, four after that. Moving the pointer off that row stops
+it. A drag that starts on the top or bottom row does not scroll until the pointer
+has left that row and come back.
+
 A code frame and a table each carry a `[copy]` button at the right of their top
 edge. It copies the **whole block**: the code exactly as written, and the table as
 a grid of tab-separated cells that a spreadsheet splits into columns. An HTML

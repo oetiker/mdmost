@@ -12,6 +12,10 @@
 
 ### Fixed
 
+- With `--mouse`, dragging a selection to the top or bottom row of the document now
+  keeps scrolling while the pointer rests there, and speeds up the longer it is held.
+  Before, the document moved one row only each time the pointer moved, so selecting
+  more than a screenful seemed not to work.
 - YAML front matter no longer renders as a horizontal rule followed by a heading made
   of its YAML lines, and its first line no longer appears in the contents pane.
 - HTML comments such as `<!-- TODO -->` no longer show as a dim `⟨html⟩` marker; they
