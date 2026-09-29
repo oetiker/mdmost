@@ -468,6 +468,24 @@ fn front_matter_yaml(block: &str) -> String {
     yaml
 }
 
+/// How many bytes of a front matter block its delimiters enclose: the opening `---`
+/// line through the closing one, that line's newline included.
+///
+/// comrak's text for the block may run on over the blank lines after the closing
+/// delimiter, and its sourcepos stops short of that line's newline. Neither is the
+/// block a reader would copy: the one lets a copy trail blank lines, the other leaves the
+/// closing line unterminated.
+fn front_matter_len(block: &str) -> usize {
+    let mut len = 0;
+    for (index, line) in block.split_inclusive('\n').enumerate() {
+        len += line.len();
+        if index > 0 && line.trim_end() == "---" {
+            break;
+        }
+    }
+    len
+}
+
 /// Closes the gap an inline comment leaves between two words.
 ///
 /// `Before <!-- note --> after` would otherwise read `Before  after`, with the space on
@@ -552,7 +570,10 @@ fn convert<'a>(
     headings: &mut Vec<Heading>,
 ) -> Node {
     let ast = node.data.borrow();
-    let source = offsets.span(ast.sourcepos);
+    let mut source = offsets.span(ast.sourcepos);
+    if let NodeValue::FrontMatter(text) = &ast.value {
+        source.end = (source.start + front_matter_len(text)).min(offsets.len);
+    }
     let kind = match &ast.value {
         NodeValue::Document => NodeKind::Document,
         NodeValue::FrontMatter(text) => NodeKind::FrontMatter {

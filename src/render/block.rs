@@ -11,7 +11,7 @@
 //! Nodes of kind [`NodeKind::SkippedHtml`] never reach the canvas: they collapse to a
 //! dim `⟨html⟩` marker (design spec §2).
 
-use crate::canvas::{Anchor, BorderSet, Canvas, Hotspot, HotspotKind};
+use crate::canvas::{Anchor, Atom, BorderSet, Canvas, Hotspot, HotspotKind};
 use crate::doc::{ListInfo, Node, NodeKind};
 use crate::numbering::Numbering;
 use crate::text::{Align, Line, Span, display_width, pad_to_width, repeat_to_width};
@@ -289,7 +289,7 @@ pub(crate) fn render_block_ctx(node: &Node, width: u16, ctx: Ctx<'_>) -> Canvas 
         }
         NodeKind::Image { url, .. } => image(node, url, width, ctx),
         NodeKind::SkippedHtml { .. } => html_marker(width, ctx),
-        NodeKind::FrontMatter { .. } => front_matter(width, ctx),
+        NodeKind::FrontMatter { yaml } => front_matter(node, yaml, width, ctx),
         // A display formula is drawn where it can be and shown as its own framed source
         // where it cannot. The framed source is not a placeholder: it is the permanent
         // failure path of design spec §9, and a formula that will not parse or will not
@@ -881,17 +881,36 @@ pub(crate) const FRONT_MATTER_LABEL: &str = "[Frontmatter]";
 ///
 /// Drawn whether or not the mouse was captured, like a footnote marker: `f` reaches it
 /// from the keyboard, so it is never a control nobody can press.
-fn front_matter(width: u16, ctx: Ctx<'_>) -> Canvas {
+///
+/// The label is also an [`Atom`] standing for the whole block, delimiters included: the
+/// control is all the reader sees of the front matter, so a drag over it copies the
+/// front matter, the way a drag over a diagram's box art copies the diagram. The
+/// rectangle is the label's own cells and not the whole row, for the reason a diagram's
+/// is its drawn bounds: the blank to the right of the label is not something drawn, and
+/// a press there should take hold of nothing.
+fn front_matter(node: &Node, yaml: &str, width: u16, ctx: Ctx<'_>) -> Canvas {
     let mut out = Canvas::from_text(width, FRONT_MATTER_LABEL, ctx.theme.text.footnote_ref);
+    let cols = u16::try_from(display_width(FRONT_MATTER_LABEL))
+        .unwrap_or(u16::MAX)
+        .min(width);
     let target = out.next_target();
     out.add_hotspot(Hotspot {
         row: 0,
         col: 0,
-        cols: u16::try_from(display_width(FRONT_MATTER_LABEL))
-            .unwrap_or(u16::MAX)
-            .min(width),
+        cols,
         kind: HotspotKind::FrontMatter,
         target,
+    });
+    out.add_atom(Atom {
+        row: 0,
+        rows: 1,
+        col: 0,
+        cols,
+        source_start: node.source.start,
+        source_end: node.source.end,
+        // The YAML as comrak cut it out, for the reason `Atom::content` gives: the
+        // selection matches each line against it rather than trusting the range alone.
+        content: yaml.to_string(),
     });
     out
 }

@@ -857,25 +857,37 @@ fn footnote_popup(buffer: &mut Buffer, area: Rect, app: &App) {
         .border_type(BorderType::Rounded)
         .border_style(term_style(on_page(theme.ui.help_border)))
         .title(TermSpan::styled(
-            format!(" [{}] ", popup.label()),
+            popup.title(),
             term_style(on_page(theme.ui.help_title)),
         ));
     // A note taller than its box says how much more there is and how to reach it, the
     // way the help overlay does. A box that silently held back half a footnote would be
-    // the pager lying by omission about the document.
+    // the pager lying by omission about the document. A note wider than its box says
+    // which way there is more with an arrow on each side that has any, in the same
+    // title, so the two hints never compete for the one bottom border.
+    let mut hints = Vec::new();
     let hidden = popup.hidden_rows();
     if popup.max_scroll() > 0 {
-        let note = if hidden > 0 {
-            format!(" \u{2193} {hidden} more ")
+        hints.push(if hidden > 0 {
+            format!("\u{2193} {hidden} more")
         } else {
-            " \u{2191} back ".to_string()
-        };
+            "\u{2191} back".to_string()
+        });
+    }
+    if popup.hscroll() > 0 {
+        hints.push("\u{2190}".to_string());
+    }
+    if popup.hscroll() < popup.max_hscroll() {
+        hints.push("\u{2192}".to_string());
+    }
+    if !hints.is_empty() {
         block = block.title_bottom(TermSpan::styled(
-            note,
+            format!(" {} ", hints.join(" ")),
             term_style(on_page(theme.ui.help_title)),
         ));
     }
     block.render(rect, buffer);
+    popup_copy_button(buffer, area, app, term_style(on_page(theme.ui.help_border)));
 
     // The note itself: canvas cells straight into buffer cells, from the row the reader
     // has scrolled to. The inner region is the border plus one column of padding on each
@@ -887,21 +899,26 @@ fn footnote_popup(buffer: &mut Buffer, area: Rect, app: &App) {
         rect.height.saturating_sub(crate::tui::popup::CHROME_ROWS),
     );
     let canvas = popup.canvas();
+    let left = usize::from(popup.hscroll());
     for y in 0..inner.height {
         let Some(cells) = canvas.row(popup.scroll() + usize::from(y)) else {
             break;
         };
         for x in 0..inner.width {
-            let Some(cell) = cells.get(usize::from(x)) else {
+            let Some(cell) = cells.get(left + usize::from(x)) else {
                 break;
             };
             let Some(target) = buffer.cell_mut((inner.x + x, inner.y + y)) else {
                 continue;
             };
             target.set_style(term_style(base.patch(cell.style())));
-            if cell.is_continuation() {
-                // The lead is always on screen here — the note starts at its own column
-                // zero — so ratatui wants the owned cell left empty.
+            if cell.is_continuation() && x == 0 {
+                // The second half of a wide glyph whose first half the sideways scroll
+                // has taken off the left edge: a space, not half a character.
+                target.set_symbol(" ");
+            } else if cell.is_continuation() {
+                // The lead is on screen, one column to the left, so ratatui wants the
+                // owned cell left empty.
                 target.set_symbol("");
             } else if cell.width() == 2 && x + 1 >= inner.width {
                 // A wide glyph whose other half falls outside the box, drawn as a space
@@ -912,6 +929,33 @@ fn footnote_popup(buffer: &mut Buffer, area: Rect, app: &App) {
             }
         }
     }
+}
+
+/// Paints the popup's border `[copy]`, or `[copied]` just after it was pressed.
+///
+/// Paint-time, like the document buttons' [`copied_flash`]: the button lives on the
+/// border the painter draws, not in any canvas. Where it goes is
+/// [`App::popup_copy_button`]'s answer, which the hit test asks too, and `[copied]`
+/// starts two columns left of the label for the reason the document flash does — that
+/// is where the reserved region begins.
+fn popup_copy_button(buffer: &mut Buffer, area: Rect, app: &App, style: TermStyle) {
+    let Some((x, y)) = app.popup_copy_button() else {
+        return;
+    };
+    let flashing = app
+        .popup()
+        .is_some_and(crate::tui::popup::Popup::is_flashing);
+    let (x, label) = if flashing {
+        (x.saturating_sub(2), crate::render::button::FLASH)
+    } else {
+        (x, crate::render::button::LABEL)
+    };
+    buffer.set_string(
+        area.x.saturating_add(x),
+        area.y.saturating_add(y),
+        label,
+        style,
+    );
 }
 
 /// Says so, rather than showing a screenful of nothing (usability P14).
