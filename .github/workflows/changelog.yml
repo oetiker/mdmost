@@ -1,0 +1,119 @@
+name: Changelog
+# repo-infra: changelog v3
+#
+# Required, not advisory (spec D2). Being required is only safe because the
+# escape hatch below is a JOB-level `if:`. A job skipped by a condition
+# reports Success, while a WORKFLOW skipped by a paths/branches filter stays
+# Pending forever and blocks the merge. Never add paths: or paths-ignore: to
+# this workflow (spec D13).
+#
+# The release PR is not blocked by being GITHUB_TOKEN-authored: its runs are
+# created in an approval-required state and start when a maintainer clicks
+# "Approve workflows to run".
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+  # D26: the release-built commit status on a release pull request's head.
+  statuses: read
+
+jobs:
+  # No `name:`: the check context is the job id, `changelog-updated`, which is
+  # what the ruleset requires. Renaming this job silently un-requires the check.
+  changelog-updated:
+    # The no-changelog label is the deliberate escape hatch for typo and CI-only
+    # changes. Without it every weekly dependabot PR is blocked, since this
+    # check is required. The label must exist in the repository: a label that
+    # does not exist is silently ignored by dependabot.
+    #
+    # release/* always runs (D26): on a repository with release_build set, a
+    # release pull request is gated on its build below, and the label must
+    # not turn that red check green after an Update branch.
+    if: >-
+      startsWith(github.head_ref, 'release/') ||
+      !contains(github.event.pull_request.labels.*.name, 'no-changelog')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const lib = `${process.env.GITHUB_WORKSPACE}/.github/workflows/lib`;
+            const changes = require(`${lib}/changes.js`);
+            const releaseLib = require(`${lib}/release.js`);
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+
+            // Both sides come from the API rather than from the checkout. On a
+            // pull_request event the checkout is the merge commit, and comparing
+            // against a base that is not in a shallow clone needs fetch-depth: 0.
+            const read = async (path, ref) => {
+              const { data } = await github.rest.repos.getContent({ owner, repo, path, ref });
+              return Buffer.from(data.content, 'base64').toString('utf8');
+            };
+
+            if (pr.head.ref.startsWith('release/')) {
+              // From the base commit: a pull request must not be able to turn
+              // its own gate off.
+              let config = {};
+              try {
+                config = JSON.parse(await read('.github/repo-infra.json', pr.base.sha));
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+              if (!config.release_build) {
+                core.notice('release/* is exempt: the release workflow writes CHANGES.md itself.');
+                return;
+              }
+              if (releaseLib.isReleasePr(pr, `${owner}/${repo}`)) {
+                // The statuses of the pull request's head commit, not of the
+                // merge commit: the build sets its status on the head.
+                const statuses = await github.paginate(
+                  github.rest.repos.listCommitStatusesForRef,
+                  { owner, repo, ref: pr.head.sha, per_page: 100 },
+                );
+                if (!releaseLib.releaseBuilt(statuses)) {
+                  core.setFailed(
+                    'the release branch changed after it was built (the Update branch '
+                    + 'button does this); close this pull request and dispatch Create '
+                    + 'release PR again'
+                  );
+                  return;
+                }
+                core.notice(`${pr.head.sha} is the commit the release was built from.`);
+                return;
+              }
+              // Anyone else's release/* branch: the ordinary rules, label included.
+            }
+
+            if (pr.labels.some((label) => label.name === 'no-changelog')) {
+              core.notice("Labelled 'no-changelog'.");
+              return;
+            }
+
+            const readOptional = async (path, ref) => {
+              try {
+                return await read(path, ref);
+              } catch (error) {
+                if (error.status === 404) return null;
+                throw error;
+              }
+            };
+
+            const verdict = changes.gateVerdict(
+              await readOptional('CHANGES.md', pr.base.sha),
+              await readOptional('CHANGES.md', pr.head.sha),
+            );
+            if (!verdict.ok) {
+              core.setFailed(verdict.message);
+              return;
+            }
+
+            core.notice(verdict.message);

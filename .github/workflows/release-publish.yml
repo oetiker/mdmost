@@ -1,0 +1,508 @@
+name: Publish release (automatic)
+# repo-infra: release-publish v4
+#
+# Half two. Merging the release pull request lands the rolled CHANGES.md on main,
+# and that merge triggers this.
+#
+# This file is assembled, not copied: this frame, then one job block per publish
+# add-on the repository installs, then the finalize job whose `needs:` list is
+# generated from those blocks. That generated list is the reason the core never
+# has to know which add-ons exist.
+#
+# There is deliberately no workflow_dispatch. Publishing should be a consequence
+# of merging a release pull request, never something started from a dropdown.
+#
+# Recovery without release_build: `publish` is idempotent by tag presence, so a
+# whole-workflow re-run after the tag exists skips everything and the release
+# stays a draft. Use **Re-run failed jobs**, which keeps the successful job's
+# outputs. With release_build (D26), `publish` decides from the tag and the
+# releases together (lib/publish.js), and both kinds of re-run finish a
+# stopped release: a whole-workflow re-run also repeats the add-ons that
+# already succeeded, and each standard add-on skips what an earlier attempt
+# uploaded. A `publish_local` job must do the same.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - CHANGES.md
+
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Tag and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.publish.outputs.version }}
+      tag: ${{ steps.publish.outputs.tag }}
+      release_id: ${{ steps.publish.outputs.release_id }}
+      head: ${{ steps.publish.outputs.head }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Tag and create the draft release
+        id: publish
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const ws = process.env.GITHUB_WORKSPACE;
+            const lib = `${ws}/.github/workflows/lib`;
+            const changesLib = require(`${lib}/changes.js`);
+            const bumpLib = require(`${lib}/bump.js`);
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const fileIO = {
+              read: (p) => fs.readFileSync(path.join(ws, p), 'utf8'),
+              write: () => { throw new Error('the publisher never writes'); },
+            };
+
+            const config = JSON.parse(fileIO.read('.github/repo-infra.json'));
+
+            // CHANGES.md is the source of truth. It is the only file every
+            // repository has, and it changes on exactly one occasion.
+            const release = changesLib.latestRelease(fileIO.read('CHANGES.md'));
+            if (!release) {
+              core.notice('CHANGES.md has no released version yet - nothing to do.');
+              return;
+            }
+            const version = release.version;
+            const tag = `v${version}`;
+
+            // Every version file is a derived copy. If one disagrees, the release
+            // pull request half-applied, and tagging now would repeat the failure
+            // that shipped an inconsistent v0.1.1 elsewhere.
+            const stale = config.version_files.filter(
+              (spec) => !bumpLib.verifyFile(spec, version, fileIO)
+            );
+            if (stale.length > 0) {
+              core.setFailed(
+                `CHANGES.md says ${version} but these disagree: `
+                + stale.map((s) => s.path).join(', ')
+              );
+              return;
+            }
+
+            // Annotated, not a bare createRef. A bare ref makes a lightweight tag,
+            // and `git describe` prefers annotated ones; the existing repositories
+            // have annotated tags and a silent switch would change local tooling
+            // behaviour for no reason.
+            const makeTag = async (name, message, sha) => {
+              const { data: object } = await github.rest.git.createTag({
+                owner, repo, tag: name, message, object: sha, type: 'commit',
+              });
+              return object.sha;
+            };
+            const moveMajor = async (sha) => {
+              if (!config.moving_major_tag) return;
+              const major = `v${version.split('.')[0]}`;
+              const tagSha = await makeTag(major, `Update ${major} to ${tag}`, sha);
+              try {
+                await github.rest.git.updateRef({
+                  owner, repo, ref: `tags/${major}`, sha: tagSha, force: true,
+                });
+              } catch (error) {
+                if (error.status !== 422) throw error;
+                await github.rest.git.createRef({
+                  owner, repo, ref: `refs/tags/${major}`, sha: tagSha,
+                });
+              }
+              core.notice(`Moved ${major} to ${tag}.`);
+            };
+
+            if (!config.release_build) {
+              // Idempotent: an ordinary pull request that edits [Unreleased] also
+              // triggers this workflow, finds the tag already present, and stops.
+              try {
+                await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+                core.notice(`${tag} is already tagged - nothing to do.`);
+                return;
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+
+              await github.rest.git.createRef({
+                owner, repo, ref: `refs/tags/${tag}`,
+                sha: await makeTag(tag, `Release ${tag}`, context.sha),
+              });
+              core.notice(`Tagged ${tag}.`);
+              await moveMajor(context.sha);
+
+              // Draft, so publish add-ons can attach artifacts before anyone
+              // sees the release. The finalize job below publishes it.
+              const { data: created } = await github.rest.repos.createRelease({
+                owner, repo,
+                tag_name: tag,
+                name: tag,
+                body: changesLib.notesFor(fileIO.read('CHANGES.md'), version),
+                draft: true,
+                prerelease: false,
+                make_latest: 'true',
+              });
+
+              core.setOutput('version', version);
+              core.setOutput('tag', tag);
+              core.setOutput('release_id', String(created.id));
+              core.setOutput('head', context.sha);
+              return;
+            }
+
+            // release_build (D26): the release pull request built the release
+            // into a draft. Tag the commit that was built, not this merge.
+            const publishLib = require(`${lib}/publish.js`);
+            const releaseLib = require(`${lib}/release.js`);
+            let tagCommit = null;
+            try {
+              const { data: ref } = await github.rest.git.getRef({
+                owner, repo, ref: `tags/${tag}`,
+              });
+              // publish makes annotated tags: the ref points at a tag object.
+              tagCommit = ref.object.type === 'tag'
+                ? (await github.rest.git.getTag({ owner, repo, tag_sha: ref.object.sha }))
+                  .data.object.sha
+                : ref.object.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            // getReleaseByTag answers 404 for a draft; list them instead.
+            const releases = (await github.paginate(github.rest.repos.listReleases, {
+              owner, repo, per_page: 100,
+            })).filter((r) => r.tag_name === tag);
+
+            const decision = publishLib.publishDecision({ tag, tagCommit, releases });
+            if (decision.action === 'done') {
+              core.notice(`${tag} is released - nothing to do.`);
+              return;
+            }
+            if (decision.action === 'fail') {
+              core.setFailed(decision.message);
+              return;
+            }
+
+            let head = decision.head;
+            if (decision.action === 'resume' && decision.recordAssetId) {
+              // Only a courtesy: a failed download or a corrupt record must not
+              // stop a recovery run that does not need the record.
+              try {
+                const { data: raw } = await github.rest.repos.getReleaseAsset({
+                  owner, repo, asset_id: decision.recordAssetId,
+                  headers: { accept: 'application/octet-stream' },
+                });
+                const warning = publishLib.recordHeadWarning(
+                  tag, decision.head, JSON.parse(Buffer.from(raw).toString('utf8')).head,
+                );
+                if (warning) core.warning(warning);
+              } catch (error) {
+                core.warning(`${tag}: could not compare ${releaseLib.BUILD_RECORD} `
+                  + `with the tag commit (${error.message}). Publishing continues from the tag.`);
+              }
+            }
+            if (decision.action === 'create') {
+              // browser_download_url does not serve drafts; the API does.
+              const { data: raw } = await github.rest.repos.getReleaseAsset({
+                owner, repo, asset_id: decision.recordAssetId,
+                headers: { accept: 'application/octet-stream' },
+              });
+              const record = JSON.parse(Buffer.from(raw).toString('utf8'));
+              let latestAtHead = null;
+              try {
+                const { data } = await github.rest.repos.getContent({
+                  owner, repo, path: 'CHANGES.md', ref: record.head,
+                });
+                latestAtHead = changesLib.latestRelease(
+                  Buffer.from(data.content, 'base64').toString('utf8'),
+                );
+              } catch (error) {
+                if (error.status !== 404 && error.status !== 422) throw error;
+                // A 404 is either no such commit or no CHANGES.md at it.
+                try {
+                  await github.rest.git.getCommit({ owner, repo, commit_sha: record.head });
+                } catch (missing) {
+                  if (missing.status !== 404 && missing.status !== 422) throw missing;
+                  core.setFailed(`${tag}: ${releaseLib.BUILD_RECORD} names `
+                    + `${record.head}, which does not exist in this repository. `
+                    + 'Nothing was tagged.');
+                  return;
+                }
+              }
+              const problem = publishLib.validateBuildRecord(record, version, latestAtHead);
+              if (problem) {
+                core.setFailed(`${tag}: ${problem}. Nothing was tagged.`);
+                return;
+              }
+              head = record.head;
+              await github.rest.git.createRef({
+                owner, repo, ref: `refs/tags/${tag}`,
+                sha: await makeTag(tag, `Release ${tag}`, head),
+              });
+              core.notice(`Tagged ${tag} at the built commit ${head}.`);
+            }
+
+            // Idempotent, so a resumed run repeats it harmlessly.
+            await github.rest.repos.updateRelease({
+              owner, repo, release_id: decision.releaseId,
+              tag_name: tag, target_commitish: head,
+            });
+            await moveMajor(head);
+
+            const { data: compared } = await github.rest.repos.compareCommitsWithBasehead({
+              owner, repo, basehead: `${head}...${context.sha}`,
+            });
+            if (compared.status === 'diverged') {
+              core.notice(`${tag} is not on main's history (the release pull request `
+                + 'was squashed or rebased). The release is correct; git describe on '
+                + 'main will not find it. RELEASING.md recommends a merge commit.');
+            }
+
+            core.setOutput('version', version);
+            core.setOutput('tag', tag);
+            core.setOutput('release_id', String(decision.releaseId));
+            core.setOutput('head', head);
+
+  # repo-infra: publish-gitea-packages v1
+  # D27. Uploads every .deb and .rpm on the release to the Gitea package
+  # registry named in .github/repo-infra.json "gitea_packages". Gitea signs
+  # the Debian and RPM metadata and, with ?sign=true, each rpm, with its own
+  # per-owner key; no repository holds a signing key.
+  #
+  # The credential is a dedicated Gitea user's token, scope write:package, in
+  # the GitHub organisation secret GITEA_PACKAGE_TOKEN with the variable
+  # GITEA_PACKAGE_USER. A repository under a personal account carries its own
+  # copy of both (references/release-flow.md).
+  publish-gitea-packages:
+    name: Publish packages to Gitea
+    needs: [publish]
+    if: needs.publish.outputs.release_id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # write, not read: a draft release and its assets are invisible to a token
+    # that cannot push.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.publish.outputs.head }}
+
+      - uses: actions/github-script@v9
+        env:
+          GITEA_PACKAGE_TOKEN: ${{ secrets.GITEA_PACKAGE_TOKEN }}
+          GITEA_PACKAGE_USER: ${{ vars.GITEA_PACKAGE_USER }}
+        with:
+          script: |
+            const crypto = require('crypto');
+            const fs = require('fs');
+            const ws = process.env.GITHUB_WORKSPACE;
+            const gitea = require(`${ws}/.github/workflows/lib/gitea.js`);
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const release_id = Number('${{ needs.publish.outputs.release_id }}');
+
+            let cfg;
+            try {
+              cfg = gitea.packageConfig(JSON.parse(
+                fs.readFileSync(`${ws}/.github/repo-infra.json`, 'utf8')));
+            } catch (error) {
+              core.setFailed(error.message);
+              return;
+            }
+            const missing = gitea.missingCredentials(process.env);
+            if (missing.length > 0) {
+              core.setFailed(`${missing.join(' and ')} is empty. Set the secret `
+                + 'GITEA_PACKAGE_TOKEN and the variable GITEA_PACKAGE_USER on the '
+                + 'organisation, or on the repository if it belongs to a person.');
+              return;
+            }
+
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner, repo, release_id, per_page: 100,
+            });
+            const packages = assets
+              .map((asset) => ({ asset, pkg: gitea.parsePackageFile(asset.name) }))
+              .filter((entry) => entry.pkg);
+            // Every .deb and .rpm is uploaded; one that cannot be named is a
+            // failure, not a file to skip.
+            const unparsable = assets
+              .filter((a) => /\.(deb|rpm)$/.test(a.name) && !gitea.parsePackageFile(a.name))
+              .map((a) => a.name);
+            if (unparsable.length > 0) {
+              core.setFailed(`Cannot upload ${unparsable.join(', ')}: the file name does not `
+                + 'have the shape Gitea needs. Expected name_version_arch.deb (lower-case '
+                + 'name) or name-version-release.arch.rpm.');
+              return;
+            }
+            if (packages.length === 0) {
+              core.setFailed('The release carries no .deb or .rpm, so '
+                + 'publish-gitea-packages would upload nothing. Attached: '
+                + `${assets.map((a) => a.name).join(', ') || 'nothing'}.`);
+              return;
+            }
+
+            const user = process.env.GITEA_PACKAGE_USER;
+            const token = process.env.GITEA_PACKAGE_TOKEN;
+            const authorization = `Basic ${Buffer.from(`${user}:${token}`).toString('base64')}`;
+            core.setSecret(authorization);
+
+            for (const { asset, pkg } of packages) {
+              // By asset id through the API: browser_download_url does not
+              // serve drafts.
+              const { data } = await github.rest.repos.getReleaseAsset({
+                owner, repo, asset_id: asset.id,
+                headers: { accept: 'application/octet-stream' },
+              });
+              const body = Buffer.from(data);
+              const sha256 = crypto.createHash('sha256').update(body).digest('hex');
+
+              const res = await fetch(gitea.uploadUrl(cfg, pkg), {
+                method: 'PUT',
+                headers: { authorization, 'content-type': 'application/octet-stream' },
+                body,
+              });
+              if (res.ok) {
+                core.notice(`${asset.name}: uploaded to ${cfg.owner}'s ${pkg.kind} registry.`);
+                continue;
+              }
+              if (res.status === 409) {
+                const list = await fetch(gitea.filesUrl(cfg, pkg), { headers: { authorization } });
+                const files = list.ok ? await list.json().catch(() => null) : null;
+                if (!Array.isArray(files)) {
+                  core.setFailed(`${asset.name}: Gitea answered 409 for ${pkg.name} `
+                    + `${pkg.version}, and listing the stored files answered HTTP `
+                    + `${list.status} without a file list`);
+                  return;
+                }
+                const verdict = gitea.conflictVerdict(pkg, sha256, files);
+                if (!verdict.ok) {
+                  core.setFailed(verdict.message);
+                  return;
+                }
+                core.notice(verdict.message);
+                continue;
+              }
+              core.setFailed(`${asset.name}: Gitea answered ${res.status}: ${await res.text()}`);
+              return;
+            }
+
+  finalize:
+    name: Publish the release
+    # Generated by the assembler: `publish`, then every add-on job installed in
+    # this repository, then every job named in `publish_local` in
+    # .github/repo-infra.json. An add-on that fails leaves the release a draft,
+    # which is the correct outcome -- a release missing its artifacts must not
+    # be visible.
+    #
+    # This line is GENERATED, including the repository's own publish jobs. Do
+    # not hand-edit it: a hand edit is reverted by the next `apply`, and the
+    # revert does not fail -- it just stops waiting. Declare the job in
+    # `publish_local` instead. The asset check in the step below is what makes
+    # a lost entry loud rather than silent.
+    needs: [publish, publish-gitea-packages]
+    if: needs.publish.outputs.release_id != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # For .github/workflows/lib/assets.js, below.
+      # The tagged head: a re-run reads release_assets the same way.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.publish.outputs.head }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const lib = `${process.env.GITHUB_WORKSPACE}/.github/workflows/lib`;
+            const assetsLib = require(`${lib}/assets.js`);
+            const fs = require('fs');
+            const releaseLib = require(`${lib}/release.js`);
+            const config = JSON.parse(fs.readFileSync(
+              `${process.env.GITHUB_WORKSPACE}/.github/repo-infra.json`, 'utf8'));
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const release_id = Number('${{ needs.publish.outputs.release_id }}');
+
+            // Generated from the manifest entry of every installed publish
+            // block plus the `assets` of every `publish_local` entry -- by the
+            // assembler, from the same declarations the `needs:` list above
+            // comes from. Never a literal typed a second time by hand.
+            const expected = [];
+            // D26: a release the pull request built must carry every file the
+            // repository declared, read at the tagged head.
+            const declared = config.release_build ? (config.release_assets || []) : [];
+
+            // The `needs:` list above is ordering, and ordering cannot report
+            // its own absence: reverted, it does not fail, it stops waiting.
+            // So ask the release what it actually carries. This assertion
+            // cannot pass while being wrong -- an asset is on the release or
+            // it is not -- which is the whole difference between a quietly
+            // empty release and a red job.
+            const attached = await github.paginate(
+              github.rest.repos.listReleaseAssets,
+              { owner, repo, release_id, per_page: 100 },
+            );
+            const names = attached.map((a) => a.name);
+            const missing = assetsLib.missingAssets(names, [...expected, ...declared]);
+            if (missing.length > 0) {
+              core.setFailed(
+                `${{ needs.publish.outputs.tag }} is missing ${missing.join(', ')}`
+                + ` -- it stays a draft. Attached: ${names.join(', ') || 'nothing'}.`
+                + ` Either a publish job did not run (compare finalize's needs:`
+                + ` list with the jobs in this workflow) or it attached`
+                + ` something under another name (see publish_local in`
+                + ` .github/repo-infra.json).`
+              );
+              return;
+            }
+
+            // A name check passes an asset whose upload broke half way, so
+            // check that every attached file is complete as well.
+            const unfinished = assetsLib.unfinishedAssets(attached);
+            if (unfinished.length > 0) {
+              core.setFailed(
+                `${{ needs.publish.outputs.tag }} carries ${unfinished.join(', ')}`
+                + ` whose upload did not finish -- it stays a draft. Delete`
+                + ` the asset and re-run the job that attached it.`
+              );
+              return;
+            }
+
+            // The build record is never public. Deleting it after publishing
+            // would be impossible with GitHub's immutable releases on.
+            const record = attached.find((a) => a.name === releaseLib.BUILD_RECORD);
+            if (record) {
+              try {
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: record.id });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+
+            const { data: released } = await github.rest.repos.updateRelease({
+              owner, repo, release_id, draft: false,
+            });
+            core.notice(`Published ${released.html_url}`);
+            await core.summary
+              .addHeading(`Released ${{ needs.publish.outputs.tag }}`)
+              .addRaw(`Assets: ${names.join(', ') || 'none'}`)
+              .addLink('Release', released.html_url)
+              .write();

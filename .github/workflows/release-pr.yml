@@ -1,0 +1,456 @@
+name: Create release PR
+# repo-infra: release-pr-build v1
+#
+# The release_build variant of release-pr.yml (D26). The release pull request
+# builds the release before anyone merges it, so nothing is written to main
+# after the merge and publishing never rebuilds. A reusable workflow can only
+# be called as a job, so this is three jobs:
+#
+#   prepare  guard, two refusals, stale drafts, roll, bump, commit the branch
+#   build    .github/workflows/release-build.yml -- the project's own file,
+#            read-only, no secrets
+#   finish   commit the declared release files, draft the release with every
+#            built file and release-build.json attached, mark the head
+#            `release-built`, then open the pull request
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Release type
+        required: true
+        default: bugfix
+        type: choice
+        options:
+          - bugfix
+          - feature
+          - major
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+  statuses: write
+
+jobs:
+  prepare:
+    name: Prepare the release branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+      date: ${{ steps.prepare.outputs.date }}
+      head: ${{ steps.commit.outputs.head }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Guard (right branch, green checks)
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const lib = `${process.env.GITHUB_WORKSPACE}/.github/workflows/lib`;
+            const checks = require(`${lib}/checks.js`);
+
+            const def = context.payload.repository.default_branch;
+            if (context.ref !== `refs/heads/${def}`) {
+              core.setFailed(
+                `Releases run from ${def} only. This run is on ${context.ref}.`
+              );
+              return;
+            }
+
+            // Required status checks cannot be used on the ruleset (they would
+            // deadlock the release PR), so the tests are verified here, on the
+            // commit, before any PR exists.
+            // This job is itself a check run on this commit, so the guard has
+            // to exclude its own jobs or it waits for the job doing the
+            // waiting -- 15 minutes, then "Still running: Prepare the release
+            // pull request".  It must exclude EVERY earlier attempt too, or
+            // one failed run leaves a corpse that no retry can ever get past.
+            // checks.js:guardIgnoreIds does both, and is unit-tested; this
+            // used to be inline here, where nothing could test it.
+            const ignoreCheckRunIds = await checks.guardIgnoreIds(github, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+              workflowRef: process.env.GITHUB_WORKFLOW_REF,
+              runId: context.runId,
+            });
+
+            const state = await checks.waitForChecks(github, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.sha,
+            }, { ignoreCheckRunIds });
+
+            if (state.timedOut) {
+              core.setFailed(
+                `Timed out waiting for checks on ${context.sha}. Still running: `
+                + state.pending.map((c) => c.name).join(', ')
+              );
+              return;
+            }
+            if (state.total === 0) {
+              core.setFailed(
+                `No checks ran on ${context.sha}. Refusing to release a commit `
+                + 'that nothing tested.'
+              );
+              return;
+            }
+            if (state.failed.length > 0) {
+              core.setFailed(
+                'Failing checks on this commit: '
+                + state.failed.map((c) => c.name).join(', ')
+              );
+              return;
+            }
+
+            core.notice(`All ${state.total} checks green on ${context.sha}.`);
+
+      - name: Refuse an open or unpublished release; delete stale drafts
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const ws = process.env.GITHUB_WORKSPACE;
+            const lib = `${ws}/.github/workflows/lib`;
+            const releaseLib = require(`${lib}/release.js`);
+            const changesLib = require(`${lib}/changes.js`);
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // A second dispatch would force-move the open pull request's branch
+            // under its reviewers.
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+            const blocking = releaseLib.blockingReleasePr(prs, `${owner}/${repo}`);
+            if (blocking) {
+              core.setFailed(
+                `Release pull request #${blocking.number} (${blocking.head.ref}) is `
+                + 'still open. Merge or close it before dispatching again.'
+              );
+              return;
+            }
+
+            // Without this, a dispatch while publish is running or has failed
+            // computes the same version again and roll writes a second heading.
+            const refs = await github.paginate(github.rest.git.listMatchingRefs, {
+              owner, repo, ref: 'tags/v', per_page: 100,
+            });
+            const tags = refs.map((r) => r.ref.replace('refs/tags/', ''));
+            const latest = changesLib.latestRelease(
+              fs.readFileSync(`${ws}/CHANGES.md`, 'utf8'),
+            );
+            const untagged = releaseLib.untaggedRelease(latest, tags);
+            if (untagged) {
+              core.setFailed(
+                `v${untagged} is in CHANGES.md on main but has no tag. `
+                + 'Re-run the failed jobs of its Publish release run; if it is '
+                + `already out under another tag, push v${untagged} by hand; to `
+                + 'abandon it, merge a pull request that moves its entries back '
+                + 'under [Unreleased].'
+              );
+              return;
+            }
+
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner, repo, per_page: 100,
+            });
+            const stale = releaseLib.staleDrafts(releases, {
+              tags, latestVersion: latest && latest.version,
+            });
+            for (const draft of stale) {
+              await github.rest.repos.deleteRelease({ owner, repo, release_id: draft.id });
+              core.notice(`Deleted the stale draft release ${draft.tag_name}.`);
+            }
+
+      - name: Compute the version and rewrite the files
+        id: prepare
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const ws = process.env.GITHUB_WORKSPACE;
+            const lib = `${ws}/.github/workflows/lib`;
+            const versionLib = require(`${lib}/version.js`);
+            const changesLib = require(`${lib}/changes.js`);
+            const bumpLib = require(`${lib}/bump.js`);
+
+            const config = JSON.parse(
+              fs.readFileSync(`${ws}/.github/repo-infra.json`, 'utf8')
+            );
+
+            const refs = await github.paginate(github.rest.git.listMatchingRefs, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: 'tags/v',
+              per_page: 100,
+            });
+            const tags = refs.map((r) => r.ref.replace('refs/tags/', ''));
+            const latest = versionLib.latest(tags);
+            const version = versionLib.next(latest, context.payload.inputs.release_type);
+
+            if (tags.includes(`v${version}`)) {
+              core.setFailed(`v${version} is already tagged.`);
+              return;
+            }
+
+            const fileIO = {
+              read: (p) => fs.readFileSync(path.join(ws, p), 'utf8'),
+              write: (p, c) => fs.writeFileSync(path.join(ws, p), c, 'utf8'),
+            };
+
+            const date = new Date().toISOString().slice(0, 10);
+            // roll throws when [Unreleased] is empty, which is the hard backstop
+            // behind the required changelog gate.
+            fileIO.write('CHANGES.md', changesLib.roll(fileIO.read('CHANGES.md'), version, date));
+            bumpLib.bumpAll(config.version_files, version, fileIO);
+
+            core.setOutput('version', version);
+            core.setOutput('date', date);
+            core.notice(`Preparing ${latest} -> v${version} (${date}).`);
+
+      # Ecosystems whose lockfile can only be rewritten by their own tool run
+      # here, between the rewrite and the commit. A Rust repository gets,
+      # verbatim:
+      #
+      #   - uses: dtolnay/rust-toolchain@stable
+      #   - run: cargo update --workspace
+      #
+      # Not --offline: the resolve needs the registry. Not || true: swallowing
+      # that failure is what tagged mdmost v0.1.1 with an inconsistent lockfile.
+
+      - name: Commit the release branch
+        id: commit
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const ws = process.env.GITHUB_WORKSPACE;
+            const commitLib = require(`${ws}/.github/workflows/lib/commit.js`);
+            const config = JSON.parse(
+              fs.readFileSync(`${ws}/.github/repo-infra.json`, 'utf8')
+            );
+            const version = '${{ steps.prepare.outputs.version }}';
+            const paths = ['CHANGES.md', ...config.version_files.map((f) => f.path)];
+            const head = await commitLib.commitFiles(github, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: `release/v${version}`,
+              baseSha: context.sha,
+              message: `Release v${version}`,
+              files: paths.map((p) => ({
+                path: p, content: fs.readFileSync(path.join(ws, p), 'utf8'),
+              })),
+            });
+            core.setOutput('head', head);
+
+  # The project's own build (D20's seam). The `uses:` path resolves at the
+  # dispatched commit on main, not on the release branch. Read-only, and no
+  # secrets: its only way to write the repository is the release-files
+  # artifact, which `finish` checks against release_files.
+  build:
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/release-build.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      ref: ${{ needs.prepare.outputs.head }}
+
+  finish:
+    name: Draft the release and open the pull request
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # A called workflow's jobs belong to this run, so their artifacts are
+      # found here by pattern.
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-asset-*
+          path: ${{ runner.temp }}/assets
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-files
+          path: ${{ runner.temp }}/release-files
+          merge-multiple: true
+
+      - name: Commit the release files, draft the release, open the pull request
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const ws = process.env.GITHUB_WORKSPACE;
+            const tmp = process.env.RUNNER_TEMP;
+            const lib = `${ws}/.github/workflows/lib`;
+            const releaseLib = require(`${lib}/release.js`);
+            const assetsLib = require(`${lib}/assets.js`);
+            const changesLib = require(`${lib}/changes.js`);
+            const commitLib = require(`${lib}/commit.js`);
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const config = JSON.parse(
+              fs.readFileSync(`${ws}/.github/repo-infra.json`, 'utf8')
+            );
+            const version = '${{ needs.prepare.outputs.version }}';
+            const date = '${{ needs.prepare.outputs.date }}';
+            const prepared = '${{ needs.prepare.outputs.head }}';
+            const tag = `v${version}`;
+            const branch = `release/${tag}`;
+
+            // 1. The declared list itself, again: this reads it from the
+            //    dispatched main, whether or not anyone ran `check`.
+            const declared = config.release_files || [];
+            const refused = releaseLib.refusedReleaseFiles(declared, config.version_files);
+            if (refused.length > 0) {
+              core.setFailed('release_files in .github/repo-infra.json: '
+                + refused.map((r) => `${r.path} ${r.reason}`).join('; '));
+              return;
+            }
+
+            // 2. What the build wrote back: declared paths, UTF-8 text only.
+            const walk = (dir, prefix = '') => (fs.existsSync(dir)
+              ? fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory()
+                ? walk(path.join(dir, e.name), `${prefix}${e.name}/`)
+                : [`${prefix}${e.name}`]))
+              : []);
+            const filesDir = `${tmp}/release-files`;
+            const written = walk(filesDir);
+            const undeclared = releaseLib.undeclaredReleaseFiles(written, declared);
+            if (undeclared.length > 0) {
+              core.setFailed(`release-build.yml wrote ${undeclared.join(', ')}, which `
+                + 'release_files in .github/repo-infra.json does not list.');
+              return;
+            }
+            const files = [];
+            for (const p of written) {
+              const content = releaseLib.decodeText(fs.readFileSync(path.join(filesDir, p)));
+              if (content === null) {
+                core.setFailed(`release-build.yml wrote ${p}, which is not UTF-8 text.`);
+                return;
+              }
+              files.push({ path: p, content });
+            }
+
+            // 3. What the build produced, against what the release must carry.
+            //    Declared independently of the build, so a build that drops a
+            //    file cannot shrink the list along with it.
+            const assetDir = `${tmp}/assets`;
+            const assetNames = fs.existsSync(assetDir)
+              ? fs.readdirSync(assetDir).filter((n) => fs.statSync(path.join(assetDir, n)).isFile())
+              : [];
+            const missing = assetsLib.missingAssets(assetNames, config.release_assets || []);
+            if (missing.length > 0) {
+              core.setFailed(`The build produced nothing for ${missing.join(', ')} `
+                + `(release_assets). Built: ${assetNames.join(', ') || 'nothing'}.`);
+              return;
+            }
+            if (assetNames.includes(releaseLib.BUILD_RECORD)) {
+              core.setFailed(`The build produced a file named ${releaseLib.BUILD_RECORD}; `
+                + 'that name is reserved.');
+              return;
+            }
+
+            // 4. The commit lands before the pull request exists, so the one
+            //    "Approve workflows to run" click covers its checks.
+            let head = prepared;
+            if (files.length > 0) {
+              head = await commitLib.commitFiles(github, {
+                owner, repo, branch, baseSha: prepared,
+                message: `Release ${tag}: built files`, files,
+              });
+            }
+
+            // 5. A draft for this version with a build record belongs to an
+            //    abandoned attempt: prepare passed both refusals.
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner, repo, per_page: 100,
+            });
+            for (const old of releaseLib.ownDrafts(releases, version)) {
+              await github.rest.repos.deleteRelease({ owner, repo, release_id: old.id });
+            }
+            const { data: rolled } = await github.rest.repos.getContent({
+              owner, repo, path: 'CHANGES.md', ref: head,
+            });
+            const { data: draft } = await github.rest.repos.createRelease({
+              owner, repo,
+              tag_name: tag,
+              target_commitish: head,
+              name: tag,
+              body: changesLib.notesFor(
+                Buffer.from(rolled.content, 'base64').toString('utf8'), version,
+              ),
+              draft: true,
+              prerelease: false,
+              make_latest: 'true',
+            });
+            const upload = (name, data, type) => github.rest.repos.uploadReleaseAsset({
+              owner, repo, release_id: draft.id, name, data,
+              headers: { 'content-type': type, 'content-length': data.length },
+            });
+            for (const name of assetNames) {
+              await upload(name, fs.readFileSync(path.join(assetDir, name)),
+                'application/octet-stream');
+            }
+            await upload(releaseLib.BUILD_RECORD,
+              Buffer.from(JSON.stringify({ version, head, assets: assetNames }, null, 2)),
+              'application/json');
+
+            // 6. The changelog gate reads this status. A later push to the
+            //    branch is a new commit without it.
+            await github.rest.repos.createCommitStatus({
+              owner, repo, sha: head, state: 'success', context: 'release-built',
+              description: `${tag} built into a draft release`,
+            });
+
+            const body = [
+              'Prepared by the **Create release PR** workflow.',
+              '',
+              `- rolls \`CHANGES.md\` \`[Unreleased]\` into \`## ${version} - ${date}\``,
+              `- sets ${config.version_files.map((f) => `\`${f.path}\``).join(', ')} to \`${version}\``,
+              ...(files.length > 0
+                ? [`- writes ${files.map((f) => `\`${f.path}\``).join(', ')} from the build`]
+                : []),
+              `- built ${assetNames.length} files into a draft release for \`${tag}\``,
+              '',
+              'Review, then merge. Merging triggers **Publish release**, which tags',
+              `the built commit \`${head.slice(0, 12)}\` as \`${tag}\` and publishes the draft.`,
+              '',
+              'Do not press **Update branch**: the build would no longer match the',
+              'branch, and the changelog check goes red. Closing this pull request',
+              'cancels the release.',
+            ].join('\n');
+            const { data: pr } = await github.rest.pulls.create({
+              owner, repo,
+              head: branch,
+              base: context.payload.repository.default_branch,
+              title: `Release ${tag}`,
+              body,
+            });
+            core.notice(`Release pull request opened: ${pr.html_url}`);
+            await core.summary
+              .addHeading(`Release ${tag} built`)
+              .addLink('Review and merge to publish', pr.html_url)
+              .write();
