@@ -6,9 +6,11 @@
 
 ### Changed
 
-- A mouse selection now tints the page light blue and leaves the text in its own colours. Before, it painted the selected text in the page colour on solid blue, so headings, code and links all looked the same while you dragged over them.
-
 ### Fixed
+
+## 0.6.0 - 2026-09-30
+### Changed
+- A mouse selection now tints the page light blue and leaves the text in its own colours. Before, it painted the selected text in the page colour on solid blue, so headings, code and links all looked the same while you dragged over them.
 
 ## 0.5.0 - 2026-09-30
 ### New
