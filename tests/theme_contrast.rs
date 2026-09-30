@@ -209,17 +209,13 @@ fn body_text_clears_the_text_contrast_floor() {
 
 /// A highlight the reader is looking straight at must stay readable under it.
 ///
-/// The three washes that can cover document text — the two search colours and the
-/// mouse selection — replace the background wholesale, so the ink on top of them is a
-/// different pairing from anything else the palette is checked for. A selection is also
-/// the one of the three the reader makes *while watching it*, which is exactly when an
-/// illegible wash is most annoying.
+/// The two search washes replace the background and the ink wholesale, so the ink on
+/// top of them is a different pairing from anything else the palette is checked for.
 #[test]
 fn text_under_a_highlight_clears_the_text_contrast_floor() {
     for theme in themes() {
         let name = &theme.name;
         for (slot, style) in [
-            ("the selection wash", theme.ui.selection),
             ("an ordinary search match", theme.ui.search_match),
             ("the current search match", theme.ui.search_current),
         ] {
@@ -228,6 +224,25 @@ fn text_under_a_highlight_clears_the_text_contrast_floor() {
                 .unwrap_or_else(|| panic!("{name}: {slot} needs a background"));
             at_least(name, slot, fg(slot, style), ground, TEXT_FLOOR);
         }
+    }
+}
+
+/// The selection tints the page and keeps the ink of the text under it.
+///
+/// So body text must clear the floor on the tint as it does on the page. A selection is
+/// the highlight the reader makes *while watching it*, which is exactly when an
+/// illegible one is most annoying.
+#[test]
+fn body_text_under_the_selection_tint_clears_the_text_contrast_floor() {
+    for theme in themes() {
+        let name = &theme.name;
+        assert_eq!(theme.ui.selection.fg, None, "{name}: the selection recolours the text");
+        let tint = theme
+            .ui
+            .selection
+            .bg
+            .unwrap_or_else(|| panic!("{name}: the selection needs a background"));
+        at_least(name, "body text under the selection", fg("body", theme.text.body), tint, TEXT_FLOOR);
     }
 }
 
