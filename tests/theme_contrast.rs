@@ -236,13 +236,22 @@ fn text_under_a_highlight_clears_the_text_contrast_floor() {
 fn body_text_under_the_selection_tint_clears_the_text_contrast_floor() {
     for theme in themes() {
         let name = &theme.name;
-        assert_eq!(theme.ui.selection.fg, None, "{name}: the selection recolours the text");
+        assert_eq!(
+            theme.ui.selection.fg, None,
+            "{name}: the selection recolours the text"
+        );
         let tint = theme
             .ui
             .selection
             .bg
             .unwrap_or_else(|| panic!("{name}: the selection needs a background"));
-        at_least(name, "body text under the selection", fg("body", theme.text.body), tint, TEXT_FLOOR);
+        at_least(
+            name,
+            "body text under the selection",
+            fg("body", theme.text.body),
+            tint,
+            TEXT_FLOOR,
+        );
     }
 }
 
