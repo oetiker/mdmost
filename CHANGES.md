@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## [Unreleased]
 
 ### New
 
@@ -9,6 +9,8 @@
   `[copy]` button.
 
 ### Changed
+
+- Releases are built inside the release pull request. Debian and Ubuntu can install mdmost with apt and Fedora, RHEL, Rocky and Alma with dnf, from the oposs package registry.
 
 ### Fixed
 

@@ -3,9 +3,9 @@
 #   brew tap oetiker/mdmost https://github.com/oetiker/mdmost
 #   brew install mdmost
 #
-# The version and the four sha256 lines are rewritten by .github/workflows/release.yml
+# The version and the four sha256 lines are rewritten by .github/workflows/release-build.yml
 # after the release artifacts exist. The trailing marker comments are what that
-# rewrite matches on — do not remove them.
+# rewrite matches on -- do not remove them.
 class Mdmost < Formula
   desc "Full-screen terminal pager for a single Markdown document"
   homepage "https://github.com/oetiker/mdmost"
@@ -15,8 +15,8 @@ class Mdmost < Formula
   # Bottles exist for one reason: without one, Homebrew treats this formula as a source
   # build and refuses to install on a Mac whose Command Line Tools are older than its
   # macOS, even though nothing here is compiled. The block is rewritten by
-  # .github/workflows/release.yml once a release's bottles exist, and the marker
-  # comments are the range that rewrite replaces — do not remove them. Empty means no
+  # .github/workflows/release-build.yml once a release's bottles exist, and the marker
+  # comments are the range that rewrite replaces -- do not remove them. Empty means no
   # bottle is published yet, which costs nothing but that check.
   #
   # One bottle per architecture is enough: on macOS, Homebrew falls back to a bottle
