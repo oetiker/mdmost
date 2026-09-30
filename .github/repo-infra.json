@@ -1,0 +1,36 @@
+{
+  "ecosystems": ["rust"],
+  "moving_major_tag": false,
+  "version_files": [
+    {
+      "path": "Cargo.toml",
+      "pattern": "^version\\s*=\\s*\"[^\"]*\"",
+      "replacement": "version = \"$VERSION\"",
+      "verify": "^version\\s*=\\s*\"$VERSION\""
+    }
+  ],
+  "ci": ["ci-man", "ci-rust-musl"],
+  "ci_local": true,
+  "release_build": true,
+  "publish": ["publish-gitea-packages"],
+  "build": [],
+  "release_files": ["Formula/mdmost.rb"],
+  "release_assets": [
+    "mdmost-*-x86_64-unknown-linux-musl.tar.gz",
+    "mdmost-*-aarch64-unknown-linux-musl.tar.gz",
+    "mdmost-*-x86_64-apple-darwin.tar.gz",
+    "mdmost-*-aarch64-apple-darwin.tar.gz",
+    "mdmost-*-x86_64-pc-windows-msvc.zip",
+    "mdmost_*_amd64.deb", "mdmost_*_arm64.deb",
+    "mdmost-*.x86_64.rpm", "mdmost-*.aarch64.rpm",
+    "mdmost-*.arm64_sonoma.bottle.tar.gz"
+  ],
+  "rust": {"lint": ["mdmost"], "test": ["mdmost", "pulldown-latex"],
+           "tested_elsewhere": ["syntect"]},
+  "gitea_packages": {
+    "url": "https://gitea.oetiker.ch",
+    "owner": "oposs",
+    "debian": {"distribution": "stable", "component": "main"},
+    "rpm": {"group": ""}
+  }
+}
