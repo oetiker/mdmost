@@ -81,6 +81,11 @@ const HEADING_RAMP: [f32; 6] = [0.0, 0.16, 0.32, 0.48, 0.64, 0.80];
 /// steps down, so a deep heading settles into the page rather than shouting from it.
 const HEADING_BOLD_THROUGH: usize = 3;
 
+/// How far the selection tint is blended from [`Palette::bg`] towards
+/// [`Palette::blue`]. Enough to see the extent of a drag, little enough that body text
+/// keeps the contrast floor `tests/theme_contrast.rs` pins.
+const SELECTION_TINT: f32 = 0.25;
+
 /// How far a heading's rule is blended towards [`Palette::border`].
 ///
 /// Kept small on purpose: the rule under the signature heading must not be fainter
@@ -303,9 +308,11 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             // Blue, because the two warm washes on the page are already spoken for by
             // search — yellow for a match, orange for the current one — and a reader
             // dragging over a searched document must be able to tell at a glance which
-            // highlight is which. Same fg/bg shape as those two so the contrast floor
-            // `tests/theme_contrast.rs` pins applies to it identically.
-            selection: Style::new().fg(p.bg).bg(p.blue),
+            // highlight is which. A tint of the page rather than a solid wash, and no
+            // foreground: the selected text keeps its own colours, where the old
+            // inverse-looking `fg(bg).bg(blue)` flattened headings, code and links to
+            // one colour while the reader was dragging over them.
+            selection: Style::new().bg(p.bg.blend(p.blue, SELECTION_TINT)),
             prompt: Style::new().fg(p.fg).bg(p.overlay),
             error: base.fg(p.red).bold(),
             warning: base.fg(p.yellow),
