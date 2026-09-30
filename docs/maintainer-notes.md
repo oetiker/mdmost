@@ -437,8 +437,9 @@ visible even where it does nothing useful. And when this happens, treat it as th
 doing its job: the abort means a miss that used to pass silently is now caught, not that
 something regressed.
 
-Recording takes about five minutes and the result is lossless WebP. The recording shipped
-in commit `299bc81` is 1,594,864 bytes (about 1.6 MB) across 922 frames. Frame count was
+Recording takes about five minutes and the result is lossless WebP. The recording made
+for the selection tint (2026-09-30, ansidrama 0.5.1) is 838,114 bytes across 901 captured
+frames, which the WebP stores as 876 once identical neighbours merge. Frame count was
 found reproducible under the current recorder on an earlier, gate-free baseline script
 (before the `await` gates and the restored theme beat existed): two consecutive full
 recordings of *that* script produced 908 frames each, with a byte-identical
@@ -508,8 +509,8 @@ so a repaint that lands late is no longer sampled early. The beat is back in
 colour, and the broken frame's *text* was correct — its status bar said `theme: light`
 truthfully while the pixels underneath were still dark. Verifying the switch means a
 human opening the frame and reading the background colour: light is `#fdfcf9`, dark is
-`#11141b`. Verified for the recording shipped in commit `299bc81` at frame0919 (light,
-correct) and frame0920 (dark, correct); check the equivalent frames again after any
+`#11141b`. Verified for the 2026-09-30 recording (the selection tint) at frame0898
+(light, correct) and frame0899 (dark, correct); check the equivalent frames again after any
 re-recording, since frame numbers shift whenever anything earlier in the script changes,
 and note which commit they were read against.
 
