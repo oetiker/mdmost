@@ -30,6 +30,30 @@ function unreleasedBlock(text) {
   return lines.slice(range.start + 1, range.end).join('\n');
 }
 
+// The changelog gate's decision. A text is null when the file does not exist
+// at that commit. A base without the heading counts as an empty block, because
+// the pull request that converts a repository onto the standard is the one
+// that introduces '## [Unreleased]'; a head without it cannot be judged.
+function gateVerdict(baseText, headText) {
+  const missing = `CHANGES.md has no '${UNRELEASED_HEADING}' heading; add it and an entry under it.`;
+  const blockOf = (text) => (text === null || !findUnreleased(text.split('\n'))
+    ? null
+    : unreleasedBlock(text));
+  const head = blockOf(headText);
+  if (head === null) return { ok: false, message: missing };
+  const base = blockOf(baseText);
+  const unchanged = base === null ? isEmpty(head) : base === head;
+  if (unchanged) {
+    return {
+      ok: false,
+      message: `This pull request adds nothing under '${UNRELEASED_HEADING}' in `
+        + 'CHANGES.md. Add an entry describing the change, or label the '
+        + "pull request 'no-changelog' if it genuinely needs none.",
+    };
+  }
+  return { ok: true, message: 'CHANGES.md [Unreleased] was updated.' };
+}
+
 function isEmpty(block) {
   return block
     .split('\n')
@@ -109,4 +133,4 @@ function notesFor(text, version) {
   return lines.slice(start + 1, blockEnd(lines, start)).join('\n').trim();
 }
 
-module.exports = { unreleasedBlock, isEmpty, roll, latestRelease, notesFor };
+module.exports = { unreleasedBlock, gateVerdict, isEmpty, roll, latestRelease, notesFor };

@@ -150,3 +150,26 @@ test('notesFor returns only that version', () => {
 test('notesFor fails loudly for a version that is not there', () => {
   assert.throws(() => changes.notesFor(FILLED, '9.9.9'), /no section for 9\.9\.9/);
 });
+
+const BARE = '# Changelog\n\n## Unreleased\n\n- an entry\n';
+const ADDS_NOTHING = /adds nothing under '## \[Unreleased\]'/;
+
+test('gateVerdict', async (t) => {
+  const cases = [
+    ['both sides equal', EMPTY, EMPTY, false, ADDS_NOTHING],
+    ['head adds an entry', EMPTY, FILLED, true, /was updated/],
+    ['base has the bare heading, head is converted', BARE, FILLED, true, /was updated/],
+    ['base has the bare heading, head is empty', BARE, EMPTY, false, ADDS_NOTHING],
+    ['base file is missing, head has an entry', null, FILLED, true, /was updated/],
+    ['base file is missing, head is empty', null, EMPTY, false, ADDS_NOTHING],
+    ['head has the bare heading', EMPTY, BARE, false, /no '## \[Unreleased\]' heading/],
+    ['head file is missing', EMPTY, null, false, /no '## \[Unreleased\]' heading/],
+  ];
+  for (const [name, base, head, ok, message] of cases) {
+    await t.test(name, () => {
+      const verdict = changes.gateVerdict(base, head);
+      assert.equal(verdict.ok, ok);
+      assert.match(verdict.message, message);
+    });
+  }
+});

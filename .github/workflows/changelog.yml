@@ -98,16 +98,22 @@ jobs:
               return;
             }
 
-            const base = changes.unreleasedBlock(await read('CHANGES.md', pr.base.sha));
-            const head = changes.unreleasedBlock(await read('CHANGES.md', pr.head.sha));
+            const readOptional = async (path, ref) => {
+              try {
+                return await read(path, ref);
+              } catch (error) {
+                if (error.status === 404) return null;
+                throw error;
+              }
+            };
 
-            if (base === head) {
-              core.setFailed(
-                "This pull request adds nothing under '## [Unreleased]' in "
-                + 'CHANGES.md. Add an entry describing the change, or label the '
-                + "pull request 'no-changelog' if it genuinely needs none."
-              );
+            const verdict = changes.gateVerdict(
+              await readOptional('CHANGES.md', pr.base.sha),
+              await readOptional('CHANGES.md', pr.head.sha),
+            );
+            if (!verdict.ok) {
+              core.setFailed(verdict.message);
               return;
             }
 
-            core.notice('CHANGES.md [Unreleased] was updated.');
+            core.notice(verdict.message);
