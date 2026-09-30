@@ -19,22 +19,30 @@ brew trust --formula oetiker/mdmost/mdmost
 brew install mdmost
 ```
 
-**Debian, Ubuntu** — download `mdmost_<version>_amd64.deb` (or `_arm64.deb`) from the
-[releases page](https://github.com/oetiker/mdmost/releases):
+**Debian, Ubuntu**: add the signed apt repository of the oposs package registry, then
+install as usual. `apt upgrade` picks up new releases.
 
 ```sh
-sudo dpkg -i mdmost_*_amd64.deb
-man mdmost
+sudo curl -fsSL https://gitea.oetiker.ch/api/packages/oposs/debian/repository.key \
+    -o /etc/apt/keyrings/oposs.asc
+echo "deb [signed-by=/etc/apt/keyrings/oposs.asc] https://gitea.oetiker.ch/api/packages/oposs/debian stable main" \
+    | sudo tee /etc/apt/sources.list.d/oposs.list
+sudo apt update
+sudo apt install mdmost
 ```
 
-**Fedora, RHEL, openSUSE** — download the matching `.rpm`:
+**Fedora, RHEL, Rocky, Alma**: add the signed rpm repository the same way. `dnf upgrade`
+picks up new releases.
 
 ```sh
-sudo rpm -i mdmost-*.x86_64.rpm
+sudo curl -fsSL https://gitea.oetiker.ch/api/packages/oposs/rpm.repo \
+    -o /etc/yum.repos.d/oposs.repo
+sudo dnf install mdmost
 ```
 
-There is no apt or yum repository, so `apt upgrade` will not find new versions: come
-back to the releases page for those.
+The same `.deb` and `.rpm` files are on the
+[releases page](https://github.com/oetiker/mdmost/releases) for a machine without
+repository access, and for openSUSE (`sudo rpm -i mdmost-*.x86_64.rpm`).
 
 **Any Linux** — the tarballs are static musl builds and need nothing installed. The
 archive carries the man page beside the binary, so install both:
