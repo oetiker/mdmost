@@ -128,15 +128,20 @@ Two failure modes cost real time on this project:
 
 ## Releasing
 
-Releases are cut by the `Release` workflow, run from the Actions tab with a release type
-of `bugfix`, `feature` or `major`. It must be run from `main`, and it refuses otherwise.
+Releases start with the `Create release PR` workflow, run from the Actions tab on `main`
+with a release type of `bugfix`, `feature` or `major`. It opens a release pull request that
+bumps `Cargo.toml` and moves the `## Unreleased` block of `CHANGES.md` into a dated
+section. Its `build` job calls `.github/workflows/release-build.yml`, which builds the
+tarballs, zip, `.deb` and `.rpm` files, the bottles and the rewritten `Formula/mdmost.rb`
+without writing the repository. The results are attached to a draft release, and
+merging the pull request publishes it. The publish run then uploads the `.deb` and `.rpm`
+files to the Gitea package registry.
 
 Before the first release:
 
 1. Create `https://github.com/oetiker/mdmost` and push `main`.
-2. Settings → Actions → General → Workflow permissions: allow read and write. The
-   `version` job pushes a commit and a tag, and the `homebrew` job pushes the rewritten
-   formula.
+2. Settings → Actions → General → Workflow permissions: allow read and write, and allow
+   Actions to create pull requests. The release pull request is opened by the workflow.
 
 The project uses **no repository secrets**. It used to need `CRATES_IO_TOKEN`; the
 `publish-crate` job is gone and so is the token. If one is still set on the repository,
@@ -147,12 +152,12 @@ Each release:
 1. Put what changed under `## Unreleased` in `CHANGES.md`. The workflow moves that block
    into a dated section and uses it verbatim as the release notes — nothing else writes
    them.
-2. Run the workflow. It bumps `Cargo.toml`, tags, builds five targets, packages `.deb`
-   and `.rpm` for the two musl targets, and rewrites `Formula/mdmost.rb` with the new
-   checksums. It does not publish to crates.io; mdmost is not published there, and the
+2. Run the workflow, review the release pull request and merge it. The build covers five
+   targets, packages `.deb` and `.rpm` for the two musl targets, and rewrites
+   `Formula/mdmost.rb` with the new checksums. It does not publish to crates.io; mdmost is not published there, and the
    three early releases that are (0.1.0, 0.1.2, 0.2.0) are all yanked (`CHANGES.md`,
    Unreleased, says why).
-3. `git pull` afterwards: the workflow has pushed two commits and a tag to `main`.
+3. `git pull` afterwards: the merge brought the release commit and the formula to `main`.
 
 **Open question, unsettled: whether `CHANGES.md`'s `### Breaking` section still earns its
 keep.** 0.3.0 introduced it to record API breaks a `cargo publish` consumer of the library
@@ -205,9 +210,9 @@ make man          # needs pandoc; 3.1.3 is what this was designed against
 
 A generated file under version control can disagree with its source, and then it needs
 a staleness gate. A file that does not exist cannot be stale, so there is no gate. CI
-runs the same `make man`: `ci.yml`'s `docs` job builds it and throws it away, purely so
-a manual that stops converting fails the pull request that broke it; `release.yml`
-builds it once at the top of `build-binaries`, where the tarball, the deb and the rpm
+runs the same `make man`: the `ci-man` job builds it and throws it away, purely so
+a manual that stops converting fails the pull request that broke it; `release-build.yml`
+builds it once at the top of its `binaries` job, where the tarball, the deb and the rpm
 all read it out of the working tree. Homebrew reads it from our tarball. The Windows zip
 ships no man page and so skips pandoc entirely.
 
@@ -218,7 +223,7 @@ by reading the metadata:
 | --- | --- | --- |
 | deb | `/usr/share/man/man1/mdmost.1.gz` | `cargo deb --no-build` then `dpkg-deb -c` |
 | rpm | `/usr/share/man/man1/mdmost.1` | `cargo generate-rpm` then `rpm2cpio \| zstd -dc \| cpio -t` |
-| tarball | `mdmost/man/mdmost.1` | staged exactly as `release.yml` does, then `tar tzf` |
+| tarball | `mdmost/man/mdmost.1` | staged exactly as `release-build.yml` does, then `tar tzf` |
 | Homebrew | `man1.install "man/mdmost.1"` | both formula paths resolve inside the unpacked tarball |
 
 `cargo-deb` gzips the page because Debian policy wants it that way; the rpm ships it
@@ -253,7 +258,7 @@ install with no matching bottle a **source build**, and a source build runs
 outdated* on a Mac whose CLT is older than its macOS. `bottle :unneeded`, which used to
 say "no compiler needed", was removed in Homebrew 3.0. A bottle is the only way left.
 
-Four things to know before touching `.github/workflows/release.yml`:
+Four things to know before touching `.github/workflows/release-build.yml`:
 
 - **One bottle per architecture is enough.** `find_older_compatible_tag` in Homebrew's
   `extend/os/mac/utils/bottles.rb` accepts a bottle built for an *older or equal* macOS of
@@ -261,7 +266,7 @@ Four things to know before touching `.github/workflows/release.yml`:
   oldest runner image per architecture: `macos-14` for arm64, `macos-13` for Intel.
   `macos-13` is the last Intel image GitHub has; that leg is `continue-on-error` because it
   will eventually vanish, and when it does Intel Macs simply go back to the source path.
-- **The filename is renamed on upload.** `brew bottle` writes
+- **The filename is renamed after the build.** `brew bottle` writes
   `mdmost--<version>.<tag>.bottle.tar.gz`, with two dashes, which is what GitHub Packages
   wants. A plain `root_url` like ours is fetched as `mdmost-<version>.<tag>.bottle.tar.gz`,
   with one. Compare `Bottle::Filename#url_encode` with `#github_packages`. Both names are
@@ -272,13 +277,14 @@ Four things to know before touching `.github/workflows/release.yml`:
   uploaded sends Homebrew after a file that is not there. The generated block carries its
   own `# BOTTLE-START` / `# BOTTLE-END` markers and replaces that range in place, which is
   what keeps the rewrite idempotent. Removing those markers fails the job by design.
-- **`bottles` runs after `homebrew`, not beside it.** It installs from the tap, so the
-  version and the four url `sha256` lines have to be on `main` first. As a side effect
-  `brew install --build-bottle` checksums the published tarball, so this doubles as an
-  end-to-end test of what `create-release` uploaded.
+- **`bottles` runs after `binaries`, not beside it.** The release does not exist yet, so
+  the formula's GitHub url would 404. The job installs from a local tap whose formula
+  points at the tarballs `binaries` built, and `brew bottle` still records the GitHub
+  root url. The `formula` job then writes the version, the checksums and the bottle block
+  into `Formula/mdmost.rb`.
 
-Homebrew 6.0 also stopped loading formulae from untrusted third-party taps, so CI taps and
-then runs `brew trust --formula oetiker/mdmost/mdmost`. The `|| true` after it is for a
+Homebrew 6.0 also stopped loading formulae from untrusted third-party taps, so CI creates a
+local tap and then runs `brew trust --formula local/mdmost/mdmost`. The `|| true` after it is for a
 runner image still on Homebrew 5, where the command does not exist.
 
 ## Regenerating the demo
