@@ -19,6 +19,10 @@ brew trust --formula oetiker/mdmost/mdmost
 brew install mdmost
 ```
 
+On Linux, Homebrew, the apt and dnf packages and the tarballs all install the same binary:
+a static build against the musl C library. It does not use the system's C library, so it runs on old and new distributions
+alike. The x86_64 binary of 0.5.0 runs unchanged on Alpine and on CentOS 7.
+
 **Debian, Ubuntu**: add the signed apt repository of the oposs package registry, then
 install as usual. `apt upgrade` picks up new releases.
 
