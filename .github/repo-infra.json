@@ -31,7 +31,7 @@
     "mdmost-*.x86_64.rpm", "mdmost-*.aarch64.rpm",
     "mdmost-*.arm64_sonoma.bottle.tar.gz"
   ],
-  "rust": {"lint": ["mdmost"], "test": ["mdmost", "pulldown-latex"],
+  "rust": {"lint": ["mdmost"], "test": ["mdmost", "pulldown-latexx"],
            "tested_elsewhere": ["syntect"]},
   "gitea_packages": {
     "url": "https://gitea.oetiker.ch",
