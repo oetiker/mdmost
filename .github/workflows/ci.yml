@@ -1,0 +1,325 @@
+name: CI
+# repo-infra: ci v1
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+
+  # repo-infra: ci-lib v1
+  lib:
+    name: Workflow library tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The release logic is a library, so it is tested like one. Before this,
+      # the changelog roller was a Perl program inside a YAML string whose only
+      # test was cutting a release.
+      - name: Run the workflow library tests
+        run: node --test .github/workflows/lib/*.test.js
+
+  # repo-infra: ci-rust v2
+  # D24. A bare `cargo test` runs the workspace's default members only, and a
+  # root [package] makes that one crate. rust-plan reads the "rust" key of
+  # .github/repo-infra.json and `cargo metadata`, and hands the two matrix
+  # jobs below the crates they run for. Without the key, and where default
+  # members equal members, it hands them one empty entry and they run the
+  # workspace-wide commands. Every other case fails here, naming the crates.
+  rust-plan:
+    name: Rust workspace plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      lint: ${{ steps.plan.outputs.lint }}
+      test: ${{ steps.plan.outputs.test }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo metadata --no-deps --format-version 1 > "$RUNNER_TEMP/cargo-metadata.json"
+
+      - id: plan
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const ws = process.env.GITHUB_WORKSPACE;
+            const { rustPlan } = require(`${ws}/.github/workflows/lib/rust-plan.js`);
+            const configPath = `${ws}/.github/repo-infra.json`;
+            const config = fs.existsSync(configPath)
+              ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
+              : {};
+            const metadata = JSON.parse(
+              fs.readFileSync(`${process.env.RUNNER_TEMP}/cargo-metadata.json`, 'utf8'),
+            );
+            try {
+              const plan = rustPlan(config, metadata);
+              core.setOutput('lint', JSON.stringify(plan.lint));
+              core.setOutput('test', JSON.stringify(plan.test));
+              core.notice(`lint: ${plan.lint.join(', ') || 'workspace'}; `
+                + `test: ${plan.test.join(', ') || 'workspace'}`);
+            } catch (error) {
+              core.setFailed(error.message);
+            }
+
+  rust-check:
+    name: Rust check and lint ${{ matrix.package }}
+    needs: rust-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.rust-plan.outputs.lint) }}
+    env:
+      CARGO_TERM_COLOR: always
+      PACKAGE: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - run: cargo fmt --check ${PACKAGE:+-p "$PACKAGE"}
+
+      # --no-deps with -p: clippy-driver replaces rustc for every workspace
+      # member regardless of -p, so -p alone still lints vendored crates.
+      - run: |
+          if [ -n "$PACKAGE" ]; then
+            cargo clippy --all-targets -p "$PACKAGE" --no-deps -- -D warnings
+          else
+            cargo clippy --all-targets -- -D warnings
+          fi
+
+  rust-test:
+    name: Rust tests ${{ matrix.package }}
+    needs: rust-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.rust-plan.outputs.test) }}
+    env:
+      CARGO_TERM_COLOR: always
+      PACKAGE: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - run: cargo test ${PACKAGE:+-p "$PACKAGE"}
+
+  # repo-infra: ci-man v2
+  man:
+    name: Manual converts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # pandoc converts the manual; groff and man-db render the result, which
+      # is the only way to find out whether roff can lay the page out.
+      - name: Install pandoc and the man toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc groff man-db
+
+      - name: Build the man page
+        run: make man
+
+      # Nothing consumes the page in CI. This fails the pull request whose
+      # manual stops converting, or converts into a page roff cannot lay out.
+      # pandoc's preamble probes for the fonts C and CB and falls back when
+      # they are missing; mdmost met both warnings on every build and neither
+      # is a defect. The one that is, and that mdmost hit twice, is `table
+      # wider than line length minus indentation`: a Markdown table with a
+      # prose column. MANWIDTH pins the line length, since the runner has no
+      # terminal to take it from.
+      - name: Render every page and fail on a roff warning
+        run: |
+          shopt -s nullglob
+          pages=(man/*.[1-9]*)
+          if [ ${#pages[@]} -eq 0 ]; then
+            echo "::error::make man produced no page under man/"
+            exit 1
+          fi
+          status=0
+          for page in "${pages[@]}"; do
+            warnings=$(MANWIDTH=80 man --warnings -l "$page" 2>&1 >/dev/null \
+              | grep -v -e "cannot select font 'C'$" -e "cannot select font 'CB'$" || true)
+            if [ -n "$warnings" ]; then
+              echo "::error file=$page::roff warnings in $page"
+              printf '%s\n' "$warnings"
+              status=1
+            else
+              echo "$page: no warnings"
+            fi
+          done
+          exit $status
+
+  # repo-infra: ci-rust-musl v1
+  rust-musl:
+    name: Static musl ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      # One target failing must not cancel the other: which of the two broke is
+      # the whole answer here, and fail-fast throws half of it away.
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+
+      # No `targets:` on purpose. cross compiles inside its own image, which
+      # already carries the musl std for the target; the runner's toolchain is
+      # here only to run `cargo install cross` and `cargo metadata`.
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Pinned to a released version, not `main`. A cross-compile is the thing
+      # least likely to be rehearsed locally, so it must not rest on a moving
+      # dependency: a break here is discovered by the pull request that is
+      # innocent of it.
+      - name: Install cross
+        run: cargo install cross --version 0.2.5 --locked
+
+      # cross, not a bare `cargo build --target`. `ring` needs the right
+      # assembler for the target and `zstd-sys` needs a C compiler for it;
+      # cross's images carry both, and a plain `cargo build --target` on the
+      # runner carries neither.
+      #
+      # No `actions/cache` here, unlike rust-check and rust-test. cross writes
+      # `target/` from inside a container under its own uid mapping, and
+      # restoring a cache into that path is not part of the recipe this block
+      # was proved from. It is a real cost -- `cargo install cross` builds from
+      # source -- and a deliberate one; see the design doc.
+      - name: Build
+        run: RUSTFLAGS="-C target-feature=+crt-static" cross build --release --workspace --target ${{ matrix.target }}
+
+      # `crt-static` is a *hint* the linker is free to ignore, so the result is
+      # asserted rather than assumed. A binary that only runs on the machine
+      # that built it is worse than no binary: it fails at the far end, on a
+      # host nobody is watching, and reads as a network fault.
+      - name: Verify the binaries are really static
+        run: |
+          set -euo pipefail
+          dir="target/${{ matrix.target }}/release"
+
+          # cargo metadata, not a listing of $dir. A cdylib member's .so is a
+          # regular executable file too, and `file` calls it a shared object --
+          # which would fail this check for a crate doing nothing wrong.
+          metadata=$(cargo metadata --format-version 1 --no-deps)
+          bins=$(printf '%s' "$metadata" \
+            | jq -r '.packages[].targets[] | select(.kind | index("bin")) | .name' \
+            | sort -u)
+
+          # A library-only workspace has nothing to link-check, and that is not
+          # a failure: the build still proved the crate compiles for musl.
+          if [ -z "$bins" ]; then
+            echo "::notice::no binary targets in this workspace -- musl build verified compilation only"
+            exit 0
+          fi
+
+          declared=0
+          checked=0
+          while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            declared=$((declared + 1))
+            binary="$dir/$name"
+            if [ ! -f "$binary" ]; then
+              # A bin behind `required-features` is not produced by a plain
+              # --workspace build. Skipped, not failed -- the tally below is
+              # what refuses a build that produced nothing at all.
+              echo "::notice::${binary} was not built (required-features?) -- skipped"
+              continue
+            fi
+            file "$binary"
+            if ! file "$binary" | grep -q 'static'; then
+              echo "::error::${binary} is not statically linked"
+              exit 1
+            fi
+            # Guarded by `command -v` so this half *skips* where llvm-objdump is
+            # absent instead of erroring. That guard is what makes the check
+            # portable across runner images.
+            if command -v llvm-objdump >/dev/null && llvm-objdump -T "$binary" 2>/dev/null | grep -q GLIBC; then
+              echo "::error::${binary} still references glibc symbols"
+              exit 1
+            fi
+            checked=$((checked + 1))
+          done <<< "$bins"
+
+          # Every declared binary missing means the build silently produced
+          # nothing, and the loop above would have reported success by saying
+          # nothing at all.
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::the workspace declares ${declared} binary target(s) and the build produced none of them"
+            exit 1
+          fi
+          echo "verified ${checked} of ${declared} binary target(s) statically linked for ${{ matrix.target }}"
+
+  # repo-infra: ci-local v1
+  # The project brings the jobs, the standard brings the seam (D25, D20's
+  # shape). .github/workflows/ci-local.yml is the project's own file: it
+  # triggers on workflow_call only, sets timeout-minutes on each of its jobs,
+  # and keeps its conditions inside steps, never on a job -- a reusable
+  # workflow whose every job is skipped reports ci-local as skipped, and
+  # ci-passed counts skipped as green. references/conventions.md.
+  ci-local:
+    uses: ./.github/workflows/ci-local.yml
+
+  # The single context the ruleset requires (spec D2). It exists so branch
+  # protection can name one check that means "this repository's CI passed",
+  # whatever this repository's jobs happen to be. The needs list is generated
+  # by the assembler from the blocks that went into this file.
+  #
+  # `if: always()` is load-bearing. Without it this job is *skipped* when a
+  # dependency fails, and a skipped job reports Success -- so the required
+  # check would go green on a red build. It fails open, silently, and looks
+  # like it is working.
+  ci-passed:
+    if: always()
+    needs: [lib, rust-plan, rust-check, rust-test, man, rust-musl, ci-local]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
