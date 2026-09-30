@@ -4,16 +4,20 @@
 
 ### New
 
+### Changed
+
+### Fixed
+
+## 0.5.0 - 2026-09-30
+### New
 - YAML front matter at the top of a file (between two `---` lines) is shown as an
   italic *Frontmatter* label followed by the YAML as a coloured code block with its
   `[copy]` button.
 
 ### Changed
-
 - Releases are built inside the release pull request. Debian and Ubuntu can install mdmost with apt and Fedora, RHEL, Rocky and Alma with dnf, from the oposs package registry.
 
 ### Fixed
-
 - With `--mouse`, dragging a selection to the top or bottom row of the document now
   keeps scrolling while the pointer rests there, and speeds up the longer it is held.
   Before, the document moved one row only each time the pointer moved, so selecting
