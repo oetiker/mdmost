@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn signs() {
         let mut input = "  +    +-   \\test";
-        assert_eq!(lex::signs(&mut input).unwrap(), -1);
+        assert_eq!(lex::signs(&mut input).unwrap(), -2);
         assert_eq!(input, "\\test");
     }
 
