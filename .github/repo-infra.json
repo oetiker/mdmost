@@ -32,7 +32,7 @@
     "mdmost-*.arm64_sonoma.bottle.tar.gz"
   ],
   "rust": {"lint": ["mdmost"], "test": ["mdmost", "pulldown-latex"],
-           "tested_elsewhere": ["syntect"]},
+           "tested_elsewhere": []},
   "gitea_packages": {
     "url": "https://gitea.oetiker.ch",
     "owner": "oposs",
