@@ -154,9 +154,9 @@ Each release:
    them.
 2. Run the workflow, review the release pull request and merge it. The build covers five
    targets, packages `.deb` and `.rpm` for the two musl targets, and rewrites
-   `Formula/mdmost.rb` with the new checksums. It does not publish to crates.io; mdmost is not published there, and the
-   three early releases that are (0.1.0, 0.1.2, 0.2.0) are all yanked (`CHANGES.md`,
-   Unreleased, says why).
+   `Formula/mdmost.rb` with the new checksums. It does not publish to crates.io; mdmost
+   is not published there, and the three early releases that are (0.1.0, 0.1.2, 0.2.0)
+   are all yanked (`CHANGES.md`, Unreleased, says why).
 3. `git pull` afterwards: the merge brought the release commit and the formula to `main`.
 
 **Open question, unsettled: whether `CHANGES.md`'s `### Breaking` section still earns its
@@ -263,9 +263,10 @@ Four things to know before touching `.github/workflows/release-build.yml`:
 - **One bottle per architecture is enough.** `find_older_compatible_tag` in Homebrew's
   `extend/os/mac/utils/bottles.rb` accepts a bottle built for an *older or equal* macOS of
   the same architecture. The fallback only reaches upward, so bottles are built on the
-  oldest runner image per architecture: `macos-14` for arm64, `macos-13` for Intel.
-  `macos-13` is the last Intel image GitHub has; that leg is `continue-on-error` because it
-  will eventually vanish, and when it does Intel Macs simply go back to the source path.
+  oldest runner image per architecture: `macos-14` for arm64, `macos-15-intel` for Intel.
+  `macos-15-intel` is the last Intel image GitHub will offer and goes away in August 2027;
+  that leg is `continue-on-error`, and when it vanishes Intel Macs simply go back to the
+  source path. Its bottle serves Sequoia and later only.
 - **The filename is renamed after the build.** `brew bottle` writes
   `mdmost--<version>.<tag>.bottle.tar.gz`, with two dashes, which is what GitHub Packages
   wants. A plain `root_url` like ours is fetched as `mdmost-<version>.<tag>.bottle.tar.gz`,

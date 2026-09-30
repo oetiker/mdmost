@@ -7,6 +7,12 @@
       "pattern": "^version\\s*=\\s*\"[^\"]*\"",
       "replacement": "version = \"$VERSION\"",
       "verify": "^version\\s*=\\s*\"$VERSION\""
+    },
+    {
+      "path": "Cargo.lock",
+      "pattern": "^name = \"mdmost\"\nversion = \"[^\"]*\"",
+      "replacement": "name = \"mdmost\"\nversion = \"$VERSION\"",
+      "verify": "^name = \"mdmost\"\nversion = \"$VERSION\""
     }
   ],
   "ci": ["ci-man", "ci-rust-musl"],
