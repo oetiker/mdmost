@@ -7,6 +7,7 @@
 ### Changed
 
 ### Fixed
+- In Mermaid flowcharts, an arrow from outside a subgraph to a node inside it now reaches that node. Before, it stopped at the subgraph border when it arrived under the subgraph title, or when several arrows entered the same subgraph.
 
 ## 0.6.0 - 2026-09-30
 ### Changed

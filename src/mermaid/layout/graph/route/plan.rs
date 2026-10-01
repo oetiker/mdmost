@@ -6,7 +6,7 @@
 
 use super::super::glyph::{Dir, Stroke};
 use super::super::spec::{PortPolicy, Terminator};
-use super::{Gap, Input, Route, band_size, is_item};
+use super::{Gap, Input, Route, SideCell, band_size, is_item};
 
 /// Port cross coordinates, by segment.
 pub(super) struct Ports {
@@ -113,6 +113,11 @@ fn distinct_terminators(members: &[usize], input: &Input<'_>, outgoing: bool) ->
 /// meaning (design spec §6.3, §6.4). So when the edges on one side carry different
 /// terminators they are given distinct ports as long as any remain, and only share
 /// one when the side genuinely runs out of cells.
+///
+/// A container is different: its edges really end at nodes inside it, and an edge only
+/// reaches its node if its port sits over that node. So the edges are grouped by the
+/// node they aim at and each group is spread over that node's own span, clear of the
+/// title letters in the frame.
 fn spread(
     members: &[usize],
     wanted: &[usize],
@@ -120,12 +125,68 @@ fn spread(
     id: usize,
     outgoing: bool,
 ) -> Vec<usize> {
-    let start = input.cross[id];
-    let size = input.cross_size[id].max(1);
+    let whole = (input.cross[id], input.cross_size[id].max(1));
+    let span_of = |index: usize| -> Option<(usize, usize)> {
+        let edge = &input.edges[input.layered.segs[index].edge];
+        let reach = if outgoing {
+            edge.from_reach
+        } else {
+            edge.to_reach
+        };
+        reach.map(|reach| (reach.lo, reach.hi))
+    };
+    let spans: Vec<Option<(usize, usize)>> = members.iter().map(|&m| span_of(m)).collect();
+    if !is_item(input, id) || spans.iter().all(Option::is_none) {
+        return spread_over(members, wanted, input, id, outgoing, whole, true);
+    }
+    let mut out = vec![0; members.len()];
+    let mut done = vec![false; members.len()];
+    for first in 0..members.len() {
+        if done[first] {
+            continue;
+        }
+        let span = spans[first];
+        let group: Vec<usize> = (first..members.len())
+            .filter(|&i| !done[i] && spans[i] == span)
+            .collect();
+        let sub_members: Vec<usize> = group.iter().map(|&i| members[i]).collect();
+        let sub_wanted: Vec<usize> = group.iter().map(|&i| wanted[i]).collect();
+        let placed = match span {
+            None => spread_over(&sub_members, &sub_wanted, input, id, outgoing, whole, true),
+            Some((lo, hi)) => {
+                let side = (input.cross[id] + lo, hi.saturating_sub(lo).max(1));
+                let clear = clear_stretch(input, id, outgoing, side);
+                let mut placed =
+                    spread_over(&sub_members, &sub_wanted, input, id, outgoing, clear, false);
+                nudge_off_title(&mut placed, input, id, outgoing, side);
+                placed
+            }
+        };
+        for (&i, at) in group.iter().zip(placed) {
+            done[i] = true;
+            out[i] = at;
+        }
+    }
+    out
+}
+
+/// Places `members` along the stretch `(start, size)` of one side of `id`.
+///
+/// `whole` says the stretch is the entire side, which is when a self loop's cell and
+/// the box's internal rules have to be kept clear.
+fn spread_over(
+    members: &[usize],
+    wanted: &[usize],
+    input: &Input<'_>,
+    id: usize,
+    outgoing: bool,
+    (start, size): (usize, usize),
+    whole: bool,
+) -> Vec<usize> {
     let centre = start + size / 2;
     let count = members.len();
     // A self loop owns the last cell of the side; forward ports keep off it.
-    let looped = input.loops.iter().any(|&(item, _)| item == id);
+    let looped = whole && input.loops.iter().any(|&(item, _)| item == id);
     let size = size - usize::from(looped && size > 3);
     let usable = size.saturating_sub(2);
     if input.ports[id] == PortPolicy::Center || size < 3 || count == 0 {
@@ -164,8 +225,87 @@ fn spread(
             previous = Some(out[i]);
         }
     }
-    nudge_off_rules(&mut out, &order, input, id, first, last);
+    if whole {
+        nudge_off_rules(&mut out, &order, input, id, first, last);
+    }
     out
+}
+
+/// The part of the stretch `(start, size)` that lies under plain frame.
+///
+/// Spreading a fan over the whole span of a node and then pushing the ports that hit
+/// the title aside would bunch them up against its last letter. The fan is spread over
+/// the longest run of frame cells instead; the stretch comes back unchanged when it
+/// has none, and [`nudge_off_title`] then does what it can.
+fn clear_stretch(
+    input: &Input<'_>,
+    id: usize,
+    outgoing: bool,
+    (start, size): (usize, usize),
+) -> (usize, usize) {
+    let side = if outgoing {
+        &input.side_out[id]
+    } else {
+        &input.side_in[id]
+    };
+    let base = input.cross[id];
+    let art = |at: usize| {
+        side.get(at - base)
+            .is_none_or(|&cell| cell == SideCell::Art)
+    };
+    let (first, last) = (start + 1, start + size.saturating_sub(2));
+    let mut best: Option<(usize, usize)> = None;
+    let mut run: Option<usize> = None;
+    for at in first..=last + 1 {
+        if at <= last && art(at) {
+            run.get_or_insert(at);
+        } else if let Some(from) = run.take()
+            && best.is_none_or(|(a, b)| at - from > b - a + 1)
+        {
+            best = Some((from, at - 1));
+        }
+    }
+    // `spread_over` keeps one cell off each end, which is the node's corner there; the
+    // run's own ends are free to use, so it is handed over with a cell either side.
+    best.map_or((start, size), |(a, b)| (a - 1, b - a + 3))
+}
+
+/// Moves ports off the letters of a container title, and off its blank margin when a
+/// cell of frame is free nearby.
+///
+/// The search stays within the stretch `(start, size)`, the span of the node the edges
+/// aim at. A cell of frame is best, since the crossing then shows as a junction; a
+/// blank cell beside the title comes next; a cell no other port holds beats a shared
+/// one. A port with nowhere to go stays put and its edge ends at the frame.
+fn nudge_off_title(
+    out: &mut [usize],
+    input: &Input<'_>,
+    id: usize,
+    outgoing: bool,
+    (start, size): (usize, usize),
+) {
+    let side = if outgoing {
+        &input.side_out[id]
+    } else {
+        &input.side_in[id]
+    };
+    let base = input.cross[id];
+    let cell = |at: usize| side.get(at - base).copied().unwrap_or(SideCell::Art);
+    let (first, last) = (start + 1, (start + size).saturating_sub(2).max(start + 1));
+    for i in 0..out.len() {
+        let at = out[i];
+        if cell(at) == SideCell::Art {
+            continue;
+        }
+        let best = (1..size)
+            .flat_map(|step| [at + step, at.wrapping_sub(step)])
+            .filter(|&candidate| (first..=last).contains(&candidate))
+            .filter(|&candidate| cell(candidate) < cell(at))
+            .min_by_key(|&candidate| (cell(candidate), out.contains(&candidate)));
+        if let Some(candidate) = best {
+            out[i] = candidate;
+        }
+    }
 }
 
 /// Moves ports off any border cell that already carries an internal rule.

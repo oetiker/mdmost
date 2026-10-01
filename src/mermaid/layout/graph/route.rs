@@ -38,6 +38,18 @@ pub(super) struct Reach {
     pub hi: usize,
 }
 
+/// What one border cell of a box holds, as far as an edge crossing it is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum SideCell {
+    /// Line art: a crossing edge turns it into a junction.
+    Art,
+    /// A gap, such as the space around a container title: an edge may pass, but no
+    /// junction shows where it does.
+    Blank,
+    /// A letter, such as one of a container title: no edge may pass.
+    Text,
+}
+
 /// An edge as the router sees it: already resolved to items of this level.
 #[derive(Debug, Clone)]
 pub(super) struct LevelEdge {
@@ -85,6 +97,11 @@ pub(super) struct Input<'a> {
     /// Per virtual node, the cross offsets whose border cell already carries an
     /// internal rule, which a port should avoid landing on.
     pub ruled: &'a [Vec<bool>],
+    /// Per virtual node, what each border cell of its entry side holds, which tells a
+    /// port carried through a container frame where it may cross.
+    pub side_in: &'a [Vec<SideCell>],
+    /// Likewise for the exit side.
+    pub side_out: &'a [Vec<SideCell>],
     /// Smallest allowed gap between two ranks.
     pub min_gap: usize,
     /// True when the flow axis runs vertically, which decides whether a label is

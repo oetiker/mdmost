@@ -58,7 +58,7 @@ use crate::theme::Theme;
 
 use frame::{Frame, Pen};
 use rank::RawEdge;
-use route::{Input, LevelEdge, Reach, Routing};
+use route::{Input, LevelEdge, Reach, Routing, SideCell};
 
 /// Spacing tried in turn until the drawing fits the width budget.
 ///
@@ -330,6 +330,40 @@ fn ruled_offsets(canvas: &Canvas, vertical: bool) -> Vec<bool> {
     }
 }
 
+/// What each cell along one side of `canvas` holds.
+///
+/// `inwards` picks the side an incoming edge arrives at; otherwise it is the side an
+/// outgoing edge leaves by. A container frame writes its title into its top border,
+/// and an edge carried through the frame to a node inside cannot cross those letters:
+/// a port landing on one stops at the border. The router keeps such ports off them.
+fn side_cells(canvas: &Canvas, direction: Direction, inwards: bool) -> Vec<SideCell> {
+    let rows = canvas.height();
+    let cols = usize::from(canvas.width());
+    let cell = |row: usize, col: usize| -> SideCell {
+        let Some(drawn) = canvas.row(row).and_then(|cells| cells.get(col)) else {
+            return SideCell::Blank;
+        };
+        // The right half of a wide letter has no text of its own, but is still a letter.
+        if drawn.is_continuation() {
+            return SideCell::Text;
+        }
+        match drawn.text().chars().next().unwrap_or(' ') {
+            ' ' => SideCell::Blank,
+            ch if glyph::mask_of(ch).is_some() => SideCell::Art,
+            _ => SideCell::Text,
+        }
+    };
+    // The side an edge enters by is the near one for a top-down or left-to-right flow.
+    let near = matches!(direction, Direction::TopToBottom | Direction::LeftToRight) == inwards;
+    if Frame::vertical(direction) {
+        let row = if near { 0 } else { rows.saturating_sub(1) };
+        (0..cols).map(|col| cell(row, col)).collect()
+    } else {
+        let col = if near { 0 } else { cols.saturating_sub(1) };
+        (0..rows).map(|row| cell(row, col)).collect()
+    }
+}
+
 /// Where a node sits inside its container box, measured along the parent's axes.
 ///
 /// `inwards` asks for the distance from the edge an incoming line arrives at; otherwise
@@ -526,6 +560,8 @@ impl Ctx<'_> {
         let mut loop_pad = vec![0usize; count];
         let mut ports = vec![PortPolicy::Center; count];
         let mut ruled: Vec<Vec<bool>> = vec![Vec::new(); count];
+        let mut side_in: Vec<Vec<SideCell>> = vec![Vec::new(); count];
+        let mut side_out: Vec<Vec<SideCell>> = vec![Vec::new(); count];
         for (index, item) in items.iter().enumerate() {
             let (rows, cols) = (item.canvas.height(), usize::from(item.canvas.width()));
             let (cross, flow) = if vertical { (cols, rows) } else { (rows, cols) };
@@ -537,6 +573,8 @@ impl Ctx<'_> {
             loop_pad[index] = if looped { 2 } else { 0 };
             ports[index] = item.ports;
             ruled[index] = ruled_offsets(&item.canvas, vertical);
+            side_in[index] = side_cells(&item.canvas, direction, true);
+            side_out[index] = side_cells(&item.canvas, direction, false);
         }
         let cross_gap = if vertical {
             self.gap
@@ -554,6 +592,8 @@ impl Ctx<'_> {
             loops: &loops,
             loop_pad: &loop_pad,
             ruled: &ruled,
+            side_in: &side_in,
+            side_out: &side_out,
             min_gap: if vertical { 1 } else { 3 },
             vertical,
         };
