@@ -8,6 +8,8 @@
 
 ### Fixed
 - In Mermaid flowcharts, an arrow from outside a subgraph to a node inside it now reaches that node. Before, it stopped at the subgraph border when it arrived under the subgraph title, or when several arrows entered the same subgraph.
+- A Mermaid label written as a markdown string, for example ``A["`**bold** text`"]``, no longer shows its backticks and stars, and one that spans several lines no longer fails with "cannot read a node shape". Its `**bold**`, `__bold__`, `*italic*` and `_italic_` are drawn bold and italic.
+- Mermaid labels draw `<b>`, `<strong>`, `<i>` and `<em>` as bold and italic instead of showing the tags as text.
 
 ## 0.6.0 - 2026-09-30
 ### Changed

@@ -579,6 +579,11 @@ syntax-highlighted code block with a dim caption stating the reason.
   durations or explicit dates, and `done`/`active`/`crit`/`milestone` tags. The time
   scale is chosen from the available width.
 
+Labels break lines at `<br>` and draw `<b>`, `<strong>`, `<i>` and `<em>` as bold
+and italic. A markdown string, label text in backticks inside quotes
+(``A["`text`"]``), also draws `**bold**`, `__bold__`, `*italic*` and `_italic_`,
+and may span several source lines, each of which starts a new line in the label.
+
 Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
 
 ## Front matter

@@ -210,7 +210,11 @@ pub fn label_rows(label: &Label) -> Vec<Piece> {
 /// Emits nothing when the label carries no source — `Label::line`, a label
 /// `lex::label_at` refused to place, or a `Label::from_lines` hull — because a span at
 /// byte zero of the document is worse than no span at all.
+///
+/// It also draws the piece's bold and italic, which is the other thing the plain text
+/// of a piece cannot carry, and which every caller of this needs as well.
 pub fn label_spans(canvas: &mut Canvas, label: &Label, piece: &Piece, row: usize, col: usize) {
+    label_marks(canvas, label, piece, row, col);
     let (Some(at), false) = (piece.at, label.source.is_empty()) else {
         return;
     };
@@ -225,6 +229,38 @@ pub fn label_spans(canvas: &mut Canvas, label: &Label, piece: &Piece, row: usize
             cols: u16::try_from(span.cols).unwrap_or(u16::MAX),
             copied: true,
         });
+    }
+}
+
+/// Draws the bold and italic of one drawn piece, whose first column is `(row, col)`.
+///
+/// Nothing is marked when the piece is unlocated or not the stretch of its line it
+/// claims to be, as [`Label::spans_for`] declines in the same case.
+fn label_marks(canvas: &mut Canvas, label: &Label, piece: &Piece, row: usize, col: usize) {
+    let Some(at) = piece.at else {
+        return;
+    };
+    let span = at..at + piece.text.len();
+    if label
+        .lines
+        .get(piece.index)
+        .and_then(|line| line.get(span.clone()))
+        != Some(&piece.text)
+    {
+        return;
+    }
+    let line = &label.lines[piece.index];
+    for (range, attrs) in label.marks(piece.index) {
+        let (lo, hi) = (range.start.max(span.start), range.end.min(span.end));
+        if lo >= hi {
+            continue;
+        }
+        let from = col + display_width(&line[span.start..lo]);
+        let style = crate::theme::Style {
+            attrs: *attrs,
+            ..crate::theme::Style::NONE
+        };
+        canvas.patch_style(row, from, display_width(&line[lo..hi]), style);
     }
 }
 

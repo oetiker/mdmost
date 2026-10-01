@@ -11,6 +11,7 @@ pub(crate) mod chrome;
 pub(crate) mod entity;
 pub mod gantt;
 pub mod layout;
+pub(crate) mod markup;
 pub mod parse;
 pub mod pie;
 pub mod sequence;

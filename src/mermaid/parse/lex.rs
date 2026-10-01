@@ -26,11 +26,34 @@ pub struct SrcLine<'a> {
 ///
 /// Directives may span several lines, so a line opening with `%%{` swallows following
 /// lines until one closes the block with `}%%`.
+///
+/// A markdown string (``"`…`"``) may span several lines too, its line breaks being
+/// breaks in the label. A line that leaves one open is joined with the lines after it
+/// until the string closes, into one [`SrcLine`] numbered after its first line. Only a
+/// markdown string does this: a stray `"` in a plain message must not swallow the rest
+/// of the diagram.
 pub fn preprocess(src: &str) -> Vec<SrcLine<'_>> {
     let mut out = Vec::new();
     let mut in_directive = false;
+    // The first line number and start byte of a statement with a markdown string open.
+    let mut open: Option<(usize, usize)> = None;
     for (index, raw) in src.lines().enumerate() {
         let number = index + 1;
+        if let Some((first, start)) = open {
+            let Some(end) = offset_of(src, raw).map(|at| at + raw.len()) else {
+                continue;
+            };
+            let joined = &src[start..end];
+            if !opens_markdown_string(joined) {
+                open = None;
+                let text = strip_comment(joined).trim();
+                out.push(SrcLine {
+                    number: first,
+                    text,
+                });
+            }
+            continue;
+        }
         let trimmed = raw.trim();
         if in_directive {
             if trimmed.contains("}%%") {
@@ -49,9 +72,34 @@ pub fn preprocess(src: &str) -> Vec<SrcLine<'_>> {
         if text.is_empty() {
             continue;
         }
+        if opens_markdown_string(text)
+            && let Some(start) = offset_of(src, text)
+        {
+            open = Some((number, start));
+            continue;
+        }
+        out.push(SrcLine { number, text });
+    }
+    // A string never closed is handed on as it stands, for the parser to report.
+    if let Some((number, start)) = open {
+        let text = src[start..].trim();
         out.push(SrcLine { number, text });
     }
     out
+}
+
+/// Whether `text` ends inside a markdown string, one opened by ``"` ``.
+fn opens_markdown_string(text: &str) -> bool {
+    let mut quoted = false;
+    let mut markdown = false;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            quoted = !quoted;
+            markdown = quoted && chars.peek() == Some(&'`');
+        }
+    }
+    quoted && markdown
 }
 
 /// Removes a trailing `%%` comment that is not inside a quoted string.
