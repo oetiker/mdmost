@@ -12,6 +12,8 @@
 - A Mermaid edge line that passes a wide character in a label or title, for example a Chinese letter or an emoji, no longer erases that character.
 - A Mermaid label written as a markdown string, for example ``A["`**bold** text`"]``, no longer shows its backticks and stars, and one that spans several lines no longer fails with "cannot read a node shape". Its `**bold**`, `__bold__`, `*italic*` and `_italic_` are drawn bold and italic.
 - Mermaid labels draw `<b>`, `<strong>`, `<i>` and `<em>` as bold and italic instead of showing the tags as text.
+- A Mermaid edge label no longer touches the line of another edge that runs next to it (`│headers│`). When the space after its own line is taken, the label moves to the other side of the line.
+- In the man page, options and configuration keys are shown as indented option paragraphs instead of bullet lists.
 
 ## 0.6.0 - 2026-09-30
 ### Changed

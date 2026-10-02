@@ -326,7 +326,9 @@ fn label_extent(input: &Input<'_>, routes: &[Route]) -> usize {
             edge.label.height()
         };
         if widest > 0 {
-            extent = extent.max(route.dst + 1 + widest);
+            // A label may sit before its line rather than after it; see `label_side`.
+            let start = route.label.map_or(route.dst + 1, |(_, cross)| cross);
+            extent = extent.max(start + widest);
         }
         if let Some(note) = &edge.tail_label {
             extent = extent.max(route.src + 1 + across(note));

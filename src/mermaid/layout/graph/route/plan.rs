@@ -407,7 +407,7 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
         } else {
             (edge.label.height(), text)
         };
-        let at = routes[index].dst + 1;
+        let at = label_side(members, routes, index, across);
         spans.push((at, at + across));
         extents.push(along);
     }
@@ -424,7 +424,7 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
     }
     gap.label_size = cursor;
     for (slot, &index) in labelled.iter().enumerate() {
-        routes[index].label = Some((gap.label_base + offsets[bands[slot]], routes[index].dst + 1));
+        routes[index].label = Some((gap.label_base + offsets[bands[slot]], spans[slot].0));
     }
     let needed =
         gap.tail_len + gap.tail_note + gap.channels + gap.label_size + gap.head_note + gap.head_len;
@@ -434,6 +434,32 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
         .iter()
         .any(|&index| input.edges[input.layered.segs[index].edge].stroke != Stroke::Solid);
     gap.size = needed.max(input.min_gap) + usize::from(styled);
+}
+
+/// The first cross cell of the label carried by segment `index`, `across` cells wide.
+///
+/// The label rows lie below the channels, where every edge crossing the gap runs
+/// straight along the flow at its target port. So any other edge whose port falls
+/// within the label's columns, or in the cell just past them, would cut through the
+/// text or run flush against it. The label sits after its own line unless such a
+/// line is in the way there and not before the line, in which case it sits before it.
+/// When both sides are blocked it stays after the line.
+fn label_side(members: &[usize], routes: &[Route], index: usize, across: usize) -> usize {
+    let own = routes[index].dst;
+    let blocked = |lo: usize, hi: usize| {
+        members.iter().any(|&other| {
+            let at = routes[other].dst;
+            other != index && at != own && (lo..=hi).contains(&at)
+        })
+    };
+    let after = own + 1;
+    if !blocked(after, after + across) {
+        return after;
+    }
+    match own.checked_sub(across) {
+        Some(before) if !blocked(before.saturating_sub(1), own.saturating_sub(1)) => before,
+        _ => after,
+    }
 }
 
 /// How many flow cells an end note occupies: one row when the flow runs down the
