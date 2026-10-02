@@ -1,4 +1,4 @@
-// repo-infra: workflow-lib v5
+// repo-infra: workflow-lib v6
 'use strict';
 
 // publish-gitea-packages (D27): which release assets are packages, where

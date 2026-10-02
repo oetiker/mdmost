@@ -1,17 +1,23 @@
 name: Create release PR
-# repo-infra: release-pr-build v1
+# repo-infra: release-pr v5
 #
-# The release_build variant of release-pr.yml (D26). The release pull request
-# builds the release before anyone merges it, so nothing is written to main
-# after the merge and publishing never rebuilds. A reusable workflow can only
-# be called as a job, so this is three jobs:
+# One release flow for every repository (D28). The release is built and
+# tested on the release branch before the pull request exists, so the pull
+# request can be merged at once:
 #
-#   prepare  guard, two refusals, stale drafts, roll, bump, commit the branch
-#   build    .github/workflows/release-build.yml -- the project's own file,
-#            read-only, no secrets
-#   finish   commit the declared release files, draft the release with every
-#            built file and release-build.json attached, mark the head
-#            `release-built`, then open the pull request
+#   prepare  guard, refusals, stale drafts and parked runs, roll, bump,
+#            commit the release branch
+#   build    .github/workflows/release-build.yml (assembled; the project's
+#            own build jobs live in release-build-local.yml)
+#   test     .github/workflows/ci.yml on the release branch, beside build
+#   finish   commit the declared release files, draft the release, mark the
+#            head, write the two required checks, open the pull request,
+#            then judge it against main
+#
+# main is protected and GITHUB_TOKEN cannot be given a ruleset bypass: the
+# bypass list takes users, teams and GitHub Apps, and the Actions token is
+# none of those. So the release still lands through a pull request. Merging
+# it triggers release-publish.yml.
 
 on:
   workflow_dispatch:
@@ -30,22 +36,31 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# Every job grants its own permissions; the workflow level stays read-only.
 permissions:
-  contents: write
-  pull-requests: write
   checks: read
   actions: read
-  statuses: write
 
 jobs:
   prepare:
     name: Prepare the release branch
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+      # The guard reads the check runs on the dispatched commit, and the job
+      # ids of this workflow's runs on it: this run, so the guard can exclude
+      # itself, and every earlier attempt, whose failed build and test jobs
+      # sit on the same commit.
+      checks: read
+      # Also deleting the parked runs of abandoned release branches.
+      actions: write
     outputs:
       version: ${{ steps.prepare.outputs.version }}
       date: ${{ steps.prepare.outputs.date }}
       head: ${{ steps.commit.outputs.head }}
+      base: ${{ steps.commit.outputs.base }}
     steps:
       - uses: actions/checkout@v7
 
@@ -53,7 +68,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Guard (right branch, green checks)
+      - name: Guard (right branch, no failed check)
         uses: actions/github-script@v9
         with:
           script: |
@@ -68,16 +83,13 @@ jobs:
               return;
             }
 
-            // Required status checks cannot be used on the ruleset (they would
-            // deadlock the release PR), so the tests are verified here, on the
-            // commit, before any PR exists.
-            // This job is itself a check run on this commit, so the guard has
-            // to exclude its own jobs or it waits for the job doing the
-            // waiting -- 15 minutes, then "Still running: Prepare the release
-            // pull request".  It must exclude EVERY earlier attempt too, or
-            // one failed run leaves a corpse that no retry can ever get past.
-            // checks.js:guardIgnoreIds does both, and is unit-tested; this
-            // used to be inline here, where nothing could test it.
+            // The guard does not wait (D28): the test job runs the same
+            // ci.yml on this commit plus the release changes, and finish
+            // opens no pull request unless it is green. A check that already
+            // failed here is refused by name. This workflow's own jobs, and
+            // the build and test jobs of every earlier attempt, are check
+            // runs on this same commit; checks.js:guardIgnoreIds drops them
+            // all, or one failed attempt would block every retry.
             const ignoreCheckRunIds = await checks.guardIgnoreIds(github, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -85,38 +97,19 @@ jobs:
               workflowRef: process.env.GITHUB_WORKFLOW_REF,
               runId: context.runId,
             });
-
-            const state = await checks.waitForChecks(github, {
+            const state = await checks.checkState(github, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               ref: context.sha,
             }, { ignoreCheckRunIds });
-
-            if (state.timedOut) {
-              core.setFailed(
-                `Timed out waiting for checks on ${context.sha}. Still running: `
-                + state.pending.map((c) => c.name).join(', ')
-              );
+            const refusal = checks.guardVerdict(state);
+            if (refusal) {
+              core.setFailed(refusal);
               return;
             }
-            if (state.total === 0) {
-              core.setFailed(
-                `No checks ran on ${context.sha}. Refusing to release a commit `
-                + 'that nothing tested.'
-              );
-              return;
-            }
-            if (state.failed.length > 0) {
-              core.setFailed(
-                'Failing checks on this commit: '
-                + state.failed.map((c) => c.name).join(', ')
-              );
-              return;
-            }
+            core.notice(`No failed check on ${context.sha}.`);
 
-            core.notice(`All ${state.total} checks green on ${context.sha}.`);
-
-      - name: Refuse an open or unpublished release; delete stale drafts
+      - name: Refuse an open or unpublished release; delete stale drafts and parked runs
         uses: actions/github-script@v9
         with:
           script: |
@@ -153,13 +146,7 @@ jobs:
             );
             const untagged = releaseLib.untaggedRelease(latest, tags);
             if (untagged) {
-              core.setFailed(
-                `v${untagged} is in CHANGES.md on main but has no tag. `
-                + 'Re-run the failed jobs of its Publish release run; if it is '
-                + `already out under another tag, push v${untagged} by hand; to `
-                + 'abandon it, merge a pull request that moves its entries back '
-                + 'under [Unreleased].'
-              );
+              core.setFailed(releaseLib.untaggedMessage(untagged));
               return;
             }
 
@@ -172,6 +159,26 @@ jobs:
             for (const draft of stale) {
               await github.rest.repos.deleteRelease({ owner, repo, release_id: draft.id });
               core.notice(`Deleted the stale draft release ${draft.tag_name}.`);
+            }
+
+            // The parked pull_request runs of abandoned release branches. No
+            // release pull request is open at this point (refused above), so
+            // every parked release run belongs to a closed one. A failure here
+            // is a warning: the runs are clutter, not state. One failed
+            // deletion does not keep the others.
+            let parked = [];
+            try {
+              parked = await releaseLib.fetchParkedRuns(github, { owner, repo });
+            } catch (error) {
+              core.warning(`Could not list the parked runs of closed release branches: ${error.message}`);
+            }
+            for (const run of parked) {
+              try {
+                await github.rest.actions.deleteWorkflowRun({ owner, repo, run_id: run.id });
+                core.notice(`Deleted the parked run ${run.id} of ${run.head_branch}.`);
+              } catch (error) {
+                core.warning(`Could not delete the parked run ${run.id} of ${run.head_branch}: ${error.message}`);
+              }
             }
 
       - name: Compute the version and rewrite the files
@@ -221,15 +228,11 @@ jobs:
             core.setOutput('date', date);
             core.notice(`Preparing ${latest} -> v${version} (${date}).`);
 
-      # Ecosystems whose lockfile can only be rewritten by their own tool run
-      # here, between the rewrite and the commit. A Rust repository gets,
-      # verbatim:
-      #
-      #   - uses: dtolnay/rust-toolchain@stable
-      #   - run: cargo update --workspace
-      #
-      # Not --offline: the resolve needs the registry. Not || true: swallowing
-      # that failure is what tagged mdmost v0.1.1 with an inconsistent lockfile.
+      # A lockfile that only its own tool can rewrite gets that tool as a step
+      # here, between the rewrite and the commit; repo-infra has none. The
+      # commit below takes exactly CHANGES.md and the version_files paths, so
+      # such a step only lands if its file is listed there. Rust needs no step:
+      # detection lists Cargo.lock in version_files, with one regex per crate.
 
       - name: Commit the release branch
         id: commit
@@ -256,11 +259,15 @@ jobs:
               })),
             });
             core.setOutput('head', head);
+            core.setOutput('base', context.sha);
 
-  # The project's own build (D20's seam). The `uses:` path resolves at the
-  # dispatched commit on main, not on the release branch. Read-only, and no
-  # secrets: its only way to write the repository is the release-files
-  # artifact, which `finish` checks against release_files.
+  # The assembled build (D28): add-ons from "release_build" and the project's
+  # own release-build-local.yml. The `uses:` path resolves at the dispatched
+  # commit on main. contents: read, so its one way to write the repository is
+  # the release-files artifact, which `finish` checks against release_files.
+  # It gets the secrets: a build that signs a binary needs its key. No
+  # repository secret may carry write access to the repository
+  # (references/conventions.md).
   build:
     needs: prepare
     permissions:
@@ -269,16 +276,34 @@ jobs:
     with:
       version: ${{ needs.prepare.outputs.version }}
       ref: ${{ needs.prepare.outputs.head }}
+    secrets: inherit
+
+  # The same ci.yml every pull request runs, on the release branch, beside
+  # build. GitHub checks the permissions of every job of the called file,
+  # skipped or not, so this grants the union of what ci.yml's jobs ask for.
+  test:
+    needs: prepare
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: read
+      checks: write
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.head }}
+    secrets: inherit
 
   finish:
     name: Draft the release and open the pull request
-    needs: [prepare, build]
+    needs: [prepare, build, test]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: write
       statuses: write
+      # The two required checks on the head: changelog-updated and ci-passed.
+      checks: write
     steps:
       - uses: actions/checkout@v7
 
@@ -317,6 +342,7 @@ jobs:
             const version = '${{ needs.prepare.outputs.version }}';
             const date = '${{ needs.prepare.outputs.date }}';
             const prepared = '${{ needs.prepare.outputs.head }}';
+            const base = '${{ needs.prepare.outputs.base }}';
             const tag = `v${version}`;
             const branch = `release/${tag}`;
 
@@ -373,8 +399,8 @@ jobs:
               return;
             }
 
-            // 4. The commit lands before the pull request exists, so the one
-            //    "Approve workflows to run" click covers its checks.
+            // 4. The built files land on the branch before the pull request
+            //    exists.
             let head = prepared;
             if (files.length > 0) {
               head = await commitLib.commitFiles(github, {
@@ -415,14 +441,24 @@ jobs:
                 'application/octet-stream');
             }
             await upload(releaseLib.BUILD_RECORD,
-              Buffer.from(JSON.stringify({ version, head, assets: assetNames }, null, 2)),
+              Buffer.from(JSON.stringify({ version, base, head, assets: assetNames }, null, 2)),
               'application/json');
 
-            // 6. The changelog gate reads this status. A later push to the
+            // 6. The release-mode gates read this status. A later push to the
             //    branch is a new commit without it.
             await github.rest.repos.createCommitStatus({
               owner, repo, sha: head, state: 'success', context: 'release-built',
-              description: `${tag} built into a draft release`,
+              description: `${tag} built and tested`,
+            });
+
+            // 7. The ruleset requires its two contexts without naming an app,
+            //    so check runs written here satisfy it. The pull request's own
+            //    pull_request runs park; nobody needs to approve them.
+            await github.rest.checks.create({
+              owner, repo, name: 'changelog-updated', head_sha: head,
+              status: 'completed', conclusion: 'success',
+              output: { title: `${tag} rolls CHANGES.md`,
+                summary: 'Create release PR rolled [Unreleased] into this version.' },
             });
 
             const body = [
@@ -434,13 +470,14 @@ jobs:
                 ? [`- writes ${files.map((f) => `\`${f.path}\``).join(', ')} from the build`]
                 : []),
               `- built ${assetNames.length} files into a draft release for \`${tag}\``,
+              '- ran this repository\'s CI on the release branch before this pull request was opened',
               '',
-              'Review, then merge. Merging triggers **Publish release**, which tags',
-              `the built commit \`${head.slice(0, 12)}\` as \`${tag}\` and publishes the draft.`,
+              'Review, then merge; nothing needs approving. Merging triggers **Publish',
+              `release**, which tags the built commit \`${head.slice(0, 12)}\` as \`${tag}\``,
+              'and publishes the draft. Merge with a merge commit if you can.',
               '',
-              'Do not press **Update branch**: the build would no longer match the',
-              'branch, and the changelog check goes red. Closing this pull request',
-              'cancels the release.',
+              'If main moves before the merge, this pull request cannot be merged: close',
+              'it and dispatch Create release PR again. Do not press **Update branch**.',
             ].join('\n');
             const { data: pr } = await github.rest.pulls.create({
               owner, repo,
@@ -450,7 +487,26 @@ jobs:
               body,
             });
             core.notice(`Release pull request opened: ${pr.html_url}`);
+
+            // 8. Opened first, so a release that went stale while it built is
+            //    visible and says why. A push to main between this comparison
+            //    and the check write below lets release-pr-current's red
+            //    ci-passed land first and this green one replace it; the
+            //    ruleset's up-to-date rule still refuses the merge.
+            const { data: compared } = await github.rest.repos.compareCommitsWithBasehead({
+              owner, repo, basehead: `${context.payload.repository.default_branch}...${head}`,
+            });
+            const verdict = releaseLib.finishVerdict({ behindBy: compared.behind_by, tag });
+            await github.rest.checks.create({
+              owner, repo, name: 'ci-passed', head_sha: head,
+              status: 'completed', conclusion: verdict.conclusion,
+              output: { title: verdict.title, summary: verdict.summary },
+            });
+            if (verdict.conclusion !== 'success') {
+              core.setFailed(`${pr.html_url}: ${verdict.summary}`);
+              return;
+            }
             await core.summary
-              .addHeading(`Release ${tag} built`)
+              .addHeading(`Release ${tag} built and tested`)
               .addLink('Review and merge to publish', pr.html_url)
               .write();

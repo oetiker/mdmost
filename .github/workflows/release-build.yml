@@ -1,9 +1,17 @@
 name: Release build
+# repo-infra: release-build v1
+#
+# Called by Create release PR (release-pr.yml) on the release branch, before
+# the pull request exists (D28). Assembled like ci.yml: this frame, one job
+# block per add-on named in "release_build" in .github/repo-infra.json, and
+# the project's own jobs through release-build-local.yml when
+# "release_build_local" is set.
+#
+# Every file the release ships is an artifact whose name starts with
+# release-asset-; the repository files the build rewrote are the artifact
+# release-files. Both names are reserved for this workflow
+# (references/conventions.md).
 
-# Called by the release pull request's `build` job (repo-infra D26). Builds
-# every file the release ships, uploads each as a `release-asset-*` artifact,
-# and uploads the rewritten Formula/mdmost.rb as the artifact `release-files`.
-# Read-only: nothing here writes the repository.
 on:
   workflow_call:
     inputs:
@@ -17,337 +25,29 @@ on:
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
-  binaries:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            cross: true
-            package: true
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            cross: true
-            package: true
-          - target: x86_64-apple-darwin
-            os: macos-latest
-          - target: aarch64-apple-darwin
-            os: macos-14
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            windows: true
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      # man/ is not in git; it is generated from docs/manual.md. Three steps in this
-      # job need the page -- the tarball, the deb and the rpm -- so it is built once
-      # here, before any of them. The Windows zip ships no man page, so that leg
-      # skips pandoc rather than installing something nothing uses.
-      - name: Build the man page
-        if: '!matrix.windows'
-        run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            brew install pandoc
-          else
-            sudo apt-get update && sudo apt-get install -y pandoc
-          fi
-          make man
-        shell: bash
-
-      - name: Install cross
-        if: matrix.cross
-        # Pinned to the released version, not `main`: the static-musl build cannot be
-        # rehearsed locally, so it must not rest on a moving dependency.
-        run: cargo install cross --version 0.2.5 --locked
-
-      - name: Build binary
-        run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            RUSTFLAGS="-C target-feature=+crt-static" cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
-        shell: bash
-
-      - name: Create tarball
-        if: '!matrix.windows'
-        run: |
-          mkdir -p dist staging/mdmost/man
-          BINARY="target/${{ matrix.target }}/release/mdmost"
-          ARCHIVE="mdmost-${{ inputs.version }}-${{ matrix.target }}.tar.gz"
-          cp "$BINARY" staging/mdmost/
-          cp man/mdmost.1 staging/mdmost/man/
-          cp README.md LICENSE staging/mdmost/
-          # The Homebrew formula installs integrations/ out of this tarball, so it has
-          # to be in here; `brew install` never sees the repository.
-          cp -R integrations staging/mdmost/
-          tar -czvf "dist/${ARCHIVE}" -C staging mdmost
-        shell: bash
-
-      - name: Create zip (Windows)
-        if: matrix.windows
-        run: |
-          mkdir dist
-          mkdir staging/mdmost
-          $ARCHIVE = "mdmost-${{ inputs.version }}-${{ matrix.target }}.zip"
-          Copy-Item "target/${{ matrix.target }}/release/mdmost.exe" staging/mdmost/
-          Copy-Item README.md staging/mdmost/
-          Copy-Item LICENSE staging/mdmost/
-          Compress-Archive -Path staging/mdmost -DestinationPath "dist/$ARCHIVE"
-        shell: pwsh
-
-      - name: Build deb and rpm
-        if: matrix.package
-        run: |
-          cargo install cargo-deb --version '^3.7'
-          cargo install cargo-generate-rpm --version '^0.21'
-          cargo deb --no-build --no-strip --target ${{ matrix.target }}
-          cargo generate-rpm --target ${{ matrix.target }}
-          cp target/${{ matrix.target }}/debian/*.deb dist/
-          cp target/${{ matrix.target }}/generate-rpm/*.rpm dist/
-        shell: bash
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-asset-${{ matrix.target }}
-          path: dist/*
-
-  # Nothing here is compiled, but a formula with no bottle is a *source build* as far as
-  # Homebrew is concerned, and a source build refuses to run on a Mac whose Command Line
-  # Tools are older than its macOS. Bottling is how that check is skipped.
-  #
-  # This runs after `binaries` on purpose: it installs the formula from a local tap that
-  # points at the tarballs `binaries` built, because the release does not exist yet.
-  bottles:
-    name: Bottle on ${{ matrix.os }}
-    needs: binaries
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    # Only the leg that is expected to rot is allowed to fail quietly. A missing Intel
-    # bottle is a slow install for Intel Macs; a broken arm64 bottle is a real defect and
-    # fails the release.
-    #
-    # `continue-on-error` covers a leg that *runs* and fails. It does nothing for a leg
-    # that never starts, and that is the failure these labels actually have: a retired
-    # image leaves the job **queued** with no runner for the 24 hours GitHub waits before
-    # cancelling it, `formula` never fans in, and the bottle the other leg built
-    # in half a minute is left in an artifact nobody collects. That is what happened to
-    # v0.1.2, which shipped with an empty bottle block. Nothing in the workflow can catch
-    # it -- `timeout-minutes` bounds run time, not queue time -- so the labels below have
-    # to be kept current by hand, and a release that sits in `queued` is the symptom.
-    continue-on-error: ${{ matrix.optional || false }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # The oldest image per architecture, because Homebrew's fallback lets a bottle
-          # serve *newer* macOS and never older.
-          #
-          # macos-14 is arm64 and is now deprecated; it still schedules, and moving up to
-          # macos-15 would narrow the bottle to Sequoia and later, so it stays until it
-          # stops working. macos-15-intel is the last x86_64 image GitHub will ever
-          # offer -- a standard runner, not a paid larger one -- and it goes away in August
-          # 2027 along with Intel support altogether. Being macOS 15, its bottle serves
-          # Sequoia and later only: an Intel Mac on Ventura or Sonoma gets the source
-          # path, and there is no older Intel runner left to change that. It is the
-          # optional leg for that reason.
-          - os: macos-14
-          - os: macos-15-intel
-            optional: true
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: 1
-      HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
-      VERSION: ${{ inputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: release-asset-*-apple-darwin
-          path: dist
-          merge-multiple: true
-
-      # `@main`, not `@master`: Homebrew renamed the default branch of
-      # Homebrew/actions, and the old ref stopped resolving at all -- both bottle legs
-      # of the v0.3.2 release failed in "Prepare all required actions", before a step
-      # ran. Their tags are dated rather than semver, so a branch is what tracks them.
-      - uses: Homebrew/actions/setup-homebrew@main
-
-      # The release does not exist yet, so the formula's GitHub url would 404.
-      # A local tap points it at the tarball this run built; `brew bottle` still
-      # records the GitHub root url.
-      - name: Local tap with the built tarballs
-        run: |
-          set -euo pipefail
-          arm="$PWD/dist/mdmost-${VERSION}-aarch64-apple-darwin.tar.gz"
-          x86="$PWD/dist/mdmost-${VERSION}-x86_64-apple-darwin.tar.gz"
-          brew tap-new --no-git local/mdmost
-          TAP="$(brew --repository)/Library/Taps/local/homebrew-mdmost"
-          sed -e "s|^  version \".*\"|  version \"${VERSION}\"|" \
-              -e "s|url \"https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-aarch64-apple-darwin.tar.gz\"|url \"file://${arm}\"|" \
-              -e "s|url \"https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-x86_64-apple-darwin.tar.gz\"|url \"file://${x86}\"|" \
-              -e "s|sha256 \"[0-9a-f]*\" # mac-arm|sha256 \"$(shasum -a 256 "$arm" | cut -d' ' -f1)\" # mac-arm|" \
-              -e "s|sha256 \"[0-9a-f]*\" # mac-x86|sha256 \"$(shasum -a 256 "$x86" | cut -d' ' -f1)\" # mac-x86|" \
-              Formula/mdmost.rb \
-            | awk '/# BOTTLE-START/{print; skip=1; next} /# BOTTLE-END/{skip=0} !skip' \
-            > "$TAP/Formula/mdmost.rb"
-          # Homebrew 6.0 stopped loading formulae from third-party taps until they are
-          # trusted. `brew trust` does not exist before that, and the `||` keeps this
-          # working on a runner image that is still on Homebrew 5.
-          brew trust --formula local/mdmost/mdmost || true
-
-      - name: Build the bottle
-        run: |
-          set -euo pipefail
-          brew install --build-bottle local/mdmost/mdmost
-          brew bottle --json --no-rebuild \
-            --root-url="https://github.com/oetiker/mdmost/releases/download/v${VERSION}" \
-            local/mdmost/mdmost
-          # `brew bottle` writes `name--version.tag.bottle.tar.gz`, with two dashes, which
-          # is the name GitHub Packages wants. A plain `root_url` like ours is fetched as
-          # `name-version.tag.bottle.tar.gz`, with one -- see `Bottle::Filename#url_encode`
-          # against `#github_packages` in Homebrew. The json carries both names, so the
-          # rename is read from it rather than guessed at.
-          mkdir -p bottle
-          for json in ./*.bottle.json; do
-            jq -r '.[].bottle.tags[] | "\(.local_filename)\t\(.filename)"' "$json" \
-            | while IFS=$'\t' read -r local_name upload_name; do
-                mv "$local_name" "bottle/$upload_name"
-              done
-          done
-          cp ./*.bottle.json bottle/
-          ls -la bottle
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-asset-bottle-${{ matrix.os }}
-          path: bottle/*.bottle.tar.gz
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: bottle-json-${{ matrix.os }}
-          path: bottle/*.bottle.json
-
-  formula:
-    name: Rewrite the formula
-    needs: [binaries, bottles]
-    # One architecture's bottle is worth publishing alone (the optional leg).
-    if: ${{ !cancelled() && needs.binaries.result == 'success' }}
+  # A repository with nothing to build still gets a valid file, and a release
+  # without assets.
+  release-version:
+    name: Release version
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      VERSION: ${{ inputs.version }}
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.ref }}
+      - run: echo "Building v${VERSION} from ${REF}"
+        env:
+          VERSION: ${{ inputs.version }}
+          REF: ${{ inputs.ref }}
 
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: release-asset-*
-          path: artifacts
-          merge-multiple: true
-
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: bottle-json-*
-          path: bottles
-          merge-multiple: true
-
-      - name: Version, sha256 lines and the bottle block
-        run: |
-          set -euo pipefail
-          sha() { sha256sum "artifacts/mdmost-${VERSION}-$1.tar.gz" | cut -d' ' -f1; }
-          MAC_ARM=$(sha aarch64-apple-darwin)
-          MAC_X86=$(sha x86_64-apple-darwin)
-          LINUX_X86=$(sha x86_64-unknown-linux-musl)
-          LINUX_ARM=$(sha aarch64-unknown-linux-musl)
-          # Each sha256 line carries a trailing marker comment naming the artifact it
-          # belongs to, which is what makes this rewrite unambiguous.
-          sed -i \
-            -e "s/^  version \".*\"/  version \"${VERSION}\"/" \
-            -e "s|sha256 \"[0-9a-f]*\" # mac-arm|sha256 \"${MAC_ARM}\" # mac-arm|" \
-            -e "s|sha256 \"[0-9a-f]*\" # mac-x86|sha256 \"${MAC_X86}\" # mac-x86|" \
-            -e "s|sha256 \"[0-9a-f]*\" # linux-x86|sha256 \"${LINUX_X86}\" # linux-x86|" \
-            -e "s|sha256 \"[0-9a-f]*\" # linux-arm|sha256 \"${LINUX_ARM}\" # linux-arm|" \
-            Formula/mdmost.rb
-
-          # Zero bottles fails the release. The bottle legs themselves can fail without
-          # failing the run (`continue-on-error` on the optional one, and `!cancelled()`
-          # here), which is deliberate -- one architecture is worth publishing alone.
-          # Zero is not: v0.1.2 shipped with an empty bottle block and v0.3.2 with a
-          # stale one, because the old job exited 0 whatever it found. The formula
-          # arrives here carrying the PREVIOUS release's block, so leaving it alone would
-          # publish a `root_url` pointing at the previous tag under this release's
-          # version -- `mdmost-0.3.2.arm64_sonoma.bottle.tar.gz` under
-          # `.../download/v0.3.1`, a 404 on every `brew install`.
-          shopt -s nullglob
-          jsons=(bottles/*.bottle.json)
-          [ ${#jsons[@]} -gt 0 ] || { echo "::error::no bottles were built"; exit 1; }
-          # The rename must have produced exactly the names the json records.
-          for json in "${jsons[@]}"; do
-            jq -r '.[].bottle.tags[].filename' "$json" | while read -r name; do
-              [ -f "artifacts/$name" ] || { echo "::error::bottle $name was not built under that name"; exit 1; }
-            done
-          done
-
-          # Generated rather than patched line by line: which architectures produced a
-          # bottle is not known ahead of time, and a `sha256` line for a bottle that was
-          # never built would send Homebrew after a file that does not exist.
-          {
-            echo "  # BOTTLE-START"
-            echo "  bottle do"
-            echo "    root_url \"https://github.com/oetiker/mdmost/releases/download/v${VERSION}\""
-            for json in "${jsons[@]}"; do
-              # `cellar` sits on the bottle, and `brew bottle` copies it onto each tag;
-              # read the tag's own value first and fall back to the bottle's.
-              jq -r '.[].bottle as $b | $b.tags | to_entries[]
-                     | "    sha256 cellar: :\(.value.cellar // $b.cellar), \(.key): \"\(.value.sha256)\""' "$json"
-            done
-            echo "  end"
-            echo "  # BOTTLE-END"
-          } > bottle-block.txt
-          cat bottle-block.txt
-          # The generated block carries its own markers, so it replaces the old range
-          # exactly where that range was. Substituting in place rather than deleting and
-          # re-inserting is what keeps this idempotent: every release rewrites the same
-          # lines instead of drifting the whitespace around them.
-          grep -q '# BOTTLE-START' Formula/mdmost.rb || {
-            echo "::error::the bottle markers are gone from Formula/mdmost.rb"
-            exit 1
-          }
-          awk '
-            /# BOTTLE-START/ {
-              while ((getline line < "bottle-block.txt") > 0) print line
-              inside = 1
-              next
-            }
-            /# BOTTLE-END/ { inside = 0; next }
-            !inside
-          ' Formula/mdmost.rb > Formula/mdmost.rb.new
-          mv Formula/mdmost.rb.new Formula/mdmost.rb
-
-          mkdir -p release-files/Formula
-          cp Formula/mdmost.rb release-files/Formula/mdmost.rb
-          cat release-files/Formula/mdmost.rb
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-files
-          path: release-files/
+  # repo-infra: release-build-local-job v1
+  # The project brings the build, the standard brings the seam (D20's shape,
+  # D28). .github/workflows/release-build-local.yml is the project's own file:
+  # it triggers on workflow_call only with the inputs version and ref, checks
+  # out ref in every actions/checkout, sets timeout-minutes on each of its
+  # jobs, uploads each shipped file as a release-asset-* artifact and the
+  # repository files it rewrote as release-files. references/conventions.md.
+  release-build-local:
+    uses: ./.github/workflows/release-build-local.yml
+    with:
+      version: ${{ inputs.version }}
+      ref: ${{ inputs.ref }}
+    secrets: inherit

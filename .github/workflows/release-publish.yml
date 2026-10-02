@@ -1,5 +1,5 @@
 name: Publish release (automatic)
-# repo-infra: release-publish v4
+# repo-infra: release-publish v5
 #
 # Half two. Merging the release pull request lands the rolled CHANGES.md on main,
 # and that merge triggers this.
@@ -12,14 +12,15 @@ name: Publish release (automatic)
 # There is deliberately no workflow_dispatch. Publishing should be a consequence
 # of merging a release pull request, never something started from a dropdown.
 #
-# Recovery without release_build: `publish` is idempotent by tag presence, so a
-# whole-workflow re-run after the tag exists skips everything and the release
-# stays a draft. Use **Re-run failed jobs**, which keeps the successful job's
-# outputs. With release_build (D26), `publish` decides from the tag and the
-# releases together (lib/publish.js), and both kinds of re-run finish a
-# stopped release: a whole-workflow re-run also repeats the add-ons that
-# already succeeded, and each standard add-on skips what an earlier attempt
-# uploaded. A `publish_local` job must do the same.
+# Recovery (D28): `publish` decides from the tag and the releases together
+# (lib/publish.js), so **Re-run failed jobs** and a whole-workflow re-run both
+# finish a stopped release: a whole-workflow re-run also repeats the add-ons
+# that already succeeded, and each standard add-on skips what an earlier
+# attempt uploaded. A `publish_local` job must do the same.
+#
+# Before it tags, publish compares the tree of the release pull request's
+# merge commit with the tree of the head that was built. With the ruleset's
+# up-to-date rule on they are equal; a mismatch tags nothing.
 
 on:
   push:
@@ -33,6 +34,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   publish:
@@ -124,45 +126,8 @@ jobs:
               core.notice(`Moved ${major} to ${tag}.`);
             };
 
-            if (!config.release_build) {
-              // Idempotent: an ordinary pull request that edits [Unreleased] also
-              // triggers this workflow, finds the tag already present, and stops.
-              try {
-                await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
-                core.notice(`${tag} is already tagged - nothing to do.`);
-                return;
-              } catch (error) {
-                if (error.status !== 404) throw error;
-              }
-
-              await github.rest.git.createRef({
-                owner, repo, ref: `refs/tags/${tag}`,
-                sha: await makeTag(tag, `Release ${tag}`, context.sha),
-              });
-              core.notice(`Tagged ${tag}.`);
-              await moveMajor(context.sha);
-
-              // Draft, so publish add-ons can attach artifacts before anyone
-              // sees the release. The finalize job below publishes it.
-              const { data: created } = await github.rest.repos.createRelease({
-                owner, repo,
-                tag_name: tag,
-                name: tag,
-                body: changesLib.notesFor(fileIO.read('CHANGES.md'), version),
-                draft: true,
-                prerelease: false,
-                make_latest: 'true',
-              });
-
-              core.setOutput('version', version);
-              core.setOutput('tag', tag);
-              core.setOutput('release_id', String(created.id));
-              core.setOutput('head', context.sha);
-              return;
-            }
-
-            // release_build (D26): the release pull request built the release
-            // into a draft. Tag the commit that was built, not this merge.
+            // The release pull request built the release into a draft (D26, D28).
+            // Tag the commit that was built, not this merge.
             const publishLib = require(`${lib}/publish.js`);
             const releaseLib = require(`${lib}/release.js`);
             let tagCommit = null;
@@ -242,6 +207,32 @@ jobs:
               const problem = publishLib.validateBuildRecord(record, version, latestAtHead);
               if (problem) {
                 core.setFailed(`${tag}: ${problem}. Nothing was tagged.`);
+                return;
+              }
+              // D28: main must be the release that was built. Find the release
+              // pull request by its branch, not from the recorded head or
+              // context.sha: for a commit off the default branch (a squash or
+              // rebase merge) the commit association lists only open pull
+              // requests, and a failed first publish followed by an ordinary
+              // merge starts a new run on a later commit.
+              const { data: associated } = await github.rest.pulls.list({
+                owner, repo, state: 'closed', head: `${owner}:release/${tag}`, per_page: 100,
+              });
+              const mergeSha = releaseLib.releasePrMergeCommit(associated, {
+                fullName: `${owner}/${repo}`, tag,
+              });
+              const treeOf = async (sha) => (await github.rest.git.getCommit({
+                owner, repo, commit_sha: sha,
+              })).data.tree.sha;
+              const treeProblem = releaseLib.treeVerdict({
+                tag,
+                head: record.head,
+                mergeSha,
+                mergeTree: mergeSha ? await treeOf(mergeSha) : null,
+                headTree: await treeOf(record.head),
+              });
+              if (treeProblem) {
+                core.setFailed(treeProblem);
                 return;
               }
               head = record.head;
@@ -416,6 +407,8 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+      # D28: deleting the parked pull_request runs of the release branch.
+      actions: write
     steps:
       # For .github/workflows/lib/assets.js, below.
       # The tagged head: a re-run reads release_assets the same way.
@@ -446,9 +439,9 @@ jobs:
             // assembler, from the same declarations the `needs:` list above
             // comes from. Never a literal typed a second time by hand.
             const expected = [];
-            // D26: a release the pull request built must carry every file the
-            // repository declared, read at the tagged head.
-            const declared = config.release_build ? (config.release_assets || []) : [];
+            // D26, D28: the release must carry every file the repository
+            // declared, read at the tagged head.
+            const declared = config.release_assets || [];
 
             // The `needs:` list above is ordering, and ordering cannot report
             // its own absence: reverted, it does not fail, it stops waiting.
@@ -506,3 +499,29 @@ jobs:
               .addRaw(`Assets: ${names.join(', ') || 'none'}`)
               .addLink('Release', released.html_url)
               .write();
+
+      # The release pull request's own pull_request runs parked for an
+      # approval nobody needed to give (D28). Nothing depends on them.
+      - name: Delete the parked runs of the release branch
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const branch = 'release/${{ needs.publish.outputs.tag }}';
+            let parked;
+            try {
+              const releaseLib = require(
+                `${process.env.GITHUB_WORKSPACE}/.github/workflows/lib/release.js`);
+              parked = await releaseLib.fetchParkedRuns(github, { owner, repo, branch });
+            } catch (error) {
+              core.warning(`Could not list the parked runs of the release branch: ${error.message}`);
+              return;
+            }
+            // One failed deletion does not keep the others.
+            for (const run of parked) {
+              try {
+                await github.rest.actions.deleteWorkflowRun({ owner, repo, run_id: run.id });
+              } catch (error) {
+                core.warning(`Could not delete the parked run ${run.id}: ${error.message}`);
+              }
+            }
