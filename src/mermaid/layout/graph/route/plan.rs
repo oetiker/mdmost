@@ -365,19 +365,17 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
                 .max(note_extent(input, edge.tail_label.as_deref()));
         }
     }
+    untangle_swaps(input, members, routes);
     let jogs: Vec<usize> = members
         .iter()
         .copied()
         .filter(|&index| routes[index].src != routes[index].dst)
         .collect();
-    let spans: Vec<(usize, usize)> = jogs
+    let ends: Vec<(usize, usize)> = jogs
         .iter()
-        .map(|&index| {
-            let route = &routes[index];
-            (route.src.min(route.dst), route.src.max(route.dst))
-        })
+        .map(|&index| (routes[index].src, routes[index].dst))
         .collect();
-    let (colours, channels) = colour(&spans);
+    let (colours, channels) = stack_channels(&ends);
     for (&index, &channel) in jogs.iter().zip(&colours) {
         routes[index].channel = Some(channel);
     }
@@ -472,6 +470,127 @@ fn note_extent(input: &Input<'_>, note: Option<&str>) -> usize {
     }
 }
 
+/// Gives every jog `(src, dst)` a channel, so that no two jogs ever share line.
+///
+/// Jogs whose sideways runs overlap get different channels, as in [`colour`]. On top
+/// of that, a jog that ends in the column where another one starts runs below it:
+/// the other edge then leaves that column before this one arrives, and the two read
+/// as a step. The other way round both would run down the same cells between their
+/// two channels, and the eye could no longer tell them apart. A jog that also
+/// starts where the other ends cannot be ordered either way; [`untangle_swaps`]
+/// moves such a port beforehand, and any longer cycle is cut where it is found.
+fn stack_channels(ends: &[(usize, usize)]) -> (Vec<usize>, usize) {
+    let count = ends.len();
+    let span = |i: usize| (ends[i].0.min(ends[i].1), ends[i].0.max(ends[i].1));
+    // `above[i]` lists the jogs that must take a channel before jog `i`.
+    let above: Vec<Vec<usize>> = (0..count)
+        .map(|i| {
+            (0..count)
+                .filter(|&j| j != i && ends[j].0 == ends[i].1)
+                .collect()
+        })
+        .collect();
+    let mut used: Vec<Vec<(usize, usize)>> = Vec::new();
+    let mut out = vec![0usize; count];
+    let mut done = vec![false; count];
+    for _ in 0..count {
+        let pending = || (0..count).filter(|&i| !done[i]);
+        let ready = pending()
+            .filter(|&i| above[i].iter().all(|&j| done[j]))
+            .min_by_key(|&i| (span(i), i));
+        let Some(i) = ready.or_else(|| pending().min_by_key(|&i| (span(i), i))) else {
+            break;
+        };
+        let floor = above[i]
+            .iter()
+            .filter(|&&j| done[j])
+            .map(|&j| out[j] + 1)
+            .max()
+            .unwrap_or(0);
+        let (lo, hi) = span(i);
+        let fits = |taken: &Vec<(usize, usize)>| taken.iter().all(|&(a, b)| hi < a || lo > b);
+        let chosen = (floor..used.len())
+            .find(|&c| fits(&used[c]))
+            .unwrap_or(used.len().max(floor));
+        if chosen >= used.len() {
+            used.resize(chosen + 1, Vec::new());
+        }
+        used[chosen].push((lo, hi));
+        out[i] = chosen;
+        done[i] = true;
+    }
+    (out, used.len())
+}
+
+/// Moves one port of every pair of jogs that swap columns, one ending where the other
+/// starts and the other way round.
+///
+/// Two fans spread evenly over boxes that line up produce this when their edges
+/// cross, and no channel order keeps such a pair apart (see [`stack_channels`]): it
+/// is drawn as one loop. Moving the arrival port of either edge by one cell leaves a
+/// single crossing. The port moves towards the edge's own source, onto a plain
+/// border cell that no other line of the gap starts in and that keeps a cell of air
+/// to every other arrival port; when neither edge has such a cell the pair stays as
+/// it is.
+fn untangle_swaps(input: &Input<'_>, members: &[usize], routes: &mut [Route]) {
+    for (pos, &a) in members.iter().enumerate() {
+        for &b in &members[pos + 1..] {
+            let (ra, rb) = (&routes[a], &routes[b]);
+            let swapped = ra.src != ra.dst && ra.dst == rb.src && rb.dst == ra.src;
+            if !swapped {
+                continue;
+            }
+            for index in [a, b] {
+                if let Some(at) = shifted_port(input, members, routes, index) {
+                    routes[index].dst = at;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// A free cell one step from the arrival port of segment `index`, nearer its source
+/// first.
+fn shifted_port(
+    input: &Input<'_>,
+    members: &[usize],
+    routes: &[Route],
+    index: usize,
+) -> Option<usize> {
+    let id = input.layered.segs[index].b;
+    if !is_item(input, id) || input.ports[id] == PortPolicy::Center {
+        return None;
+    }
+    let (src, dst) = (routes[index].src, routes[index].dst);
+    let toward = if src < dst { dst - 1 } else { dst + 1 };
+    let away = if src < dst {
+        dst + 1
+    } else {
+        dst.checked_sub(1)?
+    };
+    let base = input.cross[id];
+    let (first, last) = (base + 1, (base + input.cross_size[id]).checked_sub(2)?);
+    let looped = input.loops.iter().any(|&(item, _)| item == id);
+    let plain = |at: usize| {
+        input.side_in[id]
+            .get(at - base)
+            .is_none_or(|&cell| cell == SideCell::Art)
+            && !input.ruled[id].get(at - base).copied().unwrap_or(false)
+    };
+    let clear = |at: usize| {
+        members.iter().all(|&other| {
+            other == index || {
+                let route = &routes[other];
+                route.src != at && route.dst.abs_diff(at) > 1
+            }
+        })
+    };
+    [toward, away].into_iter().find(|&at| {
+        (first..=last).contains(&at) && !(looped && at == last) && plain(at) && clear(at)
+    })
+}
+
 /// Greedy interval colouring: intervals sharing a colour never overlap.
 fn colour(spans: &[(usize, usize)]) -> (Vec<usize>, usize) {
     let mut order: Vec<usize> = (0..spans.len()).collect();
@@ -519,4 +638,48 @@ pub(super) fn stack_ranks(input: &Input<'_>, gaps: &[Gap]) -> (Vec<usize>, Vec<u
         cursor += gaps.get(rank).map_or(0, |gap| gap.size);
     }
     (flow, band_end, cursor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stack_channels;
+
+    #[test]
+    fn a_jog_ending_where_another_starts_runs_below_it() {
+        // Airlock 25 -> Web UI 46, hin-cred-mgr 46 -> HIN LDAP 76: drawn the other
+        // way round, both run down column 46 between their channels.
+        for ends in [[(25, 46), (46, 76)], [(46, 76), (25, 46)]] {
+            let (channels, count) = stack_channels(&ends);
+            let (arriving, leaving) = if ends[0].1 == 46 { (0, 1) } else { (1, 0) };
+            assert!(
+                channels[arriving] > channels[leaving],
+                "{ends:?} -> {channels:?}"
+            );
+            assert_eq!(count, 2);
+        }
+    }
+
+    #[test]
+    fn the_order_carries_along_a_chain() {
+        let ends = [(5, 10), (10, 20), (20, 30)];
+        let (channels, _) = stack_channels(&ends);
+        assert!(
+            channels[0] > channels[1] && channels[1] > channels[2],
+            "{channels:?}"
+        );
+    }
+
+    #[test]
+    fn jogs_that_never_meet_share_a_channel() {
+        let (channels, count) = stack_channels(&[(1, 5), (8, 12), (20, 14)]);
+        assert_eq!(channels, vec![0, 0, 0]);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn a_swapped_pair_still_gets_two_channels() {
+        let (channels, count) = stack_channels(&[(15, 27), (27, 15)]);
+        assert_ne!(channels[0], channels[1]);
+        assert_eq!(count, 2);
+    }
 }

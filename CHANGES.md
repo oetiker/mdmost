@@ -13,6 +13,7 @@
 - A Mermaid label written as a markdown string, for example ``A["`**bold** text`"]``, no longer shows its backticks and stars, and one that spans several lines no longer fails with "cannot read a node shape". Its `**bold**`, `__bold__`, `*italic*` and `_italic_` are drawn bold and italic.
 - Mermaid labels draw `<b>`, `<strong>`, `<i>` and `<em>` as bold and italic instead of showing the tags as text.
 - A Mermaid edge label no longer touches the line of another edge that runs next to it (`│headers│`). When the space after its own line is taken, the label moves to the other side of the line.
+- Two crossing Mermaid edges, where one ends in the column the other starts from, are no longer drawn over each other as one loop or one shared line. Before, the arrows from REST API to LDAP management and from Web UI to Zimbra management could not be told apart.
 - In the man page, options and configuration keys are shown as indented option paragraphs instead of bullet lists.
 
 ## 0.6.0 - 2026-09-30
