@@ -3411,20 +3411,32 @@ fn a_composite_state_title_maps_back_to_the_document() {
     every_span_names_its_own_cells(&canvas, doc);
     no_span_sits_on_line_art(&canvas);
 
-    // The same title over a narrower frame, where the top edge has no room for it: a
-    // frame clips its title, and the span may only name the bytes behind the cells that
-    // survived the clip. An implementation that names the whole title regardless passes
-    // the assertions above and fails these.
-    let narrow =
-        "```mermaid\nstateDiagram-v2\n  state \"Doing work\" as w {\n    a --> b\n  }\n```\n";
-    let canvas = render(narrow, 80);
-    let span = span_for(&canvas, narrow, "Doing ");
+    // A title too long for the frame to grow to: a frame clips its title, and the span
+    // may only name the bytes behind the cells that survived the clip. An
+    // implementation that names the whole title regardless passes the assertions above
+    // and fails these.
+    let long = "Doing work that goes on and on and on and on and on and on and on and on";
+    let narrow = format!(
+        "```mermaid\nstateDiagram-v2\n  state \"{long}\" as w {{\n    a --> b\n  }}\n```\n"
+    );
+    let canvas = render(&narrow, 80);
+    let span = canvas
+        .spans()
+        .iter()
+        .find(|s| narrow[s.source_start..s.source_end].starts_with("Doing"))
+        .expect("the clipped title keeps a span");
+    let named = &narrow[span.source_start..span.source_end];
+    assert!(
+        named.len() < long.len(),
+        "the title was not clipped: {named:?}"
+    );
     assert_eq!(
         span_cells(&canvas, span),
-        "Doing ",
+        named,
         "a clipped title names only what is drawn: {:?}",
         canvas.row_text(span.row)
     );
+    let narrow = narrow.as_str();
     every_span_names_its_own_cells(&canvas, narrow);
     no_span_sits_on_line_art(&canvas);
 }

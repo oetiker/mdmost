@@ -330,6 +330,66 @@ fn ruled_offsets(canvas: &Canvas, vertical: bool) -> Vec<bool> {
     }
 }
 
+/// Where a frame's title goes and how wide the frame becomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TitlePlace {
+    /// Columns between the two side borders.
+    inner: usize,
+    /// How far the content moves right inside them.
+    shift: usize,
+    /// The frame column the space before the title is written to.
+    at: usize,
+}
+
+/// Places a title `title` columns wide over content `content` columns wide.
+///
+/// A frame narrower than its title cut it off: `subgraph s["A rather long title"]`
+/// around one small node drew `╭ A rath╮`. So the frame grows to hold the title and a
+/// space either side, though never past `cap`, the width a node's own label may take,
+/// so that one long title cannot push the whole diagram off the page.
+///
+/// A title written over a node an outside edge must reach also stops that edge at the
+/// border, because no line crosses a letter. `crossed` holds those nodes as
+/// `(column, width)` inside the content, and every one of them keeps at least one cell
+/// of plain frame above its interior. The first fit wins, in this order: the title at
+/// the left with the content centred; the title moved right; the frame widened one
+/// column at a time. When nothing fits within `cap`, the plain layout is used and the
+/// edge ends at the frame.
+fn place_title(content: usize, title: usize, crossed: &[(usize, usize)], cap: usize) -> TitlePlace {
+    let block = if title == 0 { 0 } else { title + 2 };
+    let narrowest = content.max(block.min(cap.max(content)));
+    let fits = |place: TitlePlace| {
+        crossed.iter().all(|&(col, cols)| {
+            // Frame columns: the border, the padding, the shift.
+            let lo = col + 2 + place.shift + 1;
+            let hi = (col + 2 + place.shift + cols).saturating_sub(2);
+            (lo..=hi).any(|at| at < place.at || at >= place.at + block)
+        })
+    };
+    let plain = TitlePlace {
+        inner: narrowest,
+        shift: (narrowest - content) / 2,
+        at: 1,
+    };
+    if block == 0 || crossed.is_empty() || fits(plain) {
+        return plain;
+    }
+    for inner in narrowest..=cap.max(narrowest) {
+        let centred = (inner - content) / 2;
+        let shifts =
+            std::iter::once(centred).chain((0..=inner - content).filter(|&s| s != centred));
+        for shift in shifts {
+            for at in 1..=(inner + 1).saturating_sub(block).max(1) {
+                let place = TitlePlace { inner, shift, at };
+                if fits(place) {
+                    return place;
+                }
+            }
+        }
+    }
+    plain
+}
+
 /// What each cell along one side of `canvas` holds.
 ///
 /// `inwards` picks the side an incoming edge arrives at; otherwise it is the side an
@@ -355,13 +415,33 @@ fn side_cells(canvas: &Canvas, direction: Direction, inwards: bool) -> Vec<SideC
     };
     // The side an edge enters by is the near one for a top-down or left-to-right flow.
     let near = matches!(direction, Direction::TopToBottom | Direction::LeftToRight) == inwards;
-    if Frame::vertical(direction) {
+    let mut side: Vec<SideCell> = if Frame::vertical(direction) {
         let row = if near { 0 } else { rows.saturating_sub(1) };
         (0..cols).map(|col| cell(row, col)).collect()
     } else {
         let col = if near { 0 } else { cols.saturating_sub(1) };
         (0..rows).map(|row| cell(row, col)).collect()
+    };
+    // A space between two words of a title is part of the title, not a gap in the
+    // frame: an edge let through there drew `╭ A rather│long title`. Only the margin
+    // spaces between the title and the frame line stay blank.
+    let mut index = 0;
+    while index < side.len() {
+        if side[index] != SideCell::Blank {
+            index += 1;
+            continue;
+        }
+        let end = (index..side.len())
+            .find(|&at| side[at] != SideCell::Blank)
+            .unwrap_or(side.len());
+        let before = index.checked_sub(1).map(|at| side[at]);
+        let after = side.get(end).copied();
+        if before == Some(SideCell::Text) && after == Some(SideCell::Text) {
+            side[index..end].fill(SideCell::Text);
+        }
+        index = end;
     }
+    side
 }
 
 /// Where a node sits inside its container box, measured along the parent's axes.
@@ -478,8 +558,35 @@ impl Ctx<'_> {
         let inner = self.level(&items, direction);
         match &group.title {
             None => inner,
-            Some(title) => self.frame(inner, title),
+            Some(title) => {
+                let crossed = self.crossed(group, &inner, inherited);
+                self.frame(inner, title, &crossed)
+            }
         }
+    }
+
+    /// The nodes of `drawn` that an edge from outside `group` meets through the frame's
+    /// top edge, as their columns inside `drawn`.
+    ///
+    /// Only a vertical parent flow sends edges through the top edge, which is the edge
+    /// the title is written into. Which end of the edge is outside does not matter: an
+    /// edge reversed to break a cycle crosses the other way.
+    fn crossed(&self, group: &GroupSpec, drawn: &Drawn, parent: Direction) -> Vec<(usize, usize)> {
+        if !Frame::vertical(parent) || group.title.is_none() {
+            return Vec::new();
+        }
+        let inside = |node: NodeIdx| drawn.hints.iter().any(|&(other, _)| other == node);
+        drawn
+            .hints
+            .iter()
+            .filter(|&&(node, _)| {
+                self.spec.edges.iter().any(|edge| {
+                    (edge.from == node && !inside(edge.to))
+                        || (edge.to == node && !inside(edge.from))
+                })
+            })
+            .map(|&(_, spot)| (spot.col, spot.cols))
+            .collect()
     }
 
     /// Wraps a drawn container in its titled frame.
@@ -489,43 +596,54 @@ impl Ctx<'_> {
     /// [`Canvas::framed`], because the span that maps the title back to the document has
     /// to name the bytes behind the cells that were really painted: computing the drawn
     /// text once and both drawing and mapping it is the only way the two cannot disagree.
-    fn frame(&self, drawn: Drawn, title: &DrawnLabel) -> Drawn {
+    ///
+    /// `crossed` lists, in the columns of `drawn`, the nodes an edge from outside
+    /// reaches through the top edge. The title is placed so that it leaves each of them
+    /// at least one cell of plain frame to cross; see [`place_title`].
+    fn frame(&self, drawn: Drawn, title: &DrawnLabel, crossed: &[(usize, usize)]) -> Drawn {
         let styles = self.theme.diagram;
-        let mut padded = Canvas::new(drawn.canvas.width(), 1, self.theme.base());
-        padded.append(&drawn.canvas, self.theme.base());
-        padded.push_blank_row(self.theme.base());
-        let padded = padded.indent(1, 1, self.theme.base());
-        // `framed` writes a space, the title and a space into an edge `inner` columns
-        // wide, and draws no title at all below four columns.
-        let inner = usize::from(padded.width());
+        let base = self.theme.base();
+        let mut padded = Canvas::new(drawn.canvas.width(), 1, base);
+        padded.append(&drawn.canvas, base);
+        padded.push_blank_row(base);
+        let padded = padded.indent(1, 1, base);
+        let content = usize::from(padded.width());
+        let title_cols = title
+            .rows
+            .first()
+            .map_or(0, |row| crate::text::display_width(&row.text));
+        let place = place_title(content, title_cols, crossed, usize::from(self.budget));
+        let extra = u16::try_from(place.inner - content).unwrap_or(0);
+        let left = u16::try_from(place.shift).unwrap_or(0);
+        let padded = padded.indent(left, extra.saturating_sub(left), base);
+        let mut canvas = padded.framed(BorderSet::DASHED, styles.group_border, None, base);
+        // A space, the title and a space, clipped so they never reach the corner.
+        let room = (place.inner + 1).saturating_sub(place.at + 2);
         let head = title
             .rows
             .first()
-            .filter(|_| inner >= 4)
+            .filter(|_| place.inner >= 4)
             .map(|row| Piece {
-                text: crate::text::truncate_to_width(&row.text, inner - 1).to_string(),
+                text: crate::text::truncate_to_width(&row.text, room).to_string(),
                 index: row.index,
                 at: row.at,
             })
             .filter(|row| !row.text.is_empty());
-        let heading = head
-            .as_ref()
-            .map(|row| Line::new(vec![Span::new(row.text.clone(), styles.group_title)]));
-        let mut canvas = padded.framed(
-            BorderSet::DASHED,
-            styles.group_border,
-            heading.as_ref(),
-            self.theme.base(),
-        );
-        // The title lands one column past the border and the space that follows it.
         if let Some(head) = &head {
-            chrome::label_spans(&mut canvas, &title.label, head, 0, 2);
+            let spaced = Line::new(vec![
+                Span::new(" ", styles.group_border),
+                Span::new(head.text.clone(), styles.group_title),
+                Span::new(" ", styles.group_border),
+            ]);
+            canvas.write_line(0, place.at, &spaced, styles.group_border);
+            chrome::label_spans(&mut canvas, &title.label, head, 0, place.at + 1);
         }
-        // The frame adds one row and column of border plus one of padding.
+        // The frame adds one row and column of border plus one of padding, and the
+        // content moved right by `shift` within a frame widened for its title.
         let hints = drawn
             .hints
             .into_iter()
-            .map(|(node, spot)| (node, spot.shifted(2, 2)))
+            .map(|(node, spot)| (node, spot.shifted(2, 2 + place.shift)))
             .collect();
         Drawn { canvas, hints }
     }

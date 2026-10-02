@@ -411,3 +411,23 @@ fn a_port_keeps_off_a_compartment_rule() {
         }
     }
 }
+
+#[test]
+fn a_space_inside_a_frame_title_is_not_a_gap() {
+    use super::{SideCell, side_cells};
+    use crate::text::{Line, Span};
+    let theme = Theme::default_dark();
+    let title = Line::new(vec![Span::new("ab cd", theme.diagram.group_title)]);
+    let canvas = Canvas::from_text(12, "", theme.base()).framed(
+        BorderSet::DASHED,
+        theme.diagram.group_border,
+        Some(&title),
+        theme.base(),
+    );
+    let side = side_cells(&canvas, Direction::TopToBottom, true);
+    // `╭ ab cd ╌╌╌╌╌╮`: the margin spaces are gaps, the one between the words is not.
+    assert_eq!(side[1], SideCell::Blank);
+    assert_eq!(side[4], SideCell::Text);
+    assert_eq!(side[7], SideCell::Blank);
+    assert_eq!(side[8], SideCell::Art);
+}

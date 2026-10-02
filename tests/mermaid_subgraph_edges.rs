@@ -79,3 +79,23 @@ fn a_fan_of_edges_into_a_subgraph_reaches_each_node() {
         160,
     );
 }
+
+#[test]
+fn a_subgraph_title_wider_than_its_content_is_drawn_whole() {
+    let src = r#"flowchart TB
+    a["outside"]
+    subgraph s["A rather long title"]
+        c
+    end
+    a --> c
+"#;
+    every_arrow_meets_a_node(src, 120);
+    let rows = grid(src, 120);
+    assert!(
+        rows.iter().any(|row| row
+            .iter()
+            .collect::<String>()
+            .contains(" A rather long title ╮")),
+        "title cut off"
+    );
+}
