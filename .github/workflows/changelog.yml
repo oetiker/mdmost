@@ -1,5 +1,5 @@
 name: Changelog
-# repo-infra: changelog v3
+# repo-infra: changelog v4
 #
 # Required, not advisory (spec D2). Being required is only safe because the
 # escape hatch below is a JOB-level `if:`. A job skipped by a condition
@@ -7,9 +7,10 @@ name: Changelog
 # Pending forever and blocks the merge. Never add paths: or paths-ignore: to
 # this workflow (spec D13).
 #
-# The release PR is not blocked by being GITHUB_TOKEN-authored: its runs are
-# created in an approval-required state and start when a maintainer clicks
-# "Approve workflows to run".
+# A release pull request is opened by GITHUB_TOKEN, so its runs park until
+# someone approves them. Nobody needs to (D28): Create release PR writes this
+# check itself. This job exists for the case where someone approves them
+# anyway, or presses Update branch, and then agrees with Create release PR.
 
 on:
   pull_request:
@@ -19,7 +20,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
-  # D26: the release-built commit status on a release pull request's head.
+  # D28 release mode: the release-built commit status on the head.
   statuses: read
 
 jobs:
@@ -31,9 +32,8 @@ jobs:
     # check is required. The label must exist in the repository: a label that
     # does not exist is silently ignored by dependabot.
     #
-    # release/* always runs (D26): on a repository with release_build set, a
-    # release pull request is gated on its build below, and the label must
-    # not turn that red check green after an Update branch.
+    # release/* always runs: a release pull request is gated on its build, and
+    # the label must not turn that red check green after an Update branch.
     if: >-
       startsWith(github.head_ref, 'release/') ||
       !contains(github.event.pull_request.labels.*.name, 'no-changelog')
@@ -42,52 +42,45 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The library is loaded from the base commit (D28), so a pull request
+      # that edits lib/changes.js or lib/release.js is judged by main's rules.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: repo-infra-base
+
       - uses: actions/github-script@v9
         with:
           script: |
-            const lib = `${process.env.GITHUB_WORKSPACE}/.github/workflows/lib`;
-            const changes = require(`${lib}/changes.js`);
-            const releaseLib = require(`${lib}/release.js`);
+            const ws = process.env.GITHUB_WORKSPACE;
+            const baseLib = `${ws}/repo-infra-base/.github/workflows/lib`;
+            // The base's changes.js when it has gateVerdict. The pull request
+            // that installs or upgrades the library finds none there, or one
+            // without it (v0.2.0 shipped workflow-lib v4, before gateVerdict),
+            // and runs its own. The base commit decides which, not the pull
+            // request.
+            const baseChanges = (() => {
+              try {
+                const lib = require(`${baseLib}/changes.js`);
+                return typeof lib.gateVerdict === 'function' ? lib : null;
+              } catch (error) {
+                return null;
+              }
+            })();
+            const changes = baseChanges
+              || require(`${ws}/.github/workflows/lib/changes.js`);
             const { owner, repo } = context.repo;
             const pr = context.payload.pull_request;
 
-            // Both sides come from the API rather than from the checkout. On a
-            // pull_request event the checkout is the merge commit, and comparing
-            // against a base that is not in a shallow clone needs fetch-depth: 0.
-            const read = async (path, ref) => {
-              const { data } = await github.rest.repos.getContent({ owner, repo, path, ref });
-              return Buffer.from(data.content, 'base64').toString('utf8');
-            };
-
             if (pr.head.ref.startsWith('release/')) {
-              // From the base commit: a pull request must not be able to turn
-              // its own gate off.
-              let config = {};
-              try {
-                config = JSON.parse(await read('.github/repo-infra.json', pr.base.sha));
-              } catch (error) {
-                if (error.status !== 404) throw error;
-              }
-              if (!config.release_build) {
-                core.notice('release/* is exempt: the release workflow writes CHANGES.md itself.');
-                return;
-              }
-              if (releaseLib.isReleasePr(pr, `${owner}/${repo}`)) {
-                // The statuses of the pull request's head commit, not of the
-                // merge commit: the build sets its status on the head.
-                const statuses = await github.paginate(
-                  github.rest.repos.listCommitStatusesForRef,
-                  { owner, repo, ref: pr.head.sha, per_page: 100 },
-                );
-                if (!releaseLib.releaseBuilt(statuses)) {
-                  core.setFailed(
-                    'the release branch changed after it was built (the Update branch '
-                    + 'button does this); close this pull request and dispatch Create '
-                    + 'release PR again'
-                  );
+              const releaseLib = require(`${baseLib}/release.js`);
+              const verdict = await releaseLib.releaseModeVerdict(github, { owner, repo, pr });
+              if (verdict !== null) {
+                if (!verdict.ok) {
+                  core.setFailed(verdict.message);
                   return;
                 }
-                core.notice(`${pr.head.sha} is the commit the release was built from.`);
+                core.notice(verdict.message);
                 return;
               }
               // Anyone else's release/* branch: the ordinary rules, label included.
@@ -98,9 +91,13 @@ jobs:
               return;
             }
 
+            // Both sides come from the API rather than from the checkout. On a
+            // pull_request event the checkout is the merge commit, and comparing
+            // against a base that is not in a shallow clone needs fetch-depth: 0.
             const readOptional = async (path, ref) => {
               try {
-                return await read(path, ref);
+                const { data } = await github.rest.repos.getContent({ owner, repo, path, ref });
+                return Buffer.from(data.content, 'base64').toString('utf8');
               } catch (error) {
                 if (error.status === 404) return null;
                 throw error;
