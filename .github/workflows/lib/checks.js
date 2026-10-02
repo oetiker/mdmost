@@ -1,4 +1,4 @@
-// repo-infra: workflow-lib v5
+// repo-infra: workflow-lib v6
 'use strict';
 
 // Everything that reported on the commit, whatever workflow produced it. The
@@ -33,22 +33,6 @@ async function checkState(github, { owner, repo, ref }, opts = {}) {
   };
 }
 
-async function waitForChecks(github, params, opts = {}) {
-  const intervalMs = opts.intervalMs ?? 15000;
-  const timeoutMs = opts.timeoutMs ?? 15 * 60 * 1000;
-  const sleep = opts.sleep ?? ((ms) => new Promise((r) => { setTimeout(r, ms); }));
-  const now = opts.now ?? (() => Date.now());
-
-  const started = now();
-  for (;;) {
-    const state = await checkState(github, params, opts);
-    if (state.failed.length > 0) return state;
-    if (state.pending.length === 0) return state;
-    if (now() - started >= timeoutMs) return { ...state, timedOut: true };
-    await sleep(intervalMs);
-  }
-}
-
 // The workflow file name out of GITHUB_WORKFLOW_REF, which looks like
 //   owner/repo/.github/workflows/release-pr.yml@refs/heads/main
 function workflowFile(workflowRef) {
@@ -57,7 +41,8 @@ function workflowFile(workflowRef) {
 }
 
 // Every check run on this commit that this workflow produced, in ANY of its
-// runs -- which is the set a guard waiting on its own commit must ignore.
+// runs -- which is the set the guard must ignore: its own jobs, and the build and test
+// jobs of every earlier attempt, which leave failed check runs on this same commit.
 //
 // Ignoring only the current run is not enough, and the failure it causes is
 // permanent. Seen on oetiker/smalti's first release: attempt 1 died on a
@@ -95,4 +80,13 @@ async function guardIgnoreIds(github, {
   return [...ids];
 }
 
-module.exports = { checkState, waitForChecks, guardIgnoreIds };
+// D28: the guard does not wait. A check that already failed on the dispatched
+// commit is refused by name. A running check, or none at all, is not: the
+// test job runs the same ci.yml on this commit plus the release changes, and
+// finish opens no pull request unless it is green.
+function guardVerdict(state) {
+  if (state.failed.length === 0) return null;
+  return `Failing checks on this commit: ${state.failed.map((c) => c.name).join(', ')}`;
+}
+
+module.exports = { checkState, guardVerdict, guardIgnoreIds };
