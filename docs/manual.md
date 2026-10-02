@@ -34,62 +34,62 @@ writes plain text rather than escape sequences.
 
 # OPTIONS
 
-- **`--render-once`** — Render one frame to standard output and exit. No terminal is
+- `--render-once`: Render one frame to standard output and exit. No terminal is
   needed. The output is truecolour to a terminal and plain text anywhere else.
 
-- **`--width N`** — Render the whole document at width *N* instead of the terminal's.
+- `--width N`: Render the whole document at width *N* instead of the terminal's.
 
-- **`--body-width N`** — Cap the prose body at *N* columns and centre it; `0` removes the
+- `--body-width N`: Cap the prose body at *N* columns and centre it; `0` removes the
   cap.
 
-- **`--no-body-width`** — Lay the body out at the full terminal width.
+- `--no-body-width`: Lay the body out at the full terminal width.
 
-- **`--theme NAME`** — Start in theme *NAME*.
+- `--theme NAME`: Start in theme *NAME*.
 
-- **`--icons`** — Use Nerd Font glyphs even when none is detected.
+- `--icons`: Use Nerd Font glyphs even when none is detected.
 
-- **`--no-icons`** — Use plain Unicode instead of Nerd Font glyphs, at the same display
+- `--no-icons`: Use plain Unicode instead of Nerd Font glyphs, at the same display
   width.
 
-- **`--math`** — Parse math even if the configuration file turns it off.
+- `--math`: Parse math even if the configuration file turns it off.
 
-- **`--no-math`** — Do not parse math at all: `$` stays ordinary text.
+- `--no-math`: Do not parse math at all: `$` stays ordinary text.
 
-- **`--math-inline`** — Lay out inline math even if the configuration file turns it off.
+- `--math-inline`: Lay out inline math even if the configuration file turns it off.
 
-- **`--no-math-inline`** — Show inline `$…$` math as its source rather than laying it out.
+- `--no-math-inline`: Show inline `$…$` math as its source rather than laying it out.
 
-- **`--math-backslash`** — Also read `\(…\)` and `\[…\]` as math.
+- `--math-backslash`: Also read `\(…\)` and `\[…\]` as math.
 
-- **`--no-math-backslash`** — Do not read `\(…\)` and `\[…\]`, even if the configuration
+- `--no-math-backslash`: Do not read `\(…\)` and `\[…\]`, even if the configuration
   file does.
 
-- **`--narrow-emoji`** — Draw an emoji whose form is set by a variation selector
+- `--narrow-emoji`: Draw an emoji whose form is set by a variation selector
   (`U+FE0F`) in one column rather than two, for a terminal that does the same. Left to
   itself **mdmost** measures the terminal; see *Emoji width* below.
 
-- **`--wide-emoji`** — Draw such an emoji at the width the standard gives it, without
+- `--wide-emoji`: Draw such an emoji at the width the standard gives it, without
   measuring the terminal.
 
-- **`--no-reload`** — Do not re-read the document when the file it came from changes on
+- `--no-reload`: Do not re-read the document when the file it came from changes on
   disk. Watching is on by default; see *Reloading* below.
 
-- **`--reload`** — Re-read the document when its file changes, even if the configuration
+- `--reload`: Re-read the document when its file changes, even if the configuration
   file turns it off.
 
-- **`--mouse`** — Capture the mouse: the wheel scrolls, the scrollbar drags, a click in
+- `--mouse`: Capture the mouse: the wheel scrolls, the scrollbar drags, a click in
   the contents pane jumps, and a drag over the document copies the Markdown source
   behind it.
 
-- **`--toc`** — Start with the contents pane open.
+- `--toc`: Start with the contents pane open.
 
-- **`--config PATH`** — Read the configuration from *PATH* instead of the default file.
+- `--config PATH`: Read the configuration from *PATH* instead of the default file.
 
-- **`--licenses`** — Print the licences of the bundled syntax definitions and exit.
+- `--licenses`: Print the licences of the bundled syntax definitions and exit.
 
-- **`-h`, `--help`** — Print a usage summary and exit.
+- `-h, --help`: Print a usage summary and exit.
 
-- **`-V`, `--version`** — Print the version and exit.
+- `-V, --version`: Print the version and exit.
 
 There is no `--color` flag. Truecolour is used when standard output is a terminal.
 
@@ -100,78 +100,78 @@ and the status bar name the bindings in effect rather than the defaults.
 
 ## Movement
 
-- **`j`, `Down`** — Scroll down one line.
+- `j, Down`: Scroll down one line.
 
-- **`k`, `Up`** — Scroll up one line.
+- `k, Up`: Scroll up one line.
 
-- **`d`, `Ctrl-d`** — Scroll down half a screen.
+- `d, Ctrl-d`: Scroll down half a screen.
 
-- **`u`, `Ctrl-u`** — Scroll up half a screen.
+- `u, Ctrl-u`: Scroll up half a screen.
 
-- **`space`, `Ctrl-f`, `PgDn`** — Scroll down one screen.
+- `space, Ctrl-f, PgDn`: Scroll down one screen.
 
-- **`b`, `Ctrl-b`, `PgUp`** — Scroll up one screen.
+- `b, Ctrl-b, PgUp`: Scroll up one screen.
 
-- **`g`, `Home`** — Go to the top, and back to the left edge.
+- `g, Home`: Go to the top, and back to the left edge.
 
-- **`G`, `End`** — Go to the bottom of the document.
+- `G, End`: Go to the bottom of the document.
 
-- **`%`** — Jump N percent into the document, as in `50%`.
+- `%`: Jump N percent into the document, as in `50%`.
 
-- **`Left`, `Right`** — Scroll content wider than the terminal, such as a wide table or a
+- `Left, Right`: Scroll content wider than the terminal, such as a wide table or a
   long code line. Neither is reflowed.
 
 ## Structure
 
-- **`[`** — Go to the previous heading.
+- `[`: Go to the previous heading.
 
-- **`]`** — Go to the next heading.
+- `]`: Go to the next heading.
 
-- **`=`, `Ctrl-g`** — Report the current position.
+- `=, Ctrl-g`: Report the current position.
 
-- **`Tab`** — Show or hide the contents pane.
+- `Tab`: Show or hide the contents pane.
 
-- **`f`** — Move the keyboard cursor to the next link or button in the document,
+- `f`: Move the keyboard cursor to the next link or button in the document,
   scrolling to bring it into view.
 
-- **`F`** — Move the keyboard cursor to the previous link or button in the document,
+- `F`: Move the keyboard cursor to the previous link or button in the document,
   scrolling to bring it into view.
 
-- **`Enter`** — Jump to the selected heading, or follow the link or button under the
+- `Enter`: Jump to the selected heading, or follow the link or button under the
   keyboard cursor. The status bar shows the full URL under the cursor, as it does for a
   mouse hover.
 
 ## Search
 
-- **`/`** — Search forward.
+- `/`: Search forward.
 
-- **`?`** — Search backward.
+- `?`: Search backward.
 
-- **`n`, `Ctrl-Down`** — Go to the next match.
+- `n, Ctrl-Down`: Go to the next match.
 
-- **`N`, `Ctrl-Up`** — Go to the previous match.
+- `N, Ctrl-Up`: Go to the previous match.
 
-- **`Ctrl-r`** — Switch between literal and regex search.
+- `Ctrl-r`: Switch between literal and regex search.
 
 ## Display and session
 
-- **`t`** — Switch to the next theme, over the built-ins and any theme defined in the
+- `t`: Switch to the next theme, over the built-ins and any theme defined in the
   configuration file.
 
-- **`-`** — Show or hide code line numbers.
+- `-`: Show or hide code line numbers.
 
-- **`R`** — Start or stop re-reading the document as its file changes; see *Reloading*
+- `R`: Start or stop re-reading the document as its file changes; see *Reloading*
   below. Off and on again is also how to ask for a change straight away, without waiting
   out the settle window. A document that arrived on standard input has no file to watch,
   and the key says so.
 
-- **`S`** — Save the current settings for the next run.
+- `S`: Save the current settings for the next run.
 
-- **`h`, `F1`** — Show or hide the help overlay.
+- `h, F1`: Show or hide the help overlay.
 
-- **`Esc`** — Clear the search, or close the overlay or pane. `Esc` does not quit.
+- `Esc`: Clear the search, or close the overlay or pane. `Esc` does not quit.
 
-- **`q`** — Quit.
+- `q`: Quit.
 
 ## Notes
 
@@ -370,11 +370,11 @@ through the built-ins and any theme defined here.
 
 Three settings answer the same question. Each outranks the one before it:
 
-- **`icons = true` / `false`** — Settles it for this machine.
+- `icons = true|false`: Settles it for this machine.
 
-- **`MDMOST_ICONS=1` / `0`** — Settles it for this shell. See **ENVIRONMENT**.
+- `MDMOST_ICONS=1|0`: Settles it for this shell. See **ENVIRONMENT**.
 
-- **`--icons` / `--no-icons`** — Settles it for this run.
+- `--icons, --no-icons`: Settles it for this run.
 
 With none of the three set, **mdmost** detects whether to use icons. The
 detection is described under **TERMINAL SETUP**.
@@ -473,8 +473,8 @@ of note accepts them. `math = false` turns parsing off: `$` is ordinary text, as
 if math did not exist.
 
 A `\(…\)` or `\[…\]` pair is found only when the opening and closing delimiter
-sit on the same line. A pair split across a line break — `\[` on one line, the
-formula and `\]` further down — is left as ordinary text, its delimiters drawn
+sit on the same line. A pair split across a line break (`\[` on one line, the
+formula and `\]` further down) is left as ordinary text, its delimiters drawn
 as plain brackets or parentheses: comrak's own escape handling drops the
 backslash before either reaches this parser. This is the shape a pasted
 assistant answer commonly uses, so it is worth knowing about; `$…$` and
@@ -483,22 +483,22 @@ assistant answer commonly uses, so it is worth knowing about; `$…$` and
 Inline math (`$…$`) is laid out on the line: `$E = mc^2$` reads `E = mc²`. A
 script is written with a raised or lowered Unicode character only when every
 character in it has one; otherwise the whole script is written flat with `^` or
-`_`, braces kept where they disambiguate — `$x^{n+1}$` reads `xⁿ⁺¹`, `$x^q$`
+`_`, braces kept where they disambiguate: `$x^{n+1}$` reads `xⁿ⁺¹`, `$x^q$`
 reads `x^q`, because there is no superscript `q`. `\frac{a}{b}` reads `a/b`,
 parenthesised unless both parts are a single character. `\sqrt{x}` reads `√x`,
 parenthesised the same way. A big operator (`\sum`, `\prod`, `\int` and similar)
 is a single character with its limits written as a subscript and superscript on
-it — `\sum_{i=1}^{n} i` reads `∑ᵢ₌₁ⁿ i`. `math_inline = false` shows the node's
+it: `\sum_{i=1}^{n} i` reads `∑ᵢ₌₁ⁿ i`. `math_inline = false` shows the node's
 source instead, dollars included; the content was still parsed as math, so
 `$a *b* c$` shows a literal `*b*` rather than an italic `b`.
 
-A formula that fails to parse, or that needs more than one row to lay out — a
-matrix, for instance — falls back to the same verbatim-source rendering as
+A formula that fails to parse, or that needs more than one row to lay out (a
+matrix, for instance) falls back to the same verbatim-source rendering as
 `math_inline = false`.
 
 Two limits are applied to the source before it is parsed. A formula may be at
 most 2048 bytes long, counting the macro definitions in scope for it, and may
-contain at most 32 commands in an unbroken chain —
+contain at most 32 commands in an unbroken chain:
 commands with no brace, letter or digit between them, as in `\sqrt\sqrt\sqrt x`.
 Whitespace does not break a chain; a brace does, so `\sqrt{\sqrt{x}}` is not one.
 A formula past either limit falls back the same way.
@@ -539,8 +539,8 @@ program's, so they are not listed there. `\mathrm` draws the plain letter, a
 terminal having one face; so does `\boldsymbol` over letters, though over digits
 it draws the bold ones.
 
-Colour follows the theme. The structure a formula draws — the fraction rule, the
-delimiter pieces, the radical strokes, the overline — takes the ink a diagram's
+Colour follows the theme. The structure a formula draws (the fraction rule, the
+delimiter pieces, the radical strokes, the overline) takes the ink a diagram's
 lines take: the `border` colour blended towards body text, not `border` itself.
 The symbols take the colour of body text.
 
@@ -550,32 +550,32 @@ Fenced `mermaid` blocks are parsed and drawn as Unicode box art. All seven
 families are supported. Anything outside the supported subset degrades to a
 syntax-highlighted code block with a dim caption stating the reason.
 
-- **`flowchart` / `graph`** — Directions `TD`/`TB`/`LR`/`RL`/`BT`; shapes `[rect]`,
+- `flowchart, graph`: Directions `TD`/`TB`/`LR`/`RL`/`BT`; shapes `[rect]`,
   `(round)`, `([stadium])`, `{rhombus}`, `((circle))`, `[[subroutine]]`, `[(cylinder)]`;
   edges `-->`, `---`, `-.->`, `==>` with `|label|` and `-- label -->`; nested
   `subgraph`. Out of scope: `click`, `style`/`classDef`, `linkStyle`.
 
-- **`sequenceDiagram`** — `participant`/`actor` with `as`; arrows `->`, `-->`, `->>`,
+- `sequenceDiagram`: `participant`/`actor` with `as`; arrows `->`, `-->`, `->>`,
   `-->>`, `-x`, `--x`; self-messages; `activate`/`deactivate` and `+`/`-`; `Note left
   of|right of|over`; `loop`, `alt`/`else`, `opt`, `par`/`and`, `critical`. Out of scope:
   `autonumber`, `box`, `link`, `rect`.
 
-- **`classDiagram`** — Three-compartment boxes, visibility `+ - # ~`, `$`/`*`
+- `classDiagram`: Three-compartment boxes, visibility `+ - # ~`, `$`/`*`
   classifiers, generics, `<<interface>>`/`<<abstract>>` and other stereotypes; relations
   `<|--`, `*--`, `o--`, `-->`, `..>`, `..|>` with `"1"`/`"0..*"` cardinalities.
 
-- **`erDiagram`** — Entities with attribute tables (`type name PK "comment"`, including
+- `erDiagram`: Entities with attribute tables (`type name PK "comment"`, including
   `PK`/`FK`/`UK`), aliases, crow's-foot cardinalities `||--o{`, `}o--||`, `||--||`,
   `}|..|{`, and relationship labels.
 
-- **`stateDiagram-v2`** — `[*]` start and end markers per scope, `S --> T : label`,
+- `stateDiagram-v2`: `[*]` start and end markers per scope, `S --> T : label`,
   composite `state X { … }`, `<<choice>>`, `<<fork>>`/`<<join>>`, `note left of` and
   `note right of`.
 
-- **`pie`** — `title`, `showData`, `"label" : value`. Drawn as a sorted bar chart with
+- `pie`: `title`, `showData`, `"label" : value`. Drawn as a sorted bar chart with
   percentages, because a circle in character cells reads badly.
 
-- **`gantt`** — `title`, `dateFormat`, `axisFormat`, `section`, tasks with `after X`,
+- `gantt`: `title`, `dateFormat`, `axisFormat`, `section`, tasks with `after X`,
   durations or explicit dates, and `done`/`active`/`crit`/`milestone` tags. The time
   scale is chosen from the available width.
 
@@ -634,55 +634,55 @@ protocol.
 a fallback behind it, has to cover them. Any font or font chain with that
 coverage will do.
 
-- **Box Drawing (U+2500-U+257F)** — Every table border, code frame and diagram box,
+- `Box Drawing (U+2500-U+257F)`: Every table border, code frame and diagram box,
   and math's tall delimiters.
 
-- **Block Elements (U+2580-U+259F)** — Zebra stripes, the scrollbar, gantt bars.
+- `Block Elements (U+2580-U+259F)`: Zebra stripes, the scrollbar, gantt bars.
 
-- **Geometric Shapes (U+25A0-U+25FF)** — Heading marks, diagram node shapes, arrowheads.
+- `Geometric Shapes (U+25A0-U+25FF)`: Heading marks, diagram node shapes, arrowheads.
 
-- **General Punctuation (U+2000-U+206F)** — The elision marker, the mark on a framed
+- `General Punctuation (U+2000-U+206F)`: The elision marker, the mark on a framed
   block whose content is wider than its frame, the tick on a tall radical, and math's
   double bar.
 
-- **Mathematical Operators (U+2200-U+22FF)** — Class-diagram relations, and math's
+- `Mathematical Operators (U+2200-U+22FF)`: Class-diagram relations, and math's
   radical sign (`\sqrt`).
 
-- **Misc Mathematical Symbols-A (U+27C0-U+27EF)** — Class-diagram generics, and math's
+- `Misc Mathematical Symbols-A (U+27C0-U+27EF)`: Class-diagram generics, and math's
   angle, white-square and flattened-round delimiters.
 
-- **Arrows (U+2190-U+21FF)** — Math's arrow delimiters.
+- `Arrows (U+2190-U+21FF)`: Math's arrow delimiters.
 
-- **Miscellaneous Technical (U+2300-U+23FF)** — Math's ceiling, floor and moustache
+- `Miscellaneous Technical (U+2300-U+23FF)`: Math's ceiling, floor and moustache
   delimiters.
 
-- **Misc Mathematical Symbols-B (U+2980-U+29FF)** — Math's white-brace and
+- `Misc Mathematical Symbols-B (U+2980-U+29FF)`: Math's white-brace and
   double-parenthesis delimiters.
 
-- **Dingbats (U+2700-U+27BF)** — The marker on a degraded diagram's caption.
+- `Dingbats (U+2700-U+27BF)`: The marker on a degraded diagram's caption.
 
-- **Superscripts and Subscripts (U+2070-U+209F)** — Math's raised and lowered digits,
+- `Superscripts and Subscripts (U+2070-U+209F)`: Math's raised and lowered digits,
   operators and parentheses.
 
-- **Phonetic Extensions (U+1D00-U+1D7F)** — Math's subscript `i`, the one Latin
+- `Phonetic Extensions (U+1D00-U+1D7F)`: Math's subscript `i`, the one Latin
   subscript letter outside the block above.
 
-- **Latin Extended-C (U+2C60-U+2C7F)** — Math's subscript `j`, the other one.
+- `Latin Extended-C (U+2C60-U+2C7F)`: Math's subscript `j`, the other one.
 
-- **Spacing Modifier Letters (U+02B0-U+02FF)** — Math's raised `h j l r s w x y`, the
+- `Spacing Modifier Letters (U+02B0-U+02FF)`: Math's raised `h j l r s w x y`, the
   superscript letters Unicode placed here instead of in Superscripts and Subscripts,
   above.
 
-- **Phonetic Extensions Supplement (U+1D80-U+1DBF)** — Math's raised `c f z`, the
+- `Phonetic Extensions Supplement (U+1D80-U+1DBF)`: Math's raised `c f z`, the
   superscript letters Unicode placed here instead.
 
-- **Latin-1 Supplement (U+0080-U+00FF)** — Whatever HTML entities the document decodes
+- `Latin-1 Supplement (U+0080-U+00FF)`: Whatever HTML entities the document decodes
   to, and math's raised `1`, `2` and `3`.
 
-- **Specials (U+FFF0-U+FFFF)** — The replacement character, drawn in place of one that
+- `Specials (U+FFF0-U+FFFF)`: The replacement character, drawn in place of one that
   cannot be represented.
 
-- **Private Use Area (U+E000-U+F8FF)** — Code-fence language icons, drawn **only when
+- `Private Use Area (U+E000-U+F8FF)`: Code-fence language icons, drawn **only when
   icons are on**.
 
 The Private Use Area row is the only optional one, and `--no-icons` removes it.
@@ -740,11 +740,11 @@ their configuration files.
 
 These three fonts, consulted in this order, cover everything **mdmost** draws:
 
-- **JetBrains Mono** — The text font.
+- `JetBrains Mono`: The text font.
 
-- **Symbols Nerd Font** — The Private Use Area icons.
+- `Symbols Nerd Font`: The Private Use Area icons.
 
-- **JuliaMono** — Unicode's symbol blocks: arrows, geometric shapes, dingbats and
+- `JuliaMono`: Unicode's symbol blocks: arrows, geometric shapes, dingbats and
   braille.
 
 ## Icon detection
@@ -767,8 +767,8 @@ on. To settle the choice by hand instead, see **CONFIGURATION**.
 
 ## Emoji width
 
-`U+FE0F` asks for the emoji form of a character that also has a text form — `☸️` is
-`☸` plus that selector — and the standard makes the result two columns wide.
+`U+FE0F` asks for the emoji form of a character that also has a text form (`☸️` is
+`☸` plus that selector), and the standard makes the result two columns wide.
 Several terminals draw it in one and move the cursor by one. Nothing can be
 patched over that afterwards: the width tables say two, and so does the library
 that paints the screen, so on such a terminal every line containing one is drawn
@@ -779,8 +779,8 @@ start of a line, reads back where the cursor ended up, and erases what it drew.
 A clear answer of one column makes it draw the base character alone for the rest
 of the session, which is the same glyph on such a terminal, and paint the second
 column as the blank it now is. The sequence still occupies the two columns it was
-laid out for, and every measurement is back on one number. Any other answer —
-including no answer — leaves the screen exactly as it was.
+laid out for, and every measurement is back on one number. Any other answer,
+including no answer, leaves the screen exactly as it was.
 
 This happens to the *screen*, never to the document. What a drag copies, what a
 `[copy]` button hands over, and what a search matches are all the text the file
@@ -805,11 +805,11 @@ configuration file, or pass `--narrow-emoji` / `--wide-emoji`; a flag is saved b
 Two unrelated mechanisms can hand a Markdown file to **mdmost**. Which one
 applies depends on where the file is clicked.
 
-- **The desktop's file association** — What a file manager consults when *notes.md*
+- **The desktop's file association**: what a file manager consults when *notes.md*
   is double-clicked. It is a registry belonging to the operating system, and on Linux
   it is an open standard that any program may register with.
 
-- **The terminal's own link handling** — What runs when a `file://` link in terminal
+- **The terminal's own link handling**: what runs when a `file://` link in terminal
   output is clicked. The terminal settles this itself, before the operating system is
   consulted, so it is configured once per terminal and behaves the same on Linux and
   on macOS.
@@ -849,16 +849,16 @@ xdg-mime default mdmost.desktop text/markdown
 
 Three properties of that file matter:
 
-- **`Terminal=true` is the weak part** — **mdmost** needs a terminal, so the desktop
+- **`Terminal=true` is the weak part.** **mdmost** needs a terminal, so the desktop
   has to find a terminal emulator to run it in. Which one it settles on, and whether
   it settles on one at all, differs between desktops and versions. A double-click that
   appears to do nothing has this cause, and the per-terminal setup below is the more
   dependable answer.
 
-- **`text/x-markdown` needs no line of its own** — The shared-mime-info database
+- **`text/x-markdown` needs no line of its own.** The shared-mime-info database
   declares it an alias of `text/markdown`, so it resolves through it.
 
-- **`Exec` is resolved on `PATH`** — A bare `mdmost` is correct here, and it is what a
+- **`Exec` is resolved on `PATH`.** A bare `mdmost` is correct here, and it is what a
   packaged copy of this file has to say.
 
 The `.deb` and the `.rpm` install that entry to */usr/share/applications*, so on
@@ -882,12 +882,12 @@ terminal: nothing to register, and the same configuration on both platforms.
 
 Two points apply to all of them:
 
-- **Name mdmost by absolute path** — These terminals run the program directly rather
+- **Name mdmost by absolute path.** These terminals run the program directly rather
   than through a shell, so it is looked up on the terminal's own `PATH`, and a terminal
   launched from the macOS Dock inherits a bare `PATH` with no Homebrew prefix in it.
   Use the output of `command -v mdmost`.
 
-- **A link stops at whitespace** — The usual link patterns match runs of non-space
+- **A link stops at whitespace.** The usual link patterns match runs of non-space
   characters, so a path holding a literal space is recognised only as far as the space.
   Percent-encode it as `%20`.
 
@@ -972,30 +972,30 @@ Launch Services and offers no way to intervene.
 
 # ENVIRONMENT
 
-- **`MDMOST_ICONS`** — `1` or `0` forces Nerd Font glyphs on or off. It outranks the
+- `MDMOST_ICONS`: `1` or `0` forces Nerd Font glyphs on or off. It outranks the
   configuration file and is outranked by `--icons` and `--no-icons`. Export it in a
   profile on a server that is always reached from the same well-equipped terminal.
 
-- **`PAGER`** — **mdmost** can serve as the pager for other programs:
+- `PAGER`: **mdmost** can serve as the pager for other programs:
   `export PAGER=mdmost`.
 
 # FILES
 
-- ***~/.config/mdmost/config.toml*** — Configuration, in TOML. A broken file does not
+- `~/.config/mdmost/config.toml`: Configuration, in TOML. A broken file does not
   stop the program from starting: the problem is reported and the rest of the file
   still applies, so one bad key binding costs that binding and nothing else. The
   platform's own configuration directory is used where it differs.
 
-- ***config.toml.bak*** — The previous configuration, kept beside the file whenever `S`
+- `config.toml.bak`: The previous configuration, kept beside the file whenever `S`
   writes a new one.
 
 # EXIT STATUS
 
-- **`0`** — Success, including a quit from the pager and a broken pipe.
+- `0`: Success, including a quit from the pager and a broken pipe.
 
-- **`1`** — The document could not be read, or the terminal could not be set up.
+- `1`: The document could not be read, or the terminal could not be set up.
 
-- **`2`** — The command line could not be parsed.
+- `2`: The command line could not be parsed.
 
 # SEE ALSO
 
