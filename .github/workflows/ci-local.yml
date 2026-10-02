@@ -1,7 +1,16 @@
 name: CI (mdmost's own jobs)
 
 # Called by ci.yml's ci-local job (repo-infra D25); never triggered on its own.
-on: [workflow_call]
+on:
+  workflow_call:
+    # Create release PR runs ci.yml on the release branch and passes it here
+    # (repo-infra D28); on push and pull_request it is empty and checkout uses
+    # its default commit.
+    inputs:
+      ref:
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -16,6 +25,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -32,6 +43,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -80,6 +93,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
