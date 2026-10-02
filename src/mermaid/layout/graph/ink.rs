@@ -99,11 +99,11 @@ impl Ink {
                 if spot == Spot::default() {
                     continue;
                 }
-                let under = canvas
-                    .row(row)
-                    .and_then(|cells| cells.get(col))
-                    .map(|cell| cell.text().chars().next().unwrap_or(' '))
-                    .unwrap_or(' ');
+                let cell = canvas.row(row).and_then(|cells| cells.get(col));
+                // The right half of a wide letter has no text of its own and read as a
+                // blank, so a line drawn there erased the whole letter.
+                let wide_half = cell.is_some_and(|cell| cell.is_continuation());
+                let under = cell.map_or(' ', |cell| cell.text().chars().next().unwrap_or(' '));
                 if let Some(ch) = spot.fixed {
                     let style = if spot.accent { accent } else { line };
                     let mut buf = [0u8; 4];
@@ -113,7 +113,7 @@ impl Ink {
                 let drawn = spot.stroke.unwrap_or_default();
                 let (mask, stroke) = match mask_of(under) {
                     Some(existing) => (spot.mask | existing, drawn.merge(stroke_of(under))),
-                    None if under == ' ' => (spot.mask, drawn),
+                    None if under == ' ' && !wide_half => (spot.mask, drawn),
                     // Something non-line already occupies the cell: leave it alone.
                     None => continue,
                 };
@@ -153,5 +153,16 @@ mod tests {
         ink.run(1, 1, Dir::Up, 1, Stroke::Solid);
         ink.apply(&mut canvas, theme.base(), theme.base());
         assert_eq!(canvas.row_text(0), "╰┬╯");
+    }
+
+    #[test]
+    fn a_line_never_cuts_a_wide_letter_in_half() {
+        let theme = Theme::default_dark();
+        let mut canvas = Canvas::new(4, 1, theme.base());
+        canvas.write_str(0, 0, "日", theme.base());
+        let mut ink = Ink::new(1, 4);
+        ink.run(0, 1, Dir::Right, 2, Stroke::Solid);
+        ink.apply(&mut canvas, theme.base(), theme.base());
+        assert_eq!(canvas.row_text(0), "日──");
     }
 }

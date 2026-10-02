@@ -176,6 +176,8 @@ impl Pen {
         let (row, col) = self.frame.cell(flow, cross);
         match self.canvas.row(row).and_then(|cells| cells.get(col)) {
             None => false,
+            // The right half of a wide letter is part of the letter, not a blank.
+            Some(cell) if cell.is_continuation() => false,
             Some(cell) => {
                 let ch = cell.text().chars().next().unwrap_or(' ');
                 ch == ' ' || super::glyph::mask_of(ch).is_some()

@@ -9,6 +9,7 @@
 ### Fixed
 - In Mermaid flowcharts, an arrow from outside a subgraph to a node inside it now reaches that node. Before, it stopped at the subgraph border when it arrived under the subgraph title, or when several arrows entered the same subgraph.
 - A Mermaid subgraph or composite state whose title is wider than its content no longer cuts the title off (`╭ A rath╮`); the frame widens to fit it. When the title would cover a node that an arrow enters, it moves right along the top border so the arrow can pass.
+- A Mermaid edge line that passes a wide character in a label or title, for example a Chinese letter or an emoji, no longer erases that character.
 - A Mermaid label written as a markdown string, for example ``A["`**bold** text`"]``, no longer shows its backticks and stars, and one that spans several lines no longer fails with "cannot read a node shape". Its `**bold**`, `__bold__`, `*italic*` and `_italic_` are drawn bold and italic.
 - Mermaid labels draw `<b>`, `<strong>`, `<i>` and `<em>` as bold and italic instead of showing the tags as text.
 
