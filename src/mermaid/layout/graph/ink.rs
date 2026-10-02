@@ -8,7 +8,7 @@
 use crate::canvas::Canvas;
 use crate::theme::Style;
 
-use super::glyph::{Dir, Mask, Stroke, glyph, mask_of, stroke_of};
+use super::glyph::{Dir, Mask, Stroke, heavy_of, mask_of, stroke_of, weighted_glyph};
 
 /// One cell of the overlay.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -17,6 +17,9 @@ struct Spot {
     /// `None` until something has been drawn here, so that the first stroke wins
     /// outright instead of being merged with a default.
     stroke: Option<Stroke>,
+    /// The arms drawn by a thick line, which keep their weight where a thinner line
+    /// joins or crosses them.
+    heavy: Mask,
     /// A literal glyph that replaces the mask entirely (arrowheads, terminators).
     fixed: Option<char>,
     /// True when the cell is an arrowhead or terminator rather than plain line.
@@ -52,6 +55,9 @@ impl Ink {
         };
         let spot = &mut self.spots[at];
         spot.mask |= mask;
+        if stroke == Stroke::Thick {
+            spot.heavy |= mask;
+        }
         spot.stroke = Some(spot.stroke.map_or(stroke, |had| had.merge(stroke)));
     }
 
@@ -81,6 +87,7 @@ impl Ink {
         self.spots[at] = Spot {
             mask: Mask::NONE,
             stroke: Some(stroke),
+            heavy: Mask::NONE,
             fixed: Some(ch),
             accent,
         };
@@ -111,14 +118,19 @@ impl Ink {
                     continue;
                 }
                 let drawn = spot.stroke.unwrap_or_default();
-                let (mask, stroke) = match mask_of(under) {
-                    Some(existing) => (spot.mask | existing, drawn.merge(stroke_of(under))),
-                    None if under == ' ' && !wide_half => (spot.mask, drawn),
+                let (mask, heavy, stroke) = match mask_of(under) {
+                    Some(existing) => (
+                        spot.mask | existing,
+                        spot.heavy | heavy_of(under),
+                        drawn.merge(stroke_of(under)),
+                    ),
+                    None if under == ' ' && !wide_half => (spot.mask, spot.heavy, drawn),
                     // Something non-line already occupies the cell: leave it alone.
                     None => continue,
                 };
                 let mut buf = [0u8; 4];
-                canvas.write_str(row, col, glyph(mask, stroke).encode_utf8(&mut buf), line);
+                let ch = weighted_glyph(mask, heavy, stroke);
+                canvas.write_str(row, col, ch.encode_utf8(&mut buf), line);
             }
         }
     }
@@ -142,6 +154,41 @@ mod tests {
         ink.run(1, 0, Dir::Right, 2, Stroke::Solid);
         ink.run(0, 1, Dir::Down, 2, Stroke::Solid);
         assert_eq!(ink_text(&ink), " │ \n─┼─\n │ ");
+    }
+
+    #[test]
+    fn a_thick_run_crossing_a_thin_one_keeps_both_weights() {
+        let mut ink = Ink::new(3, 3);
+        ink.run(1, 0, Dir::Right, 2, Stroke::Solid);
+        ink.run(0, 1, Dir::Down, 2, Stroke::Thick);
+        assert_eq!(ink_text(&ink), " ┃ \n─╂─\n ┃ ");
+        let mut ink = Ink::new(3, 3);
+        ink.run(1, 0, Dir::Right, 2, Stroke::Thick);
+        ink.run(0, 1, Dir::Down, 2, Stroke::Dotted);
+        assert_eq!(ink_text(&ink), " ┊ \n━┿━\n ┊ ");
+    }
+
+    #[test]
+    fn a_thick_edge_leaves_a_thin_border_thin() {
+        let theme = Theme::default_dark();
+        let mut canvas = Canvas::new(3, 2, theme.base());
+        canvas.write_str(0, 0, "╰─╯", theme.base());
+        let mut ink = Ink::new(2, 3);
+        ink.run(1, 1, Dir::Up, 1, Stroke::Thick);
+        ink.apply(&mut canvas, theme.base(), theme.base());
+        assert_eq!(canvas.row_text(0), "╰┰╯");
+        assert_eq!(canvas.row_text(1), " ┃ ");
+    }
+
+    #[test]
+    fn a_thin_edge_on_a_heavy_border_keeps_the_border_heavy() {
+        let theme = Theme::default_dark();
+        let mut canvas = Canvas::new(3, 2, theme.base());
+        canvas.write_str(0, 0, "┗━┛", theme.base());
+        let mut ink = Ink::new(2, 3);
+        ink.run(1, 1, Dir::Up, 1, Stroke::Solid);
+        ink.apply(&mut canvas, theme.base(), theme.base());
+        assert_eq!(canvas.row_text(0), "┗┯┛");
     }
 
     #[test]

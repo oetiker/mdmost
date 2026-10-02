@@ -203,7 +203,7 @@ const INVENTORY: &[(&str, &str)] = &[
     // every `║` it drew. Rendering a nested activation both ways emits no `║` at all.
     (
         "Box Drawing (U+2500-U+257F)",
-        "─━│┃┄┆┈┊┌┐┓└┗┘├┤┬┳┴┼╌╎╭╮╯╰╱╲║",
+        "─━│┃┄┆┈┊┌┐┓└┗┘├┤┬┰┳┴┼╌╎╭╮╯╰╱╲║",
     ),
     // Zebra stripes, the gap-row half block, gantt bars.
     ("Block Elements (U+2580-U+259F)", "▀▄█▋▌▍"),

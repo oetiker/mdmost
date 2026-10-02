@@ -149,6 +149,27 @@ const HEAVY: [char; 16] = [
     ' ', '┃', '┃', '┃', '━', '┛', '┓', '┫', '━', '┗', '┏', '┣', '━', '┻', '┳', '╋',
 ];
 
+/// Glyphs with some arms heavy and the others light, as `(mask, heavy arms, glyph)`.
+///
+/// This is every such combination of the four arms; Unicode has them all, square
+/// cornered only. Generated from the Unicode character names.
+#[rustfmt::skip]
+const MIXED: [(u8, u8, char); 50] = [
+    ( 3,  1, '╿'), ( 3,  2, '╽'), ( 5,  1, '┚'), ( 5,  4, '┙'),
+    ( 6,  2, '┒'), ( 6,  4, '┑'), ( 7,  1, '┦'), ( 7,  2, '┧'),
+    ( 7,  3, '┨'), ( 7,  4, '┥'), ( 7,  5, '┩'), ( 7,  6, '┪'),
+    ( 9,  1, '┖'), ( 9,  8, '┕'), (10,  2, '┎'), (10,  8, '┍'),
+    (11,  1, '┞'), (11,  2, '┟'), (11,  3, '┠'), (11,  8, '┝'),
+    (11,  9, '┡'), (11, 10, '┢'), (12,  4, '╾'), (12,  8, '╼'),
+    (13,  1, '┸'), (13,  4, '┵'), (13,  5, '┹'), (13,  8, '┶'),
+    (13,  9, '┺'), (13, 12, '┷'), (14,  2, '┰'), (14,  4, '┭'),
+    (14,  6, '┱'), (14,  8, '┮'), (14, 10, '┲'), (14, 12, '┯'),
+    (15,  1, '╀'), (15,  2, '╁'), (15,  3, '╂'), (15,  4, '┽'),
+    (15,  5, '╃'), (15,  6, '╅'), (15,  7, '╉'), (15,  8, '┾'),
+    (15,  9, '╄'), (15, 10, '╆'), (15, 11, '╊'), (15, 12, '┿'),
+    (15, 13, '╇'), (15, 14, '╈'),
+];
+
 /// The glyph a cell shows for `mask` when drawn in `stroke`.
 ///
 /// Returns a space for the empty mask.
@@ -159,6 +180,41 @@ pub fn glyph(mask: Mask, stroke: Stroke) -> char {
         Stroke::Thick => &HEAVY,
     };
     table[usize::from(mask.bits()) & 0x0f]
+}
+
+/// The glyph for `mask` when the arms in `heavy` belong to a thick line.
+///
+/// A thick edge crossing or joining a thin one keeps each arm at its own weight
+/// (`┿`, `╂`, `┰`), so neither line seems to change stroke at the junction. With no
+/// heavy arm the cell is drawn in `stroke`; with only heavy arms it is all heavy.
+/// The thin arms of a mixed glyph are light even when their edge is dotted, since
+/// Unicode has no dashed junctions.
+pub fn weighted_glyph(mask: Mask, heavy: Mask, stroke: Stroke) -> char {
+    let heavy = Mask(heavy.0 & mask.0);
+    if heavy.is_empty() {
+        return glyph(mask, stroke);
+    }
+    if heavy == mask {
+        return glyph(mask, Stroke::Thick);
+    }
+    MIXED
+        .iter()
+        .find(|&&(m, h, _)| m == mask.0 && h == heavy.0)
+        .map_or_else(|| glyph(mask, Stroke::Thick), |&(_, _, ch)| ch)
+}
+
+/// The arms of a box-drawing glyph already on the canvas that are heavy.
+///
+/// Used so that an edge merging into a heavy border keeps that border heavy, and a
+/// thick edge merging into a light border leaves the border light.
+pub fn heavy_of(ch: char) -> Mask {
+    if stroke_of(ch) == Stroke::Thick {
+        return mask_of(ch).unwrap_or(Mask::NONE);
+    }
+    MIXED
+        .iter()
+        .find(|&&(_, _, glyph)| glyph == ch)
+        .map_or(Mask::NONE, |&(_, h, _)| Mask(h))
 }
 
 /// The mask a box-drawing glyph already on the canvas stands for.
@@ -180,7 +236,12 @@ pub fn mask_of(ch: char) -> Option<Mask> {
         '┬' | '┳' | '╦' => Mask::DOWN | Mask::LEFT | Mask::RIGHT,
         '┴' | '┻' | '╩' => Mask::UP | Mask::LEFT | Mask::RIGHT,
         '┼' | '╋' | '╬' => Mask::UP | Mask::DOWN | Mask::LEFT | Mask::RIGHT,
-        _ => return None,
+        _ => {
+            return MIXED
+                .iter()
+                .find(|&&(_, _, glyph)| glyph == ch)
+                .map(|&(m, _, _)| Mask(m));
+        }
     };
     Some(m)
 }
@@ -223,6 +284,25 @@ mod tests {
             let ch = glyph(Mask(bits), Stroke::Thick);
             assert_eq!(stroke_of(ch), Stroke::Thick, "{ch}");
         }
+    }
+
+    #[test]
+    fn mixed_glyphs_round_trip_with_their_heavy_arms() {
+        for &(m, h, ch) in &MIXED {
+            assert_eq!(weighted_glyph(Mask(m), Mask(h), Stroke::Solid), ch);
+            assert_eq!(mask_of(ch), Some(Mask(m)), "{ch}");
+            assert_eq!(heavy_of(ch), Mask(h), "{ch}");
+        }
+    }
+
+    #[test]
+    fn uniform_weights_use_the_plain_sets() {
+        let cross = Mask::UP | Mask::DOWN | Mask::LEFT | Mask::RIGHT;
+        assert_eq!(weighted_glyph(cross, Mask::NONE, Stroke::Solid), '┼');
+        assert_eq!(weighted_glyph(cross, Mask::NONE, Stroke::Dotted), '┼');
+        assert_eq!(weighted_glyph(cross, cross, Stroke::Solid), '╋');
+        assert_eq!(heavy_of('╋'), cross);
+        assert_eq!(heavy_of('┼'), Mask::NONE);
     }
 
     #[test]
