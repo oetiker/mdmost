@@ -149,3 +149,62 @@ fn a_label_does_not_touch_the_line_of_a_neighbouring_edge() {
         ],
     );
 }
+
+/// The words of the labels in the two crossing-edge diagrams below.
+const CROSSING_WORDS: [&str; 11] = [
+    "mailbox",
+    "create",
+    "update",
+    "write",
+    "user",
+    "entry",
+    "(last",
+    "step)",
+    "settings",
+    "SecureMail",
+    "delegates",
+];
+
+/// When lines run close on both sides of a label, the label wraps narrower to fit
+/// between them instead of being cut by one (`mailbox│create`).
+///
+/// Below width 60 the ports sit closer together than the longest label word, and no
+/// wrap can keep the word whole, so the sweeps start there.
+#[test]
+fn a_label_wraps_to_fit_between_two_lines() {
+    let src = r#"flowchart TB
+    api["REST API (zmcfg)<br/>create, update, invalidate ID"]
+    web["Web UI<br/>Servicecenter successor<br/>mailbox settings,<br/>SecureMail Global, delegates ?"]
+    zm["Zimbra management<br/>accounts, aliases,<br/>domain lookup, mailbox settings"]
+    ld["LDAP management<br/>user entries, mail password,<br/>SecureMail flags, delegates"]
+    api -->|"mailbox create<br/>and update"| zm
+    api -->|"write user entry<br/>(last step)"| ld
+    web -->|"mailbox settings"| zm
+    web -->|"SecureMail flags,<br/>delegates ?"| ld
+"#;
+    let widths: Vec<u16> = (60..=130).step_by(2).collect();
+    assert_labels_have_air(src, &widths, &CROSSING_WORDS);
+}
+
+/// The same inside a subgraph, as in the hin-mbox-mgr overview.
+#[test]
+fn a_label_inside_a_subgraph_wraps_to_fit_between_two_lines() {
+    let src = r#"flowchart TB
+    idm["IDM Hub"]
+    airlock["Airlock<br/>replaces the Nevis proxy"]
+    subgraph mbox["hin-mbox-mgr"]
+        api["REST API (zmcfg)<br/>create, update, invalidate ID"]
+        web["Web UI<br/>Servicecenter successor<br/>mailbox settings,<br/>SecureMail Global, delegates ?"]
+        zm["Zimbra management<br/>accounts, aliases,<br/>domain lookup, mailbox settings"]
+        ld["LDAP management<br/>user entries, mail password,<br/>SecureMail flags, delegates"]
+    end
+    idm --> api
+    airlock --> web
+    api -->|"mailbox create<br/>and update"| zm
+    api -->|"write user entry<br/>(last step)"| ld
+    web -->|"mailbox settings"| zm
+    web -->|"SecureMail flags,<br/>delegates ?"| ld
+"#;
+    let widths: Vec<u16> = (60..=130).step_by(2).collect();
+    assert_labels_have_air(src, &widths, &CROSSING_WORDS);
+}

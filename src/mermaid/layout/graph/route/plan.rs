@@ -5,7 +5,7 @@
 //! half in [`super::route`] short enough to read in one go.
 
 use super::super::glyph::{Dir, Stroke};
-use super::super::spec::{PortPolicy, Terminator};
+use super::super::spec::{DrawnLabel, PortPolicy, Terminator};
 use super::{Gap, Input, Route, SideCell, band_size, is_item};
 
 /// Port cross coordinates, by segment.
@@ -202,8 +202,16 @@ fn spread_over(
         return vec![centre; count];
     }
     let (first, last) = (start + 1, start + size - 2);
+    // The fan is ordered by where each edge goes, not by where its port would aim
+    // alone: an edge to a box that sits off to one side aims at its own centre, and
+    // sorting by that can put it on the far side of the fan, across a neighbour.
+    let far_end = |i: usize| {
+        let seg = &input.layered.segs[members[i]];
+        let other = if outgoing { seg.b } else { seg.a };
+        2 * input.cross[other] + input.cross_size[other]
+    };
     let mut order: Vec<usize> = (0..count).collect();
-    order.sort_by_key(|&i| (wanted[i], members[i]));
+    order.sort_by_key(|&i| (far_end(i), wanted[i], members[i]));
     let mut out = vec![centre; count];
     // A lone edge takes the aim it asked for, which is what turns a near-miss into a
     // straight run. Several edges on one side are spread evenly instead: aiming them
@@ -399,15 +407,22 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
     let mut extents = Vec::with_capacity(labelled.len());
     for &index in &labelled {
         let edge = &input.edges[input.layered.segs[index].edge];
-        let text = edge.label.width();
-        let (across, along) = if input.vertical {
-            (text, edge.label.height())
+        let (at, rewrapped) = if input.vertical {
+            fit_label(members, routes, index, &edge.label)
         } else {
-            (edge.label.height(), text)
+            let across = edge.label.height();
+            let at = label_side(members, routes, index, across);
+            (at.unwrap_or(routes[index].dst + 1), None)
         };
-        let at = label_side(members, routes, index, across);
+        let label = rewrapped.as_ref().unwrap_or(&edge.label);
+        let (across, along) = if input.vertical {
+            (label.width(), label.height())
+        } else {
+            (label.height(), label.width())
+        };
         spans.push((at, at + across));
         extents.push(along);
+        routes[index].wrapped = rewrapped;
     }
     let (bands, band_count) = colour(&spans);
     let mut band_flow = vec![0usize; band_count];
@@ -441,8 +456,8 @@ pub(super) fn plan_gap(input: &Input<'_>, members: &[usize], routes: &mut [Route
 /// within the label's columns, or in the cell just past them, would cut through the
 /// text or run flush against it. The label sits after its own line unless such a
 /// line is in the way there and not before the line, in which case it sits before it.
-/// When both sides are blocked it stays after the line.
-fn label_side(members: &[usize], routes: &[Route], index: usize, across: usize) -> usize {
+/// When both sides are blocked there is no such cell.
+fn label_side(members: &[usize], routes: &[Route], index: usize, across: usize) -> Option<usize> {
     let own = routes[index].dst;
     let blocked = |lo: usize, hi: usize| {
         members.iter().any(|&other| {
@@ -452,12 +467,66 @@ fn label_side(members: &[usize], routes: &[Route], index: usize, across: usize) 
     };
     let after = own + 1;
     if !blocked(after, after + across) {
-        return after;
+        return Some(after);
     }
-    match own.checked_sub(across) {
-        Some(before) if !blocked(before.saturating_sub(1), own.saturating_sub(1)) => before,
-        _ => after,
+    own.checked_sub(across)
+        .filter(|&before| !blocked(before.saturating_sub(1), own.saturating_sub(1)))
+}
+
+/// Places the label of segment `index` in a graph that runs down the page, wrapping
+/// it narrower when that is what keeps it clear of the other lines.
+///
+/// When [`label_side`] finds both sides of the line blocked, the label is wrapped
+/// again to the wider of the two free stretches, each of which keeps a cell of air
+/// to the next line. It is never wrapped narrower than its longest word, since a word
+/// broken across rows reads worse than a word crossed by a line; it then stays after
+/// its line at its own width. Returns the first cross cell and, when it was wrapped
+/// again, the new rows.
+fn fit_label(
+    members: &[usize],
+    routes: &[Route],
+    index: usize,
+    label: &DrawnLabel,
+) -> (usize, Option<DrawnLabel>) {
+    let own = routes[index].dst;
+    if let Some(at) = label_side(members, routes, index, label.width()) {
+        return (at, None);
     }
+    let others = || {
+        members
+            .iter()
+            .filter(move |&&other| other != index)
+            .map(|&other| routes[other].dst)
+            .filter(move |&at| at != own)
+    };
+    // Cells `own + 1 ..= next - 2` after the line, `last + 2 ..= own - 1` before it.
+    let after = others()
+        .filter(|&at| at > own)
+        .min()
+        .map_or(0, |next| next.saturating_sub(own + 2));
+    let before = others()
+        .filter(|&at| at < own)
+        .max()
+        .map_or(own, |last| own.saturating_sub(last + 2));
+    let longest = label
+        .label
+        .lines
+        .iter()
+        .flat_map(|line| line.split_whitespace())
+        .map(crate::text::display_width)
+        .max()
+        .unwrap_or(0);
+    let room = after.max(before);
+    if room == 0 || room < longest {
+        return (own + 1, None);
+    }
+    let narrower = DrawnLabel::wrapped(&label.label, room);
+    let at = if after >= before {
+        own + 1
+    } else {
+        own - narrower.width()
+    };
+    (at, Some(narrower))
 }
 
 /// How many flow cells an end note occupies: one row when the flow runs down the
@@ -476,17 +545,36 @@ fn note_extent(input: &Input<'_>, note: Option<&str>) -> usize {
 /// of that, a jog that ends in the column where another one starts runs below it:
 /// the other edge then leaves that column before this one arrives, and the two read
 /// as a step. The other way round both would run down the same cells between their
-/// two channels, and the eye could no longer tell them apart. A jog that also
+/// two channels, and the eye could no longer tell them apart. Two overlapping jogs
+/// running the same way are ordered too, so they nest rather than cross twice. A jog that also
 /// starts where the other ends cannot be ordered either way; [`untangle_swaps`]
 /// moves such a port beforehand, and any longer cycle is cut where it is found.
 fn stack_channels(ends: &[(usize, usize)]) -> (Vec<usize>, usize) {
     let count = ends.len();
     let span = |i: usize| (ends[i].0.min(ends[i].1), ends[i].0.max(ends[i].1));
+    let overlap = |i: usize, j: usize| {
+        let ((a, b), (c, d)) = (span(i), span(j));
+        !(b < c || d < a)
+    };
+    // Of two overlapping jogs running the same way, the one that turns off sooner runs
+    // above: rightward that is the one starting further right, and of two sharing a
+    // start the one going further. Leftward it is the mirror image. They then nest
+    // instead of crossing twice.
+    let nests_above = |j: usize, i: usize| {
+        let rightward = |k: usize| ends[k].0 < ends[k].1;
+        rightward(i) == rightward(j)
+            && overlap(i, j)
+            && if rightward(i) {
+                ends[j] > ends[i]
+            } else {
+                ends[j] < ends[i]
+            }
+    };
     // `above[i]` lists the jogs that must take a channel before jog `i`.
     let above: Vec<Vec<usize>> = (0..count)
         .map(|i| {
             (0..count)
-                .filter(|&j| j != i && ends[j].0 == ends[i].1)
+                .filter(|&j| j != i && (ends[j].0 == ends[i].1 || nests_above(j, i)))
                 .collect()
         })
         .collect();
@@ -667,6 +755,19 @@ mod tests {
             channels[0] > channels[1] && channels[1] > channels[2],
             "{channels:?}"
         );
+    }
+
+    #[test]
+    fn parallel_jogs_nest_instead_of_crossing() {
+        // Rightward: the jog that starts further right turns first, above the other.
+        let (channels, _) = stack_channels(&[(28, 33), (31, 47)]);
+        assert!(channels[1] < channels[0], "{channels:?}");
+        // Leftward: the mirror image.
+        let (channels, _) = stack_channels(&[(20, 5), (23, 12)]);
+        assert!(channels[0] < channels[1], "{channels:?}");
+        // A shared start: the jog that goes further runs above.
+        let (channels, _) = stack_channels(&[(10, 15), (10, 30)]);
+        assert!(channels[1] < channels[0], "{channels:?}");
     }
 
     #[test]

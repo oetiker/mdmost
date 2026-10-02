@@ -145,6 +145,8 @@ pub(super) struct Route {
     pub dst: usize,
     pub channel: Option<usize>,
     pub label: Option<(usize, usize)>,
+    /// The edge label wrapped narrower to fit between two lines, when it had to be.
+    pub wrapped: Option<DrawnLabel>,
 }
 
 impl Routing {
@@ -157,6 +159,7 @@ impl Routing {
                 dst: ports.in_port[index],
                 channel: None,
                 label: None,
+                wrapped: None,
             })
             .collect();
         let rank_count = input.layered.ranks.len();
@@ -264,7 +267,8 @@ impl Routing {
             pen.terminator(head_at, route.dst, head.glyphs(forward), edge.stroke, true);
         }
         if let Some((flow, cross)) = route.label {
-            pen.drawn_label(self.band_end[rank] + flow, cross, &edge.label);
+            let label = route.wrapped.as_ref().unwrap_or(&edge.label);
+            pen.drawn_label(self.band_end[rank] + flow, cross, label);
         }
         // End notes — class-diagram cardinalities and the like — sit just outside the
         // terminator they belong to.
@@ -320,10 +324,11 @@ fn label_extent(input: &Input<'_>, routes: &[Route]) -> usize {
         let route = &routes[index];
         // Across the flow axis a label is as wide as its widest line when the graph
         // runs down the page, and as tall as its line count when it runs across.
+        let label = route.wrapped.as_ref().unwrap_or(&edge.label);
         let widest = if input.vertical {
-            edge.label.width()
+            label.width()
         } else {
-            edge.label.height()
+            label.height()
         };
         if widest > 0 {
             // A label may sit before its line rather than after it; see `label_side`.
