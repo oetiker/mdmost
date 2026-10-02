@@ -1,24 +1,35 @@
 name: CI
-# repo-infra: ci v1
+# repo-infra: ci v2
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  # D28: Create release PR runs this same file on the release branch before
+  # it opens the pull request. On push and pull_request `inputs.ref` is empty
+  # and every checkout uses its default commit.
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
 
-  # repo-infra: ci-lib v1
+  # repo-infra: ci-lib v2
   lib:
     name: Workflow library tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: actions/setup-node@v7
         with:
@@ -30,7 +41,7 @@ jobs:
       - name: Run the workflow library tests
         run: node --test .github/workflows/lib/*.test.js
 
-  # repo-infra: ci-rust v2
+  # repo-infra: ci-rust v3
   # D24. A bare `cargo test` runs the workspace's default members only, and a
   # root [package] makes that one crate. rust-plan reads the "rust" key of
   # .github/repo-infra.json and `cargo metadata`, and hands the two matrix
@@ -46,6 +57,8 @@ jobs:
       test: ${{ steps.plan.outputs.test }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -89,6 +102,8 @@ jobs:
       PACKAGE: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -129,6 +144,8 @@ jobs:
       PACKAGE: ${{ matrix.package }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -144,13 +161,15 @@ jobs:
 
       - run: cargo test ${PACKAGE:+-p "$PACKAGE"}
 
-  # repo-infra: ci-man v2
+  # repo-infra: ci-man v3
   man:
     name: Manual converts
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       # pandoc converts the manual; groff and man-db render the result, which
       # is the only way to find out whether roff can lay the page out.
@@ -192,7 +211,7 @@ jobs:
           done
           exit $status
 
-  # repo-infra: ci-rust-musl v1
+  # repo-infra: ci-rust-musl v2
   rust-musl:
     name: Static musl ${{ matrix.target }}
     runs-on: ubuntu-latest
@@ -209,6 +228,8 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       # No `targets:` on purpose. cross compiles inside its own image, which
       # already carries the musl std for the target; the runner's toolchain is
@@ -296,15 +317,20 @@ jobs:
           fi
           echo "verified ${checked} of ${declared} binary target(s) statically linked for ${{ matrix.target }}"
 
-  # repo-infra: ci-local v1
+  # repo-infra: ci-local v2
   # The project brings the jobs, the standard brings the seam (D25, D20's
   # shape). .github/workflows/ci-local.yml is the project's own file: it
   # triggers on workflow_call only, sets timeout-minutes on each of its jobs,
   # and keeps its conditions inside steps, never on a job -- a reusable
   # workflow whose every job is skipped reports ci-local as skipped, and
   # ci-passed counts skipped as green. references/conventions.md.
+  # The file declares the workflow_call input ref and checks it out in every
+  # actions/checkout (D28); Create release PR passes the release branch here.
   ci-local:
     uses: ./.github/workflows/ci-local.yml
+    with:
+      ref: ${{ inputs.ref }}
+    secrets: inherit
 
   # The single context the ruleset requires (spec D2). It exists so branch
   # protection can name one check that means "this repository's CI passed",
@@ -315,11 +341,125 @@ jobs:
   # dependency fails, and a skipped job reports Success -- so the required
   # check would go green on a red build. It fails open, silently, and looks
   # like it is working.
+  #
+  # Release mode (D28): on a release pull request the test results do not
+  # count. Create release PR tested exactly the head that carries the
+  # release-built status, and the head must not be behind main. The verdict
+  # is lib/release.js:releaseModeVerdict, loaded from the base commit, so a
+  # release branch changed by accident cannot pass on library code it changed.
   ci-passed:
     if: always()
     needs: [lib, rust-plan, rust-check, rust-test, man, rust-musl, ci-local]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: read
+    # The three release-mode steps run on a pull request from a release/*
+    # branch; this names that condition once.
+    env:
+      RELEASE_BRANCH_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') }}
     steps:
-      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+      - if: env.RELEASE_BRANCH_PR == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: repo-infra-base
+
+      - if: env.RELEASE_BRANCH_PR == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # An API error fails this step and so the job: a release pull request
+      # whose verdict could not be read is never green.
+      - id: release
+        name: Release mode
+        if: env.RELEASE_BRANCH_PR == 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const lib = `${process.env.GITHUB_WORKSPACE}/repo-infra-base/.github/workflows/lib`;
+            const releaseLib = require(`${lib}/release.js`);
+            const { owner, repo } = context.repo;
+            const verdict = await releaseLib.releaseModeVerdict(github, {
+              owner, repo, pr: context.payload.pull_request,
+            });
+            // A fork's or a person's release/x gets the ordinary rules.
+            if (verdict === null) {
+              core.setOutput('mode', 'ordinary');
+              return;
+            }
+            core.setOutput('mode', 'release');
+            if (!verdict.ok) {
+              core.setFailed(verdict.message);
+              return;
+            }
+            core.notice(verdict.message);
+
+      - if: steps.release.outputs.mode != 'release' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
         run: exit 1
+
+  # D28: when main moves, every open release pull request is stale. The
+  # ruleset's up-to-date rule already refuses its merge; this check run says
+  # why, where GitHub alone offers the Update branch button. Push to main
+  # only: when Create release PR calls this file the event is
+  # workflow_dispatch and the job skips. It never fails: a failed job is a
+  # failed check run on this main commit, and the guard of the next dispatch
+  # would refuse it. An API error is a warning, one per pull request, and the
+  # others are still marked. A pull request left unmarked still cannot merge:
+  # the ruleset's up-to-date rule refuses it.
+  release-pr-current:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Mark stale release pull requests
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const fullName = `${owner}/${repo}`;
+            let releaseLib;
+            let releasePrs;
+            try {
+              releaseLib = require(
+                `${process.env.GITHUB_WORKSPACE}/.github/workflows/lib/release.js`);
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'open', per_page: 100,
+              });
+              releasePrs = prs.filter((p) => releaseLib.isReleasePr(p, fullName));
+            } catch (error) {
+              core.warning(`Could not list the open release pull requests: ${error.message}`);
+              return;
+            }
+            for (const pr of releasePrs) {
+              try {
+                const { data: compared } = await github.rest.repos.compareCommitsWithBasehead({
+                  owner, repo, basehead: `${pr.base.ref}...${pr.head.sha}`,
+                });
+                const stale = releaseLib.staleReleasePr(pr, compared.behind_by);
+                if (!stale) continue;
+                await github.rest.checks.create({
+                  owner, repo, name: 'ci-passed', head_sha: stale.sha,
+                  status: 'completed', conclusion: 'failure',
+                  output: { title: stale.title, summary: stale.summary },
+                });
+                core.notice(`#${stale.number}: ${stale.summary}`);
+              } catch (error) {
+                core.warning(`Could not mark release pull request #${pr.number}: ${error.message}`);
+              }
+            }
