@@ -20,6 +20,9 @@ use crate::mermaid::ast::{
 use super::lex::{self, Nesting, SrcLine};
 use super::{direction, intern};
 
+/// The statements whose `;`-separated CSS tail `lex::drop_css_spill` drops.
+const STYLING: [&str; 4] = ["style", "classdef", "class", "linkstyle"];
+
 /// Parses a whole `flowchart` / `graph` diagram.
 ///
 /// `src` is the full mermaid source `lines` was lexed from; it is kept only so that
@@ -35,7 +38,7 @@ pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<Flowchart, Merma
 
     // `graph TD; A-->B` puts statements on the header line.
     let (_, after_keyword) = lex::split_word(header.text);
-    let mut statements = lex::split_piped_statements(after_keyword);
+    let mut statements = lex::drop_css_spill(lex::split_piped_statements(after_keyword), &STYLING);
     if let Some(first) = statements.first() {
         let (word, rest) = lex::split_word(first);
         if let Some(dir) = direction(word) {
@@ -52,7 +55,7 @@ pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<Flowchart, Merma
     }
 
     for line in body {
-        for statement in lex::split_piped_statements(line.text) {
+        for statement in lex::drop_css_spill(lex::split_piped_statements(line.text), &STYLING) {
             builder.statement(statement, line.number)?;
         }
     }

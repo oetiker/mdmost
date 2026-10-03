@@ -310,6 +310,47 @@ pub fn split_class_suffix(text: &str) -> (&str, Option<&str>) {
     (text[..at].trim_end(), Some(name))
 }
 
+/// Drops the CSS fragments a `;` cut off a styling statement.
+///
+/// `;` ends a statement in Mermaid, also inside `style A fill:#fff;stroke:#000`, so the
+/// splitter hands on `stroke:#000` as a statement of its own. Read as a node or a state
+/// description it would fail the diagram or draw a box nobody wrote. Mermaid itself
+/// ignores such a fragment, and so does this: a statement that reads as a CSS property
+/// (`word:value`) is dropped when it follows a styling statement on the same line, or
+/// another fragment dropped this way. The rule is tied to the styling statement rather
+/// than to the shape alone, because `s2:waiting` on its own is a state description and
+/// `Animal:+int age` a class member. For the same reason a property is read narrowly,
+/// as CSS is written in practice: a lower-case name directly followed by `:`, so that
+/// `class A foo; C : waiting` still gives state `C` its description.
+///
+/// `styling` lists the family's styling keywords in lower case: `class` styles in a
+/// flowchart but declares in a class diagram.
+pub fn drop_css_spill<'a>(statements: Vec<&'a str>, styling: &[&str]) -> Vec<&'a str> {
+    let mut after_styling = false;
+    statements
+        .into_iter()
+        .filter(|statement| {
+            if after_styling && is_css_property(statement) {
+                return false;
+            }
+            let word = split_word(statement).0.to_ascii_lowercase();
+            after_styling = styling.contains(&word.as_str());
+            true
+        })
+        .collect()
+}
+
+/// Whether `text` reads as one CSS property, `name:value`, such as `stroke-width:3px`.
+fn is_css_property(text: &str) -> bool {
+    let Some((name, value)) = text.split_once(':') else {
+        return false;
+    };
+    !name.is_empty()
+        && name.chars().all(|ch| ch.is_ascii_lowercase() || ch == '-')
+        && !value.trim().is_empty()
+        && !value.starts_with(':')
+}
+
 /// Splits `text` at the first top-level `sep`, returning the two trimmed halves.
 pub fn split_once_top_level(text: &str, sep: char, nesting: Nesting) -> Option<(&str, &str)> {
     let mut buf = [0u8; 4];
@@ -474,5 +515,41 @@ mod tests {
         // Not a class name: left for the caller to report or read as it stands.
         assert_eq!(split_class_suffix("A:::"), ("A:::", None));
         assert_eq!(split_class_suffix("A:::foo bar"), ("A:::foo bar", None));
+    }
+
+    #[test]
+    fn drop_css_spill_drops_only_what_follows_a_styling_statement() {
+        let styling = ["style", "classdef"];
+        let split = |text| drop_css_spill(split_statements(text), &styling);
+        assert_eq!(
+            split("style A fill:#fff;stroke:#000; stroke-width: 3px"),
+            ["style A fill:#fff"]
+        );
+        assert_eq!(
+            split("classDef c fill:red;stroke:#000; B"),
+            ["classDef c fill:red", "B"]
+        );
+        // Without a styling statement before it, `word:value` is the family's own
+        // business, such as a state description or a class member.
+        assert_eq!(split("A --> B; s2:waiting"), ["A --> B", "s2:waiting"]);
+        // A statement that is not CSS ends the run, so a later fragment is kept.
+        assert_eq!(
+            split("style A fill:#fff; B; s2:waiting"),
+            ["style A fill:#fff", "B", "s2:waiting"]
+        );
+        // Only a lower-case name directly followed by `:` reads as a property.
+        assert_eq!(
+            split("style A fill:#fff; C : waiting"),
+            ["style A fill:#fff", "C : waiting"]
+        );
+        assert_eq!(
+            split("style A fill:#fff; Up:x"),
+            ["style A fill:#fff", "Up:x"]
+        );
+        // A class suffix is not a property.
+        assert_eq!(
+            split("style A fill:#fff; B:::c"),
+            ["style A fill:#fff", "B:::c"]
+        );
     }
 }

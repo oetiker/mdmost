@@ -268,6 +268,24 @@ flowchart LR
         assert_eq!(node(&chart, "G").label, Label::line("keeps:::this"));
         assert_eq!(chart.edges.len(), 4);
     }
+
+    /// `;` ends a statement, so `stroke:#2a8bb5` after a `style` line's `;` is a stray
+    /// CSS fragment, not a node (colour spec §3.4).
+    #[test]
+    fn drops_css_fragments_cut_off_a_styling_statement() {
+        let chart = flowchart(
+            "flowchart LR
+    A --> B
+    style A fill:#e3f4fb;stroke:#2a8bb5;stroke-width:3px
+    classDef big fill:#fff; stroke:#000
+    linkStyle 0 stroke:#333;color:red
+    class A big; C --> D
+",
+        );
+        let keys: Vec<_> = chart.nodes.iter().map(|node| node.key.as_str()).collect();
+        assert_eq!(keys, vec!["A", "B", "C", "D"]);
+        assert_eq!(chart.edges.len(), 2);
+    }
 }
 
 mod sequences {
@@ -610,6 +628,23 @@ mod classes {
         assert_eq!(diagram.classes[12].name.text(), "Customer");
         assert_eq!(diagram.classes[13].name.text(), "Ticket");
         assert_eq!(diagram.relations[0].label, Some(Label::line("inheritance")));
+    }
+
+    /// A `;` inside a `style` or `classDef` line must not declare a class named after
+    /// the CSS property it cut off (colour spec §3.4).
+    #[test]
+    fn drops_css_fragments_cut_off_a_styling_statement() {
+        let diagram = class_diagram(
+            "classDiagram
+    class Animal
+    style Animal fill:#e3f4fb;stroke:#2a8bb5
+    classDef foo fill:#fff;stroke:#000
+    cssClass \"Animal\" foo; Animal : +int age
+",
+        );
+        assert_eq!(diagram.classes.len(), 1);
+        assert_eq!(diagram.classes[0].name.text(), "Animal");
+        assert_eq!(diagram.classes[0].members.len(), 1);
     }
 
     #[test]
@@ -1069,6 +1104,26 @@ mod states {
         };
         assert_eq!(scope.transitions.len(), 1);
         assert_eq!(diagram.root.transitions.len(), 1);
+    }
+
+    /// A `;` inside a styling line must not draw a state named after the CSS property
+    /// it cut off, with the value as its description (colour spec §3.4).
+    #[test]
+    fn drops_css_fragments_cut_off_a_styling_statement() {
+        let diagram = state(
+            "stateDiagram-v2
+    A --> B
+    style A fill:#e3f4fb;stroke:#2a8bb5
+    classDef foo fill:#fff;stroke:#000
+    class A foo; C : waiting
+",
+        );
+        let keys: Vec<_> = diagram.states.iter().map(|s| s.key.as_str()).collect();
+        assert_eq!(keys, vec!["A", "B", "C"]);
+        assert_eq!(
+            diagram.states[2].label.as_ref().map(Label::text).as_deref(),
+            Some("waiting")
+        );
     }
 
     #[test]

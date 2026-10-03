@@ -7,6 +7,7 @@
 ### Changed
 
 ### Fixed
+- A Mermaid `style` or `classDef` line that separates its properties with `;`, for example `style A fill:#e3f4fb;stroke:#2a8bb5`, no longer fails a flowchart with "cannot read a node shape from `:#2a8bb5`". In state and class diagrams the same line no longer draws an extra box named `stroke`. The properties after the `;` are ignored.
 - A Mermaid flowchart that gives a node a class, for example `A:::foo --> B` or `A[Text]:::foo`, no longer fails with "cannot read a node shape from `:::foo`". The class is not drawn yet, so the node looks as it would without it.
 - In Mermaid flowcharts, an arrow from outside a subgraph to a node inside it now reaches that node. Before, it stopped at the subgraph border when it arrived under the subgraph title, or when several arrows entered the same subgraph.
 - A Mermaid subgraph or composite state whose title is wider than its content no longer cuts the title off (`╭ A rath╮`); the frame widens to fit it. When the title would cover a node that an arrow enters, it moves right along the top border so the arrow can pass.

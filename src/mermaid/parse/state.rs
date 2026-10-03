@@ -20,6 +20,9 @@ use crate::mermaid::ast::{
 use super::lex::{self, Nesting, SrcLine};
 use super::{direction, intern};
 
+/// The statements whose `;`-separated CSS tail `lex::drop_css_spill` drops.
+const STYLING: [&str; 3] = ["style", "classdef", "class"];
+
 /// Parses a whole `stateDiagram` / `stateDiagram-v2`.
 ///
 /// `src` is the full mermaid source `lines` was lexed from; it is kept only so that
@@ -104,7 +107,7 @@ impl Builder<'_> {
             }
             return Ok(());
         }
-        for statement in lex::split_statements(text) {
+        for statement in lex::drop_css_spill(lex::split_statements(text), &STYLING) {
             self.statement(statement, line)?;
         }
         Ok(())
