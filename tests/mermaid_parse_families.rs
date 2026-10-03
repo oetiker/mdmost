@@ -1126,6 +1126,42 @@ mod states {
         );
     }
 
+    /// `:::name` binds tighter than `:`, so it is never read as the start of a label
+    /// or a description (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_after_a_state_name() {
+        let diagram = state(
+            "stateDiagram-v2
+    [*] --> A:::foo
+    A:::foo --> B:::bar : go
+    C:::baz
+    D:::qux : waiting
+    [*]:::foo --> D
+    B --> [*]:::foo
+",
+        );
+        let keys: Vec<_> = diagram.states.iter().map(|s| s.key.as_str()).collect();
+        assert_eq!(keys, vec!["A", "B", "C", "D"]);
+        let labels: Vec<_> = diagram
+            .root
+            .transitions
+            .iter()
+            .map(|t| t.label.as_ref().map(Label::text))
+            .collect();
+        assert_eq!(labels, vec![None, Some("go".to_string()), None, None]);
+        let transitions = &diagram.root.transitions;
+        assert_eq!(transitions[0].from, StateEndpoint::Initial);
+        assert_eq!(transitions[0].to, StateEndpoint::State(StateId(0)));
+        assert_eq!(transitions[1].to, StateEndpoint::State(StateId(1)));
+        assert_eq!(transitions[2].from, StateEndpoint::Initial);
+        assert_eq!(transitions[3].to, StateEndpoint::Final);
+        assert_eq!(diagram.states[2].label, None);
+        assert_eq!(
+            diagram.states[3].label.as_ref().map(Label::text).as_deref(),
+            Some("waiting")
+        );
+    }
+
     #[test]
     fn accepts_the_v1_spelling() {
         let diagram = state("stateDiagram\n    [*] --> Still\n");

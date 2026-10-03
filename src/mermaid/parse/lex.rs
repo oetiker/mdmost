@@ -351,6 +351,36 @@ fn is_css_property(text: &str) -> bool {
         && !value.starts_with(':')
 }
 
+/// Splits `text` at the first top-level `:` that starts a label or a description,
+/// returning the two trimmed halves.
+///
+/// [`split_once_top_level`] with `:` would cut `A:::foo : text` inside the class
+/// suffix and read `::foo : text` as the label. `:::` binds tighter than `:` (colour
+/// spec §3.3), so a `:::` and the class name after it are stepped over here.
+pub fn split_label_colon(text: &str, nesting: Nesting) -> Option<(&str, &str)> {
+    let mut scanner = Scanner::default();
+    // The end of the class suffix currently being stepped over.
+    let mut skip_to = 0;
+    for (at, ch) in text.char_indices() {
+        if at < skip_to {
+            continue;
+        }
+        if !scanner.step(ch, nesting) || ch != ':' {
+            continue;
+        }
+        if text[at..].starts_with(":::") {
+            // A class name is ASCII and holds no quote or bracket the scanner needs.
+            let name = text[at + 3..]
+                .find(|ch: char| !is_class_char(ch))
+                .unwrap_or(text.len() - at - 3);
+            skip_to = at + 3 + name;
+            continue;
+        }
+        return Some((text[..at].trim(), text[at + 1..].trim()));
+    }
+    None
+}
+
 /// Splits `text` at the first top-level `sep`, returning the two trimmed halves.
 pub fn split_once_top_level(text: &str, sep: char, nesting: Nesting) -> Option<(&str, &str)> {
     let mut buf = [0u8; 4];
@@ -515,6 +545,20 @@ mod tests {
         // Not a class name: left for the caller to report or read as it stands.
         assert_eq!(split_class_suffix("A:::"), ("A:::", None));
         assert_eq!(split_class_suffix("A:::foo bar"), ("A:::foo bar", None));
+    }
+
+    #[test]
+    fn split_label_colon_steps_over_a_class_suffix() {
+        let split = |text| split_label_colon(text, Nesting::Honour);
+        assert_eq!(split("A:::foo : text"), Some(("A:::foo", "text")));
+        assert_eq!(
+            split("A:::foo --> B:::bar: go"),
+            Some(("A:::foo --> B:::bar", "go"))
+        );
+        assert_eq!(split("a --> b : x:::y"), Some(("a --> b", "x:::y")));
+        assert_eq!(split("A:::foo"), None);
+        assert_eq!(split("[*] --> A:::foo"), None);
+        assert_eq!(split("A : text"), Some(("A", "text")));
     }
 
     #[test]

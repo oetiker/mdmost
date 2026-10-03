@@ -125,7 +125,7 @@ const SAMPLES: [&str; 7] = [
     "erDiagram\n  A ||--o{ B : has\n  A {\n    string n PK \"c\"\n  }\n",
     "pie showData\n  title T\n  \"a\" : 1\n  \"b\" : 2.5\n",
     "gantt\n  dateFormat YYYY-MM-DD\n  section S\n  t :a1, 2014-01-01, 3d\n  u :after a1, 2w\n",
-    "stateDiagram-v2\n  [*] --> A\n  state A {\n    [*] --> B\n  }\n  note left of A : n\n  style A fill:#fff;stroke:#000\n",
+    "stateDiagram-v2\n  [*] --> A:::k\n  A:::k --> C:::k : t\n  state A {\n    [*] --> B\n  }\n  note left of A : n\n  style A fill:#fff;stroke:#000\n",
 ];
 
 #[test]

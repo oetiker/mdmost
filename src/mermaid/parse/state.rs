@@ -6,7 +6,8 @@
 //! any depth, the `<<choice>>`, `<<fork>>` and `<<join>>` stereotypes, `direction`, and
 //! `note left of X` / `note right of X` in both the inline and the `end note` form.
 //!
-//! Skipped silently: `classDef`, `class`, `style`, `click`.
+//! Skipped silently: `classDef`, `class`, `style`, `click`, and the `:::name` class
+//! suffix on a state.
 //!
 //! Rejected with a reason: the `--` concurrency divider, because silently dropping it
 //! would draw parallel regions as one.
@@ -156,8 +157,9 @@ impl Builder<'_> {
         if lex::find_top_level(text, "-->", Nesting::Honour).is_some() {
             return self.transition(text, line);
         }
-        // `s2 : This is a description`.
-        if let Some((key, description)) = lex::split_once_top_level(text, ':', Nesting::Honour) {
+        // `s2 : This is a description`, also as `s2:::c : This is a description`.
+        if let Some((key, description)) = lex::split_label_colon(text, Nesting::Honour) {
+            let (key, _class) = lex::split_class_suffix(key);
             let id = self.intern_state(key);
             let description = lex::unquote(description);
             if let Some(state) = self.states.get_mut(id.0) {
@@ -165,8 +167,10 @@ impl Builder<'_> {
             }
             return Ok(());
         }
-        if text.chars().all(lex::is_ident_char) {
-            self.intern_state(text);
+        // A state alone, `s2` or `s2:::c`. The class is not drawn yet.
+        let (key, _class) = lex::split_class_suffix(text);
+        if key.chars().all(lex::is_ident_char) {
+            self.intern_state(key);
             return Ok(());
         }
         Err(lex::syntax(
@@ -277,7 +281,7 @@ impl Builder<'_> {
 
     /// Handles `a --> b : label`, including the `[*]` markers.
     fn transition(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
-        let (body, label) = match lex::split_once_top_level(text, ':', Nesting::Honour) {
+        let (body, label) = match lex::split_label_colon(text, Nesting::Honour) {
             Some((body, label)) => (body, Some(label)),
             None => (text, None),
         };
@@ -305,6 +309,9 @@ impl Builder<'_> {
         is_source: bool,
         line: usize,
     ) -> Result<StateEndpoint, MermaidError> {
+        // `A:::c` attaches a class, which is not drawn yet; after `[*]` it is read and
+        // ignored for good, since a start or end marker takes no colour.
+        let (text, _class) = lex::split_class_suffix(text);
         if text == "[*]" {
             return Ok(if is_source {
                 StateEndpoint::Initial
