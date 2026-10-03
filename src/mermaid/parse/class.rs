@@ -6,7 +6,8 @@
 //! annotations (inside or outside the block), generics written `List~T~`, `direction`,
 //! and all six relation operators with quoted cardinalities and a `: label`.
 //!
-//! Skipped silently: `click`, `style`, `classDef`, `cssClass`, `callback`, `link`.
+//! Skipped silently: `click`, `style`, `classDef`, `cssClass`, `callback`, `link`, and
+//! the `:::name` class suffix in `class A:::name`.
 //!
 //! Rejected with a reason: `note` statements and namespaces, which would otherwise be
 //! dropped from the drawing without the reader noticing.
@@ -151,6 +152,9 @@ impl Builder<'_> {
             None => (rest.trim(), None),
         };
         let (name, annotation) = lex::split_stereotype(head, line)?;
+        // `class A:::c` attaches a class, which is not drawn yet. Left on, the suffix
+        // became part of the name and declared a second class `A:::c`.
+        let (name, _class) = lex::split_class_suffix(name);
         if name.is_empty() {
             return Err(lex::syntax(line, "`class` without a name"));
         }

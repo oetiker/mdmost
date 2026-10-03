@@ -647,6 +647,27 @@ mod classes {
         assert_eq!(diagram.classes[0].members.len(), 1);
     }
 
+    /// `class A:::c` names class `A` and attaches `c` to it (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_on_a_class_declaration() {
+        let diagram = class_diagram(
+            "classDiagram
+    class Animal
+    class Animal:::foo
+    class Duck:::bar {
+        +swim()
+    }
+    class Shape~T~:::baz
+    Animal <|-- Duck
+",
+        );
+        let names: Vec<_> = diagram.classes.iter().map(|c| c.name.text()).collect();
+        assert_eq!(names, vec!["Animal", "Duck", "Shape"]);
+        assert_eq!(diagram.classes[1].members.len(), 1);
+        assert_eq!(diagram.classes[2].generic.as_deref(), Some("T"));
+        assert_eq!(diagram.relations.len(), 1);
+    }
+
     #[test]
     fn parses_a_class_block_written_on_one_line() {
         let diagram = class_diagram("classDiagram\n    class A { +f() }\n    A <|-- B\n");
