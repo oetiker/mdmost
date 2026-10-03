@@ -6,7 +6,8 @@
 //! `||--||`, `}|..|{`, …) with both the identifying (`--`) and non-identifying (`..`)
 //! line styles, and an optional `: label`.
 //!
-//! Skipped silently: `style`, `classDef`, `class`, `click`, `direction`.
+//! Skipped silently: `style`, `classDef`, `class`, `click`, `direction`, and the
+//! `:::name` class suffix on an entity.
 
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
@@ -125,7 +126,9 @@ impl Builder<'_> {
         text: &str,
         line: usize,
     ) -> Result<Option<ErRelationship>, MermaidError> {
-        let (body, label) = match lex::split_once_top_level(text, ':', Nesting::Ignore) {
+        // Not the plain first `:`: in `A:::c ||--o{ B : label` that is the class suffix,
+        // and the operator would end up in the label.
+        let (body, label) = match lex::split_label_colon(text, Nesting::Ignore) {
             Some((body, label)) => (body, Some(label)),
             None => (text, None),
         };
@@ -155,6 +158,8 @@ impl Builder<'_> {
 
     /// Resolves an entity reference, recording the alias when one is written.
     fn entity_ref(&mut self, text: &str) -> EntityId {
+        // `A:::c` attaches a class, which is not drawn yet.
+        let (text, _class) = lex::split_class_suffix(text);
         let (name, alias) = split_alias(text);
         let id = self.intern_entity(lex::unquote(name));
         if let Some(alias) = alias

@@ -122,7 +122,7 @@ const SAMPLES: [&str; 7] = [
     "flowchart TD\n  A[a]:::k -->|l| B(b)\n  subgraph s\n    C{c} -.-> D((d)):::k\n  end\n  style A fill:#fff;stroke:#000\n",
     "sequenceDiagram\n  A->>+B: hi\n  loop x\n    B-->>-A: bye\n  end\n  Note over A,B: n\n",
     "classDiagram\n  A <|-- B : l\n  style A fill:#fff;stroke:#000\n  class A:::k {\n    +int x\n    +f(int a) B\n  }\n",
-    "erDiagram\n  A ||--o{ B : has\n  A {\n    string n PK \"c\"\n  }\n",
+    "erDiagram\n  A:::k ||--o{ B:::k : has\n  A:::k {\n    string n PK \"c\"\n  }\n",
     "pie showData\n  title T\n  \"a\" : 1\n  \"b\" : 2.5\n",
     "gantt\n  dateFormat YYYY-MM-DD\n  section S\n  t :a1, 2014-01-01, 3d\n  u :after a1, 2w\n",
     "stateDiagram-v2\n  [*] --> A:::k\n  A:::k --> C:::k : t\n  state A {\n    [*] --> B\n  }\n  note left of A : n\n  style A fill:#fff;stroke:#000\n",

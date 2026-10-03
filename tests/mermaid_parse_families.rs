@@ -850,6 +850,41 @@ mod entities {
         assert_eq!(relationship.right_cardinality, ErCardinality::ZeroOrOne);
         assert_eq!(relationship.label, Some(Label::line("may own")));
     }
+
+    /// `:::name` may follow an entity name alone, before `{` and at either end of a
+    /// relationship, and binds tighter than the `:` of the label (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_after_an_entity_name() {
+        let diagram = er("erDiagram
+    CUSTOMER:::foo ||--o{ ORDER : places
+    ORDER ||--|{ LINE:::bar : contains
+    PRODUCT:::baz
+    CUSTOMER:::foo {
+        string name
+    }
+    p[Person]:::qux
+");
+        let names: Vec<_> = diagram.entities.iter().map(|e| e.name.text()).collect();
+        assert_eq!(names, vec!["CUSTOMER", "ORDER", "LINE", "PRODUCT", "p"]);
+        assert_eq!(diagram.entities[0].attributes.len(), 1);
+        assert_eq!(
+            diagram.entities[4]
+                .alias
+                .as_ref()
+                .map(Label::text)
+                .as_deref(),
+            Some("Person")
+        );
+        let labels: Vec<_> = diagram
+            .relationships
+            .iter()
+            .map(|r| r.label.as_ref().map(Label::text))
+            .collect();
+        assert_eq!(
+            labels,
+            vec![Some("places".to_string()), Some("contains".to_string())]
+        );
+    }
 }
 
 mod pies {
