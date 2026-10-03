@@ -119,7 +119,7 @@ const HEADERS: [&str; 7] = [
 
 /// Diagram sources whose every prefix must parse or fail, but never panic.
 const SAMPLES: [&str; 7] = [
-    "flowchart TD\n  A[a] -->|l| B(b)\n  subgraph s\n    C{c} -.-> D((d))\n  end\n",
+    "flowchart TD\n  A[a]:::k -->|l| B(b)\n  subgraph s\n    C{c} -.-> D((d)):::k\n  end\n",
     "sequenceDiagram\n  A->>+B: hi\n  loop x\n    B-->>-A: bye\n  end\n  Note over A,B: n\n",
     "classDiagram\n  A <|-- B : l\n  class A {\n    +int x\n    +f(int a) B\n  }\n",
     "erDiagram\n  A ||--o{ B : has\n  A {\n    string n PK \"c\"\n  }\n",

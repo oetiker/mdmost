@@ -245,6 +245,29 @@ flowchart LR
         assert_eq!(chart.nodes.len(), 2);
         assert_eq!(chart.edges.len(), 1);
     }
+
+    /// `:::name` may follow a node reference wherever one stands (colour spec §3.3).
+    /// Until colours are drawn the class is read and dropped, so the diagram must parse
+    /// exactly as if the suffix were not there.
+    #[test]
+    fn reads_a_class_suffix_wherever_a_node_stands() {
+        let chart = flowchart(
+            "flowchart LR
+    A:::foo --> B[Box]:::bar
+    C:::c & D(Round):::d --> E:::e
+    F:::f
+    G[\"keeps:::this\"] -- label --> H:::h
+",
+        );
+        let keys: Vec<_> = chart.nodes.iter().map(|node| node.key.as_str()).collect();
+        assert_eq!(keys, vec!["A", "B", "C", "D", "E", "F", "G", "H"]);
+        assert_eq!(node(&chart, "B").shape, NodeShape::Rect);
+        assert_eq!(node(&chart, "B").label, Label::line("Box"));
+        assert_eq!(node(&chart, "D").shape, NodeShape::Round);
+        assert_eq!(node(&chart, "D").label, Label::line("Round"));
+        assert_eq!(node(&chart, "G").label, Label::line("keeps:::this"));
+        assert_eq!(chart.edges.len(), 4);
+    }
 }
 
 mod sequences {

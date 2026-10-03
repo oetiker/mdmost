@@ -285,6 +285,31 @@ fn split_scanned(text: &str, pipes: bool) -> Vec<&str> {
     parts
 }
 
+/// Characters of a class name, as `classDef` and `:::name` write it.
+pub fn is_class_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')
+}
+
+/// Splits a trailing `:::name` class suffix off a node reference such as `A:::c` or
+/// `A[text]:::c`, returning the reference and the class name.
+///
+/// This is the one reader of `:::` for every family that has it, so that the colour
+/// work can keep the name where the parsers drop it today. The suffix counts only at
+/// the top level and only when a class name runs from it to the end: inside a label or
+/// a quoted name `:::` is text, and `A:::foo bar` is handed back whole for the caller
+/// to read or reject as it would any other malformed reference.
+pub fn split_class_suffix(text: &str) -> (&str, Option<&str>) {
+    let text = text.trim();
+    let Some(at) = find_top_level(text, ":::", Nesting::Honour) else {
+        return (text, None);
+    };
+    let name = text[at + 3..].trim_end();
+    if name.is_empty() || !name.chars().all(is_class_char) {
+        return (text, None);
+    }
+    (text[..at].trim_end(), Some(name))
+}
+
 /// Splits `text` at the first top-level `sep`, returning the two trimmed halves.
 pub fn split_once_top_level(text: &str, sep: char, nesting: Nesting) -> Option<(&str, &str)> {
     let mut buf = [0u8; 4];
@@ -435,5 +460,19 @@ mod tests {
         let label = label_at(src, &elsewhere);
         assert_eq!(label.lines, ["Parse"]);
         assert_eq!(label.source, 0..0);
+    }
+
+    #[test]
+    fn split_class_suffix_takes_the_name_off_the_end() {
+        assert_eq!(split_class_suffix("A:::foo"), ("A", Some("foo")));
+        assert_eq!(split_class_suffix("A[x]:::a-b_1"), ("A[x]", Some("a-b_1")));
+        assert_eq!(split_class_suffix(" A :::foo "), ("A", Some("foo")));
+        assert_eq!(split_class_suffix("A"), ("A", None));
+        // Inside a label or a quoted name `:::` is text, not a suffix.
+        assert_eq!(split_class_suffix("A[\"x:::y\"]"), ("A[\"x:::y\"]", None));
+        assert_eq!(split_class_suffix("A[x:::y]"), ("A[x:::y]", None));
+        // Not a class name: left for the caller to report or read as it stands.
+        assert_eq!(split_class_suffix("A:::"), ("A:::", None));
+        assert_eq!(split_class_suffix("A:::foo bar"), ("A:::foo bar", None));
     }
 }

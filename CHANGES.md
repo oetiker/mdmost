@@ -7,6 +7,7 @@
 ### Changed
 
 ### Fixed
+- A Mermaid flowchart that gives a node a class, for example `A:::foo --> B` or `A[Text]:::foo`, no longer fails with "cannot read a node shape from `:::foo`". The class is not drawn yet, so the node looks as it would without it.
 - In Mermaid flowcharts, an arrow from outside a subgraph to a node inside it now reaches that node. Before, it stopped at the subgraph border when it arrived under the subgraph title, or when several arrows entered the same subgraph.
 - A Mermaid subgraph or composite state whose title is wider than its content no longer cuts the title off (`╭ A rath╮`); the frame widens to fit it. When the title would cover a node that an arrow enters, it moves right along the top border so the arrow can pass.
 - A Mermaid edge line that passes a wide character in a label or title, for example a Chinese letter or an emoji, no longer erases that character.

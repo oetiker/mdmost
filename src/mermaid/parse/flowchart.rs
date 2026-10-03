@@ -6,7 +6,8 @@
 //! links with optional back arrows, both label forms (`-->|text|` and `-- text -->`),
 //! `&` node groups, chained edges, and nested `subgraph` … `end`.
 //!
-//! Skipped silently: `click`, `style`, `classDef`, `class`, `cssClass`, `linkStyle`.
+//! Skipped silently: `click`, `style`, `classDef`, `class`, `cssClass`, `linkStyle`, and
+//! the `:::name` class suffix on a node.
 //!
 //! Rejected with a reason: `--x` / `--o` link terminators, `@{ … }` shape metadata,
 //! and edges whose endpoint is a subgraph.
@@ -207,6 +208,9 @@ impl Builder<'_> {
     /// Declares or updates a single node, returning its id.
     fn node(&mut self, text: &str, line: usize) -> Result<NodeId, MermaidError> {
         let src = self.src;
+        // `A:::c` and `A[text]:::c` attach a class, which is not drawn yet; without
+        // this the suffix reaches the shape reader and fails the whole diagram.
+        let (text, _class) = lex::split_class_suffix(text);
         let (key, rest) = lex::take_ident(text);
         if key.is_empty() {
             return Err(lex::syntax(
