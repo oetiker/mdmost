@@ -265,9 +265,13 @@ impl Resolution {
         first.sort_by_key(|&(at, color)| (at, color.rgb.r, color.rgb.g, color.rgb.b));
         let angles: Vec<f32> = first
             .iter()
-            .map(|(_, color)| match color.named {
-                Some(slot) => NOMINAL[slot],
-                None => hue_of(color.rgb).unwrap_or_default(),
+            .map(|(_, color)| {
+                // `named` is public, so a hand-built AST may carry a slot past 15:
+                // that colour is placed by its hue like an unnamed one.
+                color
+                    .named
+                    .and_then(|slot| NOMINAL.get(slot).copied())
+                    .unwrap_or_else(|| hue_of(color.rgb).unwrap_or_default())
             })
             .collect();
         Self {
@@ -449,12 +453,37 @@ mod tests {
     fn nearest_breaks_ties_towards_the_larger_angle() {
         assert_eq!(nearest(7.5, |_| true), Some(1), "15 beats 0");
         assert_eq!(
-            nearest(352.5, |_| true),
+            nearest(348.75, |_| true),
             Some(0),
-            "0 counts as 360 against 337.5"
+            "360 beats 337.5, both 11.25 away"
+        );
+        assert_eq!(
+            nearest(345.0, |_| true),
+            Some(15),
+            "no tie: 337.5 is nearer"
         );
         assert_eq!(nearest(359.0, |_| true), Some(0), "the shorter way round");
         assert_eq!(nearest(198.0, |_| true), Some(9));
+    }
+
+    #[test]
+    fn a_named_slot_past_the_table_falls_back_to_its_hue() {
+        let paint = merge([&Props {
+            stroke: Some((
+                PaintColor {
+                    rgb: Color::hex(0x2a8bb5),
+                    named: Some(16),
+                },
+                10,
+            )),
+            ..Props::default()
+        }])
+        .expect("painted");
+        assert_eq!(
+            Resolution::of([&paint]).slot(&paint),
+            Some(9),
+            "200 cyan-blue"
+        );
     }
 
     #[test]

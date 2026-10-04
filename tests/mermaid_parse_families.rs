@@ -1394,6 +1394,24 @@ mod states {
     }
 
     #[test]
+    fn an_empty_composite_is_a_node_and_takes_the_default_class() {
+        let diagram = state(
+            "stateDiagram-v2\n  state Hollow {\n  }\n  state Full {\n    D\n  }\n\
+             classDef default stroke:#00ff00\n",
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "Hollow").paint),
+            Some((None, Some(0x00ff00), false)),
+            "drawn as a state box"
+        );
+        assert_eq!(
+            state_named(&diagram, "Full").paint,
+            None,
+            "a frame takes no default"
+        );
+    }
+
+    #[test]
     fn style_on_an_undeclared_state_creates_none() {
         let diagram = state("stateDiagram-v2\n  A --> B\n  style Z fill:#ff0000\n  class Y c\n");
         assert_eq!(diagram.states.len(), 2);

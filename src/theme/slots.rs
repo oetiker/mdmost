@@ -23,7 +23,7 @@ const TEXT: f32 = 4.5;
 const GRAPHIC: f32 = 3.0;
 
 /// The colours one slot draws with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SlotInk {
     /// Borders, frame titles and inner rules of a node or frame in this slot. `None`
     /// when no repair step could make it readable (colour spec §5.3 step 2): such a
@@ -75,21 +75,7 @@ pub(super) fn derive(p: &Palette, d: &DiagramStyles) -> [SlotInk; 16] {
                     && ink.contrast(full[slot]) >= GRAPHIC
             })
     });
-    let ink = |style: Style| style.fg.unwrap_or(p.fg);
-    let on_full = [
-        (ink(d.node_text), TEXT),
-        (ink(d.stereotype), TEXT),
-        (ink(d.edge_label), TEXT),
-    ];
-    let on_half = [
-        (ink(d.node_text), TEXT),
-        (ink(d.edge_label), TEXT),
-        (ink(d.group_title), TEXT),
-        (ink(d.line), GRAPHIC),
-        (ink(d.arrow), GRAPHIC),
-        (ink(d.node_border), GRAPHIC),
-        (ink(d.group_border), GRAPHIC),
-    ];
+    let (on_full, on_half) = fixed_ink_pairs(d, p.fg);
     std::array::from_fn(|slot| match inks[slot] {
         // Step 2: the theme's own colours, and no tint at all.
         None => SlotInk {
@@ -104,6 +90,33 @@ pub(super) fn derive(p: &Palette, d: &DiagramStyles) -> [SlotInk; 16] {
             half_tint: tint(p.bg, hues[slot], HALF_TINT, &on_half),
         },
     })
+}
+
+/// `N` fixed inks, each with the contrast floor it must clear.
+pub type InkPairs<const N: usize> = [(Color, f32); N];
+
+/// The fixed theme inks that sit on a slot's tints, each with its contrast floor: the
+/// first list on a full tint, the second on a half tint (colour spec §5.3 step 3).
+/// `fg` stands in for a style without a foreground. Public so `tests/theme_contrast.rs`
+/// checks the pairs the repair uses rather than a copy of them.
+pub fn fixed_ink_pairs(d: &DiagramStyles, fg: Color) -> (InkPairs<3>, InkPairs<7>) {
+    let ink = |style: Style| style.fg.unwrap_or(fg);
+    (
+        [
+            (ink(d.node_text), TEXT),
+            (ink(d.stereotype), TEXT),
+            (ink(d.edge_label), TEXT),
+        ],
+        [
+            (ink(d.node_text), TEXT),
+            (ink(d.edge_label), TEXT),
+            (ink(d.group_title), TEXT),
+            (ink(d.line), GRAPHIC),
+            (ink(d.arrow), GRAPHIC),
+            (ink(d.node_border), GRAPHIC),
+            (ink(d.group_border), GRAPHIC),
+        ],
+    )
 }
 
 /// The strongest tint of `hue` at or under `start` on which every `(ink, floor)` pair

@@ -490,7 +490,7 @@ fn a_formulas_rules_are_visible_but_quieter_than_its_symbols() {
     }
 }
 
-use mdmost::theme::{Palette, SlotInk};
+use mdmost::theme::{Palette, SlotInk, fixed_ink_pairs};
 
 /// Colour spec §7: every slot ink and tint against every ground it meets.
 #[test]
@@ -626,15 +626,21 @@ fn the_slot_repair_terminates_on_hostile_palettes() {
                     );
                 }
             }
-            let text = fg("text", d.node_text);
-            assert!(
-                full_tint == bg || text.contrast(full_tint) >= TEXT_FLOOR,
-                "{what}: slot {x} full"
-            );
-            assert!(
-                half_tint == bg || text.contrast(half_tint) >= TEXT_FLOOR,
-                "{what}: slot {x} half"
-            );
+            // Every fixed-ink pair clears its floor on its tint, or the tint has been
+            // lowered all the way to the page (§8).
+            let (on_full, on_half) = fixed_ink_pairs(&d, theme.palette.fg);
+            for (ink, floor) in on_full {
+                assert!(
+                    full_tint == bg || ink.contrast(full_tint) >= floor,
+                    "{what}: slot {x} full"
+                );
+            }
+            for (ink, floor) in on_half {
+                assert!(
+                    half_tint == bg || ink.contrast(half_tint) >= floor,
+                    "{what}: slot {x} half"
+                );
+            }
         }
     }
     let text_misses = Theme::from_palette("t", true, repair_palettes()[0].1.clone());

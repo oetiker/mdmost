@@ -17,7 +17,7 @@ mod builtin;
 mod slots;
 mod style;
 
-pub use slots::SlotInk;
+pub use slots::{InkPairs, SlotInk, fixed_ink_pairs};
 pub use style::{Attributes, Color, Style};
 
 use crate::error::ThemeError;

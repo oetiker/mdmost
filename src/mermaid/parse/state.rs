@@ -409,10 +409,14 @@ impl Builder<'_> {
             ));
         }
         for state in &mut self.states {
-            state.paint = match state.kind {
+            state.paint = match &state.kind {
                 StateKind::Simple => self.sheet.paint(Some(&state.key), &[], true),
-                // A composite is a frame: no `classDef default` (ruling 14).
-                StateKind::Composite(_) => self.sheet.paint(Some(&state.key), &[], false),
+                // A composite is a frame: no `classDef default` (ruling 14). One with
+                // nothing inside is drawn as a plain state box (layout), so it is a
+                // node and takes the default.
+                StateKind::Composite(scope) => {
+                    self.sheet.paint(Some(&state.key), &[], is_hollow(scope))
+                }
                 _ => None,
             };
         }
@@ -423,4 +427,15 @@ impl Builder<'_> {
             root,
         })
     }
+}
+
+/// Whether a composite state has nothing to draw inside it, which layout demotes to an
+/// ordinary state box: no state, no note and no `[*]` marker.
+fn is_hollow(scope: &StateScope) -> bool {
+    scope.states.is_empty()
+        && scope.notes.is_empty()
+        && !scope
+            .transitions
+            .iter()
+            .any(|t| t.from == StateEndpoint::Initial || t.to == StateEndpoint::Final)
 }
