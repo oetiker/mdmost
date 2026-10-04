@@ -35,7 +35,8 @@ style mbox fill:#fff7ee,stroke:#b8650a,stroke-width:3px,color:#000
 
 Decided with the owner on 2026-10-02 and 2026-10-03 and not reopened here.
 
-A pushback review (2026-10-03) raised the points behind rulings 9 to 15.
+Pushback reviews raised the points behind rulings 9 to 15 (2026-10-03) and 16 to 20
+(2026-10-04).
 
 1. Colours carry the distinction, not the exact shade. Each author colour snaps to a
    hue of the active theme.
@@ -60,6 +61,13 @@ A pushback review (2026-10-03) raised the points behind rulings 9 to 15.
 13. A `fill` without a hue does not tint.
 14. `classDef default` applies to nodes only, not to subgraphs or composite states.
 15. `style X` or `class X c` for an undeclared `X` is ignored. It does not create a node.
+16. Contrast is repaired on the slot inks, not on the tints: a weak ink moves a little
+    toward the text colour, and the tints keep their strength (§5.3).
+17. Notes inside a filled composite state keep the page background.
+18. A heavy frame keeps the round corners of a light frame: `╭╍╮ ╏ ╰╍╯`.
+19. The remaining `:::` misreadings are fixed before the colour work (§3.7).
+20. Two colours are the same when their RGB values are equal: `red` and `#ff0000` are
+    one colour.
 
 ## 3. Parsing
 
@@ -74,6 +82,9 @@ pub struct Paint {
     pub stroke: Option<Color>,
     /// `stroke-width` of 3px or more.
     pub heavy: bool,
+    /// Byte offset of the `classDef` or `style` line that supplied the colour picking
+    /// the hue (§4.2), for the order of §4.4.
+    pub origin: Option<usize>,
 }
 ```
 
@@ -118,17 +129,17 @@ the ordering of §4.4.
 - ER: after an entity name, alone, before `{`, or at either end of a relationship.
 
 Commits `c7d24c4` to `89e5581` added the shared reader (`lex::split_class_suffix`,
-`lex::split_label_colon`) and fixed the forms of §3.7. The subgraph, composite state,
-note and class relation forms above still keep the suffix as part of the name; the
-colour work fixes them with the same reader.
+`lex::split_label_colon`). The forms of §3.7 are fixed with it before the colour work.
 
 ### 3.4 Property lists
 
 One shared helper parses a property list such as
 `fill:#e3f4fb,stroke:#2a8bb5,stroke-width:3px` into a partial `Paint`. Properties are
 separated by `,` only. `;` ends the statement, as in Mermaid: the statement splitter
-already splits there, and a fragment after it that reads as `word:value` is dropped
-instead of being parsed as a node or edge.
+splits there, and a fragment after it that reads as `word:value` is dropped instead of
+being parsed as a node or edge. The splitter does not split at a `;` that closes an
+all-digit hex value (`#333;`, `#000;`), because it reads that as a character reference;
+so the property reader itself also stops at the first `;`.
 
 - `fill`, `stroke`: `#rgb`, `#rrggbb` or `#rrggbbaa` (alpha ignored). The `#` is
   required. CSS colour names, case-insensitive: `red`, `maroon`, `orange`, `yellow`,
@@ -153,14 +164,28 @@ The affected statement or property is dropped.
 
 ### 3.7 Parse failures fixed first
 
-Four of these forms break diagrams today. They are fixed in their own commits before
-the colour work, by reading `:::name` and `;`-separated style fragments as §3.3 and
-§3.4 describe and discarding the result:
+These forms break diagrams in v0.6.0. They are fixed in their own commits before the
+colour work, by reading `:::name` and `;`-separated style fragments as §3.3 and §3.4
+describe and discarding the result.
+
+Fixed in `c7d24c4` to `89e5581`:
 
 - flowchart: `A:::foo --> B` and `style A fill:#e3f4fb;stroke:#2a8bb5` fail the diagram.
 - state: `[*] --> A:::foo` draws a transition labelled `::foo`.
 - class: `class Animal:::foo` draws a second class named `Animal:::foo`.
 - ER: `CUSTOMER:::foo ||--o{ ORDER : places` fails with "unknown attribute key".
+- state and class: a style line with `;` draws an extra box named `stroke`.
+
+Fixed next:
+
+- class: `Animal:::c <|-- Dog` and `Animal:::c : +int age` fail with "empty member";
+  `Animal <|-- Dog:::c` draws the relation labelled `::c`.
+- state: `note left of A:::c : hi` draws the note text `::c : hi`; `state A:::c {`
+  keeps `A:::c` as the composite's name.
+- flowchart: `subgraph one:::c` keeps `one:::c` as key and title.
+- `BorderSet::HEAVY` (`src/canvas/border.rs`) draws `┛` as its bottom-left corner and
+  the double-line `╣` and `╬` as its left tee and cross. The gantt critical task frame
+  uses it today; §6.2 needs it correct.
 
 ## 4. Resolution
 
@@ -202,9 +227,14 @@ two colours and collide as in §4.4.
 
 ### 4.4 Collisions
 
-Each distinct hue-picking colour is one unit. Units are taken in the source order of the
-`classDef` or `style` line that defines them. A line whose paint reaches no node is
-skipped.
+Each distinct hue-picking colour is one unit. Two colours are the same when their RGB
+values are equal; a CSS name has its CSS RGB value, so `red` and `#ff0000` are one unit.
+Units are taken in the source order of the `classDef` or `style` line that supplies them
+(`Paint::origin`). A colour that decides no node's hue takes no slot.
+
+A unit's angle is its hue angle, except that a unit first written as a CSS name takes
+the nominal angle of that name's slot (§4.3). A later hex value with the same RGB joins
+that unit and its slot.
 
 1. The unit takes its nearest slot S if S is free or held by the same colour.
 2. Otherwise it takes the nearest free slot that is neither S nor one of the two slots
@@ -239,24 +269,37 @@ and `half_tint`. Index order is the nominal angle order of §4.1, starting at re
 - `full_tint`: `bg.blend(ink, 0.15)`.
 - `half_tint`: `bg.blend(ink, 0.075)`.
 
-The ratio 0.15 is the start value. Measured at 0.15 on both built-in themes, every floor
-of §7 passes; the tightest is the light theme's orange ink on the page at 4.60:1.
+The tints are computed from the palette ink of §5.2 and do not change when §5.3 repairs
+the ink. The ratio 0.15 is the start value.
+
+Measured 2026-10-04 at 0.15 with unrepaired inks: the dark theme passes every floor of
+§7 (lowest 5.81:1). The light theme fails 72 of the 256 "ink on half tint" pairs: orange
+(4.10 to 4.19), orange-yellow (4.20 to 4.30), yellow (4.27 to 4.37), cyan (4.40 to 4.49),
+red-orange (4.44 to 4.49) and green-cyan (4.50 on magenta). Its orange ink on the page
+measures 4.60:1, so any tint under it falls short. §5.3 repairs this.
 
 ### 5.3 Contrast repair
 
 The WCAG 2 contrast function moves from `tests/theme_contrast.rs` into `src/theme`
 (`Color::contrast`), and the test uses it from there.
 
-For each slot, after §5.2:
+The steps run in this order, each over all 16 slots before the next starts:
 
-1. While `ink` misses 4.5:1 against `bg`, blend it 0.1 further toward `fg`. At most 10
-   steps.
-2. While any §7 pair on `full_tint` or `half_tint` misses its floor, lower that tint's
-   ratio by 0.015 toward `bg`. At most 10 steps; at ratio 0 the tint is `bg`.
-3. If `ink` still misses its floor after step 1, the slot uses the theme's
-   `diagram.node_border` colour as ink and `bg` as both tints.
+1. Ink. While a slot's `ink` misses 4.5:1 on `bg` or on any slot's `half_tint`, or 3:1
+   on its own `full_tint`, blend it 0.05 further toward `fg`. At most 20 steps. In the
+   light theme this moves orange, orange-yellow and yellow by 0.10 and red-orange,
+   green-cyan and cyan by 0.05, with hue shifts under 2 degrees; the dark theme needs no
+   step.
+2. Fallback. A slot whose `ink` still misses after step 1 draws nodes in
+   `diagram.node_border` and frames in `diagram.group_border` with titles in
+   `diagram.group_title`, and uses `bg` as both tints.
+3. Tints. While a §7 pair whose ink is a fixed theme style (text, labels, lines, borders)
+   misses its floor on a slot's `full_tint` or `half_tint`, lower that tint's ratio by
+   0.015 toward `bg`. At most 10 steps; at ratio 0 the tint is `bg`. A tint that moves
+   toward `bg` keeps every ink check of step 1 valid, because each ink already clears
+   both `bg` and the stronger tint.
 
-Each step is bounded, so a palette whose own `fg` misses 4.5:1 on `bg` ends at step 3
+Every loop is bounded, so a palette whose own `fg` misses 4.5:1 on `bg` ends at step 2
 instead of looping.
 
 ## 6. Drawing
@@ -264,8 +307,9 @@ instead of looping.
 ### 6.1 Resolved styles
 
 At draw time each node with a paint gets a resolved style: border colour, inner
-background and `heavy`. Border colour is the slot `ink`, or `diagram.node_border` when the
-paint has no slot. The inner background is the slot's `full_tint` when the paint has a
+background and `heavy`. Border colour is the slot `ink`, or the theme default when the
+paint has no slot: `diagram.node_border` for a node, `diagram.group_border` and
+`diagram.group_title` for a frame. The inner background is the slot's `full_tint` when the paint has a
 `fill` with a hue and a slot; otherwise the page background. The node drawing code
 (flowchart `shape.rs`, state `shape.rs`, `record.rs` for class and ER) takes this
 resolved style instead of reading `theme.diagram.node_border` directly. A node without a
@@ -293,7 +337,11 @@ Heavy applies as follows:
 | subroutine | `┌┬─┬┐ ││ ││ └┴─┴┘` | `┏┯━┯┓ ┃│ │┃ ┗┷━┷┛`, inner bars stay light |
 | cylinder | `╭─╮ ├─┤ │ ├─┤ ╰─╯` | `╭━╮ ┠─┨ ┃ ┠─┨ ╰━╯`, lid rules stay light |
 | class/ER divider | `├─┤` | `┠─┨` |
-| frame | `┌╌┐ ╎ └╌┘` | `┏╍┓ ╏ ┗╍┛` |
+| frame | `╭╌╮ ╎ ╰╌╯` | `╭╍╮ ╏ ╰╍╯`, arcs stay light |
+
+The heavy forms need two new border sets (heavy with light arcs, and heavy dashed with
+light arcs). Both join `BorderSet::ALL`. The rectangle uses `BorderSet::HEAVY` after the
+§3.7 fix.
 
 `╍` and `╏` join the Thick list of `stroke_of` in `layout/graph/glyph.rs`, so an edge
 crossing a heavy frame gets the mixed junction the table there already holds. A light
@@ -306,13 +354,22 @@ edge meeting a heavy border uses the same table (for example `┯`).
 With `fill`, a pass after the graph is drawn sets the slot's `half_tint` as background
 on every cell inside the frame that still carries the page background: empty space,
 edge lines, edge labels, inner frames' borders and titles, nodes without their own fill.
-Nodes with their own fill keep their full tint. Nested frames are painted innermost
-first, so an inner tint is not overwritten by an outer one.
+Nodes with their own fill keep their full tint. Notes keep the page background: their
+text uses `diagram.note`, which misses 4.5:1 on the light half tints (4.27 to 4.37).
+Nested frames are painted innermost first, so an inner tint is not overwritten by an
+outer one.
+
+The layout does not keep frame rectangles today: frames are wrapped level by level, and
+the parent level draws the edges into a subgraph afterwards with the page background
+(`layout/graph.rs`, the frame wrapping around line 619). So the layout records each
+frame's rectangle in final canvas coordinates, with its paint and nesting depth, and the
+pass runs once on the finished canvas.
 
 ## 7. Contrast floors
 
-Added to `tests/theme_contrast.rs` for every theme in `themes()`. `themes()` gains one
-palette whose colours sit close to its background, so §5.3 runs in the test.
+Added to `tests/theme_contrast.rs` for every theme in `themes()`, after §5.3 has run.
+`themes()` stays as it is. A low-contrast palette would fail the twelve existing tests
+that loop over it, so the repair is tested on its own list of palettes (§8).
 
 For each slot X:
 
@@ -324,9 +381,10 @@ For each slot X:
   and for every slot Y, Y `ink` 4.5:1 (an inner frame title or a painted node's border
   inside X).
 
-Measured before this spec was revised, one of these pairs fails at 0.15: the light
-theme's orange ink on the magenta half tint, 4.10:1. §5.3 step 2 lowers that tint until
-it passes; the implementation records the resulting ratios in the theme comment.
+Before repair, the light theme fails the "Y `ink` on X `half_tint`" pairs listed in
+§5.2. After §5.3 step 1 all pairs pass in both built-in themes; the implementation
+records the resulting ink blends in the theme comment. Notes never sit on a tint
+(§6.3), so `diagram.note` has no tint floor.
 
 ## 8. Tests
 
@@ -334,9 +392,11 @@ it passes; the implementation records the resulting ratios in the theme comment.
   merge order, hue detection, every rule of §4.4 including the example table, all 16
   slots held.
 - Parse, per family: every form of §3.2 and §3.3 attaches the expected `Paint`; undeclared
-  nodes and unknown classes are dropped; the four failures of §3.7 parse.
+  nodes and unknown classes are dropped; every failure of §3.7 parses.
   `tests/mermaid_parse_robustness.rs` and the property tests cover the new statements.
-- Theme: §5.3 terminates and falls back for a palette whose `fg` misses 4.5:1 on `bg`.
+- Theme: on a separate list of low-contrast palettes (one whose `fg` misses 4.5:1 on
+  `bg`, one whose hues sit close to `bg`), §5.3 terminates, and every slot either passes
+  §7 or has fallen back by step 2.
 - Render: a coloured flowchart checks cell styles (border colour, inner background,
   heavy glyphs per shape of §6.2, subgraph half tint, inner node full tint, nested frame
   order). One state, one class and one ER diagram the same way. A light edge on a heavy
