@@ -489,3 +489,162 @@ fn a_formulas_rules_are_visible_but_quieter_than_its_symbols() {
         );
     }
 }
+
+use mdmost::theme::{Palette, SlotInk};
+
+/// Colour spec §7: every slot ink and tint against every ground it meets.
+#[test]
+fn diagram_slots_clear_their_floors() {
+    for theme in themes() {
+        let name = &theme.name;
+        let d = theme.diagram;
+        let slots = theme.diagram_slots;
+        for (x, slot) in slots.iter().enumerate() {
+            let ink = slot
+                .ink
+                .unwrap_or_else(|| panic!("{name}: slot {x} fell back"));
+            at_least(
+                name,
+                &format!("slot {x} ink on the page"),
+                ink,
+                theme.palette.bg,
+                TEXT_FLOOR,
+            );
+            at_least(
+                name,
+                &format!("slot {x} ink on its full tint"),
+                ink,
+                slot.full_tint,
+                GRAPHIC_FLOOR,
+            );
+            for (what, style) in [
+                ("text", d.node_text),
+                ("stereotype", d.stereotype),
+                ("edge label", d.edge_label),
+            ] {
+                at_least(
+                    name,
+                    &format!("{what} on slot {x} full tint"),
+                    fg(what, style),
+                    slot.full_tint,
+                    TEXT_FLOOR,
+                );
+            }
+            for (what, style, floor) in [
+                ("text", d.node_text, TEXT_FLOOR),
+                ("edge label", d.edge_label, TEXT_FLOOR),
+                ("group title", d.group_title, TEXT_FLOOR),
+                ("line", d.line, GRAPHIC_FLOOR),
+                ("arrow", d.arrow, GRAPHIC_FLOOR),
+                ("node border", d.node_border, GRAPHIC_FLOOR),
+                ("group border", d.group_border, GRAPHIC_FLOOR),
+            ] {
+                at_least(
+                    name,
+                    &format!("{what} on slot {x} half tint"),
+                    fg(what, style),
+                    slot.half_tint,
+                    floor,
+                );
+            }
+            for (y, other) in slots.iter().enumerate() {
+                let other = other
+                    .ink
+                    .unwrap_or_else(|| panic!("{name}: slot {y} fell back"));
+                at_least(
+                    name,
+                    &format!("slot {y} ink on slot {x} half tint"),
+                    other,
+                    slot.half_tint,
+                    TEXT_FLOOR,
+                );
+            }
+        }
+    }
+}
+
+/// Palettes the repair has to survive (colour spec §8). Kept out of `themes()`, which
+/// every other test here loops over and which such a palette would fail.
+fn repair_palettes() -> Vec<(&'static str, Palette)> {
+    let dark = Theme::default_dark().palette;
+    let grey = Color::hex(0x777777);
+    vec![
+        (
+            "text misses the page",
+            Palette {
+                bg: grey,
+                surface: grey,
+                overlay: grey,
+                fg: Color::hex(0x8a8a8a),
+                ..dark.clone()
+            },
+        ),
+        (
+            "hues sit on the page",
+            Palette {
+                red: Color::hex(0x2a1a1e),
+                orange: Color::hex(0x2a2018),
+                yellow: Color::hex(0x28261a),
+                green: Color::hex(0x1a2820),
+                cyan: Color::hex(0x1a2628),
+                blue: Color::hex(0x1a1e2c),
+                purple: Color::hex(0x221c2c),
+                magenta: Color::hex(0x2a1a26),
+                ..dark
+            },
+        ),
+    ]
+}
+
+/// The repair terminates and leaves every slot in one of the states §5.3 allows: an ink
+/// that clears its own floors, or the step 2 fallback; a tint on which the fixed
+/// diagram inks clear theirs, or a tint that step 3 lowered all the way to the page.
+#[test]
+fn the_slot_repair_terminates_on_hostile_palettes() {
+    for (what, palette) in repair_palettes() {
+        let theme = Theme::from_palette(what, true, palette);
+        let bg = theme.palette.bg;
+        let d = theme.diagram;
+        let halves: Vec<Color> = theme.diagram_slots.iter().map(|s| s.half_tint).collect();
+        for (x, slot) in theme.diagram_slots.iter().enumerate() {
+            let SlotInk {
+                ink,
+                full_tint,
+                half_tint,
+            } = *slot;
+            match ink {
+                None => assert_eq!((full_tint, half_tint), (bg, bg), "{what}: slot {x}"),
+                Some(ink) => {
+                    assert!(ink.contrast(bg) >= TEXT_FLOOR, "{what}: slot {x} on bg");
+                    assert!(
+                        halves.iter().all(|h| ink.contrast(*h) >= TEXT_FLOOR),
+                        "{what}: slot {x} on halves"
+                    );
+                    assert!(
+                        ink.contrast(full_tint) >= GRAPHIC_FLOOR,
+                        "{what}: slot {x} on full"
+                    );
+                }
+            }
+            let text = fg("text", d.node_text);
+            assert!(
+                full_tint == bg || text.contrast(full_tint) >= TEXT_FLOOR,
+                "{what}: slot {x} full"
+            );
+            assert!(
+                half_tint == bg || text.contrast(half_tint) >= TEXT_FLOOR,
+                "{what}: slot {x} half"
+            );
+        }
+    }
+    let text_misses = Theme::from_palette("t", true, repair_palettes()[0].1.clone());
+    assert!(
+        text_misses.diagram_slots.iter().all(|s| s.ink.is_none()),
+        "every slot falls back"
+    );
+    let murky = Theme::from_palette("m", true, repair_palettes()[1].1.clone());
+    assert!(
+        murky.diagram_slots.iter().all(|s| s.ink.is_some()),
+        "inks move towards the text"
+    );
+}

@@ -14,8 +14,10 @@
 //! ```
 
 mod builtin;
+mod slots;
 mod style;
 
+pub use slots::SlotInk;
 pub use style::{Attributes, Color, Style};
 
 use crate::error::ThemeError;
@@ -375,6 +377,10 @@ pub struct Theme {
     pub table: TableStyles,
     /// Diagram styles.
     pub diagram: DiagramStyles,
+    /// The 16 hues Mermaid colour classes draw in, indexed in nominal angle order from
+    /// red (colour spec §4.1, §5). Derived from the palette and the diagram styles by
+    /// [`Theme::from_palette`], contrast-repaired; never configured on its own.
+    pub diagram_slots: [SlotInk; 16],
     /// Formula styles.
     pub math: MathStyles,
     /// Chrome styles.
