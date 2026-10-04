@@ -431,3 +431,20 @@ fn a_space_inside_a_frame_title_is_not_a_gap() {
     assert_eq!(side[7], SideCell::Blank);
     assert_eq!(side[8], SideCell::Art);
 }
+
+#[test]
+fn ports_keep_off_heavy_rules() {
+    let theme = Theme::default_dark();
+    let mut canvas = Canvas::new(4, 0, theme.base());
+    for row in ["┏┯┯┓", "┃  ┃", "┠──┨", "┗┷┷┛"] {
+        canvas.push_text(row, Align::Left, theme.diagram.node_border);
+    }
+    assert_eq!(
+        super::ruled_offsets(&canvas, false),
+        vec![false, false, true, false]
+    );
+    assert_eq!(
+        super::ruled_offsets(&canvas, true),
+        vec![false, true, true, false]
+    );
+}

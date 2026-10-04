@@ -120,18 +120,47 @@ impl BorderSet {
         ..Self::ROUNDED
     };
 
+    /// Heavy lines with the light arcs of [`ROUNDED`](Self::ROUNDED): a painted
+    /// Mermaid node with `stroke-width` 3px or more (colour spec §6.2). Box Drawing has
+    /// no heavy arcs, so the corners stay light; the tees are where a light inner rule
+    /// meets the heavy border.
+    pub const ROUNDED_HEAVY: Self = Self {
+        horizontal: '━',
+        vertical: '┃',
+        top_left: '╭',
+        top_right: '╮',
+        bottom_left: '╰',
+        bottom_right: '╯',
+        tee_down: '┯',
+        tee_up: '┷',
+        tee_right: '┠',
+        tee_left: '┨',
+        cross: '┼',
+    };
+
+    /// The heavy form of [`DASHED`](Self::DASHED): a painted Mermaid frame, which stays
+    /// dashed and keeps its light arcs (colour spec rulings 9 and 18).
+    pub const DASHED_HEAVY: Self = Self {
+        horizontal: '╍',
+        vertical: '╏',
+        ..Self::ROUNDED_HEAVY
+    };
+
     /// Every set, so a glyph on a finished canvas can be traced back to the set that
     /// drew it.
     ///
     /// Order matters only where sets share a glyph: [`ROUNDED`](Self::ROUNDED) and
     /// [`DASHED`](Self::DASHED) share every corner and tee, so either answer closes a
-    /// rule with the same character.
-    pub const ALL: [Self; 5] = [
+    /// rule with the same character. The heavy rounded sets come last, so `━` still
+    /// traces to [`HEAVY`](Self::HEAVY) and the shared arcs to [`ROUNDED`](Self::ROUNDED).
+    pub const ALL: [Self; 7] = [
         Self::ROUNDED,
         Self::PLAIN,
         Self::HEAVY,
         Self::DOUBLE,
         Self::DASHED,
+        Self::ROUNDED_HEAVY,
+        Self::DASHED_HEAVY,
     ];
 
     /// The glyph that closes `rule` on `side`.
@@ -239,14 +268,29 @@ mod tests {
     }
 
     #[test]
+    fn the_heavy_sets_keep_light_arcs() {
+        let set = BorderSet::ROUNDED_HEAVY;
+        assert_eq!(
+            (set.horizontal, set.vertical, set.top_left, set.bottom_right),
+            ('━', '┃', '╭', '╯')
+        );
+        assert_eq!(
+            (set.tee_right, set.tee_left, set.tee_down, set.tee_up),
+            ('┠', '┨', '┯', '┷')
+        );
+        let dashed = BorderSet::DASHED_HEAVY;
+        assert_eq!(
+            (dashed.horizontal, dashed.vertical, dashed.top_left),
+            ('╍', '╏', '╭')
+        );
+        assert!(BorderSet::ALL.contains(&set) && BorderSet::ALL.contains(&dashed));
+        assert_eq!(BorderSet::rule_glyph('╍'), Some((dashed, None)));
+        assert_eq!(BorderSet::rule_glyph('┠'), Some((set, Some(Rule::Middle))));
+    }
+
+    #[test]
     fn every_border_glyph_is_single_width() {
-        for set in [
-            BorderSet::ROUNDED,
-            BorderSet::PLAIN,
-            BorderSet::HEAVY,
-            BorderSet::DOUBLE,
-            BorderSet::DASHED,
-        ] {
+        for set in BorderSet::ALL {
             for glyph in [
                 set.horizontal,
                 set.vertical,

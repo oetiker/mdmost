@@ -306,7 +306,8 @@ fn validate(spec: &GraphSpec) -> Result<(), MermaidError> {
 /// A node whose art draws internal rules — a class box's compartments, an entity's
 /// attribute table — shows a `├` or `┤` where a rule meets the border. An edge
 /// attaching there turns the rule into a line that appears to flow out of the box, so
-/// the router avoids those cells when it has a choice. This is read back off the
+/// the router avoids those cells when it has a choice. A heavy box draws its rules
+/// with `┠ ┨ ┯ ┷` instead (colour spec §6.2). This is read back off the
 /// drawn node rather than declared, so it works for any caller without widening the
 /// [`NodeArt`] seam.
 fn ruled_offsets(canvas: &Canvas, vertical: bool) -> Vec<bool> {
@@ -317,7 +318,22 @@ fn ruled_offsets(canvas: &Canvas, vertical: bool) -> Vec<bool> {
             .row(row)
             .and_then(|cells| cells.get(col))
             .map(|cell| cell.text())
-            .is_some_and(|text| matches!(text, "├" | "┤" | "┬" | "┴" | "┼" | "╋" | "┣" | "┫"))
+            .is_some_and(|text| {
+                matches!(
+                    text,
+                    "├" | "┤"
+                        | "┬"
+                        | "┴"
+                        | "┼"
+                        | "╋"
+                        | "┣"
+                        | "┫"
+                        | "┠"
+                        | "┨"
+                        | "┯"
+                        | "┷"
+                )
+            })
     };
     if vertical {
         (0..cols)

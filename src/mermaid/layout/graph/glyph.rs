@@ -251,7 +251,9 @@ pub fn mask_of(ch: char) -> Option<Mask> {
 /// Used so that merging an edge into a heavy border keeps the border heavy.
 pub fn stroke_of(ch: char) -> Stroke {
     match ch {
-        '┃' | '━' | '┏' | '┓' | '┗' | '┛' | '┣' | '┫' | '┳' | '┻' | '╋' | '┅' | '┋' => {
+        '┃' | '━' | '┏' | '┓' | '┗' | '┛' | '┣' | '┫' | '┳' | '┻' | '╋' | '┅' | '┋' | '╍' | '╏' =>
+        {
+            // A heavy frame is dashed only in look; a line crossing it meets a heavy arm.
             Stroke::Thick
         }
         '┊' | '┄' | '╌' | '╎' => Stroke::Dotted,
@@ -310,5 +312,12 @@ mod tests {
         assert_eq!(Stroke::Dotted.merge(Stroke::Solid), Stroke::Solid);
         assert_eq!(Stroke::Solid.merge(Stroke::Thick), Stroke::Thick);
         assert_eq!(Stroke::Dotted.merge(Stroke::Dotted), Stroke::Dotted);
+    }
+
+    #[test]
+    fn a_heavy_dashed_frame_is_thick() {
+        assert_eq!(stroke_of('╍'), Stroke::Thick);
+        assert_eq!(stroke_of('╏'), Stroke::Thick);
+        assert_eq!(heavy_of('╍'), Mask::LEFT | Mask::RIGHT);
     }
 }

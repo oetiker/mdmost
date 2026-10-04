@@ -212,4 +212,38 @@ mod tests {
         ink.apply(&mut canvas, theme.base(), theme.base());
         assert_eq!(canvas.row_text(0), "日──");
     }
+
+    #[test]
+    fn a_thin_edge_crossing_a_heavy_frame_keeps_both_weights() {
+        let theme = Theme::default_dark();
+        let mut canvas = Canvas::new(3, 3, theme.base());
+        canvas.write_str(1, 0, "╍╍╍", theme.base());
+        let mut ink = Ink::new(3, 3);
+        ink.run(0, 1, Dir::Down, 2, Stroke::Solid);
+        ink.apply(&mut canvas, theme.base(), theme.base());
+        assert_eq!(canvas.row_text(1), "╍┿╍");
+        let mut canvas = Canvas::new(3, 3, theme.base());
+        canvas.vline(0, 1, 3, "╏", theme.base());
+        let mut ink = Ink::new(3, 3);
+        ink.run(1, 0, Dir::Right, 2, Stroke::Solid);
+        ink.apply(&mut canvas, theme.base(), theme.base());
+        assert_eq!(canvas.row_text(1), "─╂─");
+    }
+
+    #[test]
+    fn a_thin_edge_on_a_heavy_round_box_meets_it_mixed() {
+        let theme = Theme::default_dark();
+        let mut canvas = Canvas::new(3, 2, theme.base());
+        canvas.write_str(0, 0, "╰━╯", theme.base());
+        let mut ink = Ink::new(2, 3);
+        ink.run(1, 1, Dir::Up, 1, Stroke::Solid);
+        ink.apply(&mut canvas, theme.base(), theme.base());
+        assert_eq!(canvas.row_text(0), "╰┯╯");
+        let mut canvas = Canvas::new(2, 3, theme.base());
+        canvas.vline(0, 0, 3, "┃", theme.base());
+        let mut ink = Ink::new(3, 2);
+        ink.run(1, 1, Dir::Left, 1, Stroke::Solid);
+        ink.apply(&mut canvas, theme.base(), theme.base());
+        assert_eq!(canvas.row_text(1), "┠─");
+    }
 }
