@@ -437,6 +437,9 @@ pub struct FlowNode {
     pub label: Label,
     /// The node's outline shape.
     pub shape: NodeShape,
+    /// The merged colour lines aimed at this node (colour spec §3), or `None` to draw
+    /// in the theme's own diagram colours.
+    pub paint: Option<Paint>,
 }
 
 /// The outline shape of a flowchart node.
@@ -517,6 +520,9 @@ pub struct Group {
     pub nodes: Vec<NodeId>,
     /// Nested subgraphs, in declaration order.
     pub children: Vec<Group>,
+    /// The merged colour lines aimed at this subgraph (colour spec §3), or `None` to draw
+    /// in the theme's own diagram colours.
+    pub paint: Option<Paint>,
 }
 
 // ---------------------------------------------------------------------------

@@ -34,8 +34,159 @@ fn node<'a>(chart: &'a Flowchart, key: &str) -> &'a FlowNode {
     }
 }
 
+/// A paint's colours and weight, without the source offsets that order slots.
+fn colours(paint: Option<Paint>) -> Option<(Option<u32>, Option<u32>, bool)> {
+    let rgb = |c: Option<PaintColor>| c.map(|c| u32::from_be_bytes([0, c.rgb.r, c.rgb.g, c.rgb.b]));
+    paint.map(|p| (rgb(p.fill), rgb(p.stroke), p.heavy))
+}
+
 mod flowcharts {
     use super::*;
+
+    /// The colour spec's driving example (§1).
+    #[test]
+    fn reads_classdef_class_and_style() {
+        let chart = flowchart(
+            "flowchart TD\n  airlock --> zimbra --> zmcfgapi --> mbox\n\
+             classDef access fill:#e3f4fb,stroke:#2a8bb5,color:#000\n\
+             classDef comm fill:#fdf0e1,stroke:#d4831f,color:#000\n\
+             class airlock access\n  class zimbra comm\n\
+             style mbox fill:#fff7ee,stroke:#b8650a,stroke-width:3px,color:#000\n",
+        );
+        assert_eq!(
+            colours(node(&chart, "airlock").paint),
+            Some((Some(0xe3f4fb), Some(0x2a8bb5), false))
+        );
+        assert_eq!(
+            colours(node(&chart, "zimbra").paint),
+            Some((Some(0xfdf0e1), Some(0xd4831f), false))
+        );
+        assert_eq!(node(&chart, "zmcfgapi").paint, None);
+        assert_eq!(
+            colours(node(&chart, "mbox").paint),
+            Some((Some(0xfff7ee), Some(0xb8650a), true))
+        );
+        assert_eq!(chart.nodes.len(), 4, "colour lines create no node");
+    }
+
+    #[test]
+    fn merges_default_then_classes_then_styles() {
+        let chart = flowchart(
+            "flowchart LR\n  A:::one --> B\n  class A two\n  style A stroke:#00ff00\n\
+             classDef default fill:#111111,stroke-width:3px\n\
+             classDef one fill:#ff0000,stroke:#ff0000\n  classDef two stroke:#0000ff\n",
+        );
+        assert_eq!(
+            colours(node(&chart, "A").paint),
+            Some((Some(0xff0000), Some(0x00ff00), true))
+        );
+        assert_eq!(
+            colours(node(&chart, "B").paint),
+            Some((Some(0x111111), None, true)),
+            "default"
+        );
+    }
+
+    #[test]
+    fn assigns_several_classes_and_several_nodes_at_once() {
+        let chart = flowchart(
+            "flowchart LR\n  A --> B --> C\n  class A,B one,two\n\
+             classDef one fill:#ff0000\n  classDef two stroke:#0000ff\n",
+        );
+        for key in ["A", "B"] {
+            assert_eq!(
+                colours(node(&chart, key).paint),
+                Some((Some(0xff0000), Some(0x0000ff), false)),
+                "{key}"
+            );
+        }
+        assert_eq!(node(&chart, "C").paint, None);
+    }
+
+    #[test]
+    fn paints_subgraphs_by_key_and_by_suffix_but_not_by_default() {
+        let chart = flowchart(
+            "flowchart TB\n  subgraph one\n    a\n  end\n  subgraph two:::warm [Two]\n    b\n  end\n\
+             subgraph \"Three words\":::warm\n    c\n  end\n\
+             style one fill:#e3f4fb\n  classDef warm stroke:#d4831f\n  classDef default stroke:#ff0000\n",
+        );
+        let groups = &chart.root.children;
+        assert_eq!(
+            colours(groups[0].paint),
+            Some((Some(0xe3f4fb), None, false))
+        );
+        assert_eq!(
+            colours(groups[1].paint),
+            Some((None, Some(0xd4831f), false))
+        );
+        assert_eq!(
+            colours(groups[2].paint),
+            Some((None, Some(0xd4831f), false)),
+            "anonymous"
+        );
+        assert_eq!(
+            colours(node(&chart, "a").paint),
+            Some((None, Some(0xff0000), false))
+        );
+    }
+
+    #[test]
+    fn unknown_classes_undeclared_nodes_and_bad_values_are_dropped() {
+        let chart = flowchart(
+            "flowchart LR\n  A --> B\n  class A nosuch\n  style Z fill:#ff0000\n  class Y one\n\
+             classDef one fill:#ff0000\n  style B fill:notacolour,stroke:#12\n",
+        );
+        assert_eq!(chart.nodes.len(), 2);
+        assert_eq!(node(&chart, "A").paint, None);
+        assert_eq!(node(&chart, "B").paint, None);
+    }
+
+    /// `;` ends a statement, but the splitter keeps `#333;` whole (colour spec §3.4).
+    #[test]
+    fn a_semicolon_ends_the_property_list() {
+        let chart = flowchart(
+            "flowchart LR\n  A --> B --> C\n  classDef c fill:#ff99ff,stroke:#333;\n  class A c\n\
+             style B fill:#000;stroke:#123\n  style C fill:#e3f4fb;stroke:#2a8bb5\n",
+        );
+        assert_eq!(
+            colours(node(&chart, "A").paint),
+            Some((Some(0xff99ff), Some(0x333333), false))
+        );
+        assert_eq!(
+            colours(node(&chart, "B").paint),
+            Some((Some(0x000000), None, false))
+        );
+        assert_eq!(
+            colours(node(&chart, "C").paint),
+            Some((Some(0xe3f4fb), None, false))
+        );
+    }
+
+    /// Colour spec Review Focus 2: no colour line can fail a diagram.
+    #[test]
+    fn colour_lines_with_garbage_never_fail_the_diagram() {
+        for line in [
+            "classDef",
+            "classDef c",
+            "classDef ,, fill:#f00",
+            "class",
+            "class A",
+            "class  c",
+            "style",
+            "style A",
+            "style A fill:",
+            "style A stroke-width:1e999px",
+            "style A fill:#ffffffffff",
+            "style A fill:#ﬀ0000",
+            "cssClass \"A\" c",
+            "classDef é fill:#f00",
+            "style A :",
+            "classDef c fill:#f00,,,stroke:",
+        ] {
+            let chart = flowchart(&format!("flowchart LR\n  A --> B\n  {line}\n"));
+            assert_eq!(chart.nodes.len(), 2, "{line}");
+        }
+    }
 
     #[test]
     fn parses_the_documentation_flowchart() {

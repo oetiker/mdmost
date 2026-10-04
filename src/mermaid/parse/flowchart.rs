@@ -6,8 +6,8 @@
 //! links with optional back arrows, both label forms (`-->|text|` and `-- text -->`),
 //! `&` node groups, chained edges, and nested `subgraph` … `end`.
 //!
-//! Skipped silently: `click`, `style`, `classDef`, `class`, `cssClass`, `linkStyle`, and
-//! the `:::name` class suffix on a node or a subgraph.
+//! Read for colour: `classDef`, `class`, `style` and the `:::name` suffix on a node or a
+//! subgraph (colour spec). Skipped silently: `click`, `cssClass`, `linkStyle`.
 //!
 //! Rejected with a reason: `--x` / `--o` link terminators, `@{ … }` shape metadata,
 //! and edges whose endpoint is a subgraph.
@@ -18,6 +18,7 @@ use crate::mermaid::ast::{
 };
 
 use super::lex::{self, Nesting, SrcLine};
+use super::sheet::{self, Sheet};
 use super::{direction, intern};
 
 /// The statements whose `;`-separated CSS tail `lex::drop_css_spill` drops.
@@ -75,6 +76,11 @@ struct Builder<'a> {
     /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
     /// offset — every label text this parser touches is a subslice of it.
     src: &'a str,
+    /// The colour statements, merged into node and subgraph paints by `finish`.
+    sheet: Sheet,
+    /// Classes written as `:::` on each subgraph without a key, in the order subgraphs
+    /// open, which is the order `finish` walks the tree in.
+    subgraph_classes: Vec<Vec<String>>,
 }
 
 impl Builder<'_> {
@@ -86,8 +92,19 @@ impl Builder<'_> {
         let (word, rest) = lex::split_word(text);
         let lowered = word.to_ascii_lowercase();
         match lowered.as_str() {
-            // Cosmetic statements carry nothing the renderer can use.
-            "click" | "style" | "classdef" | "class" | "cssclass" | "linkstyle" => return Ok(()),
+            "click" | "cssclass" | "linkstyle" => return Ok(()),
+            "classdef" => {
+                self.sheet.define(rest, self.src);
+                return Ok(());
+            }
+            "class" => {
+                self.sheet.assign_list(rest, sheet::plain_key);
+                return Ok(());
+            }
+            "style" => {
+                self.sheet.style(rest, self.src, sheet::plain_key);
+                return Ok(());
+            }
             "direction" => {
                 let dir = direction(lex::split_word(rest).0)
                     .ok_or_else(|| lex::syntax(line, format!("unknown direction `{rest}`")))?;
@@ -111,33 +128,42 @@ impl Builder<'_> {
     /// Opens a `subgraph id [Title]` container.
     fn open_subgraph(&mut self, rest: &str, line: usize) -> Result<(), MermaidError> {
         let src = self.src;
-        // `subgraph one:::c` and `subgraph one[Title]:::c` attach a class, which is not
-        // drawn yet. Left on, the suffix became part of the title and cost the key.
-        let (rest, _class) = lex::split_class_suffix(rest);
-        let (key, title) = match shape_at(rest, 0) {
+        // `subgraph one:::c` and `subgraph one[Title]:::c` attach a class. Left on, the
+        // suffix became part of the title and cost the key.
+        let (rest, outer) = lex::split_class_suffix(rest);
+        let (key, inner, title) = match shape_at(rest, 0) {
             // `subgraph one [Title]` / `subgraph one["Title"]`, also as `one:::c [Title]`
             Some(shape) if shape.start > 0 => {
                 let text = lex::unquote(shape.text);
-                let (key, _class) = lex::split_class_suffix(&rest[..shape.start]);
-                (Some(key.to_string()), Some(lex::label_at(src, text)))
+                let (key, inner) = lex::split_class_suffix(&rest[..shape.start]);
+                (Some(key.to_string()), inner, Some(lex::label_at(src, text)))
             }
             _ => {
                 let name = lex::unquote(rest);
                 if name.is_empty() {
-                    (None, None)
+                    (None, None, None)
                 } else if name.chars().all(lex::is_ident_char) {
                     // Mermaid uses the bare word as both id and title.
-                    (Some(name.to_string()), Some(lex::label_at(src, name)))
+                    (Some(name.to_string()), None, Some(lex::label_at(src, name)))
                 } else {
-                    (None, Some(lex::label_at(src, name)))
+                    (None, None, Some(lex::label_at(src, name)))
                 }
             }
         };
+        let class = outer.or(inner);
         if let Some(key) = &key {
             if key.is_empty() {
                 return Err(lex::syntax(line, "subgraph without a name"));
             }
             self.subgraph_keys.push(key.clone());
+            if let Some(class) = class {
+                self.sheet.assign(key, class);
+            }
+            self.subgraph_classes.push(Vec::new());
+        } else {
+            // No key to file the class under: it travels with the subgraph's position.
+            self.subgraph_classes
+                .push(class.map(str::to_string).into_iter().collect());
         }
         self.stack.push(Group {
             key,
@@ -212,9 +238,9 @@ impl Builder<'_> {
     /// Declares or updates a single node, returning its id.
     fn node(&mut self, text: &str, line: usize) -> Result<NodeId, MermaidError> {
         let src = self.src;
-        // `A:::c` and `A[text]:::c` attach a class, which is not drawn yet; without
-        // this the suffix reaches the shape reader and fails the whole diagram.
-        let (text, _class) = lex::split_class_suffix(text);
+        // `A:::c` and `A[text]:::c` attach a class; without splitting it off the suffix
+        // reaches the shape reader and fails the whole diagram.
+        let (text, class) = lex::split_class_suffix(text);
         let (key, rest) = lex::take_ident(text);
         if key.is_empty() {
             return Err(lex::syntax(
@@ -224,6 +250,9 @@ impl Builder<'_> {
         }
         if rest.starts_with('@') {
             return Err(lex::unsupported(line, "`@{ … }` node metadata"));
+        }
+        if let Some(class) = class {
+            self.sheet.assign(key, class);
         }
         let shape = match shape_at(rest, 0) {
             Some(shape) if shape.start == 0 => {
@@ -254,6 +283,7 @@ impl Builder<'_> {
                 key: key_owned.clone(),
                 label: lex::label_at(src, key),
                 shape: NodeShape::Rect,
+                paint: None,
             },
         );
         if fresh && let Some(group) = self.stack.last_mut() {
@@ -294,12 +324,31 @@ impl Builder<'_> {
             // than an empty box would (design spec §6).
             return Err(lex::syntax(last_line, "flowchart has no nodes".to_string()));
         }
+        for node in &mut self.nodes {
+            node.paint = self.sheet.paint(Some(&node.key), &[], true);
+        }
+        let mut root = self.stack.pop().unwrap_or_default();
+        let mut next = 0;
+        paint_groups(&mut root, &self.sheet, &self.subgraph_classes, &mut next);
         Ok(Flowchart {
             direction: self.direction,
             nodes: self.nodes,
             edges: self.edges,
-            root: self.stack.pop().unwrap_or_default(),
+            root,
         })
+    }
+}
+
+/// Paints every subgraph below `group`, in the order their `subgraph` lines opened.
+///
+/// That order is a pre-order walk of the tree, so the anonymous subgraphs' `:::`
+/// classes line up by position without needing a key.
+fn paint_groups(group: &mut Group, sheet: &Sheet, classes: &[Vec<String>], next: &mut usize) {
+    for child in &mut group.children {
+        let own = classes.get(*next).map_or(&[][..], Vec::as_slice);
+        *next += 1;
+        child.paint = sheet.paint(child.key.as_deref(), own, false);
+        paint_groups(child, sheet, classes, next);
     }
 }
 

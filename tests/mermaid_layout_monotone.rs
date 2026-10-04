@@ -28,6 +28,7 @@ fn node(key: &str, label: &str, shape: NodeShape) -> FlowNode {
         key: key.to_string(),
         label: Label::line(label),
         shape,
+        paint: None,
     }
 }
 

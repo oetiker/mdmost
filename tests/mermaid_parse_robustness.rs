@@ -118,7 +118,7 @@ const HEADERS: [&str; 7] = [
 ];
 
 /// Diagram sources whose every prefix must parse or fail, but never panic.
-const SAMPLES: [&str; 7] = [
+const SAMPLES: [&str; 9] = [
     "flowchart TD\n  A[a]:::k -->|l| B(b)\n  subgraph s:::k\n    C{c} -.-> D((d)):::k\n  end\n  style A fill:#fff;stroke:#000\n",
     "sequenceDiagram\n  A->>+B: hi\n  loop x\n    B-->>-A: bye\n  end\n  Note over A,B: n\n",
     "classDiagram\n  A:::k <|-- B:::k : l\n  style A fill:#fff;stroke:#000\n  class A:::k {\n    +int x\n    +f(int a) B\n  }\n",
@@ -126,6 +126,8 @@ const SAMPLES: [&str; 7] = [
     "pie showData\n  title T\n  \"a\" : 1\n  \"b\" : 2.5\n",
     "gantt\n  dateFormat YYYY-MM-DD\n  section S\n  t :a1, 2014-01-01, 3d\n  u :after a1, 2w\n",
     "stateDiagram-v2\n  [*] --> A:::k\n  A:::k --> C:::k : t\n  state A:::k {\n    [*] --> B\n  }\n  note left of A:::k : n\n  style A fill:#fff;stroke:#000\n",
+    "flowchart TD\n  classDef default fill:#fff\n  classDef a,b fill:#e3f4fb,stroke:#2a8bb5,stroke-width:3px\n  A:::a --> B\n  class A,B a,b\n  style B fill:#f00;stroke:#0f0\n  subgraph s:::a\n    C\n  end\n  style s stroke:red\n",
+    "stateDiagram-v2\n  classDef hot fill:#f00\n  [*] --> A:::hot\n  class A hot\n  state B:::hot {\n    C\n  }\n  style B stroke:blue,stroke-width:4px\n",
 ];
 
 #[test]
