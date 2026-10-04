@@ -77,16 +77,26 @@ A new AST type holds what the author wrote for one node, after merging:
 
 ```rust
 /// `Color` is the existing truecolor type in `theme::style`.
+pub struct PaintColor {
+    /// A CSS name has its CSS value, so `red` and `#ff0000` compare equal.
+    pub rgb: Color,
+    /// The slot a CSS name goes to by name (§4.3). `None` for hex values and neutrals.
+    pub named: Option<usize>,
+}
+
 pub struct Paint {
-    pub fill: Option<Color>,
-    pub stroke: Option<Color>,
+    pub fill: Option<PaintColor>,
+    pub stroke: Option<PaintColor>,
     /// `stroke-width` of 3px or more.
     pub heavy: bool,
-    /// Byte offset of the `classDef` or `style` line that supplied the colour picking
-    /// the hue (§4.2), for the order of §4.4.
+    /// Byte offset of the property that supplied the colour picking the hue (§4.2),
+    /// for the order of §4.4. Between lines this is line order; within one line it
+    /// orders `fill` and `stroke` by position.
     pub origin: Option<usize>,
 }
 ```
+
+A bare `Color` could not tell `green` from `#008000`, which §4.4 treats differently.
 
 `Option<Paint>` is added to `FlowNode`, `Group` (flowchart subgraph), `StateNode`
 (plain and composite states), `Class` and `Entity`. `None` means the node draws with
@@ -155,7 +165,8 @@ another form (`#rgba`, `rgb()`, `hsl()`, `var()`) is ignored.
 For each node: `classDef default`, then the node's classes in the order they were
 assigned, then every `style` line for the node in source order. A later value replaces
 an earlier one, property by property. A class may be defined after its use; merging
-happens once the whole diagram is read.
+happens once the whole diagram is read. A class defined twice applies both
+definitions in source order.
 
 ### 3.6 Errors
 
@@ -258,8 +269,9 @@ The driving example resolves to:
 ### 5.1 Where the slots live
 
 `Theme` gets a public field `diagram_slots: [SlotInk; 16]`, computed in
-`Theme::from_palette`. `SlotInk` is `Copy` and holds three colours: `ink`, `full_tint`
-and `half_tint`. Index order is the nominal angle order of §4.1, starting at red.
+`Theme::from_palette`. `SlotInk` is `Copy` and holds `ink: Option<Color>`, `full_tint`
+and `half_tint`. `ink: None` is the fallback of §5.3 step 2: the slot draws with the
+theme defaults and both tints are `bg`. Index order is the nominal angle order of §4.1, starting at red.
 
 ### 5.2 Colours
 
@@ -342,6 +354,9 @@ The heavy forms need two new border sets (heavy with light arcs, and heavy dashe
 light arcs). Both join `BorderSet::ALL`. The rectangle uses `BorderSet::HEAVY` after the
 §3.7 fix.
 
+Edges must not attach to a heavy inner rule: the port search that keeps edges off
+`├ ┤ ┬ ┴` today also keeps them off `┠ ┨ ┯ ┷`.
+
 `╍` and `╏` join the Thick list of `stroke_of` in `layout/graph/glyph.rs`, so an edge
 crossing a heavy frame gets the mixed junction the table there already holds. A light
 edge meeting a heavy border uses the same table (for example `┯`).
@@ -361,8 +376,10 @@ outer one.
 The layout does not keep frame rectangles today: frames are wrapped level by level, and
 the parent level draws the edges into a subgraph afterwards with the page background
 (`layout/graph.rs`, the frame wrapping around line 619). So the layout records each
-frame's rectangle in final canvas coordinates, with its paint and nesting depth, and the
-pass runs once on the finished canvas.
+frame's rectangle in final canvas coordinates with its paint, after the frame's
+content, which gives innermost-first order without a depth field. The pass runs once on
+the finished canvas and marks the cells it tints, so an outer frame never reaches into
+an inner one. A tint equal to `bg` is not recorded.
 
 ## 7. Contrast floors
 
@@ -394,8 +411,10 @@ records the resulting ink blends in the theme comment. Notes never sit on a tint
   nodes and unknown classes are dropped; every failure of §3.7 parses.
   `tests/mermaid_parse_robustness.rs` and the property tests cover the new statements.
 - Theme: on a separate list of low-contrast palettes (one whose `fg` misses 4.5:1 on
-  `bg`, one whose hues sit close to `bg`), §5.3 terminates, and every slot either passes
-  §7 or has fallen back by step 2.
+  `bg`, one whose hues sit close to `bg`), §5.3 terminates; every slot ink passes its
+  floors or the slot has fallen back by step 2; every fixed-ink pair passes or its tint
+  has reached `bg`. (A palette whose own text misses 4.5:1 on `bg` cannot pass the text
+  floors on any ground, so "every slot passes §7" is not reachable for it.)
 - Render: a coloured flowchart checks cell styles (border colour, inner background,
   heavy glyphs per shape of §6.2, subgraph half tint, inner node full tint, nested frame
   order). One state, one class and one ER diagram the same way. A light edge on a heavy
