@@ -7,7 +7,7 @@
 //! `note left of X` / `note right of X` in both the inline and the `end note` form.
 //!
 //! Skipped silently: `classDef`, `class`, `style`, `click`, and the `:::name` class
-//! suffix on a state.
+//! suffix on a state, a `state` declaration and a note's target.
 //!
 //! Rejected with a reason: the `--` concurrency divider, because silently dropping it
 //! would draw parallel regions as one.
@@ -191,6 +191,9 @@ impl Builder<'_> {
             Some((description, key)) => (key, Some(description)),
             None => (head, None),
         };
+        // `state A:::c {` attaches a class, which is not drawn yet. Left on, the suffix
+        // became part of the key and the title.
+        let (key, _class) = lex::split_class_suffix(key);
         let key = lex::unquote(key);
         if key.is_empty() {
             return Err(lex::syntax(line, "`state` without a name"));
@@ -251,10 +254,13 @@ impl Builder<'_> {
                 "notes other than `left of` and `right of`",
             ));
         };
-        let (target, text) = match lex::split_once_top_level(after, ':', Nesting::Honour) {
+        // `note left of A:::c : text`: the suffix belongs to the target, so the text
+        // starts at the first `:` that is not part of it.
+        let (target, text) = match lex::split_label_colon(after, Nesting::Honour) {
             Some((target, text)) => (target, Some(text)),
             None => (after.trim(), None),
         };
+        let (target, _class) = lex::split_class_suffix(target);
         let target = self.intern_state(lex::unquote(target));
         match text {
             Some(text) => {

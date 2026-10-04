@@ -1212,6 +1212,46 @@ mod states {
         );
     }
 
+    /// In a note `:::name` belongs to the target state, not to the note text, and on a
+    /// `state` declaration it is not part of the key (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_on_a_note_target_and_a_state_declaration() {
+        let diagram = state(
+            "stateDiagram-v2
+    state A:::foo {
+        [*] --> B
+    }
+    state \"Long name\" as C:::bar
+    state D:::baz <<choice>>
+    note left of A:::foo : hi
+    note right of C:::bar
+        two
+    end note
+",
+        );
+        let keys: Vec<_> = diagram.states.iter().map(|s| s.key.as_str()).collect();
+        assert_eq!(keys, vec!["A", "B", "C", "D"]);
+        assert!(matches!(diagram.states[0].kind, StateKind::Composite(_)));
+        assert_eq!(
+            diagram.states[2].label.as_ref().map(Label::text).as_deref(),
+            Some("Long name")
+        );
+        assert_eq!(diagram.states[3].kind, StateKind::Choice);
+        let notes: Vec<_> = diagram
+            .root
+            .notes
+            .iter()
+            .map(|n| (n.target, n.text.text()))
+            .collect();
+        assert_eq!(
+            notes,
+            vec![
+                (StateId(0), "hi".to_string()),
+                (StateId(2), "two".to_string())
+            ]
+        );
+    }
+
     /// `:::name` binds tighter than `:`, so it is never read as the start of a label
     /// or a description (colour spec §3.3).
     #[test]
