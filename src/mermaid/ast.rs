@@ -727,6 +727,9 @@ pub struct Class {
     /// Members in declaration order; the renderer splits them into the field and
     /// method compartments itself.
     pub members: Vec<Member>,
+    /// The merged colour lines aimed at this class (colour spec §3), or `None` to draw
+    /// in the theme's own diagram colours.
+    pub paint: Option<Paint>,
 }
 
 /// A `<<…>>` stereotype on a class.

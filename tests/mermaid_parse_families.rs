@@ -713,6 +713,54 @@ mod classes {
         }
     }
 
+    fn class_named<'a>(diagram: &'a ClassDiagram, name: &str) -> &'a Class {
+        diagram
+            .classes
+            .iter()
+            .find(|c| c.name.lines[0] == name)
+            .unwrap_or_else(|| panic!("no class {name}"))
+    }
+
+    #[test]
+    fn reads_colour_lines_on_classes() {
+        let diagram = class_diagram(
+            "classDiagram\n  class Animal:::warm\n  Animal <|-- Dog:::cool\n  Square~Shape~ <|-- Cat\n\
+             cssClass \"Cat, Square\" cool\n  style Animal stroke-width:3px\n\
+             classDef warm fill:#d4831f\n  classDef cool stroke:#2a8bb5\n",
+        );
+        assert_eq!(
+            colours(class_named(&diagram, "Animal").paint),
+            Some((Some(0xd4831f), None, true))
+        );
+        assert_eq!(
+            colours(class_named(&diagram, "Dog").paint),
+            Some((None, Some(0x2a8bb5), false))
+        );
+        assert_eq!(
+            colours(class_named(&diagram, "Cat").paint),
+            Some((None, Some(0x2a8bb5), false))
+        );
+        assert_eq!(
+            colours(class_named(&diagram, "Square").paint),
+            Some((None, Some(0x2a8bb5), false))
+        );
+        assert_eq!(
+            diagram.classes.len(),
+            4,
+            "no class named after a colour line"
+        );
+    }
+
+    #[test]
+    fn a_class_line_in_a_class_diagram_still_declares() {
+        let diagram =
+            class_diagram("classDiagram\n  class Bird\n  classDef default fill:#ff0000\n");
+        assert_eq!(
+            colours(class_named(&diagram, "Bird").paint),
+            Some((Some(0xff0000), None, false))
+        );
+    }
+
     #[test]
     fn parses_the_documentation_class_diagram() {
         let diagram = class_diagram(

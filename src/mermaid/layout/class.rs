@@ -198,6 +198,7 @@ mod tests {
             generic: None,
             annotation: None,
             members,
+            paint: None,
         }
     }
 

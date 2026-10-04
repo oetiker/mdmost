@@ -68,6 +68,7 @@ fn class_diagram(count: usize, members: usize, pairs: &[(usize, usize, usize)]) 
                     })
                 })
                 .collect(),
+            paint: None,
         })
         .collect();
     let arrows = [

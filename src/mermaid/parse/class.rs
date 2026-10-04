@@ -6,8 +6,8 @@
 //! annotations (inside or outside the block), generics written `List~T~`, `direction`,
 //! and all six relation operators with quoted cardinalities and a `: label`.
 //!
-//! Skipped silently: `click`, `style`, `classDef`, `cssClass`, `callback`, `link`, and
-//! the `:::name` class suffix after a class name.
+//! Read for colour: `classDef`, `cssClass`, `style` and the `:::name` suffix after a
+//! class name (colour spec). Skipped silently: `click`, `callback`, `link`.
 //!
 //! Rejected with a reason: `note` statements and namespaces, which would otherwise be
 //! dropped from the drawing without the reader noticing.
@@ -20,6 +20,7 @@ use crate::mermaid::ast::{
 use crate::mermaid::entity;
 
 use super::lex::{self, Nesting, SrcLine};
+use super::sheet::Sheet;
 use super::{direction, intern};
 
 /// The statements whose `;`-separated CSS tail `lex::drop_css_spill` drops. `class`
@@ -48,6 +49,10 @@ pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<ClassDiagram, Me
     if let Some(open) = builder.open {
         return Err(lex::syntax(open, "`class` block without a closing `}`"));
     }
+    for class in &mut builder.classes {
+        let key = class.name.lines.first().cloned().unwrap_or_default();
+        class.paint = builder.sheet.paint(Some(&key), &[], true);
+    }
     Ok(ClassDiagram {
         direction: builder.direction,
         classes: builder.classes,
@@ -67,6 +72,8 @@ struct Builder<'a> {
     /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
     /// offset — every label text this parser touches is a subslice of it.
     src: &'a str,
+    /// The colour statements, merged into class paints once the diagram is read.
+    sheet: Sheet,
 }
 
 impl Builder<'_> {
@@ -107,7 +114,21 @@ impl Builder<'_> {
     fn statement(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         let (word, rest) = lex::split_word(text);
         match word.to_ascii_lowercase().as_str() {
-            "click" | "style" | "classdef" | "cssclass" | "callback" | "link" => return Ok(()),
+            "click" | "callback" | "link" => return Ok(()),
+            "classdef" => {
+                self.sheet.define(rest, self.src);
+                return Ok(());
+            }
+            "cssclass" => {
+                let src = self.src;
+                self.sheet.assign_list(rest, |text| class_key(src, text));
+                return Ok(());
+            }
+            "style" => {
+                let src = self.src;
+                self.sheet.style(rest, src, |text| class_key(src, text));
+                return Ok(());
+            }
             "note" => return Err(lex::unsupported(line, "`note` statements")),
             "namespace" => return Err(lex::unsupported(line, "`namespace` blocks")),
             "direction" => {
@@ -152,13 +173,16 @@ impl Builder<'_> {
             None => (rest.trim(), None),
         };
         let (name, annotation) = lex::split_stereotype(head, line)?;
-        // `class A:::c` attaches a class, which is not drawn yet. Left on, the suffix
-        // became part of the name and declared a second class `A:::c`.
-        let (name, _class) = lex::split_class_suffix(name);
+        // `class A:::c` attaches a class. Left on, the suffix became part of the name and
+        // declared a second class `A:::c`.
+        let (name, class) = lex::split_class_suffix(name);
         if name.is_empty() {
             return Err(lex::syntax(line, "`class` without a name"));
         }
         let id = self.intern_class(name);
+        if let Some(class) = class {
+            self.sheet.assign(&class_key(self.src, name), class);
+        }
         if let Some(annotation) = annotation
             && let Some(class) = self.classes.get_mut(id.0)
         {
@@ -229,17 +253,10 @@ impl Builder<'_> {
     /// part of the key: `class Square~Shape~` and a later `<<abstract>> Square` are
     /// the same class.
     fn intern_class(&mut self, text: &str) -> ClassId {
-        // `A:::c` attaches a class, which is not drawn yet. Stripped here, it leaves
-        // both relation ends, the member form and an annotation line alike.
-        let (text, _class) = lex::split_class_suffix(text);
-        let text = lex::unquote(text);
-        let (name, generic) = match text.split_once('~') {
-            Some((name, rest)) => (
-                name.trim(),
-                Some(normalise_generics(rest.trim_end().trim_end_matches('~'))),
-            ),
-            None => (text, None),
-        };
+        // `A:::c` attaches a class. Stripped here, it leaves both relation ends, the
+        // member form and an annotation line alike.
+        let (text, class) = lex::split_class_suffix(text);
+        let (name, generic) = split_generic(lex::unquote(text));
         // Keyed on the label's visible first line, not on the raw source text: see
         // `er::Builder::intern_entity` for why the two can differ and why this is the
         // one an author means.
@@ -254,15 +271,42 @@ impl Builder<'_> {
                 generic: None,
                 annotation: None,
                 members: Vec::new(),
+                paint: None,
             },
         ));
         if let Some(generic) = generic
-            && let Some(class) = self.classes.get_mut(id.0)
+            && let Some(entry) = self.classes.get_mut(id.0)
         {
-            class.generic = Some(generic);
+            entry.generic = Some(generic);
+        }
+        if let Some(class) = class {
+            self.sheet.assign(&key, class);
         }
         id
     }
+}
+
+/// Splits a `Square~Shape~` generic parameter off a class name.
+fn split_generic(text: &str) -> (&str, Option<String>) {
+    match text.split_once('~') {
+        Some((name, rest)) => (
+            name.trim(),
+            Some(normalise_generics(rest.trim_end().trim_end_matches('~'))),
+        ),
+        None => (text, None),
+    }
+}
+
+/// The key a class is filed under: its name without class suffix, quotes or generic, as
+/// the first line of its label, so `Square~Shape~` and `"Square"` are the same class.
+/// `style` and `cssClass` name their targets through it.
+fn class_key(src: &str, text: &str) -> String {
+    let (name, _) = split_generic(lex::unquote(lex::split_class_suffix(text).0));
+    lex::label_at(src, name)
+        .lines
+        .first()
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Rewrites Mermaid's `~T~` generic markers as angle brackets.
