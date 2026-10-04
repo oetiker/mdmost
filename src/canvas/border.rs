@@ -89,7 +89,7 @@ impl BorderSet {
         vertical: '┃',
         top_left: '┏',
         top_right: '┓',
-        bottom_left: '┛',
+        bottom_left: '┗',
         bottom_right: '┛',
         tee_down: '┳',
         tee_up: '┻',
@@ -208,6 +208,34 @@ mod tests {
             Some((BorderSet::DOUBLE, Some(Rule::Top)))
         );
         assert_eq!(BorderSet::DOUBLE.close(Rule::Middle, Side::Right), '╣');
+    }
+
+    #[test]
+    fn every_corner_and_tee_of_a_set_is_its_own_glyph() {
+        for set in BorderSet::ALL {
+            let glyphs = [
+                set.top_left,
+                set.top_right,
+                set.bottom_left,
+                set.bottom_right,
+                set.tee_down,
+                set.tee_up,
+                set.tee_right,
+                set.tee_left,
+                set.cross,
+            ];
+            for (at, glyph) in glyphs.iter().enumerate() {
+                assert!(
+                    !glyphs[at + 1..].contains(glyph),
+                    "{glyph:?} stands for two positions in {set:?}"
+                );
+            }
+        }
+        assert_eq!(BorderSet::HEAVY.close(Rule::Bottom, Side::Left), '┗');
+        assert_eq!(
+            BorderSet::rule_glyph('┗'),
+            Some((BorderSet::HEAVY, Some(Rule::Bottom)))
+        );
     }
 
     #[test]
