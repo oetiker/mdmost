@@ -372,6 +372,40 @@ pub enum Direction {
 }
 
 // ---------------------------------------------------------------------------
+// Colour lines (colour spec, docs/superpowers/specs/2026-10-03-mermaid-colours-design.md)
+// ---------------------------------------------------------------------------
+
+/// A colour as written in a `classDef` or `style` line (colour spec §3.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PaintColor {
+    /// The RGB value. A CSS name has its CSS value, so `red` and `#ff0000` compare
+    /// equal (colour spec ruling 20).
+    pub rgb: crate::theme::Color,
+    /// The slot a CSS colour name goes to by name (colour spec §4.3), as an index into
+    /// the 16 slots. `None` for a hex value and for the neutral names.
+    pub named: Option<usize>,
+}
+
+/// What the author wrote for one node, frame or composite state, after merging
+/// (colour spec §3.1, §3.5).
+///
+/// The author's values, not theme colours: resolution to theme hues happens at draw
+/// time, so the parsers stay theme-free (colour spec ruling 8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Paint {
+    /// `fill`.
+    pub fill: Option<PaintColor>,
+    /// `stroke`.
+    pub stroke: Option<PaintColor>,
+    /// `stroke-width` of 3px or more.
+    pub heavy: bool,
+    /// Byte offset of the property that supplied the colour picking the hue
+    /// (colour spec §4.2), which orders the slot assignment of §4.4. `None` when no
+    /// colour has a hue.
+    pub origin: Option<usize>,
+}
+
+// ---------------------------------------------------------------------------
 // §6.1 flowchart / graph
 // ---------------------------------------------------------------------------
 
