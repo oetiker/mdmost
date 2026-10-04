@@ -7,7 +7,7 @@
 //! `&` node groups, chained edges, and nested `subgraph` … `end`.
 //!
 //! Skipped silently: `click`, `style`, `classDef`, `class`, `cssClass`, `linkStyle`, and
-//! the `:::name` class suffix on a node.
+//! the `:::name` class suffix on a node or a subgraph.
 //!
 //! Rejected with a reason: `--x` / `--o` link terminators, `@{ … }` shape metadata,
 //! and edges whose endpoint is a subgraph.
@@ -111,14 +111,15 @@ impl Builder<'_> {
     /// Opens a `subgraph id [Title]` container.
     fn open_subgraph(&mut self, rest: &str, line: usize) -> Result<(), MermaidError> {
         let src = self.src;
+        // `subgraph one:::c` and `subgraph one[Title]:::c` attach a class, which is not
+        // drawn yet. Left on, the suffix became part of the title and cost the key.
+        let (rest, _class) = lex::split_class_suffix(rest);
         let (key, title) = match shape_at(rest, 0) {
-            // `subgraph one [Title]` / `subgraph one["Title"]`
+            // `subgraph one [Title]` / `subgraph one["Title"]`, also as `one:::c [Title]`
             Some(shape) if shape.start > 0 => {
                 let text = lex::unquote(shape.text);
-                (
-                    Some(rest[..shape.start].trim().to_string()),
-                    Some(lex::label_at(src, text)),
-                )
+                let (key, _class) = lex::split_class_suffix(&rest[..shape.start]);
+                (Some(key.to_string()), Some(lex::label_at(src, text)))
             }
             _ => {
                 let name = lex::unquote(rest);

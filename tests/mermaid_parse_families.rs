@@ -269,6 +269,43 @@ flowchart LR
         assert_eq!(chart.edges.len(), 4);
     }
 
+    /// `subgraph one:::name` attaches a class to the subgraph; it is not part of the
+    /// key or the title (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_on_a_subgraph() {
+        let chart = flowchart(
+            "flowchart LR
+    subgraph one:::foo
+        a
+    end
+    subgraph two:::foo [Second]
+        b
+    end
+    subgraph three[Third]:::foo
+        c
+    end
+    subgraph \"Fourth one\":::foo
+        d
+    end
+",
+        );
+        let groups: Vec<_> = chart
+            .root
+            .children
+            .iter()
+            .map(|group| (group.key.as_deref(), group.title.as_ref().map(Label::text)))
+            .collect();
+        assert_eq!(
+            groups,
+            vec![
+                (Some("one"), Some("one".to_string())),
+                (Some("two"), Some("Second".to_string())),
+                (Some("three"), Some("Third".to_string())),
+                (None, Some("Fourth one".to_string())),
+            ]
+        );
+    }
+
     /// `;` ends a statement, so `stroke:#2a8bb5` after a `style` line's `;` is a stray
     /// CSS fragment, not a node (colour spec §3.4).
     #[test]
