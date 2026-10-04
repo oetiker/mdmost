@@ -108,11 +108,19 @@ the ordering of §4.4.
 `A:::c : text` in a state diagram is class `c` plus the description `text`.
 
 - flowchart: after a node reference anywhere one may stand: alone (`A:::c`), after a
-  shape (`A[text]:::c`), at either end of an edge, inside an `&` group.
+  shape (`A[text]:::c`), at either end of an edge, inside an `&` group. After a subgraph
+  key: `subgraph one:::c` and `subgraph one:::c [Title]`.
 - state: after a state name, alone or at either end of a transition. After `[*]` it is
-  read and ignored.
-- class: `class A:::c` and `class A:::c {`.
+  read and ignored. In `state A:::c {` it applies to the composite state. In
+  `note left of A:::c : text` it applies to `A`, not to the note.
+- class: `class A:::c` and `class A:::c {`. At either end of a relation
+  (`Animal:::c <|-- Dog`) and before a member (`Animal:::c : +int age`).
 - ER: after an entity name, alone, before `{`, or at either end of a relationship.
+
+Commits `c7d24c4` to `89e5581` added the shared reader (`lex::split_class_suffix`,
+`lex::split_label_colon`) and fixed the forms of §3.7. The subgraph, composite state,
+note and class relation forms above still keep the suffix as part of the name; the
+colour work fixes them with the same reader.
 
 ### 3.4 Property lists
 
