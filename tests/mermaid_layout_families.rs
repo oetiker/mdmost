@@ -121,6 +121,7 @@ fn er_diagram(count: usize, attributes: usize, pairs: &[(usize, usize, usize)]) 
                     comment: None,
                 })
                 .collect(),
+            paint: None,
         })
         .collect();
     let cardinalities = [

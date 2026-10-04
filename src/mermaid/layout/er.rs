@@ -172,6 +172,7 @@ mod tests {
             name: Label::line(name),
             alias: None,
             attributes,
+            paint: None,
         }
     }
 

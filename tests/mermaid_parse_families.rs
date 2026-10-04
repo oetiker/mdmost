@@ -1011,6 +1011,40 @@ mod classes {
 mod entities {
     use super::*;
 
+    fn entity_named<'a>(diagram: &'a ErDiagram, name: &str) -> &'a Entity {
+        diagram
+            .entities
+            .iter()
+            .find(|e| e.name.lines[0] == name)
+            .unwrap_or_else(|| panic!("no entity {name}"))
+    }
+
+    #[test]
+    fn reads_colour_lines_on_entities() {
+        let diagram = er(
+            "erDiagram\n  CUSTOMER:::warm ||--o{ ORDER : places\n  ORDER ||--|{ LINE:::cool : has\n\
+             p[Person]:::cool\n  class ORDER warm\n  style LINE fill:#000000;stroke:#ff0000\n\
+             classDef warm fill:#d4831f\n  classDef cool stroke:#2a8bb5\n",
+        );
+        assert_eq!(
+            colours(entity_named(&diagram, "CUSTOMER").paint),
+            Some((Some(0xd4831f), None, false))
+        );
+        assert_eq!(
+            colours(entity_named(&diagram, "ORDER").paint),
+            Some((Some(0xd4831f), None, false))
+        );
+        assert_eq!(
+            colours(entity_named(&diagram, "LINE").paint),
+            Some((Some(0x000000), Some(0x2a8bb5), false))
+        );
+        assert_eq!(
+            colours(entity_named(&diagram, "p").paint),
+            Some((None, Some(0x2a8bb5), false))
+        );
+        assert_eq!(diagram.entities.len(), 4);
+    }
+
     /// The ER diagram in `src`.
     #[track_caller]
     fn er(src: &str) -> ErDiagram {

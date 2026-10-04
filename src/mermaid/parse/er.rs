@@ -6,8 +6,8 @@
 //! `||--||`, `}|..|{`, …) with both the identifying (`--`) and non-identifying (`..`)
 //! line styles, and an optional `: label`.
 //!
-//! Skipped silently: `style`, `classDef`, `class`, `click`, `direction`, and the
-//! `:::name` class suffix on an entity.
+//! Read for colour: `classDef`, `class`, `style` and the `:::name` suffix on an entity
+//! (colour spec). Skipped silently: `click`, `direction`.
 
 use crate::error::MermaidError;
 use crate::mermaid::ast::{
@@ -18,6 +18,7 @@ use crate::mermaid::entity;
 
 use super::intern;
 use super::lex::{self, Nesting, SrcLine};
+use super::sheet::Sheet;
 
 /// Parses a whole `erDiagram`.
 ///
@@ -41,6 +42,10 @@ pub fn parse<'a>(lines: &[SrcLine<'a>], src: &'a str) -> Result<ErDiagram, Merma
     if let Some(open) = builder.open {
         return Err(lex::syntax(open, "attribute block without a closing `}`"));
     }
+    for entity in &mut builder.entities {
+        let key = entity.name.lines.first().cloned().unwrap_or_default();
+        entity.paint = builder.sheet.paint(Some(&key), &[], true);
+    }
     Ok(ErDiagram {
         entities: builder.entities,
         relationships: builder.relationships,
@@ -58,6 +63,8 @@ struct Builder<'a> {
     /// The full mermaid source, passed to `lex::label_at` to compute a label's byte
     /// offset — every label text this parser touches is a subslice of it.
     src: &'a str,
+    /// The colour statements, merged into entity paints once the diagram is read.
+    sheet: Sheet,
 }
 
 impl Builder<'_> {
@@ -66,12 +73,23 @@ impl Builder<'_> {
         if self.open.is_some() {
             return self.attribute_line(text, line);
         }
-        let (word, _) = lex::split_word(text);
-        if matches!(
-            word.to_ascii_lowercase().as_str(),
-            "style" | "classdef" | "class" | "click" | "direction"
-        ) {
-            return Ok(());
+        let (word, rest) = lex::split_word(text);
+        let src = self.src;
+        match word.to_ascii_lowercase().as_str() {
+            "click" | "direction" => return Ok(()),
+            "classdef" => {
+                self.sheet.define(rest, src);
+                return Ok(());
+            }
+            "class" => {
+                self.sheet.assign_list(rest, |name| entity_key(src, name));
+                return Ok(());
+            }
+            "style" => {
+                self.sheet.style(rest, src, |name| entity_key(src, name));
+                return Ok(());
+            }
+            _ => {}
         }
         if let Some(relationship) = self.relationship(text, line)? {
             self.relationships.push(relationship);
@@ -158,10 +176,13 @@ impl Builder<'_> {
 
     /// Resolves an entity reference, recording the alias when one is written.
     fn entity_ref(&mut self, text: &str) -> EntityId {
-        // `A:::c` attaches a class, which is not drawn yet.
-        let (text, _class) = lex::split_class_suffix(text);
+        // `A:::c` attaches a class.
+        let (text, class) = lex::split_class_suffix(text);
         let (name, alias) = split_alias(text);
         let id = self.intern_entity(lex::unquote(name));
+        if let Some(class) = class {
+            self.sheet.assign(&entity_key(self.src, text), class);
+        }
         if let Some(alias) = alias
             && let Some(target) = self.entities.get_mut(id.0)
         {
@@ -185,9 +206,21 @@ impl Builder<'_> {
                 name: label.clone(),
                 alias: None,
                 attributes: Vec::new(),
+                paint: None,
             },
         ))
     }
+}
+
+/// The key an entity is filed under: its name without class suffix, alias or quotes, as
+/// the first line of its label. `style` and `class` name their targets through it.
+fn entity_key(src: &str, text: &str) -> String {
+    let (name, _) = split_alias(lex::split_class_suffix(text).0);
+    lex::label_at(src, lex::unquote(name))
+        .lines
+        .first()
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Splits `CUSTOMER["Customer account"]` into its name and its alias.

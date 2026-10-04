@@ -17,6 +17,7 @@ fn entity(name: &str, attributes: Vec<ErAttribute>) -> Entity {
         name: Label::line(name),
         alias: None,
         attributes,
+        paint: None,
     }
 }
 

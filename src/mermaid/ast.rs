@@ -946,6 +946,9 @@ pub struct Entity {
     pub alias: Option<Label>,
     /// Attributes from the `{ … }` block, in declaration order.
     pub attributes: Vec<ErAttribute>,
+    /// The merged colour lines aimed at this entity (colour spec §3), or `None` to draw
+    /// in the theme's own diagram colours.
+    pub paint: Option<Paint>,
 }
 
 /// One line of an entity's attribute block: `string name PK "comment"`.
