@@ -19,6 +19,7 @@
 use crate::canvas::{BorderSet, Canvas, align_offset};
 use crate::mermaid::ast::Label;
 use crate::mermaid::chrome;
+use crate::mermaid::layout::painted::NodeStyle;
 use crate::text::{Align, display_width, ellipsize};
 use crate::theme::{Style, Theme};
 
@@ -83,8 +84,12 @@ impl Row {
 /// no members is a plain name box and an entity with no attributes is a plain name box.
 /// A box with nothing in it at all still draws as a one-row frame rather than
 /// collapsing to nothing.
-pub(super) fn draw(compartments: &[Vec<Row>], budget: u16, theme: &Theme) -> Canvas {
-    let styles = theme.diagram;
+pub(super) fn draw(
+    compartments: &[Vec<Row>],
+    budget: u16,
+    theme: &Theme,
+    style: &NodeStyle,
+) -> Canvas {
     let filled: Vec<&Vec<Row>> = compartments
         .iter()
         .filter(|rows| !rows.is_empty())
@@ -139,14 +144,22 @@ pub(super) fn draw(compartments: &[Vec<Row>], budget: u16, theme: &Theme) -> Can
         body.push_blank_row(theme.base());
     }
 
-    let mut out = body.framed(BorderSet::PLAIN, styles.node_border, None, theme.base());
+    // Heavy dividers stay light (`┠─┨`): the mixed tees are what Box Drawing has for a
+    // light rule meeting a heavy side.
+    let (border, left, right) = if style.heavy {
+        (BorderSet::HEAVY, "┠", "┨")
+    } else {
+        (BorderSet::PLAIN, "├", "┤")
+    };
+    let mut out = body.framed(border, style.border, None, theme.base());
     for rule in rules {
         // +1 for the frame's own top edge.
         let row = rule + 1;
-        out.write_str(row, 0, "├", styles.node_border);
-        out.hline(row, 1, inner, "─", styles.compartment);
-        out.write_str(row, inner + 1, "┤", styles.node_border);
+        out.write_str(row, 0, left, style.border);
+        out.hline(row, 1, inner, "─", style.rule);
+        out.write_str(row, inner + 1, right, style.border);
     }
+    style.fill_inside(&mut out, 1);
     out
 }
 
@@ -166,7 +179,12 @@ mod tests {
     #[test]
     fn compartments_are_separated_by_a_rule_tied_into_the_border() {
         let theme = theme();
-        let canvas = draw(&[rows(&["Name"]), rows(&["+field"])], 40, &theme);
+        let canvas = draw(
+            &[rows(&["Name"]), rows(&["+field"])],
+            40,
+            &theme,
+            &NodeStyle::plain(&theme),
+        );
         let text = canvas.plain_text();
         assert!(text.contains("├──"), "{text}");
         assert!(text.contains("──┤"), "{text}");
@@ -175,15 +193,20 @@ mod tests {
     #[test]
     fn an_empty_compartment_is_dropped_rather_than_drawn_blank() {
         let theme = theme();
-        let with_gap = draw(&[rows(&["Name"]), Vec::new()], 40, &theme);
-        let without = draw(&[rows(&["Name"])], 40, &theme);
+        let with_gap = draw(
+            &[rows(&["Name"]), Vec::new()],
+            40,
+            &theme,
+            &NodeStyle::plain(&theme),
+        );
+        let without = draw(&[rows(&["Name"])], 40, &theme, &NodeStyle::plain(&theme));
         assert_eq!(with_gap.plain_text(), without.plain_text());
     }
 
     #[test]
     fn every_row_is_padded_away_from_the_border() {
         let theme = theme();
-        let canvas = draw(&[rows(&["abc"])], 40, &theme);
+        let canvas = draw(&[rows(&["abc"])], 40, &theme, &NodeStyle::plain(&theme));
         let row = canvas.row_text(1);
         assert!(row.starts_with("│ abc "), "{row:?}");
         assert!(row.ends_with(" │"), "{row:?}");
@@ -192,7 +215,12 @@ mod tests {
     #[test]
     fn a_row_too_wide_for_the_budget_is_elided() {
         let theme = theme();
-        let canvas = draw(&[rows(&["a very long member indeed"])], 14, &theme);
+        let canvas = draw(
+            &[rows(&["a very long member indeed"])],
+            14,
+            &theme,
+            &NodeStyle::plain(&theme),
+        );
         assert!(canvas.width() <= 14, "{}", canvas.width());
         assert!(canvas.plain_text().contains('…'));
     }
@@ -201,7 +229,12 @@ mod tests {
     fn a_tiny_budget_never_panics_and_still_draws_a_box() {
         let theme = theme();
         for budget in 0..12u16 {
-            let canvas = draw(&[rows(&["Name"]), rows(&["+f"])], budget, &theme);
+            let canvas = draw(
+                &[rows(&["Name"]), rows(&["+f"])],
+                budget,
+                &theme,
+                &NodeStyle::plain(&theme),
+            );
             assert!(canvas.height() >= 3, "budget {budget}");
             canvas.check_invariants().expect("canvas contract");
         }
@@ -210,7 +243,7 @@ mod tests {
     #[test]
     fn a_box_with_no_content_at_all_is_still_a_frame() {
         let theme = theme();
-        let canvas = draw(&[], 20, &theme);
+        let canvas = draw(&[], 20, &theme, &NodeStyle::plain(&theme));
         assert_eq!(canvas.height(), 3);
         canvas.check_invariants().expect("canvas contract");
     }

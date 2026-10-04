@@ -38,6 +38,7 @@ use super::graph::{
     self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke,
     Terminator,
 };
+use super::painted::{NodeStyle, Painter};
 
 /// Widest a transition label is allowed to get before it is wrapped.
 const LABEL_WIDTH: usize = 18;
@@ -75,11 +76,24 @@ pub fn draw_with(
         edges: plan.edges.clone(),
         root: plan.root.clone(),
     };
+    let painter = Painter::new(
+        diagram
+            .states
+            .iter()
+            .filter_map(|state| state.paint.as_ref()),
+        theme,
+    );
+    let styles = diagram
+        .states
+        .iter()
+        .map(|state| painter.node(state.paint.as_ref()))
+        .collect();
     graph::draw(
         &spec,
         &Art {
             plan: &plan,
             diagram,
+            styles,
         },
         width,
         theme,
@@ -324,6 +338,8 @@ fn label_lines(state: &StateNode, width: usize) -> DrawnLabel {
 struct Art<'a> {
     plan: &'a Plan,
     diagram: &'a StateDiagram,
+    /// One resolved style per state, indexed like `diagram.states`.
+    styles: Vec<NodeStyle>,
 }
 
 impl Art<'_> {
@@ -342,13 +358,20 @@ impl NodeArt for Art<'_> {
             Some(Slot::Start) => shape::start(theme),
             Some(Slot::End) => shape::end(theme),
             Some(Slot::Note(label)) => shape::note(label, budget, NOTE_WIDTH, theme),
-            Some(Slot::State(_)) => match self.state(node) {
+            Some(Slot::State(id)) => match self.state(node) {
                 Some(state) => match state.kind {
                     StateKind::Choice => shape::choice(theme),
                     StateKind::Fork | StateKind::Join => shape::bar(theme),
                     // A composite only reaches here when it was demoted for being
                     // empty, so it draws like any other state.
-                    _ => shape::state(&label_text(state), budget, theme),
+                    _ => {
+                        let style = self
+                            .styles
+                            .get(id.0)
+                            .copied()
+                            .unwrap_or_else(|| NodeStyle::plain(theme));
+                        shape::state(&label_text(state), budget, theme, &style)
+                    }
                 },
                 None => Canvas::empty(0),
             },

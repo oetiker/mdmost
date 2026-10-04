@@ -15,7 +15,8 @@ use crate::theme::{Color, SlotInk, Style, Theme};
 pub(crate) struct NodeStyle {
     /// The outline.
     pub border: Style,
-    /// Inner rules: subroutine bars, cylinder lids, class and ER dividers.
+    /// Class and ER compartment dividers. Subroutine bars and cylinder lids are part of
+    /// the outline and use `border`.
     pub rule: Style,
     /// The background of every cell between the border cells, or `None` for the page.
     pub fill: Option<Color>,

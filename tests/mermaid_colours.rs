@@ -226,3 +226,77 @@ fn more_colours_than_slots_still_draw() {
         assert!(drawn.contains(ink), "slot {slot} ink {ink:?} unused");
     }
 }
+
+#[test]
+fn a_painted_state_is_a_heavy_round_box_in_its_slot() {
+    let theme = Theme::default_dark();
+    let canvas = draw(
+        "stateDiagram-v2\n  [*] --> Idle:::hot\n  Idle --> Done\n  classDef hot fill:#ff0000,stroke-width:3px\n",
+        &theme,
+    );
+    let (row, col) = locate(&canvas, "Idle");
+    let (top, left) = corner(&canvas, row, col);
+    assert_eq!(glyph(&canvas, top, left), "╭", "arcs stay light");
+    assert_eq!(glyph(&canvas, top + 1, left), "┃");
+    assert_eq!(fg(&canvas, top, left), theme.diagram_slots[0].ink);
+    assert_eq!(
+        bg(&canvas, row, col),
+        Some(theme.diagram_slots[0].full_tint)
+    );
+    let (row, col) = locate(&canvas, "Done");
+    let (top, left) = corner(&canvas, row, col);
+    assert_eq!(
+        fg(&canvas, top, left),
+        theme.diagram.node_border.fg,
+        "unpainted"
+    );
+}
+
+#[test]
+fn a_painted_class_has_heavy_dividers_in_its_border_ink() {
+    let theme = Theme::default_dark();
+    let canvas = draw(
+        "classDiagram\n  class Animal:::k {\n    +int age\n  }\n  classDef k fill:#2a8bb5,stroke-width:3px\n",
+        &theme,
+    );
+    let text = canvas.plain_text();
+    assert!(
+        text.contains("┏━") && text.contains("┠─") && text.contains("─┨"),
+        "{text}"
+    );
+    let (row, col) = locate(&canvas, "┠");
+    let ink = theme.diagram_slots[9];
+    assert_eq!(fg(&canvas, row, col), ink.ink);
+    assert_eq!(
+        fg(&canvas, row, col + 1),
+        ink.ink,
+        "the rule takes the border ink"
+    );
+    assert_eq!(
+        bg(&canvas, row, col + 1),
+        Some(ink.full_tint),
+        "the rule is inside"
+    );
+    assert_eq!(
+        bg(&canvas, row, col),
+        Some(theme.palette.bg),
+        "the tee is border"
+    );
+}
+
+#[test]
+fn a_painted_entity_draws_its_slot() {
+    let theme = Theme::default_dark();
+    let canvas = draw(
+        "erDiagram\n  CUSTOMER:::k ||--o{ ORDER : places\n  CUSTOMER {\n    string name\n  }\n  classDef k stroke:#d4831f\n",
+        &theme,
+    );
+    let (row, col) = locate(&canvas, "CUSTOMER");
+    let (top, left) = corner(&canvas, row, col);
+    assert_eq!(fg(&canvas, top, left), theme.diagram_slots[2].ink);
+    assert_eq!(
+        bg(&canvas, row, col),
+        Some(theme.palette.bg),
+        "stroke alone does not fill"
+    );
+}
