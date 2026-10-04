@@ -7,6 +7,7 @@
 
 use crate::canvas::Canvas;
 use crate::mermaid::ast::Paint;
+use crate::mermaid::layout::graph::FrameStyle;
 use crate::mermaid::paint::{self, Resolution};
 use crate::theme::{Color, SlotInk, Style, Theme};
 
@@ -83,6 +84,20 @@ impl<'t> Painter<'t> {
             .filter(|_| hued)
             .map(tint)
             .filter(|&color| color != self.theme.palette.bg)
+    }
+
+    /// The style of a subgraph or composite state frame with this paint (colour spec
+    /// §6.3). A paint without a slot keeps the theme's frame inks, since `ink: None`
+    /// means `group_border` and `group_title`.
+    pub(crate) fn frame(&self, paint: Option<&Paint>) -> FrameStyle {
+        let Some(paint) = paint else {
+            return FrameStyle::default();
+        };
+        FrameStyle {
+            ink: self.slot(paint).and_then(|slot| slot.ink),
+            heavy: paint.heavy,
+            tint: self.tint(paint, |slot| slot.half_tint),
+        }
     }
 
     /// The style of a node with this paint (colour spec §6.1).

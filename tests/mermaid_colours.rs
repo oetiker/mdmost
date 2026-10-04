@@ -300,3 +300,84 @@ fn a_painted_entity_draws_its_slot() {
         "stroke alone does not fill"
     );
 }
+
+#[test]
+fn a_heavy_frame_is_dashed_in_its_ink_and_an_edge_crosses_it_mixed() {
+    let theme = Theme::default_dark();
+    let canvas = draw(
+        "flowchart TB\n  subgraph box [Box]\n    inside\n  end\n  outside --> inside\n\
+         style box stroke:#ff0000,stroke-width:3px\n",
+        &theme,
+    );
+    let text = canvas.plain_text();
+    assert!(text.contains("╭ Box ╍") || text.contains("╭╍"), "{text}");
+    assert!(text.contains('╏') && text.contains('┿'), "{text}");
+    let (row, col) = locate(&canvas, "Box");
+    let ink = theme.diagram_slots[0].ink;
+    assert_eq!(fg(&canvas, row, col), ink, "title");
+    assert!(
+        canvas.row(row).expect("row")[col]
+            .style()
+            .attrs
+            .contains(mdmost::theme::Attributes::BOLD)
+    );
+    assert_eq!(fg(&canvas, row, col - 2), ink, "border");
+}
+
+#[test]
+fn a_filled_frame_washes_its_area_innermost_first() {
+    let theme = Theme::default_dark();
+    let canvas = draw(
+        "flowchart TB\n  subgraph outer\n    alpha\n    subgraph inner\n      beta\n    end\n    gamma:::own\n  end\n\
+         style outer fill:#ff0000\n  style inner fill:#0000ff\n  classDef own fill:#00ff00\n",
+        &theme,
+    );
+    let red = theme.diagram_slots[0];
+    let blue = theme.diagram_slots[11];
+    let (row, col) = locate(&canvas, "alpha");
+    assert_eq!(
+        bg(&canvas, row, col),
+        Some(red.half_tint),
+        "an unfilled node in the outer frame"
+    );
+    let (row, col) = locate(&canvas, "beta");
+    assert_eq!(
+        bg(&canvas, row, col),
+        Some(blue.half_tint),
+        "the inner frame keeps its own wash"
+    );
+    let (row, col) = locate(&canvas, "╭ inner");
+    assert_eq!(
+        bg(&canvas, row, col),
+        Some(red.half_tint),
+        "the inner border sits in the outer wash"
+    );
+    let (row, col) = locate(&canvas, "gamma");
+    // #00ff00 is 120 degrees, nearer 97.5 than 150: yellow-green, slot 5.
+    let green = theme.diagram_slots[5];
+    assert_eq!(
+        bg(&canvas, row, col),
+        Some(green.full_tint),
+        "a filled node keeps its full tint"
+    );
+    let (row, col) = locate(&canvas, "╭ outer");
+    assert_eq!(
+        bg(&canvas, row, col),
+        Some(theme.palette.bg),
+        "the frame's own border keeps the page"
+    );
+}
+
+#[test]
+fn notes_in_a_filled_composite_keep_the_page() {
+    let theme = Theme::default_light();
+    let canvas = draw(
+        "stateDiagram-v2\n  state Busy {\n    Work --> Rest\n    note right of Work : later\n  }\n  style Busy fill:#ff0000\n",
+        &theme,
+    );
+    let red = theme.diagram_slots[0];
+    let (row, col) = locate(&canvas, "Work");
+    assert_eq!(bg(&canvas, row, col), Some(red.half_tint));
+    let (row, col) = locate(&canvas, "later");
+    assert_eq!(bg(&canvas, row, col), Some(theme.palette.bg));
+}

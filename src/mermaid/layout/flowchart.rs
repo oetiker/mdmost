@@ -58,7 +58,7 @@ pub fn draw_with(
         .iter()
         .map(|node| painter.node(node.paint.as_ref()))
         .collect();
-    let spec = build(chart);
+    let spec = build(chart, &painter);
     graph::draw(&spec, &Art { chart, styles }, width, theme, fit)
 }
 
@@ -102,12 +102,12 @@ impl NodeArt for Art<'_> {
 }
 
 /// Translates the flowchart AST into an engine specification.
-fn build(chart: &Flowchart) -> GraphSpec {
+fn build(chart: &Flowchart, painter: &Painter) -> GraphSpec {
     GraphSpec {
         direction: chart.direction,
         node_count: chart.nodes.len(),
         edges: chart.edges.iter().map(edge).collect(),
-        root: group(&chart.root),
+        root: group(&chart.root, painter),
     }
 }
 
@@ -143,7 +143,7 @@ fn terminator(head: ArrowHead) -> Terminator {
 }
 
 /// Translates a subgraph tree.
-fn group(group: &Group) -> GroupSpec {
+fn group(group: &Group, painter: &Painter) -> GroupSpec {
     GroupSpec {
         title: group
             .title
@@ -160,6 +160,11 @@ fn group(group: &Group) -> GroupSpec {
             }),
         direction: group.direction,
         nodes: group.nodes.iter().map(|&NodeId(id)| NodeIdx(id)).collect(),
-        children: group.children.iter().map(self::group).collect(),
+        children: group
+            .children
+            .iter()
+            .map(|child| self::group(child, painter))
+            .collect(),
+        style: painter.frame(group.paint.as_ref()),
     }
 }

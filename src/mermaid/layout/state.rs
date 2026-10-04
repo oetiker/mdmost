@@ -69,13 +69,6 @@ pub fn draw_with(
     theme: &Theme,
     fit: Fit,
 ) -> Result<Canvas, MermaidError> {
-    let plan = Plan::of(diagram);
-    let spec = GraphSpec {
-        direction: diagram.direction.unwrap_or(Direction::TopToBottom),
-        node_count: plan.slots.len(),
-        edges: plan.edges.clone(),
-        root: plan.root.clone(),
-    };
     let painter = Painter::new(
         diagram
             .states
@@ -83,6 +76,13 @@ pub fn draw_with(
             .filter_map(|state| state.paint.as_ref()),
         theme,
     );
+    let plan = Plan::of(diagram, &painter);
+    let spec = GraphSpec {
+        direction: diagram.direction.unwrap_or(Direction::TopToBottom),
+        node_count: plan.slots.len(),
+        edges: plan.edges.clone(),
+        root: plan.root.clone(),
+    };
     let styles = diagram
         .states
         .iter()
@@ -135,11 +135,11 @@ struct Ends {
 }
 
 impl Plan {
-    /// Translates a whole diagram.
-    fn of(diagram: &StateDiagram) -> Self {
+    /// Translates a whole diagram; `painter` styles the composite frames.
+    fn of(diagram: &StateDiagram, painter: &Painter) -> Self {
         let mut plan = Self::default();
         let mut ends = vec![Ends::default(); diagram.states.len()];
-        let (root, _) = plan.scope(diagram, &diagram.root, &mut ends);
+        let (root, _) = plan.scope(diagram, &diagram.root, &mut ends, painter);
         plan.root = root;
         plan
     }
@@ -159,6 +159,7 @@ impl Plan {
         diagram: &StateDiagram,
         scope: &StateScope,
         ends: &mut Vec<Ends>,
+        painter: &Painter,
     ) -> (GroupSpec, Ends) {
         let mut group = GroupSpec {
             direction: scope.direction,
@@ -191,7 +192,7 @@ impl Plan {
             };
             match &state.kind {
                 StateKind::Composite(inner) => {
-                    let (mut child, inner_ends) = self.scope(diagram, inner, ends);
+                    let (mut child, inner_ends) = self.scope(diagram, inner, ends, painter);
                     if child.nodes.is_empty() && child.children.is_empty() {
                         // An empty composite has nowhere for a transition to land, so
                         // it becomes an ordinary state box instead of a frame.
@@ -204,6 +205,7 @@ impl Plan {
                         };
                     } else {
                         child.title = Some(label_lines(state, LABEL_WIDTH));
+                        child.style = painter.frame(state.paint.as_ref());
                         group.children.push(child);
                         ends[id.0] = inner_ends;
                     }
@@ -389,11 +391,21 @@ impl NodeArt for Art<'_> {
         };
         shape::ports(centred)
     }
+
+    fn keeps_page(&self, node: NodeIdx) -> bool {
+        matches!(self.plan.slots.get(node.0), Some(Slot::Note(_)))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The plan of `diagram` with no colour lines to resolve.
+    fn plan_of(diagram: &StateDiagram) -> Plan {
+        let theme = Theme::default_dark();
+        Plan::of(diagram, &Painter::new(std::iter::empty(), &theme))
+    }
 
     fn state(key: &str, kind: StateKind) -> StateNode {
         StateNode {
@@ -426,7 +438,7 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         assert!(plan.slots.contains(&Slot::Start));
         assert!(plan.slots.contains(&Slot::End));
         assert_eq!(plan.edges.len(), 2);
@@ -446,7 +458,7 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         assert!(!plan.slots.contains(&Slot::Start));
         assert!(!plan.slots.contains(&Slot::End));
     }
@@ -473,7 +485,7 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         assert_eq!(plan.root.children.len(), 1, "the composite is a container");
         let title = plan.root.children[0]
             .title
@@ -509,7 +521,7 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         let edge = plan
             .edges
             .iter()
@@ -528,7 +540,7 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         assert!(plan.root.children.is_empty());
         assert_eq!(plan.slots, vec![Slot::State(StateId(0))]);
     }
@@ -550,7 +562,7 @@ mod tests {
                     ..StateScope::default()
                 },
             };
-            let plan = Plan::of(&diagram);
+            let plan = plan_of(&diagram);
             let state_at = plan
                 .root
                 .nodes
@@ -589,7 +601,7 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         assert_eq!(plan.slots.len(), 2);
         assert_eq!(plan.edges.len(), 1);
         assert_eq!(plan.edges[0].stroke, Stroke::Dotted);
@@ -622,9 +634,9 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let first = Plan::of(&diagram);
+        let first = plan_of(&diagram);
         for _ in 0..5 {
-            let again = Plan::of(&diagram);
+            let again = plan_of(&diagram);
             assert_eq!(first.slots, again.slots);
             assert_eq!(first.edges, again.edges);
         }

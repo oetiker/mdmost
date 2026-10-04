@@ -9,7 +9,7 @@
 use crate::canvas::Canvas;
 use crate::mermaid::ast::{Direction, Label};
 use crate::mermaid::chrome::{self, Piece};
-use crate::theme::Theme;
+use crate::theme::{Color, Theme};
 
 pub use super::glyph::Stroke;
 
@@ -135,6 +135,20 @@ pub struct GroupSpec {
     pub nodes: Vec<NodeIdx>,
     /// Nested groups, in declaration order.
     pub children: Vec<GroupSpec>,
+    /// How the frame is drawn; ignored for a group without a title.
+    pub style: FrameStyle,
+}
+
+/// How a container frame is drawn (colour spec §6.3). The default is the theme's own
+/// frame, so a caller that knows nothing about colour gets today's drawing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FrameStyle {
+    /// Border and title ink; `None` for `group_border` and `group_title`.
+    pub ink: Option<Color>,
+    /// Draw the frame with heavy dashes (`╍ ╏`).
+    pub heavy: bool,
+    /// The wash for every page-coloured cell inside the frame, or `None`.
+    pub tint: Option<Color>,
 }
 
 /// An edge between two nodes.
@@ -298,6 +312,15 @@ pub trait NodeArt {
     fn ports(&self, node: NodeIdx) -> PortPolicy {
         let _ = node;
         PortPolicy::Spread
+    }
+
+    /// Whether `node` keeps the page background inside a washed frame.
+    ///
+    /// A state note does: its text is drawn in the note ink, which misses the text
+    /// floor on the light theme's half tints (colour spec §6.3). Defaults to `false`.
+    fn keeps_page(&self, node: NodeIdx) -> bool {
+        let _ = node;
+        false
     }
 }
 

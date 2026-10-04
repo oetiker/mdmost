@@ -46,7 +46,8 @@ mod tests;
 
 pub use glyph::{Dir, Stroke};
 pub use spec::{
-    DrawnLabel, EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Terminator,
+    DrawnLabel, EdgeSpec, FrameStyle, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy,
+    Terminator,
 };
 
 use crate::canvas::{BorderSet, Canvas};
@@ -54,7 +55,7 @@ use crate::error::MermaidError;
 use crate::mermaid::ast::Direction;
 use crate::mermaid::chrome::{self, Piece};
 use crate::text::{Line, Span};
-use crate::theme::Theme;
+use crate::theme::{Color, Style, Theme};
 
 use frame::{Frame, Pen};
 use rank::RawEdge;
@@ -205,15 +206,15 @@ pub fn draw(
 ) -> Result<Canvas, MermaidError> {
     validate(spec)?;
     let attempt = |gap: usize, budget: u16| {
-        Ctx {
+        let ctx = Ctx {
             spec,
             art,
             theme,
             budget,
             gap,
-        }
-        .group(&spec.root, spec.direction)
-        .canvas
+        };
+        let drawn = ctx.group(&spec.root, spec.direction);
+        ctx.washed(drawn)
     };
     let mut narrowest: Option<u16> = None;
 
@@ -480,6 +481,47 @@ fn reach_of(canvas: &Canvas, spot: Spot, direction: Direction, inwards: bool) ->
     }
 }
 
+/// Washes the inside of each frame, in order, over cells still on the page.
+///
+/// `frames` is innermost first. A cell once visited is claimed, so an outer wash never
+/// reaches into an inner frame; cells of a node that `keep`s the page are skipped; a
+/// node with its own fill is no longer on the page and keeps it.
+fn tint_frames(canvas: &mut Canvas, frames: &[Washed], keep: &[Spot], page: Color) {
+    let cols = usize::from(canvas.width());
+    let mut claimed = vec![false; canvas.height() * cols];
+    let kept = |row: usize, col: usize| {
+        keep.iter().any(|spot| {
+            (spot.row..spot.row + spot.rows).contains(&row)
+                && (spot.col..spot.col + spot.cols).contains(&col)
+        })
+    };
+    for washed in frames {
+        let Spot {
+            row,
+            col,
+            rows,
+            cols: width,
+        } = washed.at;
+        for r in row + 1..(row + rows).saturating_sub(1) {
+            for c in col + 1..(col + width).saturating_sub(1).min(cols) {
+                let Some(flag) = claimed.get_mut(r * cols + c) else {
+                    continue;
+                };
+                if std::mem::replace(flag, true) || kept(r, c) {
+                    continue;
+                }
+                let on_page = canvas
+                    .row(r)
+                    .and_then(|cells| cells.get(c))
+                    .is_some_and(|cell| cell.style().bg == Some(page));
+                if on_page {
+                    canvas.patch_style(r, c, 1, Style::new().bg(washed.tint));
+                }
+            }
+        }
+    }
+}
+
 /// Anchors `canvas` at the left of a canvas exactly `width` columns wide.
 ///
 /// The drawing used to be centred in the budget it was given. It is not any more: every
@@ -507,6 +549,8 @@ struct Drawn {
     canvas: Canvas,
     /// Where every node it contains ended up inside `canvas`.
     hints: Vec<(NodeIdx, Spot)>,
+    /// Every washed frame inside `canvas`, innermost first.
+    frames: Vec<Washed>,
 }
 
 /// The rectangle one node's box occupies inside a canvas.
@@ -516,6 +560,13 @@ struct Spot {
     col: usize,
     rows: usize,
     cols: usize,
+}
+
+/// A washed frame's rectangle inside a canvas, and its wash.
+#[derive(Debug, Clone, Copy)]
+struct Washed {
+    at: Spot,
+    tint: Color,
 }
 
 impl Spot {
@@ -534,12 +585,37 @@ struct Item {
     canvas: Canvas,
     ports: PortPolicy,
     hints: Vec<(NodeIdx, Spot)>,
+    frames: Vec<Washed>,
     members: Vec<NodeIdx>,
     /// True when the box is a container frame rather than a node itself.
     group: bool,
 }
 
 impl Ctx<'_> {
+    /// The finished drawing with every washed frame applied, innermost first.
+    ///
+    /// Done once on the whole canvas rather than per frame, because the level above a
+    /// frame draws the edges and labels that enter it after the frame is finished, on
+    /// the page background (colour spec §6.3).
+    fn washed(&self, mut drawn: Drawn) -> Canvas {
+        if drawn.frames.is_empty() {
+            return drawn.canvas;
+        }
+        let keep: Vec<Spot> = drawn
+            .hints
+            .iter()
+            .filter(|&&(node, _)| self.art.keeps_page(node))
+            .map(|&(_, spot)| spot)
+            .collect();
+        tint_frames(
+            &mut drawn.canvas,
+            &drawn.frames,
+            &keep,
+            self.theme.palette.bg,
+        );
+        drawn.canvas
+    }
+
     /// Lays out one container and everything below it.
     fn group(&self, group: &GroupSpec, inherited: Direction) -> Drawn {
         let direction = group.direction.unwrap_or(inherited);
@@ -556,6 +632,7 @@ impl Ctx<'_> {
                 canvas,
                 ports: self.art.ports(node),
                 hints: vec![(node, whole)],
+                frames: Vec::new(),
                 members: vec![node],
                 group: false,
             });
@@ -567,6 +644,7 @@ impl Ctx<'_> {
                 canvas: drawn.canvas,
                 ports: PortPolicy::Spread,
                 hints: drawn.hints,
+                frames: drawn.frames,
                 members,
                 group: true,
             });
@@ -576,7 +654,7 @@ impl Ctx<'_> {
             None => inner,
             Some(title) => {
                 let crossed = self.crossed(group, &inner, inherited);
-                self.frame(inner, title, &crossed)
+                self.frame(inner, title, &crossed, &group.style)
             }
         }
     }
@@ -616,8 +694,28 @@ impl Ctx<'_> {
     /// `crossed` lists, in the columns of `drawn`, the nodes an edge from outside
     /// reaches through the top edge. The title is placed so that it leaves each of them
     /// at least one cell of plain frame to cross; see [`place_title`].
-    fn frame(&self, drawn: Drawn, title: &DrawnLabel, crossed: &[(usize, usize)]) -> Drawn {
+    ///
+    /// `style` colours the border and title and picks the dash weight; a wash is only
+    /// recorded here and laid on the finished canvas by [`Ctx::washed`].
+    fn frame(
+        &self,
+        drawn: Drawn,
+        title: &DrawnLabel,
+        crossed: &[(usize, usize)],
+        style: &FrameStyle,
+    ) -> Drawn {
         let styles = self.theme.diagram;
+        let border = style
+            .ink
+            .map_or(styles.group_border, |ink| styles.group_border.fg(ink));
+        let title_style = style
+            .ink
+            .map_or(styles.group_title, |ink| styles.group_title.fg(ink));
+        let set = if style.heavy {
+            BorderSet::DASHED_HEAVY
+        } else {
+            BorderSet::DASHED
+        };
         let base = self.theme.base();
         let mut padded = Canvas::new(drawn.canvas.width(), 1, base);
         padded.append(&drawn.canvas, base);
@@ -632,7 +730,7 @@ impl Ctx<'_> {
         let extra = u16::try_from(place.inner - content).unwrap_or(0);
         let left = u16::try_from(place.shift).unwrap_or(0);
         let padded = padded.indent(left, extra.saturating_sub(left), base);
-        let mut canvas = padded.framed(BorderSet::DASHED, styles.group_border, None, base);
+        let mut canvas = padded.framed(set, border, None, base);
         // A space, the title and a space, clipped so they never reach the corner.
         let room = (place.inner + 1).saturating_sub(place.at + 2);
         let head = title
@@ -647,11 +745,11 @@ impl Ctx<'_> {
             .filter(|row| !row.text.is_empty());
         if let Some(head) = &head {
             let spaced = Line::new(vec![
-                Span::new(" ", styles.group_border),
-                Span::new(head.text.clone(), styles.group_title),
-                Span::new(" ", styles.group_border),
+                Span::new(" ", border),
+                Span::new(head.text.clone(), title_style),
+                Span::new(" ", border),
             ]);
-            canvas.write_line(0, place.at, &spaced, styles.group_border);
+            canvas.write_line(0, place.at, &spaced, border);
             chrome::label_spans(&mut canvas, &title.label, head, 0, place.at + 1);
         }
         // The frame adds one row and column of border plus one of padding, and the
@@ -661,7 +759,31 @@ impl Ctx<'_> {
             .into_iter()
             .map(|(node, spot)| (node, spot.shifted(2, 2 + place.shift)))
             .collect();
-        Drawn { canvas, hints }
+        // Recorded after everything inside it, which keeps the list innermost first.
+        let mut frames: Vec<Washed> = drawn
+            .frames
+            .into_iter()
+            .map(|washed| Washed {
+                at: washed.at.shifted(2, 2 + place.shift),
+                ..washed
+            })
+            .collect();
+        if let Some(tint) = style.tint {
+            frames.push(Washed {
+                at: Spot {
+                    row: 0,
+                    col: 0,
+                    rows: canvas.height(),
+                    cols: usize::from(canvas.width()),
+                },
+                tint,
+            });
+        }
+        Drawn {
+            canvas,
+            hints,
+            frames,
+        }
     }
 
     /// Lays out one level: the boxes of a container and the edges between them.
@@ -671,6 +793,7 @@ impl Ctx<'_> {
             return Drawn {
                 canvas: Canvas::empty(0),
                 hints: Vec::new(),
+                frames: Vec::new(),
             };
         }
         let owner = self.owners(items);
@@ -743,6 +866,7 @@ impl Ctx<'_> {
         let styles = self.theme.diagram;
         let mut pen = Pen::new(frame, self.theme.base(), styles.edge_label);
         let mut hints = Vec::new();
+        let mut frames = Vec::new();
         for (index, item) in items.iter().enumerate() {
             let (row, col) = frame.origin(
                 routing.flow[index],
@@ -754,11 +878,21 @@ impl Ctx<'_> {
             for &(node, spot) in &item.hints {
                 hints.push((node, spot.shifted(row, col)));
             }
+            for washed in &item.frames {
+                frames.push(Washed {
+                    at: washed.at.shifted(row, col),
+                    ..*washed
+                });
+            }
         }
         routing.paint(&input, &mut pen);
         let mut canvas = pen.canvas;
         pen.ink.apply(&mut canvas, styles.line, styles.arrow);
-        Drawn { canvas, hints }
+        Drawn {
+            canvas,
+            hints,
+            frames,
+        }
     }
 
     /// Maps every node under this container to the item that holds it.
