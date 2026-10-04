@@ -168,6 +168,7 @@ fn state_diagram(
             key: format!("S{at}"),
             label: None,
             kind: kinds[at % kinds.len()].clone(),
+            paint: None,
         })
         .collect();
 
@@ -210,6 +211,7 @@ fn state_diagram(
             key: "Group".to_string(),
             label: None,
             kind: StateKind::Composite(inner),
+            paint: None,
         });
         root.states.push(wrapper);
     }

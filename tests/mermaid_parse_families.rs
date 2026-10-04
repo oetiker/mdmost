@@ -1266,6 +1266,67 @@ mod states {
         }
     }
 
+    fn state_named<'a>(diagram: &'a StateDiagram, key: &str) -> &'a StateNode {
+        diagram
+            .states
+            .iter()
+            .find(|s| s.key == key)
+            .unwrap_or_else(|| panic!("no state {key}"))
+    }
+
+    #[test]
+    fn reads_colour_lines_on_states_and_composites() {
+        let diagram = state(
+            "stateDiagram-v2\n  [*] --> A:::hot\n  A --> B : go\n  B:::cold : waiting\n\
+             state C:::hot {\n    D\n  }\n  state E <<choice>>\n  note left of F:::cold : n\n\
+             class E hot\n  class B hot\n  style C stroke-width:3px\n\
+             classDef hot fill:#ff0000\n  classDef cold stroke:#0000ff\n  classDef default stroke:#00ff00\n",
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "A").paint),
+            Some((Some(0xff0000), Some(0x00ff00), false))
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "B").paint),
+            Some((Some(0xff0000), Some(0x0000ff), false))
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "C").paint),
+            Some((Some(0xff0000), None, true)),
+            "no default"
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "D").paint),
+            Some((None, Some(0x00ff00), false))
+        );
+        assert_eq!(
+            state_named(&diagram, "E").paint,
+            None,
+            "a choice takes no paint"
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "F").paint),
+            Some((None, Some(0x0000ff), false)),
+            "note target"
+        );
+    }
+
+    #[test]
+    fn style_on_an_undeclared_state_creates_none() {
+        let diagram = state("stateDiagram-v2\n  A --> B\n  style Z fill:#ff0000\n  class Y c\n");
+        assert_eq!(diagram.states.len(), 2);
+    }
+
+    #[test]
+    fn a_declared_alias_takes_its_class() {
+        let diagram =
+            state("stateDiagram-v2\n  state \"Long name\" as C:::c\n  classDef c fill:#ff0000\n");
+        assert_eq!(
+            colours(state_named(&diagram, "C").paint),
+            Some((Some(0xff0000), None, false))
+        );
+    }
+
     #[test]
     fn parses_the_documentation_state_diagram() {
         let diagram = state(

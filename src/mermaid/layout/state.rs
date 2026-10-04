@@ -377,6 +377,7 @@ mod tests {
             key: key.to_string(),
             label: None,
             kind,
+            paint: None,
         }
     }
 

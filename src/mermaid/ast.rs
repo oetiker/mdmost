@@ -1133,6 +1133,10 @@ pub struct StateNode {
     pub label: Option<Label>,
     /// What kind of state this is, including composite children.
     pub kind: StateKind,
+    /// The merged colour lines aimed at this state (colour spec §3), or `None` to draw
+    /// in the theme's own diagram colours. Only plain and composite states take one;
+    /// markers, choice, fork, join and notes never do (colour spec §3.1).
+    pub paint: Option<Paint>,
 }
 
 /// The kind of a [`StateNode`].
