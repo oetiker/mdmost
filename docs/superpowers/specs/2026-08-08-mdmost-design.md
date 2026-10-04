@@ -318,7 +318,8 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
 - Layout: layered (Sugiyama-style) — cycle breaking, layer assignment by longest path,
   crossing reduction by median heuristic, coordinate assignment on a character grid.
   Edges routed orthogonally with proper junction glyphs (`├ ┤ ┬ ┴ ┼`) and arrowheads.
-- Out of scope: `click`, `style`/`classDef` colors, `linkStyle`.
+- Colours from `classDef`, `class`, `style` and `:::`: see `docs/superpowers/specs/2026-10-03-mermaid-colours-design.md`.
+- Out of scope: `click`, `linkStyle`.
 
 ### 6.2 sequenceDiagram — first-class
 - `participant`/`actor` with `as` aliases; implicit participants from first use.
@@ -336,11 +337,13 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
   `-->`, dependency `..>`, realization `..|>`, with cardinality labels `"1" -- "0..*"`.
 - Node renderer draws the three-compartment class box; edge routing is the flowchart
   engine with mermaid-accurate arrow terminators.
+- Colours from `classDef`, `class`, `style` and `:::`: see `docs/superpowers/specs/2026-10-03-mermaid-colours-design.md`.
 
 ### 6.4 erDiagram — reuses flowchart layout
 - `ENTITY { type name PK "comment" }` attribute blocks.
 - Crow's-foot cardinality `||--o{`, `}o--||`, `||--||`, `}|..|{` etc., with the
   relationship label. Terminators drawn as crow's-foot / bar / circle glyphs.
+- Colours from `classDef`, `class`, `style` and `:::`: see `docs/superpowers/specs/2026-10-03-mermaid-colours-design.md`.
 
 ### 6.5 pie
 - `pie title X` / `showData`, `"label" : value`. Rendered as a sorted horizontal bar
@@ -357,6 +360,7 @@ Directives, comments (`%%`), and `%%{init}%%` blocks are parsed and ignored.
 - `[*] --> S`, `S --> T : label`, `state X { … }` composite states, `<<choice>>`,
   `<<fork>>`/`<<join>>`, `note left of`.
 - Uses the flowchart layout engine with rounded state boxes and start/end markers.
+- Colours from `classDef`, `class`, `style` and `:::`: see `docs/superpowers/specs/2026-10-03-mermaid-colours-design.md`.
 
 ## 7. Tables
 

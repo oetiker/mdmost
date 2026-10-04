@@ -345,7 +345,7 @@ Heavy applies as follows:
 | stadium | `╭─╮ ( ) ╰─╯` | `╭━╮ ( ) ╰━╯`, arcs and parentheses stay light |
 | circle | `╭─╮ (( )) ╰─╯` | `╭━╮ (( )) ╰━╯`, arcs and parentheses stay light |
 | rhombus | ` ╱─╲ │ ╲─╱` | ` ╱━╲ ┃ ╲━╱`, diagonals stay light |
-| subroutine | `┌┬─┬┐ ││ ││ └┴─┴┘` | `┏┯━┯┓ ┃│ │┃ ┗┷━┷┛`, inner bars stay light |
+| subroutine | `┌┬─┬┐ ││ ││ └┴─┴┘` | `┏━┯…┯━┓ ┃│ │┃ ┗━┷…┷━┛`, inner bars stay light |
 | cylinder | `╭─╮ ├─┤ │ ├─┤ ╰─╯` | `╭━╮ ┠─┨ ┃ ┠─┨ ╰━╯`, lid rules stay light |
 | class/ER divider | `├─┤` | `┠─┨` |
 | frame | `╭╌╮ ╎ ╰╌╯` | `╭╍╮ ╏ ╰╍╯`, arcs stay light |

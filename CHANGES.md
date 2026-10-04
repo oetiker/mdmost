@@ -3,18 +3,19 @@
 ## [Unreleased]
 
 ### New
+- Mermaid flowchart, state, class and ER diagrams now draw the colours set with `classDef`, `class`, `cssClass`, `style` and `:::`. Each colour is drawn in the nearest hue of the active theme, so text stays readable on dark and light terminals: `stroke` colours the border, `fill` also tints the inside, and a `stroke-width` of 3px or more draws a heavy outline. A `fill` on a subgraph or composite state tints its whole area.
 
 ### Changed
 
 ### Fixed
-- A Mermaid flowchart subgraph written `subgraph one:::foo` no longer shows the title `one:::foo`; it is titled `one`. An arrow to `one` or to `two` in `subgraph two:::foo [Title]` now reports "`one` is a subgraph and cannot be used as a node", as it does without the class, instead of drawing an extra box. The class is not drawn yet.
-- A Mermaid state diagram note on a state written with `:::foo`, for example `note left of A:::foo : hi`, now shows `hi` instead of `::foo : hi`, and the `end note` form no longer fails with "cannot read a statement from `end note`". `state A:::foo {` no longer gives the composite state the title `A:::foo` and no longer keeps it apart from `A`. The class is not drawn yet.
-- A Mermaid class diagram that writes `:::foo` after a class name in a relation or a member line, for example `Animal:::foo <|-- Dog` or `Animal:::foo : +int age`, no longer fails with "empty member in `::foo <|-- Dog`". `Animal <|-- Dog:::foo` no longer draws the arrow labelled `::foo`. The class is not drawn yet.
-- A Mermaid ER diagram that gives an entity a class, for example `CUSTOMER:::foo ||--o{ ORDER : places`, no longer fails with "unknown attribute key `PLACES`". `CUSTOMER:::foo` alone or before `{` no longer draws an entity named `CUSTOMER:::foo`. The class is not drawn yet.
-- A Mermaid class diagram line such as `class Animal:::foo`, with or without a `{` member block, no longer draws a second class named `Animal:::foo` next to `Animal`. The class is not drawn yet.
-- A Mermaid state diagram that gives a state a class, for example `[*] --> A:::foo`, no longer draws the arrow labelled `::foo`. `A:::foo : text` now gives state `A` the description `text`, and `A:::foo` alone no longer gives it the description `::foo`. The class is not drawn yet.
+- A Mermaid flowchart subgraph written `subgraph one:::foo` no longer shows the title `one:::foo`; it is titled `one`. An arrow to `one` or to `two` in `subgraph two:::foo [Title]` now reports "`one` is a subgraph and cannot be used as a node", as it does without the class, instead of drawing an extra box.
+- A Mermaid state diagram note on a state written with `:::foo`, for example `note left of A:::foo : hi`, now shows `hi` instead of `::foo : hi`, and the `end note` form no longer fails with "cannot read a statement from `end note`". `state A:::foo {` no longer gives the composite state the title `A:::foo` and no longer keeps it apart from `A`.
+- A Mermaid class diagram that writes `:::foo` after a class name in a relation or a member line, for example `Animal:::foo <|-- Dog` or `Animal:::foo : +int age`, no longer fails with "empty member in `::foo <|-- Dog`". `Animal <|-- Dog:::foo` no longer draws the arrow labelled `::foo`.
+- A Mermaid ER diagram that gives an entity a class, for example `CUSTOMER:::foo ||--o{ ORDER : places`, no longer fails with "unknown attribute key `PLACES`". `CUSTOMER:::foo` alone or before `{` no longer draws an entity named `CUSTOMER:::foo`.
+- A Mermaid class diagram line such as `class Animal:::foo`, with or without a `{` member block, no longer draws a second class named `Animal:::foo` next to `Animal`.
+- A Mermaid state diagram that gives a state a class, for example `[*] --> A:::foo`, no longer draws the arrow labelled `::foo`. `A:::foo : text` now gives state `A` the description `text`, and `A:::foo` alone no longer gives it the description `::foo`.
 - A Mermaid `style` or `classDef` line that separates its properties with `;`, for example `style A fill:#e3f4fb;stroke:#2a8bb5`, no longer fails a flowchart with "cannot read a node shape from `:#2a8bb5`". In state and class diagrams the same line no longer draws an extra box named `stroke`. The properties after the `;` are ignored.
-- A Mermaid flowchart that gives a node a class, for example `A:::foo --> B` or `A[Text]:::foo`, no longer fails with "cannot read a node shape from `:::foo`". The class is not drawn yet, so the node looks as it would without it.
+- A Mermaid flowchart that gives a node a class, for example `A:::foo --> B` or `A[Text]:::foo`, no longer fails with "cannot read a node shape from `:::foo`".
 - In Mermaid flowcharts, an arrow from outside a subgraph to a node inside it now reaches that node. Before, it stopped at the subgraph border when it arrived under the subgraph title, or when several arrows entered the same subgraph.
 - A Mermaid subgraph or composite state whose title is wider than its content no longer cuts the title off (`╭ A rath╮`); the frame widens to fit it. When the title would cover a node that an arrow enters, it moves right along the top border so the arrow can pass.
 - A Mermaid edge line that passes a wide character in a label or title, for example a Chinese letter or an emoji, no longer erases that character.

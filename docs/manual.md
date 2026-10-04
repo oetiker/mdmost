@@ -553,7 +553,7 @@ syntax-highlighted code block with a dim caption stating the reason.
 - `flowchart, graph`: Directions `TD`/`TB`/`LR`/`RL`/`BT`; shapes `[rect]`,
   `(round)`, `([stadium])`, `{rhombus}`, `((circle))`, `[[subroutine]]`, `[(cylinder)]`;
   edges `-->`, `---`, `-.->`, `==>` with `|label|` and `-- label -->`; nested
-  `subgraph`. Out of scope: `click`, `style`/`classDef`, `linkStyle`.
+  `subgraph`. Out of scope: `click`, `linkStyle`.
 
 - `sequenceDiagram`: `participant`/`actor` with `as`; arrows `->`, `-->`, `->>`,
   `-->>`, `-x`, `--x`; self-messages; `activate`/`deactivate` and `+`/`-`; `Note left
@@ -578,6 +578,15 @@ syntax-highlighted code block with a dim caption stating the reason.
 - `gantt`: `title`, `dateFormat`, `axisFormat`, `section`, tasks with `after X`,
   durations or explicit dates, and `done`/`active`/`crit`/`milestone` tags. The time
   scale is chosen from the available width.
+
+Flowchart, state, class and ER diagrams read `classDef`, `class` (`cssClass` in
+class diagrams), `style` and the `:::name` suffix. The properties `fill`, `stroke`
+(`#rgb`, `#rrggbb`, `#rrggbbaa` or a CSS colour name) and `stroke-width` are read;
+others, such as `color`, are ignored. A colour is drawn in the nearest of 16 hues of
+the active theme, and two different colours take different hues while a free hue is
+left. `stroke` colours the border, `fill` also tints the inside, and a `stroke-width`
+of 3px or more draws the outline heavy. A `fill` on a subgraph or composite state
+tints its whole area more lightly. Node text keeps the theme's text colour.
 
 Labels break lines at `<br>` and draw `<b>`, `<strong>`, `<i>` and `<em>` as bold
 and italic. A markdown string, label text in backticks inside quotes
