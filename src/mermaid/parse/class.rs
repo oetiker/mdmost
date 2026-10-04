@@ -7,7 +7,7 @@
 //! and all six relation operators with quoted cardinalities and a `: label`.
 //!
 //! Skipped silently: `click`, `style`, `classDef`, `cssClass`, `callback`, `link`, and
-//! the `:::name` class suffix in `class A:::name`.
+//! the `:::name` class suffix after a class name.
 //!
 //! Rejected with a reason: `note` statements and namespaces, which would otherwise be
 //! dropped from the drawing without the reader noticing.
@@ -134,8 +134,8 @@ impl Builder<'_> {
             self.relations.push(relation);
             return Ok(());
         }
-        // The `Animal : +int age` member form.
-        if let Some((name, member)) = lex::split_once_top_level(text, ':', Nesting::Honour) {
+        // The `Animal : +int age` member form, also as `Animal:::c : +int age`.
+        if let Some((name, member)) = lex::split_label_colon(text, Nesting::Honour) {
             let id = self.intern_class(name);
             return self.member(id, member, line);
         }
@@ -195,7 +195,9 @@ impl Builder<'_> {
 
     /// Parses a relation statement, returning `None` when `text` holds no operator.
     fn relation(&mut self, text: &str, line: usize) -> Result<Option<ClassRelation>, MermaidError> {
-        let (body, label) = match lex::split_once_top_level(text, ':', Nesting::Honour) {
+        // Not the plain first `:`: in `A:::c <|-- B` that is the class suffix, and the
+        // operator would end up in the label.
+        let (body, label) = match lex::split_label_colon(text, Nesting::Honour) {
             Some((body, label)) => (body, Some(label)),
             None => (text, None),
         };
@@ -227,7 +229,10 @@ impl Builder<'_> {
     /// part of the key: `class Square~Shape~` and a later `<<abstract>> Square` are
     /// the same class.
     fn intern_class(&mut self, text: &str) -> ClassId {
-        let text = lex::unquote(text.trim());
+        // `A:::c` attaches a class, which is not drawn yet. Stripped here, it leaves
+        // both relation ends, the member form and an annotation line alike.
+        let (text, _class) = lex::split_class_suffix(text);
+        let text = lex::unquote(text);
         let (name, generic) = match text.split_once('~') {
             Some((name, rest)) => (
                 name.trim(),

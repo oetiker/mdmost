@@ -7,6 +7,7 @@
 ### Changed
 
 ### Fixed
+- A Mermaid class diagram that writes `:::foo` after a class name in a relation or a member line, for example `Animal:::foo <|-- Dog` or `Animal:::foo : +int age`, no longer fails with "empty member in `::foo <|-- Dog`". `Animal <|-- Dog:::foo` no longer draws the arrow labelled `::foo`. The class is not drawn yet.
 - A Mermaid ER diagram that gives an entity a class, for example `CUSTOMER:::foo ||--o{ ORDER : places`, no longer fails with "unknown attribute key `PLACES`". `CUSTOMER:::foo` alone or before `{` no longer draws an entity named `CUSTOMER:::foo`. The class is not drawn yet.
 - A Mermaid class diagram line such as `class Animal:::foo`, with or without a `{` member block, no longer draws a second class named `Animal:::foo` next to `Animal`. The class is not drawn yet.
 - A Mermaid state diagram that gives a state a class, for example `[*] --> A:::foo`, no longer draws the arrow labelled `::foo`. `A:::foo : text` now gives state `A` the description `text`, and `A:::foo` alone no longer gives it the description `::foo`. The class is not drawn yet.

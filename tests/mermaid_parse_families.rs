@@ -668,6 +668,36 @@ mod classes {
         assert_eq!(diagram.relations.len(), 1);
     }
 
+    /// `:::name` may follow a class name in a relation and in the `A : member` form,
+    /// and binds tighter than the `:` that starts a label or a member (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_in_a_relation_and_a_member_line() {
+        let diagram = class_diagram(
+            "classDiagram
+    Animal:::foo <|-- Dog
+    Animal <|-- Cat:::bar
+    Animal:::foo \"1\" --> \"*\" Fish:::baz : eats
+    Animal:::foo : +int age
+    <<interface>> Bird:::qux
+",
+        );
+        let names: Vec<_> = diagram.classes.iter().map(|c| c.name.text()).collect();
+        assert_eq!(names, vec!["Animal", "Dog", "Cat", "Fish", "Bird"]);
+        let labels: Vec<_> = diagram
+            .relations
+            .iter()
+            .map(|r| r.label.as_ref().map(Label::text))
+            .collect();
+        assert_eq!(labels, vec![None, None, Some("eats".to_string())]);
+        assert_eq!(diagram.relations[2].left_cardinality.as_deref(), Some("1"));
+        assert_eq!(diagram.relations[2].right_cardinality.as_deref(), Some("*"));
+        assert_eq!(diagram.classes[0].members.len(), 1);
+        assert_eq!(
+            diagram.classes[4].annotation,
+            Some(ClassAnnotation::Interface)
+        );
+    }
+
     #[test]
     fn parses_a_class_block_written_on_one_line() {
         let diagram = class_diagram("classDiagram\n    class A { +f() }\n    A <|-- B\n");
