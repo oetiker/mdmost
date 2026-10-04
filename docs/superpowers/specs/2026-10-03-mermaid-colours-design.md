@@ -176,16 +176,15 @@ Fixed in `c7d24c4` to `89e5581`:
 - ER: `CUSTOMER:::foo ||--o{ ORDER : places` fails with "unknown attribute key".
 - state and class: a style line with `;` draws an extra box named `stroke`.
 
-Fixed next:
+Fixed in `74bf68f` to `1520caf`:
 
 - class: `Animal:::c <|-- Dog` and `Animal:::c : +int age` fail with "empty member";
   `Animal <|-- Dog:::c` draws the relation labelled `::c`.
 - state: `note left of A:::c : hi` draws the note text `::c : hi`; `state A:::c {`
   keeps `A:::c` as the composite's name.
 - flowchart: `subgraph one:::c` keeps `one:::c` as key and title.
-- `BorderSet::HEAVY` (`src/canvas/border.rs`) draws `┛` as its bottom-left corner and
-  the double-line `╣` and `╬` as its left tee and cross. The gantt critical task frame
-  uses it today; §6.2 needs it correct.
+- `BorderSet::HEAVY` (`src/canvas/border.rs`) had `┛` as its bottom-left corner. No
+  diagram drew the set yet, so no output changed; §6.2 is its first user.
 
 ## 4. Resolution
 
