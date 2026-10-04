@@ -2,8 +2,9 @@
 //! Colour lines: property lists, CSS names, merging and slot resolution.
 //!
 //! Theme-free on purpose (colour spec ruling 8): this module turns what the author
-//! wrote into [`Paint`] values and decides which of the theme's 16 slots each colour
-//! takes. What a slot looks like is the theme's business (`theme::SlotInk`).
+//! wrote into [`Paint`] values ([`parse_props`], [`merge`]) and decides which of the
+//! theme's 16 slots each colour takes ([`Resolution`]). What a slot looks like is the
+//! theme's business (`theme::SlotInk`).
 
 use crate::mermaid::ast::{Paint, PaintColor};
 use crate::theme::Color;
@@ -172,6 +173,122 @@ pub fn merge<'a>(layers: impl IntoIterator<Item = &'a Props>) -> Option<Paint> {
     })
 }
 
+/// The nominal angle of each slot (colour spec §4.1), in slot index order.
+///
+/// Fixed rather than measured from the active theme, so a diagram resolves to the same
+/// slots in every theme (ruling 4). A midpoint slot draws as the blend of its
+/// neighbours, whose real hue can be some way off this angle; the angle only picks.
+pub const NOMINAL: [f32; SLOT_COUNT] = [
+    0.0, 15.0, 30.0, 37.5, 45.0, 97.5, 150.0, 165.0, 180.0, 200.0, 220.0, 240.0, 260.0, 287.5,
+    315.0, 337.5,
+];
+
+/// The shorter way round the circle between two angles.
+fn distance(a: f32, b: f32) -> f32 {
+    let d = (a - b).rem_euclid(360.0);
+    d.min(360.0 - d)
+}
+
+/// The nearest allowed slot to `angle`; a tie goes to the larger nominal angle, with 0
+/// counted as 360 against angles above 180, so that red wins a tie against
+/// magenta-red (colour spec §4.4).
+fn nearest(angle: f32, allowed: impl Fn(usize) -> bool) -> Option<usize> {
+    let tie = |slot: usize| {
+        if slot == 0 && angle > 180.0 {
+            360.0
+        } else {
+            NOMINAL[slot]
+        }
+    };
+    (0..SLOT_COUNT)
+        .filter(|&slot| allowed(slot))
+        .min_by(|&a, &b| {
+            distance(angle, NOMINAL[a])
+                .total_cmp(&distance(angle, NOMINAL[b]))
+                .then(tie(b).total_cmp(&tie(a)))
+        })
+}
+
+/// Assigns a slot to each unit angle, in the order given (colour spec §4.4).
+///
+/// A colour that lost its slot skips that slot's two neighbours too: the neighbours
+/// draw as blends with the held hue, and two classes one blend apart read as one
+/// (ruling 11). Units are distinct colours, so rule 1's "held by the same colour"
+/// never arises here; it is what deduplicating by RGB already did.
+fn assign(angles: &[f32]) -> Vec<usize> {
+    let mut held = [false; SLOT_COUNT];
+    angles
+        .iter()
+        .map(|&angle| {
+            let best = nearest(angle, |_| true).unwrap_or(0);
+            let left = (best + SLOT_COUNT - 1) % SLOT_COUNT;
+            let right = (best + 1) % SLOT_COUNT;
+            let slot = if held[best] {
+                nearest(angle, |s| !held[s] && s != best && s != left && s != right)
+                    .or_else(|| nearest(angle, |s| !held[s]))
+                    .unwrap_or(best)
+            } else {
+                best
+            };
+            held[slot] = true;
+            slot
+        })
+        .collect()
+}
+
+/// Which slot each hue-picking colour of one diagram takes.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Resolution {
+    /// One entry per unit: its RGB value and its slot.
+    units: Vec<(Color, usize)>,
+}
+
+impl Resolution {
+    /// Resolves every paint of one diagram at once, nodes and frames together, so a
+    /// colour gets the same slot wherever it is used.
+    ///
+    /// A unit is one RGB value. It is ordered by the first place its colour picked a
+    /// hue, and takes the nominal angle of its name when that first place wrote a CSS
+    /// name (§4.4). A colour that picks no paint's hue takes no slot (ruling 12).
+    pub fn of<'p>(paints: impl IntoIterator<Item = &'p Paint>) -> Self {
+        let mut first: Vec<(usize, PaintColor)> = Vec::new();
+        for paint in paints {
+            let (Some(color), Some(at)) = (hue_color(paint), paint.origin) else {
+                continue;
+            };
+            match first.iter_mut().find(|(_, unit)| unit.rgb == color.rgb) {
+                Some(unit) if at < unit.0 => *unit = (at, color),
+                Some(_) => {}
+                None => first.push((at, color)),
+            }
+        }
+        first.sort_by_key(|&(at, color)| (at, color.rgb.r, color.rgb.g, color.rgb.b));
+        let angles: Vec<f32> = first
+            .iter()
+            .map(|(_, color)| match color.named {
+                Some(slot) => NOMINAL[slot],
+                None => hue_of(color.rgb).unwrap_or_default(),
+            })
+            .collect();
+        Self {
+            units: first
+                .iter()
+                .zip(assign(&angles))
+                .map(|(&(_, color), slot)| (color.rgb, slot))
+                .collect(),
+        }
+    }
+
+    /// The slot `paint` draws in, or `None` when it has no hued colour.
+    pub fn slot(&self, paint: &Paint) -> Option<usize> {
+        let color = hue_color(paint)?;
+        self.units
+            .iter()
+            .find(|(rgb, _)| *rgb == color.rgb)
+            .map(|&(_, slot)| slot)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,5 +418,147 @@ mod tests {
         assert_eq!(merge([&parse_props("color:#000", 0)]), None);
         assert_eq!(merge(std::iter::empty()), None);
         assert_eq!(merge([&parse_props("stroke-width:1px", 0)]), None);
+    }
+
+    /// A fully saturated colour at `degrees`, for building units at known angles.
+    fn at(degrees: f32) -> Color {
+        let h = degrees / 60.0;
+        let x = 1.0 - (h.rem_euclid(2.0) - 1.0).abs();
+        let (r, g, b) = match h as u32 {
+            0 => (1.0, x, 0.0),
+            1 => (x, 1.0, 0.0),
+            2 => (0.0, 1.0, x),
+            3 => (0.0, x, 1.0),
+            4 => (x, 0.0, 1.0),
+            _ => (1.0, 0.0, x),
+        };
+        let byte = |v: f32| (v * 255.0).round() as u8;
+        Color::rgb(byte(r), byte(g), byte(b))
+    }
+
+    /// A paint whose stroke is `rgb`, written at byte `origin`.
+    fn stroked(rgb: Color, origin: usize) -> Paint {
+        merge([&Props {
+            stroke: Some((PaintColor { rgb, named: None }, origin)),
+            ..Props::default()
+        }])
+        .expect("painted")
+    }
+
+    #[test]
+    fn nearest_breaks_ties_towards_the_larger_angle() {
+        assert_eq!(nearest(7.5, |_| true), Some(1), "15 beats 0");
+        assert_eq!(
+            nearest(352.5, |_| true),
+            Some(0),
+            "0 counts as 360 against 337.5"
+        );
+        assert_eq!(nearest(359.0, |_| true), Some(0), "the shorter way round");
+        assert_eq!(nearest(198.0, |_| true), Some(9));
+    }
+
+    #[test]
+    fn the_spec_example_resolves_as_its_table_says() {
+        // classDef access/comm/part, then `style mbox` with part's stroke (colour spec §4.4).
+        let access = stroked(Color::hex(0x2a8bb5), 10);
+        let comm = stroked(Color::hex(0xd4831f), 20);
+        let part = stroked(Color::hex(0xb8650a), 30);
+        let mbox = stroked(Color::hex(0xb8650a), 40);
+        let resolution = Resolution::of([&mbox, &part, &comm, &access]);
+        assert_eq!(resolution.slot(&access), Some(9), "200 cyan-blue");
+        assert_eq!(resolution.slot(&comm), Some(2), "30 orange");
+        assert_eq!(
+            resolution.slot(&part),
+            Some(4),
+            "45 yellow: 15, 30, 37.5 skipped"
+        );
+        assert_eq!(resolution.slot(&mbox), Some(4), "same colour, same unit");
+    }
+
+    #[test]
+    fn a_collision_skips_the_two_neighbours_then_falls_back() {
+        // Rule 2: orange held, a second orange skips 15, 30 and 37.5.
+        assert_eq!(assign(&[30.0, 31.0]), vec![2, 4]);
+        // Rule 3: only the neighbours of 30 are free, so the nearest of them is taken.
+        let mut angles: Vec<f32> = (0..SLOT_COUNT)
+            .filter(|&slot| slot != 1 && slot != 3)
+            .map(|slot| NOMINAL[slot])
+            .collect();
+        angles.push(31.0);
+        assert_eq!(assign(&angles).last(), Some(&3), "37.5 is nearer than 15");
+    }
+
+    #[test]
+    fn a_seventeenth_colour_shares_its_nearest_slot() {
+        let mut angles: Vec<f32> = NOMINAL.to_vec();
+        angles.push(2.0);
+        let slots = assign(&angles);
+        assert_eq!(
+            &slots[..SLOT_COUNT],
+            (0..SLOT_COUNT).collect::<Vec<_>>().as_slice()
+        );
+        assert_eq!(slots[SLOT_COUNT], 0, "rule 4: share S");
+    }
+
+    #[test]
+    fn units_go_in_source_order_not_in_argument_order() {
+        let first = stroked(at(30.0), 5);
+        let second = stroked(at(31.0), 9);
+        let resolution = Resolution::of([&second, &first]);
+        assert_eq!(resolution.slot(&first), Some(2));
+        assert_eq!(resolution.slot(&second), Some(4));
+    }
+
+    #[test]
+    fn a_css_name_snaps_by_name_and_an_equal_hex_joins_it() {
+        let named = |name: &str, origin| {
+            merge([&Props {
+                stroke: Some((css_color(name).expect("css"), origin)),
+                ..Props::default()
+            }])
+            .expect("painted")
+        };
+        let green = named("green", 1);
+        let lime = named("lime", 2);
+        let blue = named("blue", 3);
+        let hex_blue = stroked(Color::hex(0x0000ff), 4);
+        let resolution = Resolution::of([&green, &lime, &blue, &hex_blue]);
+        assert_eq!(
+            resolution.slot(&green),
+            Some(6),
+            "by name, though 120 is nearer 97.5"
+        );
+        assert_eq!(
+            resolution.slot(&lime),
+            Some(8),
+            "collides with green, skips 5-7"
+        );
+        assert_eq!(
+            resolution.slot(&blue),
+            Some(10),
+            "by name, though 240 is a slot"
+        );
+        assert_eq!(resolution.slot(&hex_blue), Some(10), "same RGB, same unit");
+    }
+
+    #[test]
+    fn a_colour_without_hue_takes_no_slot() {
+        let grey = stroked(Color::hex(0x808080), 1);
+        let red = stroked(Color::hex(0xff0000), 2);
+        let resolution = Resolution::of([&grey, &red]);
+        assert_eq!(resolution.slot(&grey), None);
+        assert_eq!(resolution.slot(&red), Some(0));
+    }
+
+    #[test]
+    fn all_sixteen_slots_can_be_held() {
+        let paints: Vec<Paint> = NOMINAL
+            .iter()
+            .enumerate()
+            .map(|(index, &angle)| stroked(at(angle), index))
+            .collect();
+        let resolution = Resolution::of(&paints);
+        let slots: Vec<Option<usize>> = paints.iter().map(|p| resolution.slot(p)).collect();
+        assert_eq!(slots, (0..SLOT_COUNT).map(Some).collect::<Vec<_>>());
     }
 }
