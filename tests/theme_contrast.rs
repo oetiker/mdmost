@@ -19,31 +19,6 @@ const TEXT_FLOOR: f32 = 4.5;
 /// WCAG's floor for meaningful non-text graphics — borders, rules, frames: 3:1.
 const GRAPHIC_FLOOR: f32 = 3.0;
 
-/// One sRGB channel, linearised (WCAG 2, relative luminance).
-fn channel(value: u8) -> f32 {
-    let c = f32::from(value) / 255.0;
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-/// WCAG 2 relative luminance.
-///
-/// Deliberately *not* [`Color::luminance`], which is the NTSC weighting the palette
-/// derivation uses to decide which way to shade. That one answers "which of these is
-/// lighter"; this one is the only definition a contrast ratio is defined against.
-fn relative_luminance(color: Color) -> f32 {
-    0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
-}
-
-/// The WCAG 2 contrast ratio between two colours, in `1.0..=21.0`.
-fn contrast(a: Color, b: Color) -> f32 {
-    let (x, y) = (relative_luminance(a), relative_luminance(b));
-    (x.max(y) + 0.05) / (x.min(y) + 0.05)
-}
-
 /// The foreground of a style that is required to have one.
 fn fg(name: &str, style: Style) -> Color {
     style
@@ -71,7 +46,7 @@ fn themes() -> Vec<Theme> {
 /// Asserts a ratio and says what it measured either way, because a failure whose
 /// message is only "assertion failed" costs the next reader the same experiment.
 fn at_least(theme: &str, what: &str, ink: Color, ground: Color, floor: f32) {
-    let ratio = contrast(ink, ground);
+    let ratio = ink.contrast(ground);
     assert!(
         ratio >= floor,
         "{theme}: {what} measures {ratio:.2}:1, below the {floor:.1}:1 floor \
@@ -281,19 +256,16 @@ fn borders_stay_quieter_than_the_text_they_frame() {
     for theme in themes() {
         let name = &theme.name;
         let page = theme.palette.bg;
-        let border = contrast(theme.palette.border, page);
-        let body = contrast(fg("body", theme.text.body), page);
-        let muted = contrast(theme.palette.muted, page);
+        let border = theme.palette.border.contrast(page);
+        let body = fg("body", theme.text.body).contrast(page);
+        let muted = theme.palette.muted.contrast(page);
         assert!(
             border < muted && muted < body,
             "{name}: structure must recede — border {border:.2}:1, \
              muted {muted:.2}:1, body {body:.2}:1"
         );
-        let punctuation = contrast(
-            fg("punctuation", theme.code.punctuation),
-            theme.palette.surface,
-        );
-        let text = contrast(fg("code text", theme.code.text), theme.palette.surface);
+        let punctuation = fg("punctuation", theme.code.punctuation).contrast(theme.palette.surface);
+        let text = fg("code text", theme.code.text).contrast(theme.palette.surface);
         assert!(
             punctuation < text,
             "{name}: punctuation ({punctuation:.2}:1) must stay quieter than code text \
@@ -329,9 +301,9 @@ fn section_numbers_are_readable_but_quieter_than_every_heading() {
             page,
             TEXT_FLOOR,
         );
-        let numbered = contrast(number, page);
+        let numbered = number.contrast(page);
         for level in 1..=6u8 {
-            let heading = contrast(fg("a heading", theme.heading(level)), page);
+            let heading = fg("a heading", theme.heading(level)).contrast(page);
             assert!(
                 numbered < heading,
                 "{name}: the section number ({numbered:.2}:1) must stay quieter than \
@@ -392,8 +364,8 @@ fn the_hovered_copy_button_stays_legible_in_every_theme() {
             // Louder than the resting button, not merely different from it: a shift
             // that dimmed the control the pointer is on would read as it going away.
             let (rest, over) = (
-                contrast(fg(slot, resting), ground),
-                contrast(fg(slot, hovered), ground),
+                fg(slot, resting).contrast(ground),
+                fg(slot, hovered).contrast(ground),
             );
             assert!(
                 over > rest,
@@ -456,8 +428,8 @@ fn the_hovered_link_stays_legible_in_every_theme() {
             // Louder than the resting link, not merely different from it: a shift that
             // dimmed the control the pointer is on would read as it going away.
             let (rest, over) = (
-                contrast(fg(slot, resting), ground),
-                contrast(fg(slot, hovered), ground),
+                fg(slot, resting).contrast(ground),
+                fg(slot, hovered).contrast(ground),
             );
             assert!(
                 over > rest,
@@ -509,7 +481,7 @@ fn a_formulas_rules_are_visible_but_quieter_than_its_symbols() {
         let rule = fg("math.rule", theme.math.rule);
         at_least(name, "math.atom", atom, page, TEXT_FLOOR);
         at_least(name, "math.rule", rule, page, GRAPHIC_FLOOR);
-        let (atom, rule) = (contrast(atom, page), contrast(rule, page));
+        let (atom, rule) = (atom.contrast(page), rule.contrast(page));
         assert!(
             rule < atom,
             "{name}: the structure must recede — math.rule {rule:.2}:1 is not quieter than \

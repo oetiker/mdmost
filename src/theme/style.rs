@@ -75,6 +75,32 @@ impl Color {
     pub fn luminance(self) -> f32 {
         (0.299 * f32::from(self.r) + 0.587 * f32::from(self.g) + 0.114 * f32::from(self.b)) / 255.0
     }
+
+    /// WCAG 2 relative luminance in `0.0..=1.0`.
+    ///
+    /// Not [`Color::luminance`], which is the BT.601 weighting the palette derivation
+    /// shades by. That one answers "which of these is lighter"; a contrast ratio is
+    /// defined against this one only.
+    pub fn relative_luminance(self) -> f32 {
+        fn channel(value: u8) -> f32 {
+            let c = f32::from(value) / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        }
+        0.2126 * channel(self.r) + 0.7152 * channel(self.g) + 0.0722 * channel(self.b)
+    }
+
+    /// The WCAG 2 contrast ratio between two colours, in `1.0..=21.0`.
+    ///
+    /// Lives here rather than in a test because the theme itself repairs diagram slot
+    /// inks against it (colour spec §5.3).
+    pub fn contrast(self, other: Color) -> f32 {
+        let (x, y) = (self.relative_luminance(), other.relative_luminance());
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
 }
 
 /// A set of terminal text attributes.
@@ -237,6 +263,19 @@ impl Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contrast_is_the_wcag_ratio() {
+        let black = Color::hex(0x000000);
+        let white = Color::hex(0xffffff);
+        assert!((black.contrast(white) - 21.0).abs() < 1e-4);
+        assert!((white.contrast(black) - 21.0).abs() < 1e-4, "symmetric");
+        assert!((white.contrast(white) - 1.0).abs() < 1e-6);
+        // The light theme's orange on its page, the tightest ink-on-page pair of the
+        // colour spec §5.2.
+        let ratio = Color::hex(0xb35c00).contrast(Color::hex(0xfdfcf9));
+        assert!((ratio - 4.60).abs() < 0.01, "{ratio}");
+    }
 
     #[test]
     fn parses_short_and_long_hex() {
