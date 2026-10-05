@@ -104,3 +104,23 @@ fn a_flowchart_box_grows_to_keep_different_ends_apart() {
     assert_eq!(entries(&canvas, border), 2, "two entries\n{text}");
     assert!(text.contains('┄'), "the dotted edge stays dotted\n{text}");
 }
+
+#[test]
+fn a_note_tie_touches_a_composite_frame_without_cutting_it() {
+    for side in ["right", "left"] {
+        let canvas = draw(&format!(
+            "stateDiagram-v2\n  [*] --> Comp\n  state Comp {{\n    [*] --> In\n    In --> Out\n  }}\n\
+             note {side} of Comp : the note\n"
+        ));
+        let text = canvas.plain_text();
+        let tie = (0..canvas.height())
+            .map(|row| canvas.row_text(row))
+            .find(|row| row.contains('┄'))
+            .unwrap_or_else(|| panic!("no tie drawn\n{text}"));
+        let touches = if side == "right" { "╎┄" } else { "┄╎" };
+        assert!(
+            tie.contains(touches),
+            "{side}: the frame stays dashed\n{text}"
+        );
+    }
+}

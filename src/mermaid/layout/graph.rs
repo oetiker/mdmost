@@ -1095,19 +1095,34 @@ impl Ctx<'_> {
                     );
                     (row, col, items[item].canvas.height(), cross_size[item])
                 };
-                let (left, right) = if tie.right {
-                    (rect(anchor), rect(node))
+                let frame = items[anchor].group;
+                let (left, left_frame, right, right_frame) = if tie.right {
+                    (rect(anchor), frame, rect(node), false)
                 } else {
-                    (rect(node), rect(anchor))
+                    (rect(node), false, rect(anchor), frame)
                 };
                 // Mid-way down the rows both boxes share, from one facing side to the other.
                 let top = left.0.max(right.0);
                 let bottom = (left.0 + left.2).min(right.0 + right.2);
-                let start = left.1 + left.3 - 1;
-                if bottom > top && right.1 > start {
+                let mut start = left.1 + left.3 - 1;
+                let mut end = right.1;
+                // A frame's dashes have no tee, so the tie stops at a frame and touches it.
+                if left_frame {
+                    start += 1;
+                }
+                if right_frame {
+                    end = end.saturating_sub(1);
+                }
+                if bottom > top && end > start {
                     let row = top + (bottom - top - 1) / 2;
+                    if left_frame {
+                        pen.ink.add(row, start, Dir::Left.mask(), Stroke::Dotted);
+                    }
+                    if right_frame {
+                        pen.ink.add(row, end, Dir::Right.mask(), Stroke::Dotted);
+                    }
                     pen.ink
-                        .run(row, start, Dir::Right, right.1 - start, Stroke::Dotted);
+                        .run(row, start, Dir::Right, end - start, Stroke::Dotted);
                 }
             }
         }
