@@ -40,6 +40,7 @@ mod place;
 mod rank;
 mod route;
 mod spec;
+mod stretch;
 mod stub;
 
 #[cfg(test)]
@@ -991,6 +992,8 @@ impl Ctx<'_> {
                 std::mem::swap(&mut edge.from_reach, &mut edge.to_reach);
             }
         }
+        let grown = self.grown(items, &layered, &level_edges, vertical);
+        let canvas_of = |index: usize| grown[index].as_ref().unwrap_or(&items[index].canvas);
 
         let count = layered.vnodes.len();
         let mut cross_size = vec![1usize; count];
@@ -1002,7 +1005,8 @@ impl Ctx<'_> {
         let mut side_in: Vec<Vec<SideCell>> = vec![Vec::new(); count];
         let mut side_out: Vec<Vec<SideCell>> = vec![Vec::new(); count];
         for (index, item) in items.iter().enumerate() {
-            let (rows, cols) = (item.canvas.height(), usize::from(item.canvas.width()));
+            let canvas = canvas_of(index);
+            let (rows, cols) = (canvas.height(), usize::from(canvas.width()));
             let (cross, flow) = if vertical { (cols, rows) } else { (rows, cols) };
             cross_size[index] = cross;
             flow_size[index] = flow;
@@ -1011,9 +1015,9 @@ impl Ctx<'_> {
             place_size[index] = cross + if looped { 3 } else { 0 };
             loop_pad[index] = if looped { 2 } else { 0 };
             ports[index] = item.ports;
-            ruled[index] = ruled_offsets(&item.canvas, vertical);
-            side_in[index] = side_cells(&item.canvas, direction, true);
-            side_out[index] = side_cells(&item.canvas, direction, false);
+            ruled[index] = ruled_offsets(canvas, vertical);
+            side_in[index] = side_cells(canvas, direction, true);
+            side_out[index] = side_cells(canvas, direction, false);
         }
         let cross_gap = if vertical {
             self.gap
@@ -1056,8 +1060,17 @@ impl Ctx<'_> {
                 flow_size[index],
                 cross_size[index],
             );
-            pen.canvas.blit(row, col, &item.canvas, self.theme.base());
+            let canvas = canvas_of(index);
+            pen.canvas.blit(row, col, canvas, self.theme.base());
             for &(node, spot) in &item.hints {
+                let spot = if grown[index].is_some() {
+                    Spot {
+                        rows: canvas.height(),
+                        ..spot
+                    }
+                } else {
+                    spot
+                };
                 hints.push((node, spot.shifted(row, col)));
             }
             for washed in &item.frames {
@@ -1105,6 +1118,46 @@ impl Ctx<'_> {
             hints,
             frames,
         }
+    }
+
+    /// Per item, its box grown by blank rows when a sideways flow brings more kinds of
+    /// edge end to one of its sides than the side has cells for ([`stretch`]).
+    fn grown(
+        &self,
+        items: &[Item],
+        layered: &rank::Layered,
+        edges: &[LevelEdge],
+        vertical: bool,
+    ) -> Vec<Option<Canvas>> {
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                if vertical || item.group || item.ports != PortPolicy::Spread {
+                    return None;
+                }
+                let kinds = |incoming: bool| {
+                    let mut seen: Vec<Terminator> = Vec::new();
+                    for seg in &layered.segs {
+                        let end = if incoming { seg.b } else { seg.a };
+                        if end != index {
+                            continue;
+                        }
+                        let edge = &edges[seg.edge];
+                        let terminator = if incoming { edge.head } else { edge.tail };
+                        if !seen.contains(&terminator) {
+                            seen.push(terminator);
+                        }
+                    }
+                    seen.len()
+                };
+                // One cell per kind, with a cell of air between neighbours.
+                let wanted = (2 * kinds(true).max(kinds(false))).saturating_sub(1);
+                let inner = item.canvas.height().saturating_sub(2);
+                (wanted > inner)
+                    .then(|| stretch::rows(&item.canvas, wanted - inner, self.theme.base()))
+            })
+            .collect()
     }
 
     /// Maps every node under this container to the item that holds it.

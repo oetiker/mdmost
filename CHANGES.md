@@ -8,6 +8,7 @@
 ### Changed
 
 ### Fixed
+- In an `LR` or `RL` Mermaid diagram, an arrow and a line with a different end, for example a dotted `-.-` line or a state note's tie, that meet the same side of a box no longer join into one line (`├┴──▶┤`). The box grows taller so each gets its own entry, and the dotted line stays dotted.
 - A Mermaid edge into or out of a subgraph no longer runs through another node box in the subgraph (`│ a1││`) or stops at the subgraph border. When a box is in the straight way, the edge goes around it to its node.
 - A Mermaid flowchart node that a `subgraph` names after the node was first used outside it, for example `c1 --> a2` followed by `subgraph one` with `a1 --> a2`, is now drawn inside that subgraph, as Mermaid draws it. When several subgraphs name the same node, the innermost one, or else the first one, gets it.
 - A Mermaid state diagram note (`note right of A`, `note left of A`) is now drawn beside its state, on the side it names, joined by a dotted line. Before, it hung one row lower, and a `right of` note could end up on the left. In an `LR` or `RL` diagram the note goes before or after the state, so `left of` is now on the left too.

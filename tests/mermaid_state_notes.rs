@@ -69,3 +69,38 @@ fn a_note_in_a_sideways_diagram_sits_on_the_named_side() {
         }
     }
 }
+
+/// How many edges meet the left side of the box in column `col`: a tee in the border,
+/// or an arrowhead just before it.
+fn entries(canvas: &Canvas, col: usize) -> usize {
+    (0..canvas.height())
+        .filter(|&row| {
+            let text: Vec<char> = canvas.row_text(row).chars().collect();
+            text.get(col) == Some(&'┤')
+                || (text.get(col) == Some(&'│') && text.get(col - 1) == Some(&'▶'))
+        })
+        .count()
+}
+
+#[test]
+fn a_sideways_note_tie_keeps_its_own_entry_beside_an_arrow() {
+    let canvas = draw(
+        "stateDiagram-v2\n  direction LR\n  [*] --> Idle\n  Idle --> Busy\n  note left of Idle : left note\n",
+    );
+    let text = canvas.plain_text();
+    let (_, col) = locate(&canvas, "Idle");
+    let border = col - 2;
+    assert_eq!(entries(&canvas, border), 2, "two entries\n{text}");
+    assert!(text.contains('┄'), "the tie stays dotted\n{text}");
+}
+
+#[test]
+fn a_flowchart_box_grows_to_keep_different_ends_apart() {
+    let canvas =
+        draw("flowchart LR\n  S((s)) --> Idle\n  N[left note] -.- Idle\n  Idle --> Busy\n");
+    let text = canvas.plain_text();
+    let (_, col) = locate(&canvas, "Idle");
+    let border = col - 2;
+    assert_eq!(entries(&canvas, border), 2, "two entries\n{text}");
+    assert!(text.contains('┄'), "the dotted edge stays dotted\n{text}");
+}
