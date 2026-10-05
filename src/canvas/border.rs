@@ -83,7 +83,8 @@ impl BorderSet {
         ..Self::ROUNDED
     };
 
-    /// Heavy lines, for emphasis such as a critical gantt task frame.
+    /// Heavy lines: a square-cornered Mermaid node or a class/entity record with
+    /// `stroke-width` 3px or more (colour spec §6.2).
     pub const HEAVY: Self = Self {
         horizontal: '━',
         vertical: '┃',
