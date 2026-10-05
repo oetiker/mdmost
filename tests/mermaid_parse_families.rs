@@ -386,9 +386,48 @@ mod flowcharts {
         assert_eq!(inner.key.as_deref(), Some("inner"));
         assert_eq!(inner.direction, Some(Direction::LeftToRight));
         assert_eq!(inner.nodes.len(), 2);
-        // `c1` and `a2` are first mentioned outside any subgraph.
-        assert_eq!(chart.root.nodes.len(), 2);
+        // `a2` is first mentioned outside any subgraph, but `one` names it too.
+        let keys = |nodes: &[NodeId]| -> Vec<&str> {
+            nodes
+                .iter()
+                .map(|id| chart.nodes[id.0].key.as_str())
+                .collect()
+        };
+        assert_eq!(keys(&chart.root.nodes), ["c1"]);
+        assert_eq!(keys(&one.nodes), ["a1", "a2"]);
         assert_eq!(chart.root.children[1].key.as_deref(), Some("two"));
+    }
+
+    /// A node belongs to the first subgraph to close that names it, so the innermost
+    /// wins, as in Mermaid.
+    #[test]
+    fn a_node_belongs_to_the_first_subgraph_that_closes_naming_it() {
+        let chart = flowchart(
+            "flowchart TB
+  x --> y
+  subgraph outer
+    y --> z
+    subgraph inner
+      z
+    end
+  end
+             subgraph later
+    y --> w
+  end
+  w --> x
+",
+        );
+        let keys = |nodes: &[NodeId]| -> Vec<&str> {
+            nodes
+                .iter()
+                .map(|id| chart.nodes[id.0].key.as_str())
+                .collect()
+        };
+        let outer = &chart.root.children[0];
+        assert_eq!(keys(&chart.root.nodes), ["x"]);
+        assert_eq!(keys(&outer.nodes), ["y"]);
+        assert_eq!(keys(&outer.children[0].nodes), ["z"]);
+        assert_eq!(keys(&chart.root.children[1].nodes), ["w"]);
     }
 
     #[test]

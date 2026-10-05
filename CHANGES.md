@@ -8,6 +8,7 @@
 ### Changed
 
 ### Fixed
+- A Mermaid flowchart node that a `subgraph` names after the node was first used outside it, for example `c1 --> a2` followed by `subgraph one` with `a1 --> a2`, is now drawn inside that subgraph, as Mermaid draws it. When several subgraphs name the same node, the innermost one, or else the first one, gets it.
 - A Mermaid state diagram note (`note right of A`, `note left of A`) is now drawn beside its state, on the side it names, joined by a dotted line. Before, it hung one row lower, and a `right of` note could end up on the left. In an `LR` or `RL` diagram the note goes before or after the state, so `left of` is now on the left too.
 - A Mermaid flowchart subgraph written `subgraph one:::foo` no longer shows the title `one:::foo`; it is titled `one`. An arrow to `one` or to `two` in `subgraph two:::foo [Title]` now reports "`one` is a subgraph and cannot be used as a node", as it does without the class, instead of drawing an extra box.
 - A Mermaid state diagram note on a state written with `:::foo`, for example `note left of A:::foo : hi`, now shows `hi` instead of `::foo : hi`, and the `end note` form no longer fails with "cannot read a statement from `end note`". `state A:::foo {` no longer gives the composite state the title `A:::foo` and no longer keeps it apart from `A`.

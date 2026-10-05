@@ -81,6 +81,8 @@ struct Builder<'a> {
     /// Classes written as `:::` on each subgraph without a key, in the order subgraphs
     /// open, which is the order `finish` walks the tree in.
     subgraph_classes: Vec<Vec<String>>,
+    /// Per node: a closed subgraph has claimed it.
+    claimed: Vec<bool>,
 }
 
 impl Builder<'_> {
@@ -178,11 +180,25 @@ impl Builder<'_> {
         if self.stack.len() < 2 {
             return Err(lex::syntax(line, "`end` without a matching `subgraph`"));
         }
-        let group = self.stack.pop().unwrap_or_default();
+        let mut group = self.stack.pop().unwrap_or_default();
+        self.claim(&mut group);
         if let Some(parent) = self.stack.last_mut() {
             parent.children.push(group);
         }
         Ok(())
+    }
+
+    /// Keeps the nodes of `group` that no closed subgraph has claimed, and claims them.
+    ///
+    /// A node belongs to the first subgraph to close that names it, so an inner one
+    /// wins over its parent, and a node named at the top level before its subgraph
+    /// still moves into it (Mermaid's `makeUniq`).
+    fn claim(&mut self, group: &mut Group) {
+        self.claimed.resize(self.nodes.len(), false);
+        group.nodes.retain(|id| !self.claimed[id.0]);
+        for id in &group.nodes {
+            self.claimed[id.0] = true;
+        }
     }
 
     /// Parses a statement of the form `A[x] -->|l| B & C --- D`.
@@ -274,7 +290,6 @@ impl Builder<'_> {
         };
 
         let key_owned = key.to_string();
-        let fresh = !self.nodes.iter().any(|node| node.key == key_owned);
         let index = intern(
             &mut self.nodes,
             key,
@@ -286,7 +301,10 @@ impl Builder<'_> {
                 paint: None,
             },
         );
-        if fresh && let Some(group) = self.stack.last_mut() {
+        // Every group that names the node lists it; `claim` settles which one keeps it.
+        if let Some(group) = self.stack.last_mut()
+            && !group.nodes.contains(&NodeId(index))
+        {
             group.nodes.push(NodeId(index));
         }
         // A later declaration upgrades the shape and label of an existing node.
@@ -328,6 +346,7 @@ impl Builder<'_> {
             node.paint = self.sheet.paint(Some(&node.key), &[], true);
         }
         let mut root = self.stack.pop().unwrap_or_default();
+        self.claim(&mut root);
         let mut next = 0;
         paint_groups(&mut root, &self.sheet, &self.subgraph_classes, &mut next);
         Ok(Flowchart {
