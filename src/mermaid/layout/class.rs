@@ -164,6 +164,7 @@ fn build(diagram: &ClassDiagram) -> GraphSpec {
             nodes: (0..diagram.classes.len()).map(NodeIdx).collect(),
             ..GroupSpec::default()
         },
+        beside: Vec::new(),
     }
 }
 

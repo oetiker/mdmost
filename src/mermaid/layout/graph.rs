@@ -46,7 +46,7 @@ mod tests;
 
 pub use glyph::{Dir, Stroke};
 pub use spec::{
-    DrawnLabel, EdgeSpec, FrameStyle, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy,
+    Beside, DrawnLabel, EdgeSpec, FrameStyle, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy,
     Terminator,
 };
 
@@ -261,6 +261,32 @@ pub fn draw(
         }
     }
     Ok(anchored(best, width, theme))
+}
+
+/// Moves item `node`, which has no edges, into the rank of item `anchor`, right
+/// beside it.
+fn share_rank(
+    layered: &mut rank::Layered,
+    node: Option<usize>,
+    anchor: Option<usize>,
+    right: bool,
+) {
+    let (Some(node), Some(anchor)) = (node, anchor) else {
+        return;
+    };
+    let old = layered.vnodes[node].rank;
+    let rank = layered.vnodes[anchor].rank;
+    layered.ranks[old].retain(|&id| id != node);
+    layered.vnodes[node].rank = rank;
+    let at = layered.ranks[rank]
+        .iter()
+        .position(|&id| id == anchor)
+        .map_or(0, |at| if right { at + 1 } else { at });
+    layered.ranks[rank].insert(at, node);
+    debug_assert!(
+        layered.ranks.iter().all(|ids| !ids.is_empty()),
+        "an anchor's rank always holds a source besides the note"
+    );
 }
 
 /// The narrower of `at` and `canvas`' width.
@@ -797,9 +823,42 @@ impl Ctx<'_> {
             };
         }
         let owner = self.owners(items);
-        let (raw, mut level_edges, loops) = self.edges(items, &owner, direction);
+        let beside = self.beside(items, &owner);
+        // Sideways, beside is along the flow: the tie is an ordinary edge into the rank
+        // before or after the anchor. `RL` counts its ranks leftwards.
+        let ties: Vec<EdgeSpec> = if vertical {
+            Vec::new()
+        } else {
+            let leftwards = direction == Direction::RightToLeft;
+            beside
+                .iter()
+                .map(|tie| {
+                    let (from, to) = if tie.right != leftwards {
+                        (tie.anchor, tie.node)
+                    } else {
+                        (tie.node, tie.anchor)
+                    };
+                    EdgeSpec {
+                        stroke: Stroke::Dotted,
+                        head: Terminator::None,
+                        ..EdgeSpec::arrow(from, to)
+                    }
+                })
+                .collect()
+        };
+        let (raw, mut level_edges, loops) = self.edges(items, &owner, direction, &ties);
         let mut layered = rank::build(items.len(), &raw);
         order::reduce(&mut layered);
+        if vertical {
+            for tie in &beside {
+                share_rank(
+                    &mut layered,
+                    owner[tie.node.0],
+                    owner[tie.anchor.0],
+                    tie.right,
+                );
+            }
+        }
         // An edge reversed to break a cycle is drawn against the flow, so its
         // terminators swap ends and its arrow still points where the source said.
         for (edge, reversed) in level_edges.iter_mut().zip(&layered.reversed) {
@@ -886,6 +945,36 @@ impl Ctx<'_> {
             }
         }
         routing.paint(&input, &mut pen);
+        if vertical {
+            for tie in &beside {
+                let (Some(node), Some(anchor)) = (owner[tie.node.0], owner[tie.anchor.0]) else {
+                    continue;
+                };
+                let rect = |item: usize| {
+                    let (row, col) = frame.origin(
+                        routing.flow[item],
+                        cross[item],
+                        flow_size[item],
+                        cross_size[item],
+                    );
+                    (row, col, items[item].canvas.height(), cross_size[item])
+                };
+                let (left, right) = if tie.right {
+                    (rect(anchor), rect(node))
+                } else {
+                    (rect(node), rect(anchor))
+                };
+                // Mid-way down the rows both boxes share, from one facing side to the other.
+                let top = left.0.max(right.0);
+                let bottom = (left.0 + left.2).min(right.0 + right.2);
+                let start = left.1 + left.3 - 1;
+                if bottom > top && right.1 > start {
+                    let row = top + (bottom - top - 1) / 2;
+                    pen.ink
+                        .run(row, start, Dir::Right, right.1 - start, Stroke::Dotted);
+                }
+            }
+        }
         let mut canvas = pen.canvas;
         pen.ink.apply(&mut canvas, styles.line, styles.arrow);
         Drawn {
@@ -906,18 +995,34 @@ impl Ctx<'_> {
         owner
     }
 
-    /// Splits this container's edges into layered edges and self loops.
+    /// The ties of this level whose node and anchor are two different items here,
+    /// the node a plain box.
+    fn beside(&self, items: &[Item], owner: &[Option<usize>]) -> Vec<Beside> {
+        self.spec
+            .beside
+            .iter()
+            .filter(|tie| match (owner[tie.node.0], owner[tie.anchor.0]) {
+                (Some(node), Some(anchor)) => node != anchor && !items[node].group,
+                _ => false,
+            })
+            .copied()
+            .collect()
+    }
+
+    /// Splits this container's edges, followed by `ties`, into layered edges and self
+    /// loops.
     fn edges(
         &self,
         items: &[Item],
         owner: &[Option<usize>],
         direction: Direction,
+        ties: &[EdgeSpec],
     ) -> (Vec<RawEdge>, Vec<LevelEdge>, Vec<(usize, usize)>) {
         let vertical = Frame::vertical(direction);
         let mut raw = Vec::new();
         let mut level = Vec::new();
         let mut pending = Vec::new();
-        for edge in &self.spec.edges {
+        for edge in self.spec.edges.iter().chain(ties) {
             let (Some(from), Some(to)) = (owner[edge.from.0], owner[edge.to.0]) else {
                 continue;
             };

@@ -44,6 +44,7 @@ fn spec(direction: Direction, count: usize, edges: &[(usize, usize)]) -> GraphSp
             nodes: (0..count).map(NodeIdx).collect(),
             ..GroupSpec::default()
         },
+        beside: Vec::new(),
     }
 }
 

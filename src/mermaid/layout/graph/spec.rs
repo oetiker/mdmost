@@ -98,6 +98,9 @@ pub struct GraphSpec {
     pub edges: Vec<EdgeSpec>,
     /// The implicit top-level container; its `title` is `None`.
     pub root: GroupSpec,
+    /// Nodes tied to another node by a dotted line and kept beside it, such as a
+    /// state diagram note.
+    pub beside: Vec<Beside>,
 }
 
 impl GraphSpec {
@@ -108,8 +111,25 @@ impl GraphSpec {
             node_count: 0,
             edges: Vec::new(),
             root: GroupSpec::default(),
+            beside: Vec::new(),
         }
     }
+}
+
+/// A node drawn beside its anchor and tied to it by a dotted line: `note right of X`.
+///
+/// In a top-down or bottom-up level the node shares its anchor's rank, next to it on
+/// the named side. In a sideways level beside is along the flow, so the node takes
+/// the rank before or after its anchor. Both must sit directly in the same group;
+/// otherwise nothing is drawn for the tie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Beside {
+    /// The node kept beside, such as the note.
+    pub node: NodeIdx,
+    /// The node it belongs to.
+    pub anchor: NodeIdx,
+    /// True for the right of the anchor, false for the left.
+    pub right: bool,
 }
 
 /// A container of nodes drawn as a titled frame — a flowchart `subgraph` or a

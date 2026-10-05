@@ -133,6 +133,7 @@ fn build(diagram: &ErDiagram) -> GraphSpec {
             nodes: (0..diagram.entities.len()).map(NodeIdx).collect(),
             ..GroupSpec::default()
         },
+        beside: Vec::new(),
     }
 }
 

@@ -108,6 +108,7 @@ fn build(chart: &Flowchart, painter: &Painter) -> GraphSpec {
         node_count: chart.nodes.len(),
         edges: chart.edges.iter().map(edge).collect(),
         root: group(&chart.root, painter),
+        beside: Vec::new(),
     }
 }
 
