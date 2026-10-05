@@ -27,7 +27,7 @@ pub(super) struct Sheet {
 impl Sheet {
     /// `classDef a,b fill:#…`: defines every listed class.
     pub(super) fn define(&mut self, rest: &str, src: &str) {
-        let (names, list) = lex::split_word(rest);
+        let (names, list) = split_list(rest);
         let props = paint::parse_props(list, lex::offset_of(src, list).unwrap_or_default());
         for name in names
             .split(',')
@@ -41,11 +41,11 @@ impl Sheet {
     /// `class A,B c1,c2` or `cssClass "A,B" c`: the last word names the classes, and
     /// everything before it the nodes, quoted or not.
     pub(super) fn assign_list(&mut self, rest: &str, key: impl Fn(&str) -> String) {
-        let rest = rest.trim();
-        let Some(at) = rest.rfind(char::is_whitespace) else {
+        let (list, classes) = rsplit_list(rest);
+        if list.is_empty() {
             return;
-        };
-        let (list, classes) = (lex::unquote(&rest[..at]), rest[at..].trim());
+        }
+        let list = lex::unquote(list);
         for target in list.split(',').map(|target| key(target.trim())) {
             for class in classes.split(',').map(str::trim) {
                 self.assign(&target, class);
@@ -109,6 +109,35 @@ impl Sheet {
 /// The key a flowchart or state diagram files a `style` or `class` target under.
 pub(super) fn plain_key(text: &str) -> String {
     lex::unquote(text).to_string()
+}
+
+/// Splits off the leading comma list of `text`: `a, b fill:…` gives `("a, b", "fill:…")`.
+/// Whitespace next to a comma belongs to the list.
+fn split_list(text: &str) -> (&str, &str) {
+    let text = text.trim();
+    let mut end = 0;
+    while let Some(gap) = text[end..].find(char::is_whitespace).map(|at| end + at) {
+        let next = text[gap..].trim_start();
+        if !text[..gap].ends_with(',') && !next.starts_with(',') {
+            return (&text[..gap], next);
+        }
+        end = text.len() - next.len();
+    }
+    (text, "")
+}
+
+/// Splits off the trailing comma list of `text`: `A, B c1, c2` gives `("A, B", "c1, c2")`.
+fn rsplit_list(text: &str) -> (&str, &str) {
+    let text = text.trim();
+    let mut start = text.len();
+    while let Some(gap) = text[..start].rfind(char::is_whitespace) {
+        let before = text[..gap].trim_end();
+        if !before.ends_with(',') && !text[gap..].trim_start().starts_with(',') {
+            return (before, text[gap..].trim_start());
+        }
+        start = before.len();
+    }
+    ("", text)
 }
 
 /// A class name is `[A-Za-z0-9_-]+` (colour spec §3.2).

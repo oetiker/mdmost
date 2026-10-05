@@ -104,6 +104,26 @@ mod flowcharts {
     }
 
     #[test]
+    fn reads_lists_with_spaces_after_the_commas() {
+        let chart = flowchart(
+            "flowchart LR\n  A --> B --> C\n  class A, B one, two\n\
+             classDef one, three fill:#ff0000\n  classDef two stroke:#0000ff\n\
+             class C three\n",
+        );
+        for key in ["A", "B"] {
+            assert_eq!(
+                colours(node(&chart, key).paint),
+                Some((Some(0xff0000), Some(0x0000ff), false)),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            colours(node(&chart, "C").paint),
+            Some((Some(0xff0000), None, false))
+        );
+    }
+
+    #[test]
     fn paints_subgraphs_by_key_and_by_suffix_but_not_by_default() {
         let chart = flowchart(
             "flowchart TB\n  subgraph one\n    a\n  end\n  subgraph two:::warm [Two]\n    b\n  end\n\
