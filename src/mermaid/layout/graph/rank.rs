@@ -64,8 +64,9 @@ pub(super) struct RawEdge {
 /// Builds the layered graph for `items` connected by `edges`.
 ///
 /// Self edges (`from == to`) must have been removed by the caller; they are drawn as
-/// loops beside their item and take no part in layering.
-pub(super) fn build(item_count: usize, edges: &[RawEdge]) -> Layered {
+/// loops beside their item and take no part in layering. Items marked in `last`, which
+/// must have no outgoing edges, are moved down to the last rank.
+pub(super) fn build(item_count: usize, edges: &[RawEdge], last: &[bool]) -> Layered {
     let reversed = break_cycles(item_count, edges);
     let oriented: Vec<RawEdge> = edges
         .iter()
@@ -81,7 +82,13 @@ pub(super) fn build(item_count: usize, edges: &[RawEdge]) -> Layered {
             }
         })
         .collect();
-    let ranks_of = longest_path(item_count, &oriented);
+    let mut ranks_of = longest_path(item_count, &oriented);
+    let bottom = ranks_of.iter().copied().max().unwrap_or(0);
+    for (rank, &pinned) in ranks_of.iter_mut().zip(last) {
+        if pinned {
+            *rank = bottom;
+        }
+    }
     let mut layered = Layered {
         reversed,
         ..Layered::default()
@@ -250,7 +257,7 @@ mod tests {
 
     #[test]
     fn chain_ranks_increase() {
-        let layered = build(3, &[edge(0, 1), edge(1, 2)]);
+        let layered = build(3, &[edge(0, 1), edge(1, 2)], &[]);
         assert_eq!(layered.vnodes[0].rank, 0);
         assert_eq!(layered.vnodes[1].rank, 1);
         assert_eq!(layered.vnodes[2].rank, 2);
@@ -259,14 +266,14 @@ mod tests {
 
     #[test]
     fn cycles_are_broken_at_the_back_edge() {
-        let layered = build(3, &[edge(0, 1), edge(1, 2), edge(2, 0)]);
+        let layered = build(3, &[edge(0, 1), edge(1, 2), edge(2, 0)], &[]);
         assert_eq!(layered.reversed, vec![false, false, true]);
         assert_eq!(layered.ranks.len(), 3);
     }
 
     #[test]
     fn long_edges_get_dummies() {
-        let layered = build(3, &[edge(0, 1), edge(1, 2), edge(0, 2)]);
+        let layered = build(3, &[edge(0, 1), edge(1, 2), edge(0, 2)], &[]);
         let dummies = layered
             .vnodes
             .iter()
@@ -279,8 +286,8 @@ mod tests {
     #[test]
     fn layering_is_deterministic() {
         let edges = [edge(0, 2), edge(1, 2), edge(2, 3), edge(3, 1)];
-        let a = build(4, &edges);
-        let b = build(4, &edges);
+        let a = build(4, &edges, &[]);
+        let b = build(4, &edges, &[]);
         assert_eq!(format!("{a:?}"), format!("{b:?}"));
     }
 }

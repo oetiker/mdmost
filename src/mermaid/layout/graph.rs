@@ -40,6 +40,7 @@ mod place;
 mod rank;
 mod route;
 mod spec;
+mod stub;
 
 #[cfg(test)]
 mod tests;
@@ -49,6 +50,9 @@ pub use spec::{
     Beside, DrawnLabel, EdgeSpec, FrameStyle, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy,
     Terminator,
 };
+
+use std::borrow::Cow;
+use std::cell::RefCell;
 
 use crate::canvas::{BorderSet, Canvas};
 use crate::error::MermaidError;
@@ -60,6 +64,7 @@ use crate::theme::{Color, Style, Theme};
 use frame::{Frame, Pen};
 use rank::RawEdge;
 use route::{Input, LevelEdge, Reach, Routing, SideCell};
+use stub::{Blocked, Stub};
 
 /// Spacing tried in turn until the drawing fits the width budget.
 ///
@@ -206,15 +211,28 @@ pub fn draw(
 ) -> Result<Canvas, MermaidError> {
     validate(spec)?;
     let attempt = |gap: usize, budget: u16| {
-        let ctx = Ctx {
-            spec,
-            art,
-            theme,
-            budget,
-            gap,
-        };
-        let drawn = ctx.group(&spec.root, spec.direction);
-        ctx.washed(drawn)
+        let mut spec = Cow::Borrowed(spec);
+        let mut stubs = Vec::new();
+        let mut round = 0;
+        loop {
+            let ctx = Ctx {
+                spec: &spec,
+                art,
+                theme,
+                budget,
+                gap,
+                stubs: &stubs,
+                blocked: RefCell::default(),
+            };
+            let drawn = ctx.group(&spec.root, spec.direction);
+            let blocked = ctx.blocked.take();
+            if blocked.is_empty() || round == STUB_ROUNDS {
+                return ctx.washed(drawn);
+            }
+            let split = stub::split(&spec, &blocked, &mut stubs);
+            spec = Cow::Owned(split);
+            round += 1;
+        }
     };
     let mut narrowest: Option<u16> = None;
 
@@ -487,6 +505,70 @@ fn side_cells(canvas: &Canvas, direction: Direction, inwards: bool) -> Vec<SideC
     side
 }
 
+/// The widest run of `spot`'s cross span that a straight line from the container's
+/// side reaches without crossing the box of another node in `hints`, or `None` when
+/// every column of it is blocked. `inwards` and `direction` pick the side as in
+/// [`reach_of`].
+fn clear_span(
+    hints: &[(NodeIdx, Spot)],
+    node: NodeIdx,
+    spot: Spot,
+    canvas: &Canvas,
+    direction: Direction,
+    inwards: bool,
+) -> Option<(usize, usize)> {
+    let vertical = Frame::vertical(direction);
+    // `(flow start, flow end, cross start, cross end)` of a box.
+    let axes = |at: Spot| {
+        if vertical {
+            (at.row, at.row + at.rows, at.col, at.col + at.cols)
+        } else {
+            (at.col, at.col + at.cols, at.row, at.row + at.rows)
+        }
+    };
+    let total = if vertical {
+        canvas.height()
+    } else {
+        usize::from(canvas.width())
+    };
+    let (flow_lo, flow_hi, lo, hi) = axes(spot);
+    let from_start =
+        matches!(direction, Direction::TopToBottom | Direction::LeftToRight) == inwards;
+    let (way_lo, way_hi) = if from_start {
+        (0, flow_lo)
+    } else {
+        (flow_hi, total)
+    };
+    let mut free = vec![true; hi - lo];
+    for &(other, at) in hints {
+        if other == node {
+            continue;
+        }
+        let (a, b, c, d) = axes(at);
+        if a >= way_hi || b <= way_lo {
+            continue;
+        }
+        for cross in c.max(lo)..d.min(hi) {
+            free[cross - lo] = false;
+        }
+    }
+    let mut best: Option<(usize, usize)> = None;
+    let mut start = None;
+    for at in 0..=free.len() {
+        match (free.get(at).copied().unwrap_or(false), start) {
+            (true, None) => start = Some(at),
+            (false, Some(first)) => {
+                if best.is_none_or(|(a, b)| at - first > b - a) {
+                    best = Some((first, at));
+                }
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    best.map(|(a, b)| (lo + a, lo + b))
+}
+
 /// Where a node sits inside its container box, measured along the parent's axes.
 ///
 /// `inwards` asks for the distance from the edge an incoming line arrives at; otherwise
@@ -568,7 +650,15 @@ struct Ctx<'a> {
     theme: &'a Theme,
     budget: u16,
     gap: usize,
+    /// The entry stubs added to `spec`, which `art` knows nothing about.
+    stubs: &'a [Stub],
+    /// Edges whose straight line into a container met another box.
+    blocked: RefCell<Vec<Blocked>>,
 }
+
+/// How many times a drawing is split at entry stubs and drawn again: one round per
+/// level of nesting a blocked edge passes into.
+const STUB_ROUNDS: usize = 4;
 
 /// A drawn group: its canvas plus where each node it contains ended up.
 struct Drawn {
@@ -630,7 +720,7 @@ impl Ctx<'_> {
         let keep: Vec<Spot> = drawn
             .hints
             .iter()
-            .filter(|&&(node, _)| self.art.keeps_page(node))
+            .filter(|&&(node, _)| self.stub(node).is_none() && self.art.keeps_page(node))
             .map(|&(_, spot)| spot)
             .collect();
         tint_frames(
@@ -642,12 +732,30 @@ impl Ctx<'_> {
         drawn.canvas
     }
 
+    /// The entry stub `node` is, if it is one.
+    fn stub(&self, node: NodeIdx) -> Option<Stub> {
+        self.stubs.iter().find(|stub| stub.node == node).copied()
+    }
+
     /// Lays out one container and everything below it.
     fn group(&self, group: &GroupSpec, inherited: Direction) -> Drawn {
         let direction = group.direction.unwrap_or(inherited);
         let mut items = Vec::new();
         for &node in &group.nodes {
-            let canvas = self.art.render(node, self.budget, self.theme);
+            let canvas = match self.stub(node) {
+                // A stub is one cell of the line passing through it.
+                Some(_) => {
+                    let mut canvas = Canvas::new(1, 1, self.theme.base());
+                    let line = if Frame::vertical(direction) {
+                        "│"
+                    } else {
+                        "─"
+                    };
+                    canvas.write_str(0, 0, line, self.theme.diagram.line);
+                    canvas
+                }
+                None => self.art.render(node, self.budget, self.theme),
+            };
             let whole = Spot {
                 row: 0,
                 col: 0,
@@ -656,7 +764,10 @@ impl Ctx<'_> {
             };
             items.push(Item {
                 canvas,
-                ports: self.art.ports(node),
+                ports: match self.stub(node) {
+                    Some(_) => PortPolicy::Center,
+                    None => self.art.ports(node),
+                },
                 hints: vec![(node, whole)],
                 frames: Vec::new(),
                 members: vec![node],
@@ -847,7 +958,19 @@ impl Ctx<'_> {
                 .collect()
         };
         let (raw, mut level_edges, loops) = self.edges(items, &owner, direction, &ties);
-        let mut layered = rank::build(items.len(), &raw);
+        // The stub of an edge leaving this container takes the last rank, so the line
+        // leaves through the far side with nothing below it.
+        let last: Vec<bool> = items
+            .iter()
+            .map(|item| {
+                !item.group
+                    && item
+                        .members
+                        .iter()
+                        .any(|&node| self.stub(node).is_some_and(|stub| stub.sink))
+            })
+            .collect();
+        let mut layered = rank::build(items.len(), &raw, &last);
         order::reduce(&mut layered);
         if vertical {
             for tie in &beside {
@@ -1022,7 +1145,7 @@ impl Ctx<'_> {
         let mut raw = Vec::new();
         let mut level = Vec::new();
         let mut pending = Vec::new();
-        for edge in self.spec.edges.iter().chain(ties) {
+        for (index, edge) in self.spec.edges.iter().chain(ties).enumerate() {
             let (Some(from), Some(to)) = (owner[edge.from.0], owner[edge.to.0]) else {
                 continue;
             };
@@ -1047,7 +1170,28 @@ impl Ctx<'_> {
                     return None;
                 }
                 let spot = spot(item, node)?;
-                Some(reach_of(&items[item].canvas, spot, direction, inwards))
+                let reach = reach_of(&items[item].canvas, spot, direction, inwards);
+                let clear = clear_span(
+                    &items[item].hints,
+                    node,
+                    spot,
+                    &items[item].canvas,
+                    direction,
+                    inwards,
+                );
+                match clear {
+                    Some((lo, hi)) => Some(Reach { lo, hi, ..reach }),
+                    None => {
+                        // Only an edge crossing this level's frames enters a container.
+                        if from != to && index < self.spec.edges.len() {
+                            self.blocked.borrow_mut().push(Blocked {
+                                edge: index,
+                                inwards,
+                            });
+                        }
+                        None
+                    }
+                }
             };
             let described = LevelEdge {
                 stroke: edge.stroke,

@@ -99,3 +99,55 @@ fn a_subgraph_title_wider_than_its_content_is_drawn_whole() {
         "title cut off"
     );
 }
+
+/// Asserts the box around `label` holds nothing but the label: no edge runs through it.
+#[track_caller]
+fn box_is_clear(src: &str, label: &str) {
+    let rows = grid(src, 80);
+    let drawing: String = rows
+        .iter()
+        .map(|row| row.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let row: String = rows
+        .iter()
+        .map(|row| row.iter().collect::<String>())
+        .find(|row| row.contains(label))
+        .unwrap_or_else(|| panic!("`{label}` not drawn:\n{drawing}"));
+    assert!(
+        row.contains(&format!("│ {label} │")),
+        "an edge runs through `{label}`:\n{drawing}"
+    );
+}
+
+#[test]
+fn an_edge_into_a_subgraph_goes_around_a_box_in_its_way() {
+    let src = "flowchart TB\n    c1-->a2\n    subgraph one\n    a1-->a2\n    end\n";
+    box_is_clear(src, "a1");
+    every_arrow_meets_a_node(src, 80);
+}
+
+#[test]
+fn an_edge_out_of_a_subgraph_goes_around_a_box_in_its_way() {
+    let src = "flowchart TB\n    subgraph one\n    a1-->a2\n    end\n    a1-->c1\n";
+    box_is_clear(src, "a2");
+    every_arrow_meets_a_node(src, 80);
+    let rows = grid(src, 80);
+    let bottom: String = rows
+        .iter()
+        .map(|row| row.iter().collect::<String>())
+        .find(|row| row.contains('╰'))
+        .expect("the frame's bottom edge");
+    assert!(
+        !bottom.contains('┬'),
+        "the edge starts on the frame, not at `a1`: {bottom}"
+    );
+}
+
+#[test]
+fn an_edge_into_a_nested_subgraph_goes_around_boxes_at_every_depth() {
+    let src = "flowchart TB\n    c1-->b2\n    subgraph one\n    a1\n    subgraph two\n    b1-->b2\n    end\n    a1-->b1\n    end\n";
+    box_is_clear(src, "a1");
+    box_is_clear(src, "b1");
+    every_arrow_meets_a_node(src, 80);
+}

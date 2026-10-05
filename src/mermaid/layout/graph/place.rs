@@ -216,7 +216,11 @@ mod tests {
 
     #[test]
     fn a_chain_is_straight() {
-        let mut layered = build(3, &[RawEdge { from: 0, to: 1 }, RawEdge { from: 1, to: 2 }]);
+        let mut layered = build(
+            3,
+            &[RawEdge { from: 0, to: 1 }, RawEdge { from: 1, to: 2 }],
+            &[],
+        );
         order::reduce(&mut layered);
         let sizes = vec![7, 9, 5];
         let pos = assign(&layered, &sizes, 3);
@@ -232,7 +236,7 @@ mod tests {
             RawEdge { from: 0, to: 2 },
             RawEdge { from: 0, to: 3 },
         ];
-        let mut layered = build(4, &edges);
+        let mut layered = build(4, &edges, &[]);
         order::reduce(&mut layered);
         let sizes = vec![9, 7, 7, 7];
         let pos = assign(&layered, &sizes, 3);

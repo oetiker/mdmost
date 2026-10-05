@@ -200,7 +200,7 @@ mod tests {
     fn a_simple_crossing_is_removed() {
         // 0 -> 3, 1 -> 2 drawn in the order 0,1 / 2,3 crosses; swapping does not.
         let edges = [RawEdge { from: 0, to: 3 }, RawEdge { from: 1, to: 2 }];
-        let mut layered = build(4, &edges);
+        let mut layered = build(4, &edges, &[]);
         layered.ranks[1] = vec![2, 3];
         reduce(&mut layered);
         assert_eq!(crossings(&layered, &layered.ranks), 0);
@@ -214,8 +214,8 @@ mod tests {
                 to: 3 + (i * 2) % 3,
             })
             .collect();
-        let mut a = build(6, &edges);
-        let mut b = build(6, &edges);
+        let mut a = build(6, &edges, &[]);
+        let mut b = build(6, &edges, &[]);
         reduce(&mut a);
         reduce(&mut b);
         assert_eq!(a.ranks, b.ranks);
