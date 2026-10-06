@@ -1,4 +1,8 @@
--- repo-infra: man-lua v1
+-- repo-infra: man-lua v2
+--
+-- Purpose: The pandoc filter man.mk runs for term lists.
+-- Choose: With man.
+-- Supplies: Nothing.
 --
 -- Turn "- `term`: description" bullet lists into definition lists, for the man
 -- writer (D23). build/man.mk runs it.
