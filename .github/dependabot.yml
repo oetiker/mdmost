@@ -1,5 +1,9 @@
 version: 2
-# repo-infra: dependabot v1
+# repo-infra: dependabot v2
+#
+# Purpose: Keep the pinned GitHub Actions current.
+# Choose: Always.
+# Supplies: The no-changelog label.
 updates:
   - package-ecosystem: github-actions
     directory: /
