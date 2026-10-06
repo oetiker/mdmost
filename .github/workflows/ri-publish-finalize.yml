@@ -1,0 +1,186 @@
+# repo-infra: ri-publish-finalize v1
+#
+# Purpose: Check the release carries every file, then publish it.
+# Choose: Always; release-publish.yml calls it last.
+# Supplies: release_assets in .github/repo-infra.json.
+# Pieces: workflow-lib
+# Call:
+#   finalize:
+#     needs: [publish]
+#     if: needs.publish.outputs.release_id != ''
+#     uses: ./.github/workflows/ri-publish-finalize.yml
+#     permissions:
+#       contents: write
+#       actions: write
+#     with:
+#       release_id: ${{ needs.publish.outputs.release_id }}
+#       tag: ${{ needs.publish.outputs.tag }}
+#       head: ${{ needs.publish.outputs.head }}
+#
+# A publish job that fails leaves the release a draft, which is the correct
+# outcome: a release missing its files must not be visible.
+
+name: Publish the release
+
+on:
+  workflow_call:
+    inputs:
+      release_id:
+        description: The draft release to publish, from ri-publish-tag.
+        type: string
+        required: true
+      tag:
+        description: The release tag, from ri-publish-tag.
+        type: string
+        required: true
+      head:
+        description: The commit the release was built from, from ri-publish-tag.
+        type: string
+        required: true
+      expected:
+        description: JSON list of file name patterns the publish jobs attach, such as '["*.crate"]'.
+        type: string
+        required: false
+        default: '[]'
+
+permissions:
+  contents: read
+
+jobs:
+  finalize:
+    name: Publish the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      # D28: deleting the parked pull_request runs of the release branch.
+      actions: write
+    steps:
+      # For .github/workflows/lib/assets.js, below.
+      # The tagged head: a re-run reads release_assets the same way.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.head }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: actions/github-script@v9
+        env:
+          EXPECTED: ${{ inputs.expected }}
+        with:
+          script: |
+            const lib = `${process.env.GITHUB_WORKSPACE}/.github/workflows/lib`;
+            const assetsLib = require(`${lib}/assets.js`);
+            const fs = require('fs');
+            const releaseLib = require(`${lib}/release.js`);
+            const config = JSON.parse(fs.readFileSync(
+              `${process.env.GITHUB_WORKSPACE}/.github/repo-infra.json`, 'utf8'));
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const release_id = Number('${{ inputs.release_id }}');
+
+            // The files the publish jobs of release-publish.yml attach, from
+            // the caller's `expected` input; release_assets below are the
+            // files the release build made.
+            let expected;
+            try {
+              expected = JSON.parse(process.env.EXPECTED || '[]');
+            } catch (error) {
+              core.setFailed(`The input expected is not JSON: ${error.message}`);
+              return;
+            }
+            if (!Array.isArray(expected)
+                || !expected.every((p) => typeof p === 'string' && /^[A-Za-z0-9._+*~-]+$/.test(p))) {
+              core.setFailed('The input expected must be a JSON list of file name patterns.');
+              return;
+            }
+            // D26, D28: the release must carry every file the repository
+            // declared, read at the tagged head.
+            const declared = config.release_assets || [];
+
+            // The needs: list of finalize in release-publish.yml is ordering,
+            // and ordering cannot report its own absence: reverted, it does
+            // not fail, it stops waiting.
+            // So ask the release what it actually carries. This assertion
+            // cannot pass while being wrong -- an asset is on the release or
+            // it is not -- which is the whole difference between a quietly
+            // empty release and a red job.
+            const attached = await github.paginate(
+              github.rest.repos.listReleaseAssets,
+              { owner, repo, release_id, per_page: 100 },
+            );
+            const names = attached.map((a) => a.name);
+            const missing = assetsLib.missingAssets(names, [...expected, ...declared]);
+            if (missing.length > 0) {
+              core.setFailed(
+                `${{ inputs.tag }} is missing ${missing.join(', ')}`
+                + ` -- it stays a draft. Attached: ${names.join(', ') || 'nothing'}.`
+                + ` Either a publish job did not run (compare the needs: list of`
+                + ` finalize in release-publish.yml with its jobs) or it attached`
+                + ` something under another name (see the expected input of`
+                + ` finalize and release_assets in .github/repo-infra.json).`
+              );
+              return;
+            }
+
+            // A name check passes an asset whose upload broke half way, so
+            // check that every attached file is complete as well.
+            const unfinished = assetsLib.unfinishedAssets(attached);
+            if (unfinished.length > 0) {
+              core.setFailed(
+                `${{ inputs.tag }} carries ${unfinished.join(', ')}`
+                + ` whose upload did not finish -- it stays a draft. Delete`
+                + ` the asset and re-run the job that attached it.`
+              );
+              return;
+            }
+
+            // The build record is never public. Deleting it after publishing
+            // would be impossible with GitHub's immutable releases on.
+            const record = attached.find((a) => a.name === releaseLib.BUILD_RECORD);
+            if (record) {
+              try {
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: record.id });
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
+
+            const { data: released } = await github.rest.repos.updateRelease({
+              owner, repo, release_id, draft: false,
+            });
+            core.notice(`Published ${released.html_url}`);
+            await core.summary
+              .addHeading(`Released ${{ inputs.tag }}`)
+              .addRaw(`Assets: ${names.join(', ') || 'none'}`)
+              .addLink('Release', released.html_url)
+              .write();
+
+      # The release pull request's own pull_request runs parked for an
+      # approval nobody needed to give (D28). Nothing depends on them.
+      - name: Delete the parked runs of the release branch
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const branch = 'release/${{ inputs.tag }}';
+            let parked;
+            try {
+              const releaseLib = require(
+                `${process.env.GITHUB_WORKSPACE}/.github/workflows/lib/release.js`);
+              parked = await releaseLib.fetchParkedRuns(github, { owner, repo, branch });
+            } catch (error) {
+              core.warning(`Could not list the parked runs of the release branch: ${error.message}`);
+              return;
+            }
+            // One failed deletion does not keep the others.
+            for (const run of parked) {
+              try {
+                await github.rest.actions.deleteWorkflowRun({ owner, repo, run_id: run.id });
+              } catch (error) {
+                core.warning(`Could not delete the parked run ${run.id}: ${error.message}`);
+              }
+            }

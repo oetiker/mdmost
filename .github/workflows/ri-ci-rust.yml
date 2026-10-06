@@ -1,0 +1,146 @@
+# repo-infra: ri-ci-rust v1
+#
+# Purpose: Check, lint and test a Rust workspace.
+# Choose: The repository has Cargo.toml.
+# Supplies: Cargo.toml and Cargo.lock; the optional "rust" key in .github/repo-infra.json
+#   names the crates to lint and to test (D24).
+# Pieces: workflow-lib
+# Call:
+#   rust:
+#     uses: ./.github/workflows/ri-ci-rust.yml
+#     with:
+#       ref: ${{ inputs.ref }}
+
+name: Rust
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to check out; empty takes the commit that triggered the run (D28).
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  # D24. A bare `cargo test` runs the workspace's default members only, and a
+  # root [package] makes that one crate. rust-plan reads the "rust" key of
+  # .github/repo-infra.json and `cargo metadata`, and hands the two matrix
+  # jobs below the crates they run for. Without the key, and where default
+  # members equal members, it hands them one empty entry and they run the
+  # workspace-wide commands. Every other case fails here, naming the crates.
+  rust-plan:
+    name: Rust workspace plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      lint: ${{ steps.plan.outputs.lint }}
+      test: ${{ steps.plan.outputs.test }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo metadata --no-deps --format-version 1 > "$RUNNER_TEMP/cargo-metadata.json"
+
+      - id: plan
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const ws = process.env.GITHUB_WORKSPACE;
+            const { rustPlan } = require(`${ws}/.github/workflows/lib/rust-plan.js`);
+            const configPath = `${ws}/.github/repo-infra.json`;
+            const config = fs.existsSync(configPath)
+              ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
+              : {};
+            const metadata = JSON.parse(
+              fs.readFileSync(`${process.env.RUNNER_TEMP}/cargo-metadata.json`, 'utf8'),
+            );
+            try {
+              const plan = rustPlan(config, metadata);
+              core.setOutput('lint', JSON.stringify(plan.lint));
+              core.setOutput('test', JSON.stringify(plan.test));
+              core.notice(`lint: ${plan.lint.join(', ') || 'workspace'}; `
+                + `test: ${plan.test.join(', ') || 'workspace'}`);
+            } catch (error) {
+              core.setFailed(error.message);
+            }
+
+  rust-check:
+    name: Rust check and lint ${{ matrix.package }}
+    needs: rust-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.rust-plan.outputs.lint) }}
+    env:
+      CARGO_TERM_COLOR: always
+      PACKAGE: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - run: cargo fmt --check ${PACKAGE:+-p "$PACKAGE"}
+
+      # --no-deps with -p: clippy-driver replaces rustc for every workspace
+      # member regardless of -p, so -p alone still lints vendored crates.
+      - run: |
+          if [ -n "$PACKAGE" ]; then
+            cargo clippy --all-targets -p "$PACKAGE" --no-deps -- -D warnings
+          else
+            cargo clippy --all-targets -- -D warnings
+          fi
+
+  rust-test:
+    name: Rust tests ${{ matrix.package }}
+    needs: rust-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.rust-plan.outputs.test) }}
+    env:
+      CARGO_TERM_COLOR: always
+      PACKAGE: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - run: cargo test ${PACKAGE:+-p "$PACKAGE"}

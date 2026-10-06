@@ -1,0 +1,273 @@
+# repo-infra: ri-publish-tag v1
+#
+# Purpose: Tag the merged release and create its draft release (D28).
+# Choose: Always; release-publish.yml calls it.
+# Supplies: version_files and moving_major_tag in .github/repo-infra.json.
+# Pieces: workflow-lib
+# Call:
+#   publish:
+#     uses: ./.github/workflows/ri-publish-tag.yml
+#     permissions:
+#       contents: write
+#       pull-requests: read
+#
+# Recovery (D28): this job decides from the tag and the releases together
+# (lib/publish.js), so **Re-run failed jobs** and a whole-workflow re-run both
+# finish a stopped release: a whole-workflow re-run also repeats the publish
+# jobs that already succeeded, and each standard publish job skips what an
+# earlier attempt uploaded. A publish job of the repository's own must do the
+# same.
+#
+# Before it tags, it compares the tree of the release pull request's merge
+# commit with the tree of the head that was built. With the ruleset's
+# up-to-date rule on they are equal; a mismatch tags nothing.
+
+name: Tag the release
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: The released version, from CHANGES.md.
+        value: ${{ jobs.publish.outputs.version }}
+      tag:
+        description: The release tag.
+        value: ${{ jobs.publish.outputs.tag }}
+      release_id:
+        description: The draft release to publish.
+        value: ${{ jobs.publish.outputs.release_id }}
+      head:
+        description: The commit the release was built from.
+        value: ${{ jobs.publish.outputs.head }}
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  publish:
+    name: Tag and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.publish.outputs.version }}
+      tag: ${{ steps.publish.outputs.tag }}
+      release_id: ${{ steps.publish.outputs.release_id }}
+      head: ${{ steps.publish.outputs.head }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Tag and create the draft release
+        id: publish
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const ws = process.env.GITHUB_WORKSPACE;
+            const lib = `${ws}/.github/workflows/lib`;
+            const changesLib = require(`${lib}/changes.js`);
+            const bumpLib = require(`${lib}/bump.js`);
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const fileIO = {
+              read: (p) => fs.readFileSync(path.join(ws, p), 'utf8'),
+              write: () => { throw new Error('the publisher never writes'); },
+            };
+
+            const config = JSON.parse(fileIO.read('.github/repo-infra.json'));
+
+            // CHANGES.md is the source of truth. It is the only file every
+            // repository has, and it changes on exactly one occasion.
+            const release = changesLib.latestRelease(fileIO.read('CHANGES.md'));
+            if (!release) {
+              core.notice('CHANGES.md has no released version yet - nothing to do.');
+              return;
+            }
+            const version = release.version;
+            const tag = `v${version}`;
+
+            // Every version file is a derived copy. If one disagrees, the release
+            // pull request half-applied, and tagging now would repeat the failure
+            // that shipped an inconsistent v0.1.1 elsewhere.
+            const stale = config.version_files.filter(
+              (spec) => !bumpLib.verifyFile(spec, version, fileIO)
+            );
+            if (stale.length > 0) {
+              core.setFailed(
+                `CHANGES.md says ${version} but these disagree: `
+                + stale.map((s) => s.path).join(', ')
+              );
+              return;
+            }
+
+            // Annotated, not a bare createRef. A bare ref makes a lightweight tag,
+            // and `git describe` prefers annotated ones; the existing repositories
+            // have annotated tags and a silent switch would change local tooling
+            // behaviour for no reason.
+            const makeTag = async (name, message, sha) => {
+              const { data: object } = await github.rest.git.createTag({
+                owner, repo, tag: name, message, object: sha, type: 'commit',
+              });
+              return object.sha;
+            };
+            const moveMajor = async (sha) => {
+              if (!config.moving_major_tag) return;
+              const major = `v${version.split('.')[0]}`;
+              const tagSha = await makeTag(major, `Update ${major} to ${tag}`, sha);
+              try {
+                await github.rest.git.updateRef({
+                  owner, repo, ref: `tags/${major}`, sha: tagSha, force: true,
+                });
+              } catch (error) {
+                if (error.status !== 422) throw error;
+                await github.rest.git.createRef({
+                  owner, repo, ref: `refs/tags/${major}`, sha: tagSha,
+                });
+              }
+              core.notice(`Moved ${major} to ${tag}.`);
+            };
+
+            // The release pull request built the release into a draft (D26, D28).
+            // Tag the commit that was built, not this merge.
+            const publishLib = require(`${lib}/publish.js`);
+            const releaseLib = require(`${lib}/release.js`);
+            let tagCommit = null;
+            try {
+              const { data: ref } = await github.rest.git.getRef({
+                owner, repo, ref: `tags/${tag}`,
+              });
+              // publish makes annotated tags: the ref points at a tag object.
+              tagCommit = ref.object.type === 'tag'
+                ? (await github.rest.git.getTag({ owner, repo, tag_sha: ref.object.sha }))
+                  .data.object.sha
+                : ref.object.sha;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            // getReleaseByTag answers 404 for a draft; list them instead.
+            const releases = (await github.paginate(github.rest.repos.listReleases, {
+              owner, repo, per_page: 100,
+            })).filter((r) => r.tag_name === tag);
+
+            const decision = publishLib.publishDecision({ tag, tagCommit, releases });
+            if (decision.action === 'done') {
+              core.notice(`${tag} is released - nothing to do.`);
+              return;
+            }
+            if (decision.action === 'fail') {
+              core.setFailed(decision.message);
+              return;
+            }
+
+            let head = decision.head;
+            if (decision.action === 'resume' && decision.recordAssetId) {
+              // Only a courtesy: a failed download or a corrupt record must not
+              // stop a recovery run that does not need the record.
+              try {
+                const { data: raw } = await github.rest.repos.getReleaseAsset({
+                  owner, repo, asset_id: decision.recordAssetId,
+                  headers: { accept: 'application/octet-stream' },
+                });
+                const warning = publishLib.recordHeadWarning(
+                  tag, decision.head, JSON.parse(Buffer.from(raw).toString('utf8')).head,
+                );
+                if (warning) core.warning(warning);
+              } catch (error) {
+                core.warning(`${tag}: could not compare ${releaseLib.BUILD_RECORD} `
+                  + `with the tag commit (${error.message}). Publishing continues from the tag.`);
+              }
+            }
+            if (decision.action === 'create') {
+              // browser_download_url does not serve drafts; the API does.
+              const { data: raw } = await github.rest.repos.getReleaseAsset({
+                owner, repo, asset_id: decision.recordAssetId,
+                headers: { accept: 'application/octet-stream' },
+              });
+              const record = JSON.parse(Buffer.from(raw).toString('utf8'));
+              let latestAtHead = null;
+              try {
+                const { data } = await github.rest.repos.getContent({
+                  owner, repo, path: 'CHANGES.md', ref: record.head,
+                });
+                latestAtHead = changesLib.latestRelease(
+                  Buffer.from(data.content, 'base64').toString('utf8'),
+                );
+              } catch (error) {
+                if (error.status !== 404 && error.status !== 422) throw error;
+                // A 404 is either no such commit or no CHANGES.md at it.
+                try {
+                  await github.rest.git.getCommit({ owner, repo, commit_sha: record.head });
+                } catch (missing) {
+                  if (missing.status !== 404 && missing.status !== 422) throw missing;
+                  core.setFailed(`${tag}: ${releaseLib.BUILD_RECORD} names `
+                    + `${record.head}, which does not exist in this repository. `
+                    + 'Nothing was tagged.');
+                  return;
+                }
+              }
+              const problem = publishLib.validateBuildRecord(record, version, latestAtHead);
+              if (problem) {
+                core.setFailed(`${tag}: ${problem}. Nothing was tagged.`);
+                return;
+              }
+              // D28: main must be the release that was built. Find the release
+              // pull request by its branch, not from the recorded head or
+              // context.sha: for a commit off the default branch (a squash or
+              // rebase merge) the commit association lists only open pull
+              // requests, and a failed first publish followed by an ordinary
+              // merge starts a new run on a later commit.
+              const { data: associated } = await github.rest.pulls.list({
+                owner, repo, state: 'closed', head: `${owner}:release/${tag}`, per_page: 100,
+              });
+              const mergeSha = releaseLib.releasePrMergeCommit(associated, {
+                fullName: `${owner}/${repo}`, tag,
+              });
+              const treeOf = async (sha) => (await github.rest.git.getCommit({
+                owner, repo, commit_sha: sha,
+              })).data.tree.sha;
+              const treeProblem = releaseLib.treeVerdict({
+                tag,
+                head: record.head,
+                mergeSha,
+                mergeTree: mergeSha ? await treeOf(mergeSha) : null,
+                headTree: await treeOf(record.head),
+              });
+              if (treeProblem) {
+                core.setFailed(treeProblem);
+                return;
+              }
+              head = record.head;
+              await github.rest.git.createRef({
+                owner, repo, ref: `refs/tags/${tag}`,
+                sha: await makeTag(tag, `Release ${tag}`, head),
+              });
+              core.notice(`Tagged ${tag} at the built commit ${head}.`);
+            }
+
+            // Idempotent, so a resumed run repeats it harmlessly.
+            await github.rest.repos.updateRelease({
+              owner, repo, release_id: decision.releaseId,
+              tag_name: tag, target_commitish: head,
+            });
+            await moveMajor(head);
+
+            const { data: compared } = await github.rest.repos.compareCommitsWithBasehead({
+              owner, repo, basehead: `${head}...${context.sha}`,
+            });
+            if (compared.status === 'diverged') {
+              core.notice(`${tag} is not on main's history (the release pull request `
+                + 'was squashed or rebased). The release is correct; git describe on '
+                + 'main will not find it. RELEASING.md recommends a merge commit.');
+            }
+
+            core.setOutput('version', version);
+            core.setOutput('tag', tag);
+            core.setOutput('release_id', String(decision.releaseId));
+            core.setOutput('head', head);

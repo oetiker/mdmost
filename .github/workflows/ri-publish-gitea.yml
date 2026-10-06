@@ -1,0 +1,162 @@
+# repo-infra: ri-publish-gitea v1
+#
+# Purpose: Upload the release's .deb and .rpm files to a Gitea package registry.
+# Choose: The project ships packages to Gitea.
+# Supplies: gitea_packages (url, owner) in .github/repo-infra.json, the secret
+#   GITEA_PACKAGE_TOKEN and the variable GITEA_PACKAGE_USER.
+# Pieces: workflow-lib
+# Call:
+#   gitea:
+#     needs: [publish]
+#     if: needs.publish.outputs.release_id != ''
+#     uses: ./.github/workflows/ri-publish-gitea.yml
+#     permissions:
+#       contents: write
+#     with:
+#       release_id: ${{ needs.publish.outputs.release_id }}
+#       head: ${{ needs.publish.outputs.head }}
+#     secrets: inherit
+#
+# Uploads every .deb and .rpm on the release to the Gitea package
+# registry named in .github/repo-infra.json "gitea_packages". Gitea signs
+# the Debian and RPM metadata and, with ?sign=true, each rpm, with its own
+# per-owner key; no repository holds a signing key.
+#
+# The credential is a dedicated Gitea user's token, scope write:package, in
+# the GitHub organisation secret GITEA_PACKAGE_TOKEN with the variable
+# GITEA_PACKAGE_USER. A repository under a personal account carries its own
+# copy of both (references/release-flow.md).
+
+name: Publish packages to Gitea
+
+on:
+  workflow_call:
+    inputs:
+      release_id:
+        description: The draft release holding the packages, from ri-publish-tag.
+        type: string
+        required: true
+      head:
+        description: The commit the release was built from, from ri-publish-tag.
+        type: string
+        required: true
+    secrets:
+      GITEA_PACKAGE_TOKEN:
+        description: Token of the Gitea package user, scope write:package. The job fails and names it when it is empty.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish-gitea-packages:
+    name: Publish packages to Gitea
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # write, not read: a draft release and its assets are invisible to a token
+    # that cannot push.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.head }}
+
+      - uses: actions/github-script@v9
+        env:
+          GITEA_PACKAGE_TOKEN: ${{ secrets.GITEA_PACKAGE_TOKEN }}
+          GITEA_PACKAGE_USER: ${{ vars.GITEA_PACKAGE_USER }}
+        with:
+          script: |
+            const crypto = require('crypto');
+            const fs = require('fs');
+            const ws = process.env.GITHUB_WORKSPACE;
+            const gitea = require(`${ws}/.github/workflows/lib/gitea.js`);
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const release_id = Number('${{ inputs.release_id }}');
+
+            let cfg;
+            try {
+              cfg = gitea.packageConfig(JSON.parse(
+                fs.readFileSync(`${ws}/.github/repo-infra.json`, 'utf8')));
+            } catch (error) {
+              core.setFailed(error.message);
+              return;
+            }
+            const missing = gitea.missingCredentials(process.env);
+            if (missing.length > 0) {
+              core.setFailed(`${missing.join(' and ')} is empty. Set the secret `
+                + 'GITEA_PACKAGE_TOKEN and the variable GITEA_PACKAGE_USER on the '
+                + 'organisation, or on the repository if it belongs to a person.');
+              return;
+            }
+
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner, repo, release_id, per_page: 100,
+            });
+            const packages = assets
+              .map((asset) => ({ asset, pkg: gitea.parsePackageFile(asset.name) }))
+              .filter((entry) => entry.pkg);
+            // Every .deb and .rpm is uploaded; one that cannot be named is a
+            // failure, not a file to skip.
+            const unparsable = assets
+              .filter((a) => /\.(deb|rpm)$/.test(a.name) && !gitea.parsePackageFile(a.name))
+              .map((a) => a.name);
+            if (unparsable.length > 0) {
+              core.setFailed(`Cannot upload ${unparsable.join(', ')}: the file name does not `
+                + 'have the shape Gitea needs. Expected name_version_arch.deb (lower-case '
+                + 'name) or name-version-release.arch.rpm.');
+              return;
+            }
+            if (packages.length === 0) {
+              core.setFailed('The release carries no .deb or .rpm, so '
+                + 'publish-gitea-packages would upload nothing. Attached: '
+                + `${assets.map((a) => a.name).join(', ') || 'nothing'}.`);
+              return;
+            }
+
+            const user = process.env.GITEA_PACKAGE_USER;
+            const token = process.env.GITEA_PACKAGE_TOKEN;
+            const authorization = `Basic ${Buffer.from(`${user}:${token}`).toString('base64')}`;
+            core.setSecret(authorization);
+
+            for (const { asset, pkg } of packages) {
+              // By asset id through the API: browser_download_url does not
+              // serve drafts.
+              const { data } = await github.rest.repos.getReleaseAsset({
+                owner, repo, asset_id: asset.id,
+                headers: { accept: 'application/octet-stream' },
+              });
+              const body = Buffer.from(data);
+              const sha256 = crypto.createHash('sha256').update(body).digest('hex');
+
+              const res = await fetch(gitea.uploadUrl(cfg, pkg), {
+                method: 'PUT',
+                headers: { authorization, 'content-type': 'application/octet-stream' },
+                body,
+              });
+              if (res.ok) {
+                core.notice(`${asset.name}: uploaded to ${cfg.owner}'s ${pkg.kind} registry.`);
+                continue;
+              }
+              if (res.status === 409) {
+                const list = await fetch(gitea.filesUrl(cfg, pkg), { headers: { authorization } });
+                const files = list.ok ? await list.json().catch(() => null) : null;
+                if (!Array.isArray(files)) {
+                  core.setFailed(`${asset.name}: Gitea answered 409 for ${pkg.name} `
+                    + `${pkg.version}, and listing the stored files answered HTTP `
+                    + `${list.status} without a file list`);
+                  return;
+                }
+                const verdict = gitea.conflictVerdict(pkg, sha256, files);
+                if (!verdict.ok) {
+                  core.setFailed(verdict.message);
+                  return;
+                }
+                core.notice(verdict.message);
+                continue;
+              }
+              core.setFailed(`${asset.name}: Gitea answered ${res.status}: ${await res.text()}`);
+              return;
+            }

@@ -1,0 +1,94 @@
+# repo-infra: ri-release-pr-current v1
+#
+# Purpose: Mark open release pull requests stale when main moves (D28).
+# Choose: Always; ci.yml calls it.
+# Supplies: Nothing.
+# Pieces: workflow-lib
+# Call:
+#   release-pr-current:
+#     uses: ./.github/workflows/ri-release-pr-current.yml
+#     permissions:
+#       contents: read
+#       pull-requests: read
+#       checks: write
+#     with:
+#       ref: ${{ inputs.ref }}
+#
+# D28: when main moves, every open release pull request is stale. The
+# ruleset's up-to-date rule already refuses its merge; this check run says
+# why, where GitHub alone offers the Update branch button. Push to main
+# only: when Create release PR runs ci.yml the event is
+# workflow_dispatch and the job skips. It never fails: a failed job is a
+# failed check run on this main commit, and the guard of the next dispatch
+# would refuse it. An API error is a warning, one per pull request, and the
+# others are still marked. A pull request left unmarked still cannot merge:
+# the ruleset's up-to-date rule refuses it.
+
+name: Stale release pull requests
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to check out; empty takes the commit that triggered the run (D28).
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  release-pr-current:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Mark stale release pull requests
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const fullName = `${owner}/${repo}`;
+            let releaseLib;
+            let releasePrs;
+            try {
+              releaseLib = require(
+                `${process.env.GITHUB_WORKSPACE}/.github/workflows/lib/release.js`);
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'open', per_page: 100,
+              });
+              releasePrs = prs.filter((p) => releaseLib.isReleasePr(p, fullName));
+            } catch (error) {
+              core.warning(`Could not list the open release pull requests: ${error.message}`);
+              return;
+            }
+            for (const pr of releasePrs) {
+              try {
+                const { data: compared } = await github.rest.repos.compareCommitsWithBasehead({
+                  owner, repo, basehead: `${pr.base.ref}...${pr.head.sha}`,
+                });
+                const stale = releaseLib.staleReleasePr(pr, compared.behind_by);
+                if (!stale) continue;
+                await github.rest.checks.create({
+                  owner, repo, name: 'ci-passed', head_sha: stale.sha,
+                  status: 'completed', conclusion: 'failure',
+                  output: { title: stale.title, summary: stale.summary },
+                });
+                core.notice(`#${stale.number}: ${stale.summary}`);
+              } catch (error) {
+                core.warning(`Could not mark release pull request #${pr.number}: ${error.message}`);
+              }
+            }

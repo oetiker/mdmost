@@ -1,0 +1,130 @@
+# repo-infra: ri-ci-rust-musl v1
+#
+# Purpose: Build static musl binaries and verify they are static.
+# Choose: The project ships a static Linux binary; call it beside ri-ci-rust.
+# Supplies: Cargo.toml with a binary target.
+# Call:
+#   rust-musl:
+#     uses: ./.github/workflows/ri-ci-rust-musl.yml
+#     with:
+#       ref: ${{ inputs.ref }}
+
+name: Rust static binary
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to check out; empty takes the commit that triggered the run (D28).
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  rust-musl:
+    name: Static musl ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      # One target failing must not cancel the other: which of the two broke is
+      # the whole answer here, and fail-fast throws half of it away.
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      # No `targets:` on purpose. cross compiles inside its own image, which
+      # already carries the musl std for the target; the runner's toolchain is
+      # here only to run `cargo install cross` and `cargo metadata`.
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Pinned to a released version, not `main`. A cross-compile is the thing
+      # least likely to be rehearsed locally, so it must not rest on a moving
+      # dependency: a break here is discovered by the pull request that is
+      # innocent of it.
+      - name: Install cross
+        run: cargo install cross --version 0.2.5 --locked
+
+      # cross, not a bare `cargo build --target`. `ring` needs the right
+      # assembler for the target and `zstd-sys` needs a C compiler for it;
+      # cross's images carry both, and a plain `cargo build --target` on the
+      # runner carries neither.
+      #
+      # No `actions/cache` here, unlike rust-check and rust-test. cross writes
+      # `target/` from inside a container under its own uid mapping, and
+      # restoring a cache into that path is not part of the recipe this block
+      # was proved from. It is a real cost -- `cargo install cross` builds from
+      # source -- and a deliberate one; see the design doc.
+      - name: Build
+        run: RUSTFLAGS="-C target-feature=+crt-static" cross build --release --workspace --target ${{ matrix.target }}
+
+      # `crt-static` is a *hint* the linker is free to ignore, so the result is
+      # asserted rather than assumed. A binary that only runs on the machine
+      # that built it is worse than no binary: it fails at the far end, on a
+      # host nobody is watching, and reads as a network fault.
+      - name: Verify the binaries are really static
+        run: |
+          set -euo pipefail
+          dir="target/${{ matrix.target }}/release"
+
+          # cargo metadata, not a listing of $dir. A cdylib member's .so is a
+          # regular executable file too, and `file` calls it a shared object --
+          # which would fail this check for a crate doing nothing wrong.
+          metadata=$(cargo metadata --format-version 1 --no-deps)
+          bins=$(printf '%s' "$metadata" \
+            | jq -r '.packages[].targets[] | select(.kind | index("bin")) | .name' \
+            | sort -u)
+
+          # A library-only workspace has nothing to link-check, and that is not
+          # a failure: the build still proved the crate compiles for musl.
+          if [ -z "$bins" ]; then
+            echo "::notice::no binary targets in this workspace -- musl build verified compilation only"
+            exit 0
+          fi
+
+          declared=0
+          checked=0
+          while IFS= read -r name; do
+            [ -n "$name" ] || continue
+            declared=$((declared + 1))
+            binary="$dir/$name"
+            if [ ! -f "$binary" ]; then
+              # A bin behind `required-features` is not produced by a plain
+              # --workspace build. Skipped, not failed -- the tally below is
+              # what refuses a build that produced nothing at all.
+              echo "::notice::${binary} was not built (required-features?) -- skipped"
+              continue
+            fi
+            file "$binary"
+            if ! file "$binary" | grep -q 'static'; then
+              echo "::error::${binary} is not statically linked"
+              exit 1
+            fi
+            # Guarded by `command -v` so this half *skips* where llvm-objdump is
+            # absent instead of erroring. That guard is what makes the check
+            # portable across runner images.
+            if command -v llvm-objdump >/dev/null && llvm-objdump -T "$binary" 2>/dev/null | grep -q GLIBC; then
+              echo "::error::${binary} still references glibc symbols"
+              exit 1
+            fi
+            checked=$((checked + 1))
+          done <<< "$bins"
+
+          # Every declared binary missing means the build silently produced
+          # nothing, and the loop above would have reported success by saying
+          # nothing at all.
+          if [ "$checked" -eq 0 ]; then
+            echo "::error::the workspace declares ${declared} binary target(s) and the build produced none of them"
+            exit 1
+          fi
+          echo "verified ${checked} of ${declared} binary target(s) statically linked for ${{ matrix.target }}"

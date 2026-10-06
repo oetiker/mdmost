@@ -1,11 +1,11 @@
-// repo-infra: workflow-lib v6
+// repo-infra: workflow-lib v8
 'use strict';
 
 // What `finalize` checks before it flips a release from draft to public.
 //
 // Until this existed, the only thing between that flip and a release with no
 // artifacts on it was finalize's own `needs:` list. A `needs:` list is a
-// generated line in a generated file, and losing it does not fail: finalize
+// single line in release-publish.yml, and losing it does not fail: finalize
 // simply stops waiting and publishes a release whose .deb was never uploaded.
 // Nothing goes red, because nothing went wrong -- it just did not wait.
 //

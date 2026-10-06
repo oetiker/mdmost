@@ -1,0 +1,75 @@
+# repo-infra: ri-ci-man v1
+#
+# Purpose: Build the man page and fail on a roff warning.
+# Choose: The project ships a man page built from docs/manual.md (D23).
+# Supplies: docs/manual.md and a `man` target from build/man.mk.
+# Pieces: man, man-lua
+# Call:
+#   man:
+#     uses: ./.github/workflows/ri-ci-man.yml
+#     with:
+#       ref: ${{ inputs.ref }}
+
+name: Manual
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to check out; empty takes the commit that triggered the run (D28).
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  man:
+    name: Manual converts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      # pandoc converts the manual; groff and man-db render the result, which
+      # is the only way to find out whether roff can lay the page out.
+      - name: Install pandoc and the man toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc groff man-db
+
+      - name: Build the man page
+        run: make man
+
+      # Nothing consumes the page in CI. This fails the pull request whose
+      # manual stops converting, or converts into a page roff cannot lay out.
+      # pandoc's preamble probes for the fonts C and CB and falls back when
+      # they are missing; mdmost met both warnings on every build and neither
+      # is a defect. The one that is, and that mdmost hit twice, is `table
+      # wider than line length minus indentation`: a Markdown table with a
+      # prose column. MANWIDTH pins the line length, since the runner has no
+      # terminal to take it from.
+      - name: Render every page and fail on a roff warning
+        run: |
+          shopt -s nullglob
+          pages=(man/*.[1-9]*)
+          if [ ${#pages[@]} -eq 0 ]; then
+            echo "::error::make man produced no page under man/"
+            exit 1
+          fi
+          status=0
+          for page in "${pages[@]}"; do
+            warnings=$(MANWIDTH=80 man --warnings -l "$page" 2>&1 >/dev/null \
+              | grep -v -e "cannot select font 'C'$" -e "cannot select font 'CB'$" || true)
+            if [ -n "$warnings" ]; then
+              echo "::error file=$page::roff warnings in $page"
+              printf '%s\n' "$warnings"
+              status=1
+            else
+              echo "$page: no warnings"
+            fi
+          done
+          exit $status

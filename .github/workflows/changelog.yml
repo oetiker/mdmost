@@ -1,5 +1,10 @@
 name: Changelog
-# repo-infra: changelog v4
+# repo-infra: changelog v5
+#
+# Purpose: The changelog-updated required check (D2, D6).
+# Choose: Always.
+# Supplies: CHANGES.md with an Unreleased section; the no-changelog label.
+# Pieces: workflow-lib
 #
 # Required, not advisory (spec D2). Being required is only safe because the
 # escape hatch below is a JOB-level `if:`. A job skipped by a condition

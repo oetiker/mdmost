@@ -1,0 +1,45 @@
+# repo-infra: ri-ci-lib v1
+#
+# Purpose: Run the tests of the workflow library.
+# Choose: Always: it runs the tests of the workflow library every repository carries.
+# Supplies: Nothing.
+# Pieces: workflow-lib
+# Call:
+#   lib:
+#     uses: ./.github/workflows/ri-ci-lib.yml
+#     with:
+#       ref: ${{ inputs.ref }}
+
+name: Workflow library
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to check out; empty takes the commit that triggered the run (D28).
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  lib:
+    name: Workflow library tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # The release logic is a library, so it is tested like one. Before this,
+      # the changelog roller was a Perl program inside a YAML string whose only
+      # test was cutting a release.
+      - name: Run the workflow library tests
+        run: node --test .github/workflows/lib/*.test.js
