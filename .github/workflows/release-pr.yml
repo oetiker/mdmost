@@ -1,5 +1,12 @@
 name: Create release PR
-# repo-infra: release-pr v5
+# repo-infra: release-pr v6
+#
+# Purpose: Create release PR: build, test and open the release pull request
+#   (D28).
+# Choose: Always.
+# Supplies: ci.yml and release-build.yml callers that declare the inputs it
+#   passes; version_files in .github/repo-infra.json.
+# Pieces: workflow-lib
 #
 # One release flow for every repository (D28). The release is built and
 # tested on the release branch before the pull request exists, so the pull
@@ -7,8 +14,8 @@ name: Create release PR
 #
 #   prepare  guard, refusals, stale drafts and parked runs, roll, bump,
 #            commit the release branch
-#   build    .github/workflows/release-build.yml (assembled; the project's
-#            own build jobs live in release-build-local.yml)
+#   build    .github/workflows/release-build.yml, which calls the build
+#            pieces the repository needs
 #   test     .github/workflows/ci.yml on the release branch, beside build
 #   finish   commit the declared release files, draft the release, mark the
 #            head, write the two required checks, open the pull request,
@@ -232,7 +239,7 @@ jobs:
       # here, between the rewrite and the commit; repo-infra has none. The
       # commit below takes exactly CHANGES.md and the version_files paths, so
       # such a step only lands if its file is listed there. Rust needs no step:
-      # detection lists Cargo.lock in version_files, with one regex per crate.
+      # a Rust repository lists Cargo.lock in version_files, with one regex per crate.
 
       - name: Commit the release branch
         id: commit
@@ -261,8 +268,8 @@ jobs:
             core.setOutput('head', head);
             core.setOutput('base', context.sha);
 
-  # The assembled build (D28): add-ons from "release_build" and the project's
-  # own release-build-local.yml. The `uses:` path resolves at the dispatched
+  # The repository's own build (D28), release-build.yml, which calls the build
+  # pieces it needs and any jobs of its own. The `uses:` path resolves at the dispatched
   # commit on main. contents: read, so its one way to write the repository is
   # the release-files artifact, which `finish` checks against release_files.
   # It gets the secrets: a build that signs a binary needs its key. No
