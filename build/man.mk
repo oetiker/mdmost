@@ -1,4 +1,10 @@
-# repo-infra: man v3
+# repo-infra: man v4
+#
+# Purpose: Build the man page from docs/manual.md (D23).
+# Choose: The project ships a man page.
+# Supplies: docs/manual.md with section: and date: in its front matter;
+#   MAN_NAME in the Makefile.
+# Pieces: man-lua
 #
 # The man page, built from docs/manual.md (D23).
 #
