@@ -38,6 +38,18 @@ pub(super) struct Reach {
     pub hi: usize,
 }
 
+/// What one border cell of a box holds, as far as an edge crossing it is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum SideCell {
+    /// Line art: a crossing edge turns it into a junction.
+    Art,
+    /// A gap, such as the space around a container title: an edge may pass, but no
+    /// junction shows where it does.
+    Blank,
+    /// A letter, such as one of a container title: no edge may pass.
+    Text,
+}
+
 /// An edge as the router sees it: already resolved to items of this level.
 #[derive(Debug, Clone)]
 pub(super) struct LevelEdge {
@@ -85,6 +97,11 @@ pub(super) struct Input<'a> {
     /// Per virtual node, the cross offsets whose border cell already carries an
     /// internal rule, which a port should avoid landing on.
     pub ruled: &'a [Vec<bool>],
+    /// Per virtual node, what each border cell of its entry side holds, which tells a
+    /// port carried through a container frame where it may cross.
+    pub side_in: &'a [Vec<SideCell>],
+    /// Likewise for the exit side.
+    pub side_out: &'a [Vec<SideCell>],
     /// Smallest allowed gap between two ranks.
     pub min_gap: usize,
     /// True when the flow axis runs vertically, which decides whether a label is
@@ -128,6 +145,8 @@ pub(super) struct Route {
     pub dst: usize,
     pub channel: Option<usize>,
     pub label: Option<(usize, usize)>,
+    /// The edge label wrapped narrower to fit between two lines, when it had to be.
+    pub wrapped: Option<DrawnLabel>,
 }
 
 impl Routing {
@@ -140,6 +159,7 @@ impl Routing {
                 dst: ports.in_port[index],
                 channel: None,
                 label: None,
+                wrapped: None,
             })
             .collect();
         let rank_count = input.layered.ranks.len();
@@ -247,7 +267,8 @@ impl Routing {
             pen.terminator(head_at, route.dst, head.glyphs(forward), edge.stroke, true);
         }
         if let Some((flow, cross)) = route.label {
-            pen.drawn_label(self.band_end[rank] + flow, cross, &edge.label);
+            let label = route.wrapped.as_ref().unwrap_or(&edge.label);
+            pen.drawn_label(self.band_end[rank] + flow, cross, label);
         }
         // End notes — class-diagram cardinalities and the like — sit just outside the
         // terminator they belong to.
@@ -303,13 +324,16 @@ fn label_extent(input: &Input<'_>, routes: &[Route]) -> usize {
         let route = &routes[index];
         // Across the flow axis a label is as wide as its widest line when the graph
         // runs down the page, and as tall as its line count when it runs across.
+        let label = route.wrapped.as_ref().unwrap_or(&edge.label);
         let widest = if input.vertical {
-            edge.label.width()
+            label.width()
         } else {
-            edge.label.height()
+            label.height()
         };
         if widest > 0 {
-            extent = extent.max(route.dst + 1 + widest);
+            // A label may sit before its line rather than after it; see `label_side`.
+            let start = route.label.map_or(route.dst + 1, |(_, cross)| cross);
+            extent = extent.max(start + widest);
         }
         if let Some(note) = &edge.tail_label {
             extent = extent.max(route.src + 1 + across(note));

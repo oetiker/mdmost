@@ -17,6 +17,7 @@ fn state(key: &str, kind: StateKind) -> StateNode {
         key: key.to_string(),
         label: None,
         kind,
+        paint: None,
     }
 }
 
@@ -26,6 +27,7 @@ fn described(key: &str, text: &str) -> StateNode {
         key: key.to_string(),
         label: Some(Label::line(text)),
         kind: StateKind::Simple,
+        paint: None,
     }
 }
 

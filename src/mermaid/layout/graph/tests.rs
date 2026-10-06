@@ -44,6 +44,7 @@ fn spec(direction: Direction, count: usize, edges: &[(usize, usize)]) -> GraphSp
             nodes: (0..count).map(NodeIdx).collect(),
             ..GroupSpec::default()
         },
+        beside: Vec::new(),
     }
 }
 
@@ -410,4 +411,72 @@ fn a_port_keeps_off_a_compartment_rule() {
             }
         }
     }
+}
+
+#[test]
+fn a_space_inside_a_frame_title_is_not_a_gap() {
+    use super::{SideCell, side_cells};
+    use crate::text::{Line, Span};
+    let theme = Theme::default_dark();
+    let title = Line::new(vec![Span::new("ab cd", theme.diagram.group_title)]);
+    let canvas = Canvas::from_text(12, "", theme.base()).framed(
+        BorderSet::DASHED,
+        theme.diagram.group_border,
+        Some(&title),
+        theme.base(),
+    );
+    let side = side_cells(&canvas, Direction::TopToBottom, true);
+    // `╭ ab cd ╌╌╌╌╌╮`: the margin spaces are gaps, the one between the words is not.
+    assert_eq!(side[1], SideCell::Blank);
+    assert_eq!(side[4], SideCell::Text);
+    assert_eq!(side[7], SideCell::Blank);
+    assert_eq!(side[8], SideCell::Art);
+}
+
+#[test]
+fn ports_keep_off_heavy_rules() {
+    let theme = Theme::default_dark();
+    let mut canvas = Canvas::new(4, 0, theme.base());
+    for row in ["┏┯┯┓", "┃  ┃", "┠──┨", "┗┷┷┛"] {
+        canvas.push_text(row, Align::Left, theme.diagram.node_border);
+    }
+    assert_eq!(
+        super::ruled_offsets(&canvas, false),
+        vec![false, false, true, false]
+    );
+    assert_eq!(
+        super::ruled_offsets(&canvas, true),
+        vec![false, true, true, false]
+    );
+}
+
+#[test]
+fn a_tinted_group_washes_only_page_cells_inside_it() {
+    let theme = Theme::default_dark();
+    let tint = crate::theme::Color::hex(0x203040);
+    let mut spec = spec(Direction::TopToBottom, 2, &[(0, 1)]);
+    spec.root.nodes = vec![NodeIdx(0)];
+    spec.root.children = vec![GroupSpec {
+        title: Some(DrawnLabel::whole(&Label::line("g"))),
+        nodes: vec![NodeIdx(1)],
+        style: super::FrameStyle {
+            ink: None,
+            heavy: false,
+            tint: Some(tint),
+        },
+        ..GroupSpec::default()
+    }];
+    let canvas = draw(&spec, &art, 60, &theme, Fit::COMPACT).expect("fits");
+    let tinted = canvas
+        .rows()
+        .iter()
+        .flatten()
+        .filter(|cell| cell.style().bg == Some(tint))
+        .count();
+    assert!(tinted > 0, "{}", canvas.plain_text());
+    assert_eq!(
+        canvas.row(0).expect("row")[0].style().bg,
+        Some(theme.palette.bg),
+        "outside stays"
+    );
 }

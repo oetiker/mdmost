@@ -77,6 +77,7 @@ fn build(dir: usize, count: usize, pairs: &[(usize, usize, usize)], grouped: usi
         node_count: count,
         edges,
         root,
+        beside: Vec::new(),
     }
 }
 

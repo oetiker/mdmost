@@ -6,7 +6,8 @@
 //! any depth, the `<<choice>>`, `<<fork>>` and `<<join>>` stereotypes, `direction`, and
 //! `note left of X` / `note right of X` in both the inline and the `end note` form.
 //!
-//! Skipped silently: `classDef`, `class`, `style`, `click`.
+//! Read for colour: `classDef`, `class`, `style` and the `:::name` suffix on a state, a
+//! `state` declaration and a note's target (colour spec). Skipped silently: `click`.
 //!
 //! Rejected with a reason: the `--` concurrency divider, because silently dropping it
 //! would draw parallel regions as one.
@@ -18,7 +19,11 @@ use crate::mermaid::ast::{
 };
 
 use super::lex::{self, Nesting, SrcLine};
+use super::sheet::{self, Sheet};
 use super::{direction, intern};
+
+/// The statements whose `;`-separated CSS tail `lex::drop_css_spill` drops.
+const STYLING: [&str; 3] = ["style", "classdef", "class"];
 
 /// Parses a whole `stateDiagram` / `stateDiagram-v2`.
 ///
@@ -72,6 +77,8 @@ struct Builder<'a> {
     /// note form, `lex::offset_of` directly) to compute a label's byte offset — every
     /// label text this parser touches is a subslice of it.
     src: &'a str,
+    /// The colour statements, merged into state paints by `finish`.
+    sheet: Sheet,
 }
 
 impl Builder<'_> {
@@ -104,7 +111,7 @@ impl Builder<'_> {
             }
             return Ok(());
         }
-        for statement in lex::split_statements(text) {
+        for statement in lex::drop_css_spill(lex::split_statements(text), &STYLING) {
             self.statement(statement, line)?;
         }
         Ok(())
@@ -114,7 +121,19 @@ impl Builder<'_> {
     fn statement(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
         let (word, rest) = lex::split_word(text);
         match word.to_ascii_lowercase().as_str() {
-            "classdef" | "class" | "style" | "click" => return Ok(()),
+            "click" => return Ok(()),
+            "classdef" => {
+                self.sheet.define(rest, self.src);
+                return Ok(());
+            }
+            "class" => {
+                self.sheet.assign_list(rest, sheet::plain_key);
+                return Ok(());
+            }
+            "style" => {
+                self.sheet.style(rest, self.src, sheet::plain_key);
+                return Ok(());
+            }
             "direction" => {
                 let dir = direction(lex::split_word(rest).0)
                     .ok_or_else(|| lex::syntax(line, format!("unknown direction `{rest}`")))?;
@@ -153,17 +172,26 @@ impl Builder<'_> {
         if lex::find_top_level(text, "-->", Nesting::Honour).is_some() {
             return self.transition(text, line);
         }
-        // `s2 : This is a description`.
-        if let Some((key, description)) = lex::split_once_top_level(text, ':', Nesting::Honour) {
+        // `s2 : This is a description`, also as `s2:::c : This is a description`.
+        if let Some((key, description)) = lex::split_label_colon(text, Nesting::Honour) {
+            let (key, class) = lex::split_class_suffix(key);
             let id = self.intern_state(key);
+            if let Some(class) = class {
+                self.sheet.assign(key, class);
+            }
             let description = lex::unquote(description);
             if let Some(state) = self.states.get_mut(id.0) {
                 state.label = Some(lex::label_at(self.src, description));
             }
             return Ok(());
         }
-        if text.chars().all(lex::is_ident_char) {
-            self.intern_state(text);
+        // A state alone, `s2` or `s2:::c`.
+        let (key, class) = lex::split_class_suffix(text);
+        if key.chars().all(lex::is_ident_char) {
+            self.intern_state(key);
+            if let Some(class) = class {
+                self.sheet.assign(key, class);
+            }
             return Ok(());
         }
         Err(lex::syntax(
@@ -184,11 +212,17 @@ impl Builder<'_> {
             Some((description, key)) => (key, Some(description)),
             None => (head, None),
         };
+        // `state A:::c {` attaches a class. Left on, the suffix became part of the key
+        // and the title.
+        let (key, class) = lex::split_class_suffix(key);
         let key = lex::unquote(key);
         if key.is_empty() {
             return Err(lex::syntax(line, "`state` without a name"));
         }
         let id = self.intern_state(key);
+        if let Some(class) = class {
+            self.sheet.assign(key, class);
+        }
         if let Some(description) = description
             && let Some(state) = self.states.get_mut(id.0)
         {
@@ -244,11 +278,18 @@ impl Builder<'_> {
                 "notes other than `left of` and `right of`",
             ));
         };
-        let (target, text) = match lex::split_once_top_level(after, ':', Nesting::Honour) {
+        // `note left of A:::c : text`: the suffix belongs to the target, so the text
+        // starts at the first `:` that is not part of it.
+        let (target, text) = match lex::split_label_colon(after, Nesting::Honour) {
             Some((target, text)) => (target, Some(text)),
             None => (after.trim(), None),
         };
-        let target = self.intern_state(lex::unquote(target));
+        let (target, class) = lex::split_class_suffix(target);
+        let target_key = lex::unquote(target);
+        let target = self.intern_state(target_key);
+        if let Some(class) = class {
+            self.sheet.assign(target_key, class);
+        }
         match text {
             Some(text) => {
                 let text = lex::unquote(text);
@@ -274,7 +315,7 @@ impl Builder<'_> {
 
     /// Handles `a --> b : label`, including the `[*]` markers.
     fn transition(&mut self, text: &str, line: usize) -> Result<(), MermaidError> {
-        let (body, label) = match lex::split_once_top_level(text, ':', Nesting::Honour) {
+        let (body, label) = match lex::split_label_colon(text, Nesting::Honour) {
             Some((body, label)) => (body, Some(label)),
             None => (text, None),
         };
@@ -302,6 +343,9 @@ impl Builder<'_> {
         is_source: bool,
         line: usize,
     ) -> Result<StateEndpoint, MermaidError> {
+        // `A:::c` attaches a class; after `[*]` it is read and ignored for good, since a
+        // start or end marker takes no colour.
+        let (text, class) = lex::split_class_suffix(text);
         if text == "[*]" {
             return Ok(if is_source {
                 StateEndpoint::Initial
@@ -312,6 +356,9 @@ impl Builder<'_> {
         let key = lex::unquote(text);
         if key.is_empty() {
             return Err(lex::syntax(line, "transition without both states"));
+        }
+        if let Some(class) = class {
+            self.sheet.assign(key, class);
         }
         Ok(StateEndpoint::State(self.intern_state(key)))
     }
@@ -338,6 +385,7 @@ impl Builder<'_> {
                 key: key.to_string(),
                 label: None,
                 kind: StateKind::Simple,
+                paint: None,
             },
         );
         if fresh {
@@ -360,6 +408,18 @@ impl Builder<'_> {
                 "composite state without a closing `}`",
             ));
         }
+        for state in &mut self.states {
+            state.paint = match &state.kind {
+                StateKind::Simple => self.sheet.paint(Some(&state.key), &[], true),
+                // A composite is a frame: no `classDef default` (ruling 14). One with
+                // nothing inside is drawn as a plain state box (layout), so it is a
+                // node and takes the default.
+                StateKind::Composite(scope) => {
+                    self.sheet.paint(Some(&state.key), &[], is_hollow(scope))
+                }
+                _ => None,
+            };
+        }
         let root = self.stack.pop().map(|(_, scope)| scope).unwrap_or_default();
         Ok(StateDiagram {
             direction: self.direction,
@@ -367,4 +427,15 @@ impl Builder<'_> {
             root,
         })
     }
+}
+
+/// Whether a composite state has nothing to draw inside it, which layout demotes to an
+/// ordinary state box: no state, no note and no `[*]` marker.
+fn is_hollow(scope: &StateScope) -> bool {
+    scope.states.is_empty()
+        && scope.notes.is_empty()
+        && !scope
+            .transitions
+            .iter()
+            .any(|t| t.from == StateEndpoint::Initial || t.to == StateEndpoint::Final)
 }

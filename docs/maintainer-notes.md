@@ -18,6 +18,25 @@ ER and state were all built on this without changing it — resist widening it. 
 engine needed to know where a node's internal compartment rules were, reading them back
 off the drawn canvas turned out to be cheaper and more general than adding a method.
 
+## Mermaid colours are snapped, not drawn as written
+
+A Mermaid stylesheet is written for a white page: `fill:#e3f4fb,color:#000` is a pale
+box with black text, and drawn as written on a dark terminal it is a bright block with
+unreadable text. What the colours carry is the grouping, so each colour snaps to one of
+16 theme slots at fixed angles (`mermaid::paint`), and the theme decides what the slot
+looks like (`theme::slots`), repaired so every theme clears the floors in
+`tests/theme_contrast.rs`. Fixed angles rather than the theme's measured hues keep a
+diagram on the same slots in every theme.
+
+When a colour finds its slot taken it also skips the two neighbouring slots: a midpoint
+slot draws as the blend of its neighbours, so `#d4831f` and `#b8650a`, two oranges an
+author meant as two classes, would otherwise land one blend apart and read as one.
+
+The repair moves inks, not tints. Lowering the light theme's half tints until orange ink
+passed on them left them invisible; moving six light inks 0.05 to 0.10 towards the text
+keeps the tints and shifts no hue by 2 degrees. Design:
+`docs/superpowers/specs/2026-10-03-mermaid-colours-design.md`.
+
 ## Gantt state is carried by colour alone
 
 Bars are solid `█` everywhere; state is colour plus the legend. An earlier version varied

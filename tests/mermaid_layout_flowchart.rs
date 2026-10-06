@@ -18,6 +18,7 @@ fn node(key: &str, label: &str, shape: NodeShape) -> FlowNode {
         key: key.to_string(),
         label: Label::line(label),
         shape,
+        paint: None,
     }
 }
 
@@ -495,6 +496,7 @@ fn placed_node(key: &str, label: &str, at: usize, shape: NodeShape) -> FlowNode 
         key: key.to_string(),
         label: Label::parse_at(label, at),
         shape,
+        paint: None,
     }
 }
 

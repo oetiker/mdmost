@@ -19,31 +19,6 @@ const TEXT_FLOOR: f32 = 4.5;
 /// WCAG's floor for meaningful non-text graphics — borders, rules, frames: 3:1.
 const GRAPHIC_FLOOR: f32 = 3.0;
 
-/// One sRGB channel, linearised (WCAG 2, relative luminance).
-fn channel(value: u8) -> f32 {
-    let c = f32::from(value) / 255.0;
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-/// WCAG 2 relative luminance.
-///
-/// Deliberately *not* [`Color::luminance`], which is the NTSC weighting the palette
-/// derivation uses to decide which way to shade. That one answers "which of these is
-/// lighter"; this one is the only definition a contrast ratio is defined against.
-fn relative_luminance(color: Color) -> f32 {
-    0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b)
-}
-
-/// The WCAG 2 contrast ratio between two colours, in `1.0..=21.0`.
-fn contrast(a: Color, b: Color) -> f32 {
-    let (x, y) = (relative_luminance(a), relative_luminance(b));
-    (x.max(y) + 0.05) / (x.min(y) + 0.05)
-}
-
 /// The foreground of a style that is required to have one.
 fn fg(name: &str, style: Style) -> Color {
     style
@@ -71,7 +46,7 @@ fn themes() -> Vec<Theme> {
 /// Asserts a ratio and says what it measured either way, because a failure whose
 /// message is only "assertion failed" costs the next reader the same experiment.
 fn at_least(theme: &str, what: &str, ink: Color, ground: Color, floor: f32) {
-    let ratio = contrast(ink, ground);
+    let ratio = ink.contrast(ground);
     assert!(
         ratio >= floor,
         "{theme}: {what} measures {ratio:.2}:1, below the {floor:.1}:1 floor \
@@ -281,19 +256,16 @@ fn borders_stay_quieter_than_the_text_they_frame() {
     for theme in themes() {
         let name = &theme.name;
         let page = theme.palette.bg;
-        let border = contrast(theme.palette.border, page);
-        let body = contrast(fg("body", theme.text.body), page);
-        let muted = contrast(theme.palette.muted, page);
+        let border = theme.palette.border.contrast(page);
+        let body = fg("body", theme.text.body).contrast(page);
+        let muted = theme.palette.muted.contrast(page);
         assert!(
             border < muted && muted < body,
             "{name}: structure must recede — border {border:.2}:1, \
              muted {muted:.2}:1, body {body:.2}:1"
         );
-        let punctuation = contrast(
-            fg("punctuation", theme.code.punctuation),
-            theme.palette.surface,
-        );
-        let text = contrast(fg("code text", theme.code.text), theme.palette.surface);
+        let punctuation = fg("punctuation", theme.code.punctuation).contrast(theme.palette.surface);
+        let text = fg("code text", theme.code.text).contrast(theme.palette.surface);
         assert!(
             punctuation < text,
             "{name}: punctuation ({punctuation:.2}:1) must stay quieter than code text \
@@ -329,9 +301,9 @@ fn section_numbers_are_readable_but_quieter_than_every_heading() {
             page,
             TEXT_FLOOR,
         );
-        let numbered = contrast(number, page);
+        let numbered = number.contrast(page);
         for level in 1..=6u8 {
-            let heading = contrast(fg("a heading", theme.heading(level)), page);
+            let heading = fg("a heading", theme.heading(level)).contrast(page);
             assert!(
                 numbered < heading,
                 "{name}: the section number ({numbered:.2}:1) must stay quieter than \
@@ -392,8 +364,8 @@ fn the_hovered_copy_button_stays_legible_in_every_theme() {
             // Louder than the resting button, not merely different from it: a shift
             // that dimmed the control the pointer is on would read as it going away.
             let (rest, over) = (
-                contrast(fg(slot, resting), ground),
-                contrast(fg(slot, hovered), ground),
+                fg(slot, resting).contrast(ground),
+                fg(slot, hovered).contrast(ground),
             );
             assert!(
                 over > rest,
@@ -456,8 +428,8 @@ fn the_hovered_link_stays_legible_in_every_theme() {
             // Louder than the resting link, not merely different from it: a shift that
             // dimmed the control the pointer is on would read as it going away.
             let (rest, over) = (
-                contrast(fg(slot, resting), ground),
-                contrast(fg(slot, hovered), ground),
+                fg(slot, resting).contrast(ground),
+                fg(slot, hovered).contrast(ground),
             );
             assert!(
                 over > rest,
@@ -509,11 +481,176 @@ fn a_formulas_rules_are_visible_but_quieter_than_its_symbols() {
         let rule = fg("math.rule", theme.math.rule);
         at_least(name, "math.atom", atom, page, TEXT_FLOOR);
         at_least(name, "math.rule", rule, page, GRAPHIC_FLOOR);
-        let (atom, rule) = (contrast(atom, page), contrast(rule, page));
+        let (atom, rule) = (atom.contrast(page), rule.contrast(page));
         assert!(
             rule < atom,
             "{name}: the structure must recede — math.rule {rule:.2}:1 is not quieter than \
              math.atom {atom:.2}:1"
         );
     }
+}
+
+use mdmost::theme::{Palette, SlotInk, fixed_ink_pairs};
+
+/// Colour spec §7: every slot ink and tint against every ground it meets.
+#[test]
+fn diagram_slots_clear_their_floors() {
+    for theme in themes() {
+        let name = &theme.name;
+        let d = theme.diagram;
+        let slots = theme.diagram_slots;
+        for (x, slot) in slots.iter().enumerate() {
+            let ink = slot
+                .ink
+                .unwrap_or_else(|| panic!("{name}: slot {x} fell back"));
+            at_least(
+                name,
+                &format!("slot {x} ink on the page"),
+                ink,
+                theme.palette.bg,
+                TEXT_FLOOR,
+            );
+            at_least(
+                name,
+                &format!("slot {x} ink on its full tint"),
+                ink,
+                slot.full_tint,
+                GRAPHIC_FLOOR,
+            );
+            for (what, style) in [
+                ("text", d.node_text),
+                ("stereotype", d.stereotype),
+                ("edge label", d.edge_label),
+            ] {
+                at_least(
+                    name,
+                    &format!("{what} on slot {x} full tint"),
+                    fg(what, style),
+                    slot.full_tint,
+                    TEXT_FLOOR,
+                );
+            }
+            for (what, style, floor) in [
+                ("text", d.node_text, TEXT_FLOOR),
+                ("edge label", d.edge_label, TEXT_FLOOR),
+                ("group title", d.group_title, TEXT_FLOOR),
+                ("line", d.line, GRAPHIC_FLOOR),
+                ("arrow", d.arrow, GRAPHIC_FLOOR),
+                ("node border", d.node_border, GRAPHIC_FLOOR),
+                ("group border", d.group_border, GRAPHIC_FLOOR),
+            ] {
+                at_least(
+                    name,
+                    &format!("{what} on slot {x} half tint"),
+                    fg(what, style),
+                    slot.half_tint,
+                    floor,
+                );
+            }
+            for (y, other) in slots.iter().enumerate() {
+                let other = other
+                    .ink
+                    .unwrap_or_else(|| panic!("{name}: slot {y} fell back"));
+                at_least(
+                    name,
+                    &format!("slot {y} ink on slot {x} half tint"),
+                    other,
+                    slot.half_tint,
+                    TEXT_FLOOR,
+                );
+            }
+        }
+    }
+}
+
+/// Palettes the repair has to survive (colour spec §8). Kept out of `themes()`, which
+/// every other test here loops over and which such a palette would fail.
+fn repair_palettes() -> Vec<(&'static str, Palette)> {
+    let dark = Theme::default_dark().palette;
+    let grey = Color::hex(0x777777);
+    vec![
+        (
+            "text misses the page",
+            Palette {
+                bg: grey,
+                surface: grey,
+                overlay: grey,
+                fg: Color::hex(0x8a8a8a),
+                ..dark.clone()
+            },
+        ),
+        (
+            "hues sit on the page",
+            Palette {
+                red: Color::hex(0x2a1a1e),
+                orange: Color::hex(0x2a2018),
+                yellow: Color::hex(0x28261a),
+                green: Color::hex(0x1a2820),
+                cyan: Color::hex(0x1a2628),
+                blue: Color::hex(0x1a1e2c),
+                purple: Color::hex(0x221c2c),
+                magenta: Color::hex(0x2a1a26),
+                ..dark
+            },
+        ),
+    ]
+}
+
+/// The repair terminates and leaves every slot in one of the states §5.3 allows: an ink
+/// that clears its own floors, or the step 2 fallback; a tint on which the fixed
+/// diagram inks clear theirs, or a tint that step 3 lowered all the way to the page.
+#[test]
+fn the_slot_repair_terminates_on_hostile_palettes() {
+    for (what, palette) in repair_palettes() {
+        let theme = Theme::from_palette(what, true, palette);
+        let bg = theme.palette.bg;
+        let d = theme.diagram;
+        let halves: Vec<Color> = theme.diagram_slots.iter().map(|s| s.half_tint).collect();
+        for (x, slot) in theme.diagram_slots.iter().enumerate() {
+            let SlotInk {
+                ink,
+                full_tint,
+                half_tint,
+            } = *slot;
+            match ink {
+                None => assert_eq!((full_tint, half_tint), (bg, bg), "{what}: slot {x}"),
+                Some(ink) => {
+                    assert!(ink.contrast(bg) >= TEXT_FLOOR, "{what}: slot {x} on bg");
+                    assert!(
+                        halves.iter().all(|h| ink.contrast(*h) >= TEXT_FLOOR),
+                        "{what}: slot {x} on halves"
+                    );
+                    assert!(
+                        ink.contrast(full_tint) >= GRAPHIC_FLOOR,
+                        "{what}: slot {x} on full"
+                    );
+                }
+            }
+            // Every fixed-ink pair clears its floor on its tint, or the tint has been
+            // lowered all the way to the page (§8).
+            let (on_full, on_half) = fixed_ink_pairs(&d, theme.palette.fg);
+            for (ink, floor) in on_full {
+                assert!(
+                    full_tint == bg || ink.contrast(full_tint) >= floor,
+                    "{what}: slot {x} full"
+                );
+            }
+            for (ink, floor) in on_half {
+                assert!(
+                    half_tint == bg || ink.contrast(half_tint) >= floor,
+                    "{what}: slot {x} half"
+                );
+            }
+        }
+    }
+    let text_misses = Theme::from_palette("t", true, repair_palettes()[0].1.clone());
+    assert!(
+        text_misses.diagram_slots.iter().all(|s| s.ink.is_none()),
+        "every slot falls back"
+    );
+    let murky = Theme::from_palette("m", true, repair_palettes()[1].1.clone());
+    assert!(
+        murky.diagram_slots.iter().all(|s| s.ink.is_some()),
+        "inks move towards the text"
+    );
 }

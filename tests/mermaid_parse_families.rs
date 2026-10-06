@@ -34,8 +34,179 @@ fn node<'a>(chart: &'a Flowchart, key: &str) -> &'a FlowNode {
     }
 }
 
+/// A paint's colours and weight, without the source offsets that order slots.
+fn colours(paint: Option<Paint>) -> Option<(Option<u32>, Option<u32>, bool)> {
+    let rgb = |c: Option<PaintColor>| c.map(|c| u32::from_be_bytes([0, c.rgb.r, c.rgb.g, c.rgb.b]));
+    paint.map(|p| (rgb(p.fill), rgb(p.stroke), p.heavy))
+}
+
 mod flowcharts {
     use super::*;
+
+    /// The colour spec's driving example (§1).
+    #[test]
+    fn reads_classdef_class_and_style() {
+        let chart = flowchart(
+            "flowchart TD\n  airlock --> zimbra --> zmcfgapi --> mbox\n\
+             classDef access fill:#e3f4fb,stroke:#2a8bb5,color:#000\n\
+             classDef comm fill:#fdf0e1,stroke:#d4831f,color:#000\n\
+             class airlock access\n  class zimbra comm\n\
+             style mbox fill:#fff7ee,stroke:#b8650a,stroke-width:3px,color:#000\n",
+        );
+        assert_eq!(
+            colours(node(&chart, "airlock").paint),
+            Some((Some(0xe3f4fb), Some(0x2a8bb5), false))
+        );
+        assert_eq!(
+            colours(node(&chart, "zimbra").paint),
+            Some((Some(0xfdf0e1), Some(0xd4831f), false))
+        );
+        assert_eq!(node(&chart, "zmcfgapi").paint, None);
+        assert_eq!(
+            colours(node(&chart, "mbox").paint),
+            Some((Some(0xfff7ee), Some(0xb8650a), true))
+        );
+        assert_eq!(chart.nodes.len(), 4, "colour lines create no node");
+    }
+
+    #[test]
+    fn merges_default_then_classes_then_styles() {
+        let chart = flowchart(
+            "flowchart LR\n  A:::one --> B\n  class A two\n  style A stroke:#00ff00\n\
+             classDef default fill:#111111,stroke-width:3px\n\
+             classDef one fill:#ff0000,stroke:#ff0000\n  classDef two stroke:#0000ff\n",
+        );
+        assert_eq!(
+            colours(node(&chart, "A").paint),
+            Some((Some(0xff0000), Some(0x00ff00), true))
+        );
+        assert_eq!(
+            colours(node(&chart, "B").paint),
+            Some((Some(0x111111), None, true)),
+            "default"
+        );
+    }
+
+    #[test]
+    fn assigns_several_classes_and_several_nodes_at_once() {
+        let chart = flowchart(
+            "flowchart LR\n  A --> B --> C\n  class A,B one,two\n\
+             classDef one fill:#ff0000\n  classDef two stroke:#0000ff\n",
+        );
+        for key in ["A", "B"] {
+            assert_eq!(
+                colours(node(&chart, key).paint),
+                Some((Some(0xff0000), Some(0x0000ff), false)),
+                "{key}"
+            );
+        }
+        assert_eq!(node(&chart, "C").paint, None);
+    }
+
+    #[test]
+    fn reads_lists_with_spaces_after_the_commas() {
+        let chart = flowchart(
+            "flowchart LR\n  A --> B --> C\n  class A, B one, two\n\
+             classDef one, three fill:#ff0000\n  classDef two stroke:#0000ff\n\
+             class C three\n",
+        );
+        for key in ["A", "B"] {
+            assert_eq!(
+                colours(node(&chart, key).paint),
+                Some((Some(0xff0000), Some(0x0000ff), false)),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            colours(node(&chart, "C").paint),
+            Some((Some(0xff0000), None, false))
+        );
+    }
+
+    #[test]
+    fn paints_subgraphs_by_key_and_by_suffix_but_not_by_default() {
+        let chart = flowchart(
+            "flowchart TB\n  subgraph one\n    a\n  end\n  subgraph two:::warm [Two]\n    b\n  end\n\
+             subgraph \"Three words\":::warm\n    c\n  end\n\
+             style one fill:#e3f4fb\n  classDef warm stroke:#d4831f\n  classDef default stroke:#ff0000\n",
+        );
+        let groups = &chart.root.children;
+        assert_eq!(
+            colours(groups[0].paint),
+            Some((Some(0xe3f4fb), None, false))
+        );
+        assert_eq!(
+            colours(groups[1].paint),
+            Some((None, Some(0xd4831f), false))
+        );
+        assert_eq!(
+            colours(groups[2].paint),
+            Some((None, Some(0xd4831f), false)),
+            "anonymous"
+        );
+        assert_eq!(
+            colours(node(&chart, "a").paint),
+            Some((None, Some(0xff0000), false))
+        );
+    }
+
+    #[test]
+    fn unknown_classes_undeclared_nodes_and_bad_values_are_dropped() {
+        let chart = flowchart(
+            "flowchart LR\n  A --> B\n  class A nosuch\n  style Z fill:#ff0000\n  class Y one\n\
+             classDef one fill:#ff0000\n  style B fill:notacolour,stroke:#12\n",
+        );
+        assert_eq!(chart.nodes.len(), 2);
+        assert_eq!(node(&chart, "A").paint, None);
+        assert_eq!(node(&chart, "B").paint, None);
+    }
+
+    /// `;` ends a statement, but the splitter keeps `#333;` whole (colour spec §3.4).
+    #[test]
+    fn a_semicolon_ends_the_property_list() {
+        let chart = flowchart(
+            "flowchart LR\n  A --> B --> C\n  classDef c fill:#ff99ff,stroke:#333;\n  class A c\n\
+             style B fill:#000;stroke:#123\n  style C fill:#e3f4fb;stroke:#2a8bb5\n",
+        );
+        assert_eq!(
+            colours(node(&chart, "A").paint),
+            Some((Some(0xff99ff), Some(0x333333), false))
+        );
+        assert_eq!(
+            colours(node(&chart, "B").paint),
+            Some((Some(0x000000), None, false))
+        );
+        assert_eq!(
+            colours(node(&chart, "C").paint),
+            Some((Some(0xe3f4fb), None, false))
+        );
+    }
+
+    /// Colour spec Review Focus 2: no colour line can fail a diagram.
+    #[test]
+    fn colour_lines_with_garbage_never_fail_the_diagram() {
+        for line in [
+            "classDef",
+            "classDef c",
+            "classDef ,, fill:#f00",
+            "class",
+            "class A",
+            "class  c",
+            "style",
+            "style A",
+            "style A fill:",
+            "style A stroke-width:1e999px",
+            "style A fill:#ffffffffff",
+            "style A fill:#ﬀ0000",
+            "cssClass \"A\" c",
+            "classDef é fill:#f00",
+            "style A :",
+            "classDef c fill:#f00,,,stroke:",
+        ] {
+            let chart = flowchart(&format!("flowchart LR\n  A --> B\n  {line}\n"));
+            assert_eq!(chart.nodes.len(), 2, "{line}");
+        }
+    }
 
     #[test]
     fn parses_the_documentation_flowchart() {
@@ -215,9 +386,48 @@ mod flowcharts {
         assert_eq!(inner.key.as_deref(), Some("inner"));
         assert_eq!(inner.direction, Some(Direction::LeftToRight));
         assert_eq!(inner.nodes.len(), 2);
-        // `c1` and `a2` are first mentioned outside any subgraph.
-        assert_eq!(chart.root.nodes.len(), 2);
+        // `a2` is first mentioned outside any subgraph, but `one` names it too.
+        let keys = |nodes: &[NodeId]| -> Vec<&str> {
+            nodes
+                .iter()
+                .map(|id| chart.nodes[id.0].key.as_str())
+                .collect()
+        };
+        assert_eq!(keys(&chart.root.nodes), ["c1"]);
+        assert_eq!(keys(&one.nodes), ["a1", "a2"]);
         assert_eq!(chart.root.children[1].key.as_deref(), Some("two"));
+    }
+
+    /// A node belongs to the first subgraph to close that names it, so the innermost
+    /// wins, as in Mermaid.
+    #[test]
+    fn a_node_belongs_to_the_first_subgraph_that_closes_naming_it() {
+        let chart = flowchart(
+            "flowchart TB
+  x --> y
+  subgraph outer
+    y --> z
+    subgraph inner
+      z
+    end
+  end
+             subgraph later
+    y --> w
+  end
+  w --> x
+",
+        );
+        let keys = |nodes: &[NodeId]| -> Vec<&str> {
+            nodes
+                .iter()
+                .map(|id| chart.nodes[id.0].key.as_str())
+                .collect()
+        };
+        let outer = &chart.root.children[0];
+        assert_eq!(keys(&chart.root.nodes), ["x"]);
+        assert_eq!(keys(&outer.nodes), ["y"]);
+        assert_eq!(keys(&outer.children[0].nodes), ["z"]);
+        assert_eq!(keys(&chart.root.children[1].nodes), ["w"]);
     }
 
     #[test]
@@ -244,6 +454,84 @@ flowchart LR
         );
         assert_eq!(chart.nodes.len(), 2);
         assert_eq!(chart.edges.len(), 1);
+    }
+
+    /// `:::name` may follow a node reference wherever one stands (colour spec §3.3).
+    /// Until colours are drawn the class is read and dropped, so the diagram must parse
+    /// exactly as if the suffix were not there.
+    #[test]
+    fn reads_a_class_suffix_wherever_a_node_stands() {
+        let chart = flowchart(
+            "flowchart LR
+    A:::foo --> B[Box]:::bar
+    C:::c & D(Round):::d --> E:::e
+    F:::f
+    G[\"keeps:::this\"] -- label --> H:::h
+",
+        );
+        let keys: Vec<_> = chart.nodes.iter().map(|node| node.key.as_str()).collect();
+        assert_eq!(keys, vec!["A", "B", "C", "D", "E", "F", "G", "H"]);
+        assert_eq!(node(&chart, "B").shape, NodeShape::Rect);
+        assert_eq!(node(&chart, "B").label, Label::line("Box"));
+        assert_eq!(node(&chart, "D").shape, NodeShape::Round);
+        assert_eq!(node(&chart, "D").label, Label::line("Round"));
+        assert_eq!(node(&chart, "G").label, Label::line("keeps:::this"));
+        assert_eq!(chart.edges.len(), 4);
+    }
+
+    /// `subgraph one:::name` attaches a class to the subgraph; it is not part of the
+    /// key or the title (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_on_a_subgraph() {
+        let chart = flowchart(
+            "flowchart LR
+    subgraph one:::foo
+        a
+    end
+    subgraph two:::foo [Second]
+        b
+    end
+    subgraph three[Third]:::foo
+        c
+    end
+    subgraph \"Fourth one\":::foo
+        d
+    end
+",
+        );
+        let groups: Vec<_> = chart
+            .root
+            .children
+            .iter()
+            .map(|group| (group.key.as_deref(), group.title.as_ref().map(Label::text)))
+            .collect();
+        assert_eq!(
+            groups,
+            vec![
+                (Some("one"), Some("one".to_string())),
+                (Some("two"), Some("Second".to_string())),
+                (Some("three"), Some("Third".to_string())),
+                (None, Some("Fourth one".to_string())),
+            ]
+        );
+    }
+
+    /// `;` ends a statement, so `stroke:#2a8bb5` after a `style` line's `;` is a stray
+    /// CSS fragment, not a node (colour spec §3.4).
+    #[test]
+    fn drops_css_fragments_cut_off_a_styling_statement() {
+        let chart = flowchart(
+            "flowchart LR
+    A --> B
+    style A fill:#e3f4fb;stroke:#2a8bb5;stroke-width:3px
+    classDef big fill:#fff; stroke:#000
+    linkStyle 0 stroke:#333;color:red
+    class A big; C --> D
+",
+        );
+        let keys: Vec<_> = chart.nodes.iter().map(|node| node.key.as_str()).collect();
+        assert_eq!(keys, vec!["A", "B", "C", "D"]);
+        assert_eq!(chart.edges.len(), 2);
     }
 }
 
@@ -484,6 +772,54 @@ mod classes {
         }
     }
 
+    fn class_named<'a>(diagram: &'a ClassDiagram, name: &str) -> &'a Class {
+        diagram
+            .classes
+            .iter()
+            .find(|c| c.name.lines[0] == name)
+            .unwrap_or_else(|| panic!("no class {name}"))
+    }
+
+    #[test]
+    fn reads_colour_lines_on_classes() {
+        let diagram = class_diagram(
+            "classDiagram\n  class Animal:::warm\n  Animal <|-- Dog:::cool\n  Square~Shape~ <|-- Cat\n\
+             cssClass \"Cat, Square\" cool\n  style Animal stroke-width:3px\n\
+             classDef warm fill:#d4831f\n  classDef cool stroke:#2a8bb5\n",
+        );
+        assert_eq!(
+            colours(class_named(&diagram, "Animal").paint),
+            Some((Some(0xd4831f), None, true))
+        );
+        assert_eq!(
+            colours(class_named(&diagram, "Dog").paint),
+            Some((None, Some(0x2a8bb5), false))
+        );
+        assert_eq!(
+            colours(class_named(&diagram, "Cat").paint),
+            Some((None, Some(0x2a8bb5), false))
+        );
+        assert_eq!(
+            colours(class_named(&diagram, "Square").paint),
+            Some((None, Some(0x2a8bb5), false))
+        );
+        assert_eq!(
+            diagram.classes.len(),
+            4,
+            "no class named after a colour line"
+        );
+    }
+
+    #[test]
+    fn a_class_line_in_a_class_diagram_still_declares() {
+        let diagram =
+            class_diagram("classDiagram\n  class Bird\n  classDef default fill:#ff0000\n");
+        assert_eq!(
+            colours(class_named(&diagram, "Bird").paint),
+            Some((Some(0xff0000), None, false))
+        );
+    }
+
     #[test]
     fn parses_the_documentation_class_diagram() {
         let diagram = class_diagram(
@@ -589,6 +925,74 @@ mod classes {
         assert_eq!(diagram.relations[0].label, Some(Label::line("inheritance")));
     }
 
+    /// A `;` inside a `style` or `classDef` line must not declare a class named after
+    /// the CSS property it cut off (colour spec §3.4).
+    #[test]
+    fn drops_css_fragments_cut_off_a_styling_statement() {
+        let diagram = class_diagram(
+            "classDiagram
+    class Animal
+    style Animal fill:#e3f4fb;stroke:#2a8bb5
+    classDef foo fill:#fff;stroke:#000
+    cssClass \"Animal\" foo; Animal : +int age
+",
+        );
+        assert_eq!(diagram.classes.len(), 1);
+        assert_eq!(diagram.classes[0].name.text(), "Animal");
+        assert_eq!(diagram.classes[0].members.len(), 1);
+    }
+
+    /// `class A:::c` names class `A` and attaches `c` to it (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_on_a_class_declaration() {
+        let diagram = class_diagram(
+            "classDiagram
+    class Animal
+    class Animal:::foo
+    class Duck:::bar {
+        +swim()
+    }
+    class Shape~T~:::baz
+    Animal <|-- Duck
+",
+        );
+        let names: Vec<_> = diagram.classes.iter().map(|c| c.name.text()).collect();
+        assert_eq!(names, vec!["Animal", "Duck", "Shape"]);
+        assert_eq!(diagram.classes[1].members.len(), 1);
+        assert_eq!(diagram.classes[2].generic.as_deref(), Some("T"));
+        assert_eq!(diagram.relations.len(), 1);
+    }
+
+    /// `:::name` may follow a class name in a relation and in the `A : member` form,
+    /// and binds tighter than the `:` that starts a label or a member (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_in_a_relation_and_a_member_line() {
+        let diagram = class_diagram(
+            "classDiagram
+    Animal:::foo <|-- Dog
+    Animal <|-- Cat:::bar
+    Animal:::foo \"1\" --> \"*\" Fish:::baz : eats
+    Animal:::foo : +int age
+    <<interface>> Bird:::qux
+",
+        );
+        let names: Vec<_> = diagram.classes.iter().map(|c| c.name.text()).collect();
+        assert_eq!(names, vec!["Animal", "Dog", "Cat", "Fish", "Bird"]);
+        let labels: Vec<_> = diagram
+            .relations
+            .iter()
+            .map(|r| r.label.as_ref().map(Label::text))
+            .collect();
+        assert_eq!(labels, vec![None, None, Some("eats".to_string())]);
+        assert_eq!(diagram.relations[2].left_cardinality.as_deref(), Some("1"));
+        assert_eq!(diagram.relations[2].right_cardinality.as_deref(), Some("*"));
+        assert_eq!(diagram.classes[0].members.len(), 1);
+        assert_eq!(
+            diagram.classes[4].annotation,
+            Some(ClassAnnotation::Interface)
+        );
+    }
+
     #[test]
     fn parses_a_class_block_written_on_one_line() {
         let diagram = class_diagram("classDiagram\n    class A { +f() }\n    A <|-- B\n");
@@ -665,6 +1069,40 @@ mod classes {
 
 mod entities {
     use super::*;
+
+    fn entity_named<'a>(diagram: &'a ErDiagram, name: &str) -> &'a Entity {
+        diagram
+            .entities
+            .iter()
+            .find(|e| e.name.lines[0] == name)
+            .unwrap_or_else(|| panic!("no entity {name}"))
+    }
+
+    #[test]
+    fn reads_colour_lines_on_entities() {
+        let diagram = er(
+            "erDiagram\n  CUSTOMER:::warm ||--o{ ORDER : places\n  ORDER ||--|{ LINE:::cool : has\n\
+             p[Person]:::cool\n  class ORDER warm\n  style LINE fill:#000000;stroke:#ff0000\n\
+             classDef warm fill:#d4831f\n  classDef cool stroke:#2a8bb5\n",
+        );
+        assert_eq!(
+            colours(entity_named(&diagram, "CUSTOMER").paint),
+            Some((Some(0xd4831f), None, false))
+        );
+        assert_eq!(
+            colours(entity_named(&diagram, "ORDER").paint),
+            Some((Some(0xd4831f), None, false))
+        );
+        assert_eq!(
+            colours(entity_named(&diagram, "LINE").paint),
+            Some((Some(0x000000), Some(0x2a8bb5), false))
+        );
+        assert_eq!(
+            colours(entity_named(&diagram, "p").paint),
+            Some((None, Some(0x2a8bb5), false))
+        );
+        assert_eq!(diagram.entities.len(), 4);
+    }
 
     /// The ER diagram in `src`.
     #[track_caller]
@@ -770,6 +1208,41 @@ mod entities {
         assert_eq!(relationship.left_cardinality, ErCardinality::ZeroOrOne);
         assert_eq!(relationship.right_cardinality, ErCardinality::ZeroOrOne);
         assert_eq!(relationship.label, Some(Label::line("may own")));
+    }
+
+    /// `:::name` may follow an entity name alone, before `{` and at either end of a
+    /// relationship, and binds tighter than the `:` of the label (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_after_an_entity_name() {
+        let diagram = er("erDiagram
+    CUSTOMER:::foo ||--o{ ORDER : places
+    ORDER ||--|{ LINE:::bar : contains
+    PRODUCT:::baz
+    CUSTOMER:::foo {
+        string name
+    }
+    p[Person]:::qux
+");
+        let names: Vec<_> = diagram.entities.iter().map(|e| e.name.text()).collect();
+        assert_eq!(names, vec!["CUSTOMER", "ORDER", "LINE", "PRODUCT", "p"]);
+        assert_eq!(diagram.entities[0].attributes.len(), 1);
+        assert_eq!(
+            diagram.entities[4]
+                .alias
+                .as_ref()
+                .map(Label::text)
+                .as_deref(),
+            Some("Person")
+        );
+        let labels: Vec<_> = diagram
+            .relationships
+            .iter()
+            .map(|r| r.label.as_ref().map(Label::text))
+            .collect();
+        assert_eq!(
+            labels,
+            vec![Some("places".to_string()), Some("contains".to_string())]
+        );
     }
 }
 
@@ -934,6 +1407,85 @@ mod states {
         }
     }
 
+    fn state_named<'a>(diagram: &'a StateDiagram, key: &str) -> &'a StateNode {
+        diagram
+            .states
+            .iter()
+            .find(|s| s.key == key)
+            .unwrap_or_else(|| panic!("no state {key}"))
+    }
+
+    #[test]
+    fn reads_colour_lines_on_states_and_composites() {
+        let diagram = state(
+            "stateDiagram-v2\n  [*] --> A:::hot\n  A --> B : go\n  B:::cold : waiting\n\
+             state C:::hot {\n    D\n  }\n  state E <<choice>>\n  note left of F:::cold : n\n\
+             class E hot\n  class B hot\n  style C stroke-width:3px\n\
+             classDef hot fill:#ff0000\n  classDef cold stroke:#0000ff\n  classDef default stroke:#00ff00\n",
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "A").paint),
+            Some((Some(0xff0000), Some(0x00ff00), false))
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "B").paint),
+            Some((Some(0xff0000), Some(0x0000ff), false))
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "C").paint),
+            Some((Some(0xff0000), None, true)),
+            "no default"
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "D").paint),
+            Some((None, Some(0x00ff00), false))
+        );
+        assert_eq!(
+            state_named(&diagram, "E").paint,
+            None,
+            "a choice takes no paint"
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "F").paint),
+            Some((None, Some(0x0000ff), false)),
+            "note target"
+        );
+    }
+
+    #[test]
+    fn an_empty_composite_is_a_node_and_takes_the_default_class() {
+        let diagram = state(
+            "stateDiagram-v2\n  state Hollow {\n  }\n  state Full {\n    D\n  }\n\
+             classDef default stroke:#00ff00\n",
+        );
+        assert_eq!(
+            colours(state_named(&diagram, "Hollow").paint),
+            Some((None, Some(0x00ff00), false)),
+            "drawn as a state box"
+        );
+        assert_eq!(
+            state_named(&diagram, "Full").paint,
+            None,
+            "a frame takes no default"
+        );
+    }
+
+    #[test]
+    fn style_on_an_undeclared_state_creates_none() {
+        let diagram = state("stateDiagram-v2\n  A --> B\n  style Z fill:#ff0000\n  class Y c\n");
+        assert_eq!(diagram.states.len(), 2);
+    }
+
+    #[test]
+    fn a_declared_alias_takes_its_class() {
+        let diagram =
+            state("stateDiagram-v2\n  state \"Long name\" as C:::c\n  classDef c fill:#ff0000\n");
+        assert_eq!(
+            colours(state_named(&diagram, "C").paint),
+            Some((Some(0xff0000), None, false))
+        );
+    }
+
     #[test]
     fn parses_the_documentation_state_diagram() {
         let diagram = state(
@@ -1046,6 +1598,102 @@ mod states {
         };
         assert_eq!(scope.transitions.len(), 1);
         assert_eq!(diagram.root.transitions.len(), 1);
+    }
+
+    /// A `;` inside a styling line must not draw a state named after the CSS property
+    /// it cut off, with the value as its description (colour spec §3.4).
+    #[test]
+    fn drops_css_fragments_cut_off_a_styling_statement() {
+        let diagram = state(
+            "stateDiagram-v2
+    A --> B
+    style A fill:#e3f4fb;stroke:#2a8bb5
+    classDef foo fill:#fff;stroke:#000
+    class A foo; C : waiting
+",
+        );
+        let keys: Vec<_> = diagram.states.iter().map(|s| s.key.as_str()).collect();
+        assert_eq!(keys, vec!["A", "B", "C"]);
+        assert_eq!(
+            diagram.states[2].label.as_ref().map(Label::text).as_deref(),
+            Some("waiting")
+        );
+    }
+
+    /// In a note `:::name` belongs to the target state, not to the note text, and on a
+    /// `state` declaration it is not part of the key (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_on_a_note_target_and_a_state_declaration() {
+        let diagram = state(
+            "stateDiagram-v2
+    state A:::foo {
+        [*] --> B
+    }
+    state \"Long name\" as C:::bar
+    state D:::baz <<choice>>
+    note left of A:::foo : hi
+    note right of C:::bar
+        two
+    end note
+",
+        );
+        let keys: Vec<_> = diagram.states.iter().map(|s| s.key.as_str()).collect();
+        assert_eq!(keys, vec!["A", "B", "C", "D"]);
+        assert!(matches!(diagram.states[0].kind, StateKind::Composite(_)));
+        assert_eq!(
+            diagram.states[2].label.as_ref().map(Label::text).as_deref(),
+            Some("Long name")
+        );
+        assert_eq!(diagram.states[3].kind, StateKind::Choice);
+        let notes: Vec<_> = diagram
+            .root
+            .notes
+            .iter()
+            .map(|n| (n.target, n.text.text()))
+            .collect();
+        assert_eq!(
+            notes,
+            vec![
+                (StateId(0), "hi".to_string()),
+                (StateId(2), "two".to_string())
+            ]
+        );
+    }
+
+    /// `:::name` binds tighter than `:`, so it is never read as the start of a label
+    /// or a description (colour spec §3.3).
+    #[test]
+    fn reads_a_class_suffix_after_a_state_name() {
+        let diagram = state(
+            "stateDiagram-v2
+    [*] --> A:::foo
+    A:::foo --> B:::bar : go
+    C:::baz
+    D:::qux : waiting
+    [*]:::foo --> D
+    B --> [*]:::foo
+",
+        );
+        let keys: Vec<_> = diagram.states.iter().map(|s| s.key.as_str()).collect();
+        assert_eq!(keys, vec!["A", "B", "C", "D"]);
+        let labels: Vec<_> = diagram
+            .root
+            .transitions
+            .iter()
+            .map(|t| t.label.as_ref().map(Label::text))
+            .collect();
+        assert_eq!(labels, vec![None, Some("go".to_string()), None, None]);
+        let transitions = &diagram.root.transitions;
+        assert_eq!(transitions[0].from, StateEndpoint::Initial);
+        assert_eq!(transitions[0].to, StateEndpoint::State(StateId(0)));
+        assert_eq!(transitions[1].to, StateEndpoint::State(StateId(1)));
+        assert_eq!(transitions[2].from, StateEndpoint::Initial);
+        assert_eq!(transitions[3].to, StateEndpoint::Final);
+        assert_eq!(diagram.states[2].label, None);
+        assert_eq!(
+            diagram.states[3].label.as_ref().map(Label::text).as_deref(),
+            Some("waiting")
+        );
     }
 
     #[test]

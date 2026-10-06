@@ -26,6 +26,8 @@ use crate::mermaid::ast::{
 };
 use crate::theme::Theme;
 
+use super::painted::{NodeStyle, Painter};
+
 use super::graph::{
     self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
 };
@@ -58,19 +60,40 @@ pub fn draw_with(
     theme: &Theme,
     fit: Fit,
 ) -> Result<Canvas, MermaidError> {
+    let painter = Painter::new(
+        diagram
+            .classes
+            .iter()
+            .filter_map(|class| class.paint.as_ref()),
+        theme,
+    );
+    let styles = diagram
+        .classes
+        .iter()
+        .map(|class| painter.node(class.paint.as_ref()))
+        .collect();
     let spec = build(diagram);
-    graph::draw(&spec, &Art { diagram }, width, theme, fit)
+    graph::draw(&spec, &Art { diagram, styles }, width, theme, fit)
 }
 
 /// Draws class boxes for the engine.
 struct Art<'a> {
     diagram: &'a ClassDiagram,
+    /// One resolved style per class, indexed like `diagram.classes`.
+    styles: Vec<NodeStyle>,
 }
 
 impl NodeArt for Art<'_> {
     fn render(&self, node: NodeIdx, budget: u16, theme: &Theme) -> Canvas {
         match self.diagram.classes.get(node.0) {
-            Some(class) => class_box(class, budget, theme),
+            Some(class) => {
+                let style = self
+                    .styles
+                    .get(node.0)
+                    .copied()
+                    .unwrap_or_else(|| NodeStyle::plain(theme));
+                class_box(class, budget, theme, &style)
+            }
             None => Canvas::empty(0),
         }
     }
@@ -80,7 +103,7 @@ impl NodeArt for Art<'_> {
 ///
 /// Empty compartments are dropped by [`record::draw`], so a class with no members is a
 /// plain name box — which is exactly how Mermaid draws it.
-fn class_box(class: &Class, budget: u16, theme: &Theme) -> Canvas {
+fn class_box(class: &Class, budget: u16, theme: &Theme, style: &NodeStyle) -> Canvas {
     let styles = theme.diagram;
     let mut header = Vec::new();
     if let Some(annotation) = &class.annotation {
@@ -101,7 +124,7 @@ fn class_box(class: &Class, budget: u16, theme: &Theme) -> Canvas {
         }
     }
 
-    record::draw(&[header, fields, methods], budget, theme)
+    record::draw(&[header, fields, methods], budget, theme, style)
 }
 
 /// The name shown in a class box, with any generic parameter restored.
@@ -141,6 +164,7 @@ fn build(diagram: &ClassDiagram) -> GraphSpec {
             nodes: (0..diagram.classes.len()).map(NodeIdx).collect(),
             ..GroupSpec::default()
         },
+        beside: Vec::new(),
     }
 }
 
@@ -198,6 +222,7 @@ mod tests {
             generic: None,
             annotation: None,
             members,
+            paint: None,
         }
     }
 
@@ -224,7 +249,7 @@ mod tests {
     fn a_class_box_has_a_compartment_per_member_kind() {
         let theme = Theme::default_dark();
         let class = class("Animal", vec![field("age", "int"), method("isMammal")]);
-        let text = class_box(&class, 40, &theme).plain_text();
+        let text = class_box(&class, 40, &theme, &NodeStyle::plain(&theme)).plain_text();
         assert!(text.contains("Animal"), "{text}");
         assert!(text.contains("+age: int"), "{text}");
         assert!(text.contains("+isMammal(): bool"), "{text}");
@@ -234,7 +259,13 @@ mod tests {
     #[test]
     fn a_class_without_members_is_a_plain_name_box() {
         let theme = Theme::default_dark();
-        let text = class_box(&class("Marker", Vec::new()), 40, &theme).plain_text();
+        let text = class_box(
+            &class("Marker", Vec::new()),
+            40,
+            &theme,
+            &NodeStyle::plain(&theme),
+        )
+        .plain_text();
         assert!(!text.contains('├'), "no rules expected: {text}");
     }
 
@@ -243,7 +274,7 @@ mod tests {
         let theme = Theme::default_dark();
         let mut class = class("Shape", Vec::new());
         class.annotation = Some(ClassAnnotation::Interface);
-        let canvas = class_box(&class, 40, &theme);
+        let canvas = class_box(&class, 40, &theme, &NodeStyle::plain(&theme));
         assert!(canvas.row_text(1).contains("<<interface>>"));
         assert!(canvas.row_text(2).contains("Shape"));
     }

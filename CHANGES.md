@@ -3,10 +3,34 @@
 ## [Unreleased]
 
 ### New
+- Mermaid flowchart, state, class and ER diagrams now draw the colours set with `classDef`, `class`, `cssClass`, `style` and `:::`. Each colour is drawn in the nearest hue of the active theme, so text stays readable on dark and light terminals: `stroke` colours the border, `fill` also tints the inside, and a `stroke-width` of 3px or more draws a heavy outline. A `fill` on a subgraph or composite state tints its whole area.
 
 ### Changed
 
 ### Fixed
+- In an `LR` or `RL` Mermaid diagram, an arrow and a line with a different end, for example a dotted `-.-` line or a state note's tie, that meet the same side of a box no longer join into one line (`├┴──▶┤`). The box grows taller so each gets its own entry, and the dotted line stays dotted.
+- A Mermaid edge into or out of a subgraph no longer runs through another node box in the subgraph (`│ a1││`) or stops at the subgraph border. When a box is in the straight way, the edge goes around it to its node.
+- A Mermaid flowchart node that a `subgraph` names after the node was first used outside it, for example `c1 --> a2` followed by `subgraph one` with `a1 --> a2`, is now drawn inside that subgraph, as Mermaid draws it. When several subgraphs name the same node, the innermost one, or else the first one, gets it.
+- A Mermaid state diagram note (`note right of A`, `note left of A`) is now drawn beside its state, on the side it names, joined by a dotted line. Before, it hung one row lower, and a `right of` note could end up on the left. In an `LR` or `RL` diagram the note goes before or after the state, so `left of` is now on the left too.
+- A Mermaid flowchart subgraph written `subgraph one:::foo` no longer shows the title `one:::foo`; it is titled `one`. An arrow to `one` or to `two` in `subgraph two:::foo [Title]` now reports "`one` is a subgraph and cannot be used as a node", as it does without the class, instead of drawing an extra box.
+- A Mermaid state diagram note on a state written with `:::foo`, for example `note left of A:::foo : hi`, now shows `hi` instead of `::foo : hi`, and the `end note` form no longer fails with "cannot read a statement from `end note`". `state A:::foo {` no longer gives the composite state the title `A:::foo` and no longer keeps it apart from `A`.
+- A Mermaid class diagram that writes `:::foo` after a class name in a relation or a member line, for example `Animal:::foo <|-- Dog` or `Animal:::foo : +int age`, no longer fails with "empty member in `::foo <|-- Dog`". `Animal <|-- Dog:::foo` no longer draws the arrow labelled `::foo`.
+- A Mermaid ER diagram that gives an entity a class, for example `CUSTOMER:::foo ||--o{ ORDER : places`, no longer fails with "unknown attribute key `PLACES`". `CUSTOMER:::foo` alone or before `{` no longer draws an entity named `CUSTOMER:::foo`.
+- A Mermaid class diagram line such as `class Animal:::foo`, with or without a `{` member block, no longer draws a second class named `Animal:::foo` next to `Animal`.
+- A Mermaid state diagram that gives a state a class, for example `[*] --> A:::foo`, no longer draws the arrow labelled `::foo`. `A:::foo : text` now gives state `A` the description `text`, and `A:::foo` alone no longer gives it the description `::foo`.
+- A Mermaid `style` or `classDef` line that separates its properties with `;`, for example `style A fill:#e3f4fb;stroke:#2a8bb5`, no longer fails a flowchart with "cannot read a node shape from `:#2a8bb5`". In state and class diagrams the same line no longer draws an extra box named `stroke`. The properties after the `;` are ignored.
+- A Mermaid flowchart that gives a node a class, for example `A:::foo --> B` or `A[Text]:::foo`, no longer fails with "cannot read a node shape from `:::foo`".
+- In Mermaid flowcharts, an arrow from outside a subgraph to a node inside it now reaches that node. Before, it stopped at the subgraph border when it arrived under the subgraph title, or when several arrows entered the same subgraph.
+- A Mermaid subgraph or composite state whose title is wider than its content no longer cuts the title off (`╭ A rath╮`); the frame widens to fit it. When the title would cover a node that an arrow enters, it moves right along the top border so the arrow can pass.
+- A Mermaid edge line that passes a wide character in a label or title, for example a Chinese letter or an emoji, no longer erases that character.
+- A Mermaid label written as a markdown string, for example ``A["`**bold** text`"]``, no longer shows its backticks and stars, and one that spans several lines no longer fails with "cannot read a node shape". Its `**bold**`, `__bold__`, `*italic*` and `_italic_` are drawn bold and italic.
+- Mermaid labels draw `<b>`, `<strong>`, `<i>` and `<em>` as bold and italic instead of showing the tags as text.
+- A Mermaid edge label no longer touches the line of another edge that runs next to it (`│headers│`). When the space after its own line is taken, the label moves to the other side of the line.
+- Two crossing Mermaid edges, where one ends in the column the other starts from, are no longer drawn over each other as one loop or one shared line. Before, the arrows from REST API to LDAP management and from Web UI to Zimbra management could not be told apart.
+- Mermaid diagrams draw fewer edge crossings. An edge now leaves and enters a box on the side facing the box at its other end, and edges that run the same way nest instead of crossing twice.
+- A Mermaid edge label that has a line close on both sides wraps to fit between them instead of being cut by one (`mailbox│create`). In a very narrow window, where a single word is wider than the space, the label can still be cut.
+- Where a thick Mermaid edge (`==>`) crosses or joins a thin one, each line keeps its own weight (`┿`, `╂`). Before, the whole junction was drawn heavy (`╋`), so the thin line seemed to turn thick there. A thick edge leaving a thin box now shows `┰` on the border instead of `┳`.
+- In the man page, options and configuration keys are shown as indented option paragraphs instead of bullet lists.
 
 ## 0.6.0 - 2026-09-30
 ### Changed

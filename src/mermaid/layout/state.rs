@@ -19,7 +19,7 @@
 //!   somewhere to land.
 //!
 //! Notes (`note left of X`) are drawn as a box in the note ink, tied to their state by
-//! a dotted line, on the side the author asked for where the layout has room for it.
+//! a dotted line, beside the state on the side the author asked for.
 //! The side is semantic content the author wrote, not a layout decision taken from the
 //! AST, so consuming it here — at render time, with the width known — is exactly what
 //! design spec §3 permits.
@@ -35,9 +35,10 @@ use crate::mermaid::ast::{
 use crate::theme::Theme;
 
 use super::graph::{
-    self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke,
-    Terminator,
+    self, Beside, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy,
+    Stroke, Terminator,
 };
+use super::painted::{NodeStyle, Painter};
 
 /// Widest a transition label is allowed to get before it is wrapped.
 const LABEL_WIDTH: usize = 18;
@@ -68,18 +69,32 @@ pub fn draw_with(
     theme: &Theme,
     fit: Fit,
 ) -> Result<Canvas, MermaidError> {
-    let plan = Plan::of(diagram);
+    let painter = Painter::new(
+        diagram
+            .states
+            .iter()
+            .filter_map(|state| state.paint.as_ref()),
+        theme,
+    );
+    let plan = Plan::of(diagram, &painter);
     let spec = GraphSpec {
         direction: diagram.direction.unwrap_or(Direction::TopToBottom),
         node_count: plan.slots.len(),
         edges: plan.edges.clone(),
         root: plan.root.clone(),
+        beside: plan.beside.clone(),
     };
+    let styles = diagram
+        .states
+        .iter()
+        .map(|state| painter.node(state.paint.as_ref()))
+        .collect();
     graph::draw(
         &spec,
         &Art {
             plan: &plan,
             diagram,
+            styles,
         },
         width,
         theme,
@@ -109,6 +124,8 @@ struct Plan {
     edges: Vec<EdgeSpec>,
     /// The top-level container.
     root: GroupSpec,
+    /// Every note, tied to its state.
+    beside: Vec<Beside>,
 }
 
 /// The nodes a scope offers to transitions in the scope above it.
@@ -121,11 +138,11 @@ struct Ends {
 }
 
 impl Plan {
-    /// Translates a whole diagram.
-    fn of(diagram: &StateDiagram) -> Self {
+    /// Translates a whole diagram; `painter` styles the composite frames.
+    fn of(diagram: &StateDiagram, painter: &Painter) -> Self {
         let mut plan = Self::default();
         let mut ends = vec![Ends::default(); diagram.states.len()];
-        let (root, _) = plan.scope(diagram, &diagram.root, &mut ends);
+        let (root, _) = plan.scope(diagram, &diagram.root, &mut ends, painter);
         plan.root = root;
         plan
     }
@@ -145,6 +162,7 @@ impl Plan {
         diagram: &StateDiagram,
         scope: &StateScope,
         ends: &mut Vec<Ends>,
+        painter: &Painter,
     ) -> (GroupSpec, Ends) {
         let mut group = GroupSpec {
             direction: scope.direction,
@@ -177,7 +195,7 @@ impl Plan {
             };
             match &state.kind {
                 StateKind::Composite(inner) => {
-                    let (mut child, inner_ends) = self.scope(diagram, inner, ends);
+                    let (mut child, inner_ends) = self.scope(diagram, inner, ends, painter);
                     if child.nodes.is_empty() && child.children.is_empty() {
                         // An empty composite has nowhere for a transition to land, so
                         // it becomes an ordinary state box instead of a frame.
@@ -190,6 +208,7 @@ impl Plan {
                         };
                     } else {
                         child.title = Some(label_lines(state, LABEL_WIDTH));
+                        child.style = painter.frame(state.paint.as_ref());
                         group.children.push(child);
                         ends[id.0] = inner_ends;
                     }
@@ -223,37 +242,20 @@ impl Plan {
         (group, scope_ends)
     }
 
-    /// Adds a note box and the dotted line tying it to its state.
+    /// Adds a note box, kept beside its state on the side the source names.
     ///
-    /// `note left of X` / `note right of X` is the author's own words, not a layout
-    /// decision, so the side is honoured rather than discarded: the note is declared
-    /// immediately before or after its state, which is the order the engine seeds its
-    /// crossing reduction from, so the note comes out on the requested side of the
-    /// state whenever the layout has room for it there.
-    ///
-    /// It is a *preference*, not a guarantee, and it is horizontal only. The engine
-    /// ranks nodes by their edges, so a note tied to its state necessarily sits one
-    /// rank further along the flow rather than exactly beside it; pinning two nodes to
-    /// the same rank is not something the engine can currently express.
+    /// A note on a composite state is tied to its first inner node, which the engine
+    /// lifts to the composite's frame.
     fn note(&mut self, note: &StateNote, group: &mut GroupSpec, ends: &[Ends]) {
         let Some(target) = ends.get(note.target.0).and_then(|end| end.entry) else {
             return;
         };
         let node = self.push(Slot::Note(note.text.clone()));
-        match group.nodes.iter().position(|&at| at == target) {
-            Some(at) if note.placement == NotePlacement::LeftOf => group.nodes.insert(at, node),
-            Some(at) => group.nodes.insert(at + 1, node),
-            None => group.nodes.push(node),
-        }
-        self.edges.push(EdgeSpec {
-            from: target,
-            to: node,
-            stroke: Stroke::Dotted,
-            tail: Terminator::None,
-            head: Terminator::None,
-            label: DrawnLabel::default(),
-            tail_label: None,
-            head_label: None,
+        group.nodes.push(node);
+        self.beside.push(Beside {
+            node,
+            anchor: target,
+            right: note.placement == NotePlacement::RightOf,
         });
     }
 
@@ -324,6 +326,8 @@ fn label_lines(state: &StateNode, width: usize) -> DrawnLabel {
 struct Art<'a> {
     plan: &'a Plan,
     diagram: &'a StateDiagram,
+    /// One resolved style per state, indexed like `diagram.states`.
+    styles: Vec<NodeStyle>,
 }
 
 impl Art<'_> {
@@ -342,13 +346,20 @@ impl NodeArt for Art<'_> {
             Some(Slot::Start) => shape::start(theme),
             Some(Slot::End) => shape::end(theme),
             Some(Slot::Note(label)) => shape::note(label, budget, NOTE_WIDTH, theme),
-            Some(Slot::State(_)) => match self.state(node) {
+            Some(Slot::State(id)) => match self.state(node) {
                 Some(state) => match state.kind {
                     StateKind::Choice => shape::choice(theme),
                     StateKind::Fork | StateKind::Join => shape::bar(theme),
                     // A composite only reaches here when it was demoted for being
                     // empty, so it draws like any other state.
-                    _ => shape::state(&label_text(state), budget, theme),
+                    _ => {
+                        let style = self
+                            .styles
+                            .get(id.0)
+                            .copied()
+                            .unwrap_or_else(|| NodeStyle::plain(theme));
+                        shape::state(&label_text(state), budget, theme, &style)
+                    }
                 },
                 None => Canvas::empty(0),
             },
@@ -366,17 +377,28 @@ impl NodeArt for Art<'_> {
         };
         shape::ports(centred)
     }
+
+    fn keeps_page(&self, node: NodeIdx) -> bool {
+        matches!(self.plan.slots.get(node.0), Some(Slot::Note(_)))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// The plan of `diagram` with no colour lines to resolve.
+    fn plan_of(diagram: &StateDiagram) -> Plan {
+        let theme = Theme::default_dark();
+        Plan::of(diagram, &Painter::new(std::iter::empty(), &theme))
+    }
+
     fn state(key: &str, kind: StateKind) -> StateNode {
         StateNode {
             key: key.to_string(),
             label: None,
             kind,
+            paint: None,
         }
     }
 
@@ -402,7 +424,7 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         assert!(plan.slots.contains(&Slot::Start));
         assert!(plan.slots.contains(&Slot::End));
         assert_eq!(plan.edges.len(), 2);
@@ -422,7 +444,7 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         assert!(!plan.slots.contains(&Slot::Start));
         assert!(!plan.slots.contains(&Slot::End));
     }
@@ -449,7 +471,7 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         assert_eq!(plan.root.children.len(), 1, "the composite is a container");
         let title = plan.root.children[0]
             .title
@@ -485,7 +507,7 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         let edge = plan
             .edges
             .iter()
@@ -504,15 +526,18 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let plan = Plan::of(&diagram);
+        let plan = plan_of(&diagram);
         assert!(plan.root.children.is_empty());
         assert_eq!(plan.slots, vec![Slot::State(StateId(0))]);
     }
 
     #[test]
-    fn a_note_is_declared_on_the_side_it_asked_for() {
+    fn a_note_is_a_node_kept_beside_its_state_on_the_side_it_asked_for() {
         use crate::mermaid::ast::NotePlacement;
-        let build = |placement| {
+        for (placement, right) in [
+            (NotePlacement::LeftOf, false),
+            (NotePlacement::RightOf, true),
+        ] {
             let diagram = StateDiagram {
                 direction: None,
                 states: vec![state("A", StateKind::Simple)],
@@ -526,50 +551,22 @@ mod tests {
                     ..StateScope::default()
                 },
             };
-            let plan = Plan::of(&diagram);
-            let state_at = plan
-                .root
-                .nodes
-                .iter()
-                .position(|&n| plan.slots[n.0] == Slot::State(StateId(0)))
-                .expect("the state");
-            let note_at = plan
-                .root
-                .nodes
-                .iter()
-                .position(|&n| matches!(plan.slots[n.0], Slot::Note(_)))
-                .expect("the note");
-            (state_at, note_at)
-        };
-
-        let (state_at, note_at) = build(NotePlacement::LeftOf);
-        assert!(note_at < state_at, "a left note is declared first");
-
-        let (state_at, note_at) = build(NotePlacement::RightOf);
-        assert!(note_at > state_at, "a right note is declared after");
-    }
-
-    #[test]
-    fn a_note_is_a_node_tied_to_its_state_by_a_dotted_line() {
-        use crate::mermaid::ast::NotePlacement;
-        let diagram = StateDiagram {
-            direction: None,
-            states: vec![state("A", StateKind::Simple)],
-            root: StateScope {
-                states: vec![StateId(0)],
-                notes: vec![StateNote {
-                    placement: NotePlacement::LeftOf,
-                    target: StateId(0),
-                    text: Label::line("careful"),
-                }],
-                ..StateScope::default()
-            },
-        };
-        let plan = Plan::of(&diagram);
-        assert_eq!(plan.slots.len(), 2);
-        assert_eq!(plan.edges.len(), 1);
-        assert_eq!(plan.edges[0].stroke, Stroke::Dotted);
-        assert_eq!(plan.edges[0].head, Terminator::None);
+            let plan = plan_of(&diagram);
+            assert_eq!(plan.slots.len(), 2);
+            assert!(plan.edges.is_empty(), "the engine draws the tie");
+            assert_eq!(
+                plan.beside,
+                vec![Beside {
+                    node: NodeIdx(1),
+                    anchor: NodeIdx(0),
+                    right,
+                }]
+            );
+            assert!(
+                plan.root.nodes.contains(&NodeIdx(1)),
+                "the note is in the scope"
+            );
+        }
     }
 
     #[test]
@@ -598,9 +595,9 @@ mod tests {
                 ..StateScope::default()
             },
         };
-        let first = Plan::of(&diagram);
+        let first = plan_of(&diagram);
         for _ in 0..5 {
-            let again = Plan::of(&diagram);
+            let again = plan_of(&diagram);
             assert_eq!(first.slots, again.slots);
             assert_eq!(first.edges, again.edges);
         }

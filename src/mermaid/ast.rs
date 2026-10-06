@@ -25,6 +25,10 @@
 /// Mermaid labels may contain the literal markup `<br>` / `<br/>` / `<br />`, which is
 /// a line break inside the label and *not* HTML to be rendered (design spec §2 forbids
 /// HTML rendering). The parser splits on it, so a renderer only ever sees plain lines.
+/// The one exception is emphasis: `<b>`, `<strong>`, `<i>` and `<em>`, and inside a
+/// markdown string (``"`…`"``) also `**`, `__`, `*` and `_`, are removed from the lines
+/// and kept as [`marks`](Label::marks) for the renderer to draw (see
+/// [`markup`](crate::mermaid::markup)).
 ///
 /// Character entities such as `&lt;` are decoded here too, for the reasons set out in
 /// [`entity`](crate::mermaid::entity) — after the split, so that an author who wrote
@@ -57,6 +61,11 @@ pub struct Label {
     /// ([`Label::from_lines`]) carries a hull rather than one slice and holds an empty
     /// `raw`, which `spans_for` reads as "no per-line provenance" and fails closed on.
     raw: String,
+    /// True when the label was written as a markdown string, which decides how
+    /// [`raw`](Label::raw) is read back.
+    markdown: bool,
+    /// Per line, the byte ranges drawn bold or italic.
+    marks: Vec<LineMarks>,
 }
 
 /// Equality and hashing consider only the visible text, not where it came from.
@@ -97,20 +106,31 @@ impl Label {
     /// the source" value [`Label::line`] gets, rather than falsely claiming `text`
     /// began at the very start of a document.
     pub fn parse(text: &str) -> Self {
-        Self {
-            lines: split_lines(text),
-            source: Default::default(),
-            raw: text.to_string(),
-        }
+        let mut label = Self::parse_at(text, 0);
+        label.source = Default::default();
+        label
     }
 
     /// Builds a label from raw label text taken from offset `at` in the mermaid
     /// source, recording that as [`Label::source`].
+    ///
+    /// Text wrapped in backticks is a markdown string: the backticks are dropped, and
+    /// the source then starts after the opening one.
     pub fn parse_at(text: &str, at: usize) -> Self {
+        let inner = text
+            .strip_prefix('`')
+            .and_then(|rest| rest.strip_suffix('`'));
+        let (text, at, markdown) = match inner {
+            Some(inner) => (inner, at + 1, true),
+            None => (text, at, false),
+        };
+        let (lines, marks) = split_lines(text, markdown);
         Self {
-            lines: split_lines(text),
+            lines,
             source: at..at + text.len(),
             raw: text.to_string(),
+            markdown,
+            marks,
         }
     }
 
@@ -122,6 +142,8 @@ impl Label {
             lines: vec![text.clone()],
             source: Default::default(),
             raw: text,
+            markdown: false,
+            marks: Vec::new(),
         }
     }
 
@@ -138,12 +160,19 @@ impl Label {
             lines,
             source,
             raw: String::new(),
+            markdown: false,
+            marks: Vec::new(),
         }
     }
 
     /// True when the label carries no visible text at all.
     pub fn is_empty(&self) -> bool {
         self.lines.iter().all(|line| line.is_empty())
+    }
+
+    /// The byte ranges of line `index` drawn bold or italic, in order.
+    pub fn marks(&self, index: usize) -> &[(std::ops::Range<usize>, crate::theme::Attributes)] {
+        self.marks.get(index).map_or(&[], Vec::as_slice)
     }
 
     /// The label as one string, lines joined by `\n`.
@@ -188,12 +217,12 @@ impl Label {
             return Vec::new();
         }
         let base = self.source.start + raw.start;
-        let (decoded, runs) = crate::mermaid::entity::decode_runs(&self.raw[raw.clone()]);
-        if decoded != *line {
+        let styled = crate::mermaid::markup::parse_line(&self.raw[raw.clone()], self.markdown);
+        if styled.text != *line {
             return Vec::new();
         }
         let mut out = Vec::new();
-        for run in runs {
+        for run in styled.runs {
             let lo = run.text.start.max(piece.start);
             let hi = run.text.end.min(piece.end);
             if lo >= hi {
@@ -243,15 +272,20 @@ pub struct LabelSpan {
     pub cols: usize,
 }
 
-/// Splits raw label text into lines on `<br>` variants and newlines, trimming and
-/// entity-decoding each one. Shared by [`Label::parse`] and [`Label::parse_at`], which
-/// differ only in what they record as [`Label::source`].
-fn split_lines(text: &str) -> Vec<String> {
+/// Splits raw label text into lines on `<br>` variants and newlines, trimming each one,
+/// reading its emphasis and decoding its entities. Returns the lines and their marks.
+fn split_lines(text: &str, markdown: bool) -> (Vec<String>, Vec<LineMarks>) {
     split_raw(text)
         .into_iter()
-        .map(|(start, end)| line_text(&text[start..end]))
-        .collect()
+        .map(|(start, end)| {
+            let styled = crate::mermaid::markup::parse_line(text[start..end].trim(), markdown);
+            (styled.text, styled.marks)
+        })
+        .unzip()
 }
+
+/// The emphasis of one label line: byte ranges and their attributes.
+type LineMarks = Vec<(std::ops::Range<usize>, crate::theme::Attributes)>;
 
 /// Where each line of `text` sits in it, before trimming: the split alone.
 ///
@@ -273,11 +307,6 @@ fn split_raw(text: &str) -> Vec<(usize, usize)> {
         }
     }
     lines
-}
-
-/// Trims one line of a label and decodes its character entities.
-fn line_text(text: &str) -> String {
-    crate::mermaid::entity::decode(text.trim()).into_owned()
 }
 
 /// Finds the next line break marker, returning its byte offset and byte length.
@@ -343,6 +372,40 @@ pub enum Direction {
 }
 
 // ---------------------------------------------------------------------------
+// Colour lines (colour spec, docs/superpowers/specs/2026-10-03-mermaid-colours-design.md)
+// ---------------------------------------------------------------------------
+
+/// A colour as written in a `classDef` or `style` line (colour spec §3.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PaintColor {
+    /// The RGB value. A CSS name has its CSS value, so `red` and `#ff0000` compare
+    /// equal (colour spec ruling 20).
+    pub rgb: crate::theme::Color,
+    /// The slot a CSS colour name goes to by name (colour spec §4.3), as an index into
+    /// the 16 slots. `None` for a hex value and for the neutral names.
+    pub named: Option<usize>,
+}
+
+/// What the author wrote for one node, frame or composite state, after merging
+/// (colour spec §3.1, §3.5).
+///
+/// The author's values, not theme colours: resolution to theme hues happens at draw
+/// time, so the parsers stay theme-free (colour spec ruling 8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Paint {
+    /// `fill`.
+    pub fill: Option<PaintColor>,
+    /// `stroke`.
+    pub stroke: Option<PaintColor>,
+    /// `stroke-width` of 3px or more.
+    pub heavy: bool,
+    /// Byte offset of the property that supplied the colour picking the hue
+    /// (colour spec §4.2), which orders the slot assignment of §4.4. `None` when no
+    /// colour has a hue.
+    pub origin: Option<usize>,
+}
+
+// ---------------------------------------------------------------------------
 // §6.1 flowchart / graph
 // ---------------------------------------------------------------------------
 
@@ -374,6 +437,9 @@ pub struct FlowNode {
     pub label: Label,
     /// The node's outline shape.
     pub shape: NodeShape,
+    /// The merged colour lines aimed at this node (colour spec §3), or `None` to draw
+    /// in the theme's own diagram colours.
+    pub paint: Option<Paint>,
 }
 
 /// The outline shape of a flowchart node.
@@ -454,6 +520,9 @@ pub struct Group {
     pub nodes: Vec<NodeId>,
     /// Nested subgraphs, in declaration order.
     pub children: Vec<Group>,
+    /// The merged colour lines aimed at this subgraph (colour spec §3), or `None` to draw
+    /// in the theme's own diagram colours.
+    pub paint: Option<Paint>,
 }
 
 // ---------------------------------------------------------------------------
@@ -658,6 +727,9 @@ pub struct Class {
     /// Members in declaration order; the renderer splits them into the field and
     /// method compartments itself.
     pub members: Vec<Member>,
+    /// The merged colour lines aimed at this class (colour spec §3), or `None` to draw
+    /// in the theme's own diagram colours.
+    pub paint: Option<Paint>,
 }
 
 /// A `<<…>>` stereotype on a class.
@@ -874,6 +946,9 @@ pub struct Entity {
     pub alias: Option<Label>,
     /// Attributes from the `{ … }` block, in declaration order.
     pub attributes: Vec<ErAttribute>,
+    /// The merged colour lines aimed at this entity (colour spec §3), or `None` to draw
+    /// in the theme's own diagram colours.
+    pub paint: Option<Paint>,
 }
 
 /// One line of an entity's attribute block: `string name PK "comment"`.
@@ -1064,6 +1139,10 @@ pub struct StateNode {
     pub label: Option<Label>,
     /// What kind of state this is, including composite children.
     pub kind: StateKind,
+    /// The merged colour lines aimed at this state (colour spec §3), or `None` to draw
+    /// in the theme's own diagram colours. Only plain and composite states take one;
+    /// markers, choice, fork, join and notes never do (colour spec §3.1).
+    pub paint: Option<Paint>,
 }
 
 /// The kind of a [`StateNode`].

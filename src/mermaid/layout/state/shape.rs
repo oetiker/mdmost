@@ -9,6 +9,7 @@ use crate::canvas::{BorderSet, Canvas, align_offset};
 use crate::mermaid::ast::Label;
 use crate::mermaid::chrome;
 use crate::mermaid::layout::graph::PortPolicy;
+use crate::mermaid::layout::painted::NodeStyle;
 use crate::text::{Align, display_width, ellipsize};
 use crate::theme::{Style, Theme};
 
@@ -26,14 +27,29 @@ const START: &str = "●";
 /// The glyph marking the end of a scope.
 const END: &str = "◉";
 
-/// Draws a rounded state box holding a state's label.
-pub(super) fn state(label: &Label, budget: u16, theme: &Theme) -> Canvas {
-    box_of(label, budget, usize::MAX, theme, theme.diagram.node_text)
+/// Draws a rounded state box holding a state's label in `style`.
+pub(super) fn state(label: &Label, budget: u16, theme: &Theme, style: &NodeStyle) -> Canvas {
+    box_of(
+        label,
+        budget,
+        usize::MAX,
+        theme,
+        theme.diagram.node_text,
+        style,
+    )
 }
 
 /// Draws a note box: the same outline in the note ink, capped at `cap` columns.
 pub(super) fn note(label: &Label, budget: u16, cap: usize, theme: &Theme) -> Canvas {
-    box_of(label, budget, cap, theme, theme.diagram.note)
+    // Notes take no paint (colour spec §3.1).
+    box_of(
+        label,
+        budget,
+        cap,
+        theme,
+        theme.diagram.note,
+        &NodeStyle::plain(theme),
+    )
 }
 
 /// A rounded box wrapping `label` to the budget and drawing it in `ink`.
@@ -41,7 +57,14 @@ pub(super) fn note(label: &Label, budget: u16, cap: usize, theme: &Theme) -> Can
 /// The label arrives whole rather than as finished lines, because the wrap is where a
 /// drawn row loses track of the bytes it came from: `chrome::label_pieces` keeps that
 /// correspondence so every row can name its own bytes (design spec §2.2).
-fn box_of(label: &Label, budget: u16, cap: usize, theme: &Theme, ink: Style) -> Canvas {
+fn box_of(
+    label: &Label,
+    budget: u16,
+    cap: usize,
+    theme: &Theme,
+    ink: Style,
+    style: &NodeStyle,
+) -> Canvas {
     let text_budget = usize::from(budget)
         .saturating_sub(BORDER + 2 * PAD)
         .max(MIN_TEXT)
@@ -68,12 +91,15 @@ fn box_of(label: &Label, budget: u16, cap: usize, theme: &Theme, ink: Style) -> 
         let col = PAD + align_offset(text, display_width(&piece.text), Align::Center);
         chrome::label_spans(&mut body, label, piece, row, col);
     }
-    body.framed(
-        BorderSet::ROUNDED,
-        theme.diagram.node_border,
-        None,
-        theme.base(),
-    )
+    // Arcs have no heavy form, so a heavy state keeps its corners light.
+    let border = if style.heavy {
+        BorderSet::ROUNDED_HEAVY
+    } else {
+        BorderSet::ROUNDED
+    };
+    let mut out = body.framed(border, style.border, None, theme.base());
+    style.fill_inside(&mut out, 1);
+    out
 }
 
 /// Draws the filled dot that a scope's `[*] -->` transition starts from.
@@ -144,7 +170,12 @@ mod tests {
 
     #[test]
     fn a_state_box_is_rounded_and_padded() {
-        let canvas = state(&Label::line("Idle"), 40, &theme());
+        let canvas = state(
+            &Label::line("Idle"),
+            40,
+            &theme(),
+            &NodeStyle::plain(&theme()),
+        );
         let text = canvas.plain_text();
         assert!(text.starts_with('╭'), "{text}");
         assert!(canvas.row_text(1).contains(" Idle "), "{text}");
@@ -152,7 +183,12 @@ mod tests {
 
     #[test]
     fn a_state_box_wraps_a_long_label() {
-        let canvas = state(&Label::line("a rather long state name"), 16, &theme());
+        let canvas = state(
+            &Label::line("a rather long state name"),
+            16,
+            &theme(),
+            &NodeStyle::plain(&theme()),
+        );
         assert!(canvas.width() <= 16, "{}", canvas.width());
         assert!(
             canvas.height() > 3,
@@ -163,7 +199,7 @@ mod tests {
 
     #[test]
     fn an_empty_label_still_draws_a_box() {
-        let canvas = state(&Label::default(), 20, &theme());
+        let canvas = state(&Label::default(), 20, &theme(), &NodeStyle::plain(&theme()));
         assert_eq!(canvas.height(), 3);
         canvas.check_invariants().expect("canvas contract");
     }
@@ -196,7 +232,12 @@ mod tests {
     #[test]
     fn a_tiny_budget_never_panics() {
         for budget in 0..12u16 {
-            let canvas = state(&Label::line("Something long"), budget, &theme());
+            let canvas = state(
+                &Label::line("Something long"),
+                budget,
+                &theme(),
+                &NodeStyle::plain(&theme()),
+            );
             canvas.check_invariants().expect("canvas contract");
         }
     }

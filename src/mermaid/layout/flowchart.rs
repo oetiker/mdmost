@@ -9,8 +9,10 @@ mod shape;
 
 use crate::canvas::Canvas;
 use crate::error::MermaidError;
-use crate::mermaid::ast::{ArrowHead, EdgeStroke, Flowchart, Group, Label, NodeId};
+use crate::mermaid::ast::{ArrowHead, EdgeStroke, Flowchart, Group, Label, NodeId, Paint};
 use crate::theme::Theme;
+
+use super::painted::{NodeStyle, Painter};
 
 use super::graph::{
     self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Stroke,
@@ -44,19 +46,49 @@ pub fn draw_with(
     theme: &Theme,
     fit: Fit,
 ) -> Result<Canvas, MermaidError> {
-    let spec = build(chart);
-    graph::draw(&spec, &Art { chart }, width, theme, fit)
+    let mut paints: Vec<&Paint> = chart
+        .nodes
+        .iter()
+        .filter_map(|node| node.paint.as_ref())
+        .collect();
+    group_paints(&chart.root, &mut paints);
+    let painter = Painter::new(paints, theme);
+    let styles = chart
+        .nodes
+        .iter()
+        .map(|node| painter.node(node.paint.as_ref()))
+        .collect();
+    let spec = build(chart, &painter);
+    graph::draw(&spec, &Art { chart, styles }, width, theme, fit)
+}
+
+/// Every subgraph paint, so frames take part in the slot assignment from the start and
+/// a node's slot never depends on whether frames are drawn.
+fn group_paints<'c>(group: &'c Group, out: &mut Vec<&'c Paint>) {
+    for child in &group.children {
+        out.extend(child.paint.as_ref());
+        group_paints(child, out);
+    }
 }
 
 /// Draws flowchart nodes for the engine.
 struct Art<'a> {
     chart: &'a Flowchart,
+    /// One resolved style per node, indexed like `chart.nodes`.
+    styles: Vec<NodeStyle>,
 }
 
 impl NodeArt for Art<'_> {
     fn render(&self, node: NodeIdx, budget: u16, theme: &Theme) -> Canvas {
         match self.chart.nodes.get(node.0) {
-            Some(flow) => shape::draw(&flow.label, flow.shape, budget, theme),
+            Some(flow) => {
+                let style = self
+                    .styles
+                    .get(node.0)
+                    .copied()
+                    .unwrap_or_else(|| NodeStyle::plain(theme));
+                shape::draw(&flow.label, flow.shape, budget, theme, &style)
+            }
             None => Canvas::empty(0),
         }
     }
@@ -70,12 +102,13 @@ impl NodeArt for Art<'_> {
 }
 
 /// Translates the flowchart AST into an engine specification.
-fn build(chart: &Flowchart) -> GraphSpec {
+fn build(chart: &Flowchart, painter: &Painter) -> GraphSpec {
     GraphSpec {
         direction: chart.direction,
         node_count: chart.nodes.len(),
         edges: chart.edges.iter().map(edge).collect(),
-        root: group(&chart.root),
+        root: group(&chart.root, painter),
+        beside: Vec::new(),
     }
 }
 
@@ -111,7 +144,7 @@ fn terminator(head: ArrowHead) -> Terminator {
 }
 
 /// Translates a subgraph tree.
-fn group(group: &Group) -> GroupSpec {
+fn group(group: &Group, painter: &Painter) -> GroupSpec {
     GroupSpec {
         title: group
             .title
@@ -128,6 +161,11 @@ fn group(group: &Group) -> GroupSpec {
             }),
         direction: group.direction,
         nodes: group.nodes.iter().map(|&NodeId(id)| NodeIdx(id)).collect(),
-        children: group.children.iter().map(self::group).collect(),
+        children: group
+            .children
+            .iter()
+            .map(|child| self::group(child, painter))
+            .collect(),
+        style: painter.frame(group.paint.as_ref()),
     }
 }

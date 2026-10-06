@@ -9,10 +9,12 @@
 //! Three rules hold for every family (design spec §6):
 //!
 //! * Directives, `%%` comments and `%%{init}%%` blocks are parsed and ignored.
-//! * Cosmetic statements that carry no structure the renderer could use — `click`,
-//!   `style`, `classDef`, `class` (styling form), `cssClass`, `linkStyle`,
+//! * `classDef`, `class`, `cssClass`, `style` and the `:::name` suffix are read by the
+//!   flowchart, state, class and ER parsers (colour spec). Other cosmetic statements
+//!   that carry no structure the renderer could use — `click`, `linkStyle`,
 //!   `autonumber`, `box`, `rect`, `link`/`links`, `todayMarker`, `excludes` — are
-//!   skipped silently. `box`/`rect` swallow their matching `end`.
+//!   skipped silently, as are the colour lines of the families that do not draw them.
+//!   `box`/`rect` swallow their matching `end`.
 //! * Anything else outside the implemented subset returns a [`MermaidError`] naming
 //!   the line and the construct. Parsing never panics and never silently produces a
 //!   diagram that disagrees with the source.
@@ -25,6 +27,7 @@ mod gantt;
 mod lex;
 mod pie;
 mod sequence;
+mod sheet;
 mod state;
 
 use crate::error::MermaidError;

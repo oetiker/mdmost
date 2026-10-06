@@ -124,6 +124,40 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
     let heading_rules: [Style; 6] =
         std::array::from_fn(|i| base.fg(heading_color(&p, i).blend(p.border, HEADING_RULE_FADE)));
 
+    let diagram = DiagramStyles {
+        // Lines are structure and must stay quieter than the labels riding on them,
+        // but not so quiet that the diagram falls apart — halfway to the text.
+        line: base.fg(p.border.blend(p.fg, 0.6)),
+        // One ink for the whole edge: the arrowhead is the end of the line it is
+        // attached to, and it shares the node hue so a diagram reads as one object.
+        arrow: base.fg(p.blue),
+        node_border: base.fg(p.blue),
+        node_text: base,
+        group_border: base.fg(p.purple),
+        group_title: base.fg(p.purple).bold(),
+        // In a sequence diagram the labels *are* the content, so they read at body
+        // weight while the lines they sit on stay dim.
+        edge_label: base,
+        note: base.fg(p.yellow),
+        // A lifeline is a line: it stays quieter than the messages riding on it,
+        // but it must not be the faintest ink on the page, which a bare border
+        // colour was. Kept one step under `line`, which carries arrowheads.
+        lifeline: base.fg(p.border.blend(p.fg, 0.55)),
+        activation: base.fg(p.cyan),
+        compartment: base.fg(p.border),
+        stereotype: base.fg(p.magenta).italic(),
+        // A diagram title is a heading of its own; giving it the heading hue stops
+        // it reading as a bold sentence of body text.
+        title: base.fg(heading_color(&p, 1)).bold(),
+        axis: base.fg(p.muted),
+        legend: base.fg(p.fg),
+        task_done: base.fg(p.green),
+        task_active: base.fg(p.blue),
+        task_crit: base.fg(p.red),
+        milestone: base.fg(p.yellow).bold(),
+    };
+    let diagram_slots = super::slots::derive(&p, &diagram);
+
     Theme {
         name: name.to_string(),
         is_dark,
@@ -236,38 +270,8 @@ pub(super) fn from_palette(name: &str, is_dark: bool, p: Palette) -> Theme {
             row_alt: Style::new().bg(p.surface),
             overflow_marker: base.fg(chrome),
         },
-        diagram: DiagramStyles {
-            // Lines are structure and must stay quieter than the labels riding on them,
-            // but not so quiet that the diagram falls apart — halfway to the text.
-            line: base.fg(p.border.blend(p.fg, 0.6)),
-            // One ink for the whole edge: the arrowhead is the end of the line it is
-            // attached to, and it shares the node hue so a diagram reads as one object.
-            arrow: base.fg(p.blue),
-            node_border: base.fg(p.blue),
-            node_text: base,
-            group_border: base.fg(p.purple),
-            group_title: base.fg(p.purple).bold(),
-            // In a sequence diagram the labels *are* the content, so they read at body
-            // weight while the lines they sit on stay dim.
-            edge_label: base,
-            note: base.fg(p.yellow),
-            // A lifeline is a line: it stays quieter than the messages riding on it,
-            // but it must not be the faintest ink on the page, which a bare border
-            // colour was. Kept one step under `line`, which carries arrowheads.
-            lifeline: base.fg(p.border.blend(p.fg, 0.55)),
-            activation: base.fg(p.cyan),
-            compartment: base.fg(p.border),
-            stereotype: base.fg(p.magenta).italic(),
-            // A diagram title is a heading of its own; giving it the heading hue stops
-            // it reading as a bold sentence of body text.
-            title: base.fg(heading_color(&p, 1)).bold(),
-            axis: base.fg(p.muted),
-            legend: base.fg(p.fg),
-            task_done: base.fg(p.green),
-            task_active: base.fg(p.blue),
-            task_crit: base.fg(p.red),
-            milestone: base.fg(p.yellow).bold(),
-        },
+        diagram,
+        diagram_slots,
         math: MathStyles {
             // The author's own characters, so they sit exactly where body text does: a
             // `\alpha` is as much theirs as a typed `α`, and a formula must not look

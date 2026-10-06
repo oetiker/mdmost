@@ -31,6 +31,7 @@ use crate::theme::Theme;
 use super::graph::{
     self, DrawnLabel, EdgeSpec, Fit, GraphSpec, GroupSpec, NodeArt, NodeIdx, Stroke, Terminator,
 };
+use super::painted::{NodeStyle, Painter};
 use super::record::{self, Row};
 
 /// Widest a relationship label is allowed to get before it is wrapped.
@@ -60,26 +61,47 @@ pub fn draw_with(
     theme: &Theme,
     fit: Fit,
 ) -> Result<Canvas, MermaidError> {
+    let painter = Painter::new(
+        diagram
+            .entities
+            .iter()
+            .filter_map(|entity| entity.paint.as_ref()),
+        theme,
+    );
+    let styles = diagram
+        .entities
+        .iter()
+        .map(|entity| painter.node(entity.paint.as_ref()))
+        .collect();
     let spec = build(diagram);
-    graph::draw(&spec, &Art { diagram }, width, theme, fit)
+    graph::draw(&spec, &Art { diagram, styles }, width, theme, fit)
 }
 
 /// Draws entity boxes for the engine.
 struct Art<'a> {
     diagram: &'a ErDiagram,
+    /// One resolved style per entity, indexed like `diagram.entities`.
+    styles: Vec<NodeStyle>,
 }
 
 impl NodeArt for Art<'_> {
     fn render(&self, node: NodeIdx, budget: u16, theme: &Theme) -> Canvas {
         match self.diagram.entities.get(node.0) {
-            Some(entity) => entity_box(entity, budget, theme),
+            Some(entity) => {
+                let style = self
+                    .styles
+                    .get(node.0)
+                    .copied()
+                    .unwrap_or_else(|| NodeStyle::plain(theme));
+                entity_box(entity, budget, theme, &style)
+            }
             None => Canvas::empty(0),
         }
     }
 }
 
 /// Draws one entity as a name compartment over its attribute table.
-fn entity_box(entity: &Entity, budget: u16, theme: &Theme) -> Canvas {
+fn entity_box(entity: &Entity, budget: u16, theme: &Theme, style: &NodeStyle) -> Canvas {
     let styles = theme.diagram;
     let shown = display_label(entity);
     let header = vec![Row::centred(shown.text(), styles.node_text).sourced(shown.clone())];
@@ -87,7 +109,7 @@ fn entity_box(entity: &Entity, budget: u16, theme: &Theme) -> Canvas {
         .into_iter()
         .map(|text| Row::left(text, styles.node_text))
         .collect();
-    record::draw(&[header, attributes], budget, theme)
+    record::draw(&[header, attributes], budget, theme, style)
 }
 
 /// The label shown in an entity box: the alias when the source gave one.
@@ -111,6 +133,7 @@ fn build(diagram: &ErDiagram) -> GraphSpec {
             nodes: (0..diagram.entities.len()).map(NodeIdx).collect(),
             ..GroupSpec::default()
         },
+        beside: Vec::new(),
     }
 }
 
@@ -172,6 +195,7 @@ mod tests {
             name: Label::line(name),
             alias: None,
             attributes,
+            paint: None,
         }
     }
 
@@ -194,7 +218,7 @@ mod tests {
                 attribute("int", "age", Vec::new()),
             ],
         );
-        let text = entity_box(&entity, 60, &theme).plain_text();
+        let text = entity_box(&entity, 60, &theme, &NodeStyle::plain(&theme)).plain_text();
         assert!(text.contains("CUSTOMER"), "{text}");
         assert!(text.contains("PK"), "{text}");
         assert!(text.contains("string"), "{text}");
@@ -204,7 +228,13 @@ mod tests {
     #[test]
     fn an_entity_without_attributes_is_a_plain_name_box() {
         let theme = Theme::default_dark();
-        let text = entity_box(&entity("PLAIN", Vec::new()), 40, &theme).plain_text();
+        let text = entity_box(
+            &entity("PLAIN", Vec::new()),
+            40,
+            &theme,
+            &NodeStyle::plain(&theme),
+        )
+        .plain_text();
         assert!(!text.contains('├'), "no rule expected: {text}");
     }
 

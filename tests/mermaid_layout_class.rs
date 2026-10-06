@@ -18,6 +18,7 @@ fn class(name: &str, members: Vec<Member>) -> Class {
         generic: None,
         annotation: None,
         members,
+        paint: None,
     }
 }
 

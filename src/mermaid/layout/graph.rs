@@ -40,25 +40,32 @@ mod place;
 mod rank;
 mod route;
 mod spec;
+mod stretch;
+mod stub;
 
 #[cfg(test)]
 mod tests;
 
 pub use glyph::{Dir, Stroke};
 pub use spec::{
-    DrawnLabel, EdgeSpec, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy, Terminator,
+    Beside, DrawnLabel, EdgeSpec, FrameStyle, GraphSpec, GroupSpec, NodeArt, NodeIdx, PortPolicy,
+    Terminator,
 };
+
+use std::borrow::Cow;
+use std::cell::RefCell;
 
 use crate::canvas::{BorderSet, Canvas};
 use crate::error::MermaidError;
 use crate::mermaid::ast::Direction;
 use crate::mermaid::chrome::{self, Piece};
 use crate::text::{Line, Span};
-use crate::theme::Theme;
+use crate::theme::{Color, Style, Theme};
 
 use frame::{Frame, Pen};
 use rank::RawEdge;
-use route::{Input, LevelEdge, Reach, Routing};
+use route::{Input, LevelEdge, Reach, Routing, SideCell};
+use stub::{Blocked, Stub};
 
 /// Spacing tried in turn until the drawing fits the width budget.
 ///
@@ -205,15 +212,28 @@ pub fn draw(
 ) -> Result<Canvas, MermaidError> {
     validate(spec)?;
     let attempt = |gap: usize, budget: u16| {
-        Ctx {
-            spec,
-            art,
-            theme,
-            budget,
-            gap,
+        let mut spec = Cow::Borrowed(spec);
+        let mut stubs = Vec::new();
+        let mut round = 0;
+        loop {
+            let ctx = Ctx {
+                spec: &spec,
+                art,
+                theme,
+                budget,
+                gap,
+                stubs: &stubs,
+                blocked: RefCell::default(),
+            };
+            let drawn = ctx.group(&spec.root, spec.direction);
+            let blocked = ctx.blocked.take();
+            if blocked.is_empty() || round == STUB_ROUNDS {
+                return ctx.washed(drawn);
+            }
+            let split = stub::split(&spec, &blocked, &mut stubs);
+            spec = Cow::Owned(split);
+            round += 1;
         }
-        .group(&spec.root, spec.direction)
-        .canvas
     };
     let mut narrowest: Option<u16> = None;
 
@@ -262,6 +282,32 @@ pub fn draw(
     Ok(anchored(best, width, theme))
 }
 
+/// Moves item `node`, which has no edges, into the rank of item `anchor`, right
+/// beside it.
+fn share_rank(
+    layered: &mut rank::Layered,
+    node: Option<usize>,
+    anchor: Option<usize>,
+    right: bool,
+) {
+    let (Some(node), Some(anchor)) = (node, anchor) else {
+        return;
+    };
+    let old = layered.vnodes[node].rank;
+    let rank = layered.vnodes[anchor].rank;
+    layered.ranks[old].retain(|&id| id != node);
+    layered.vnodes[node].rank = rank;
+    let at = layered.ranks[rank]
+        .iter()
+        .position(|&id| id == anchor)
+        .map_or(0, |at| if right { at + 1 } else { at });
+    layered.ranks[rank].insert(at, node);
+    debug_assert!(
+        layered.ranks.iter().all(|ids| !ids.is_empty()),
+        "an anchor's rank always holds a source besides the note"
+    );
+}
+
 /// The narrower of `at` and `canvas`' width.
 fn narrower(at: Option<u16>, canvas: &Canvas) -> Option<u16> {
     Some(at.map_or(canvas.width(), |at| at.min(canvas.width())))
@@ -306,7 +352,8 @@ fn validate(spec: &GraphSpec) -> Result<(), MermaidError> {
 /// A node whose art draws internal rules — a class box's compartments, an entity's
 /// attribute table — shows a `├` or `┤` where a rule meets the border. An edge
 /// attaching there turns the rule into a line that appears to flow out of the box, so
-/// the router avoids those cells when it has a choice. This is read back off the
+/// the router avoids those cells when it has a choice. A heavy box draws its rules
+/// with `┠ ┨ ┯ ┷` instead (colour spec §6.2). This is read back off the
 /// drawn node rather than declared, so it works for any caller without widening the
 /// [`NodeArt`] seam.
 fn ruled_offsets(canvas: &Canvas, vertical: bool) -> Vec<bool> {
@@ -317,7 +364,22 @@ fn ruled_offsets(canvas: &Canvas, vertical: bool) -> Vec<bool> {
             .row(row)
             .and_then(|cells| cells.get(col))
             .map(|cell| cell.text())
-            .is_some_and(|text| matches!(text, "├" | "┤" | "┬" | "┴" | "┼" | "╋" | "┣" | "┫"))
+            .is_some_and(|text| {
+                matches!(
+                    text,
+                    "├" | "┤"
+                        | "┬"
+                        | "┴"
+                        | "┼"
+                        | "╋"
+                        | "┣"
+                        | "┫"
+                        | "┠"
+                        | "┨"
+                        | "┯"
+                        | "┷"
+                )
+            })
     };
     if vertical {
         (0..cols)
@@ -328,6 +390,184 @@ fn ruled_offsets(canvas: &Canvas, vertical: bool) -> Vec<bool> {
             .map(|row| ruled(row, 0) || ruled(row, cols.saturating_sub(1)))
             .collect()
     }
+}
+
+/// Where a frame's title goes and how wide the frame becomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TitlePlace {
+    /// Columns between the two side borders.
+    inner: usize,
+    /// How far the content moves right inside them.
+    shift: usize,
+    /// The frame column the space before the title is written to.
+    at: usize,
+}
+
+/// Places a title `title` columns wide over content `content` columns wide.
+///
+/// A frame narrower than its title cut it off: `subgraph s["A rather long title"]`
+/// around one small node drew `╭ A rath╮`. So the frame grows to hold the title and a
+/// space either side, though never past `cap`, the width a node's own label may take,
+/// so that one long title cannot push the whole diagram off the page.
+///
+/// A title written over a node an outside edge must reach also stops that edge at the
+/// border, because no line crosses a letter. `crossed` holds those nodes as
+/// `(column, width)` inside the content, and every one of them keeps at least one cell
+/// of plain frame above its interior. The first fit wins, in this order: the title at
+/// the left with the content centred; the title moved right; the frame widened one
+/// column at a time. When nothing fits within `cap`, the plain layout is used and the
+/// edge ends at the frame.
+fn place_title(content: usize, title: usize, crossed: &[(usize, usize)], cap: usize) -> TitlePlace {
+    let block = if title == 0 { 0 } else { title + 2 };
+    let narrowest = content.max(block.min(cap.max(content)));
+    let fits = |place: TitlePlace| {
+        crossed.iter().all(|&(col, cols)| {
+            // Frame columns: the border, the padding, the shift.
+            let lo = col + 2 + place.shift + 1;
+            let hi = (col + 2 + place.shift + cols).saturating_sub(2);
+            (lo..=hi).any(|at| at < place.at || at >= place.at + block)
+        })
+    };
+    let plain = TitlePlace {
+        inner: narrowest,
+        shift: (narrowest - content) / 2,
+        at: 1,
+    };
+    if block == 0 || crossed.is_empty() || fits(plain) {
+        return plain;
+    }
+    for inner in narrowest..=cap.max(narrowest) {
+        let centred = (inner - content) / 2;
+        let shifts =
+            std::iter::once(centred).chain((0..=inner - content).filter(|&s| s != centred));
+        for shift in shifts {
+            for at in 1..=(inner + 1).saturating_sub(block).max(1) {
+                let place = TitlePlace { inner, shift, at };
+                if fits(place) {
+                    return place;
+                }
+            }
+        }
+    }
+    plain
+}
+
+/// What each cell along one side of `canvas` holds.
+///
+/// `inwards` picks the side an incoming edge arrives at; otherwise it is the side an
+/// outgoing edge leaves by. A container frame writes its title into its top border,
+/// and an edge carried through the frame to a node inside cannot cross those letters:
+/// a port landing on one stops at the border. The router keeps such ports off them.
+fn side_cells(canvas: &Canvas, direction: Direction, inwards: bool) -> Vec<SideCell> {
+    let rows = canvas.height();
+    let cols = usize::from(canvas.width());
+    let cell = |row: usize, col: usize| -> SideCell {
+        let Some(drawn) = canvas.row(row).and_then(|cells| cells.get(col)) else {
+            return SideCell::Blank;
+        };
+        // The right half of a wide letter has no text of its own, but is still a letter.
+        if drawn.is_continuation() {
+            return SideCell::Text;
+        }
+        match drawn.text().chars().next().unwrap_or(' ') {
+            ' ' => SideCell::Blank,
+            ch if glyph::mask_of(ch).is_some() => SideCell::Art,
+            _ => SideCell::Text,
+        }
+    };
+    // The side an edge enters by is the near one for a top-down or left-to-right flow.
+    let near = matches!(direction, Direction::TopToBottom | Direction::LeftToRight) == inwards;
+    let mut side: Vec<SideCell> = if Frame::vertical(direction) {
+        let row = if near { 0 } else { rows.saturating_sub(1) };
+        (0..cols).map(|col| cell(row, col)).collect()
+    } else {
+        let col = if near { 0 } else { cols.saturating_sub(1) };
+        (0..rows).map(|row| cell(row, col)).collect()
+    };
+    // A space between two words of a title is part of the title, not a gap in the
+    // frame: an edge let through there drew `╭ A rather│long title`. Only the margin
+    // spaces between the title and the frame line stay blank.
+    let mut index = 0;
+    while index < side.len() {
+        if side[index] != SideCell::Blank {
+            index += 1;
+            continue;
+        }
+        let end = (index..side.len())
+            .find(|&at| side[at] != SideCell::Blank)
+            .unwrap_or(side.len());
+        let before = index.checked_sub(1).map(|at| side[at]);
+        let after = side.get(end).copied();
+        if before == Some(SideCell::Text) && after == Some(SideCell::Text) {
+            side[index..end].fill(SideCell::Text);
+        }
+        index = end;
+    }
+    side
+}
+
+/// The widest run of `spot`'s cross span that a straight line from the container's
+/// side reaches without crossing the box of another node in `hints`, or `None` when
+/// every column of it is blocked. `inwards` and `direction` pick the side as in
+/// [`reach_of`].
+fn clear_span(
+    hints: &[(NodeIdx, Spot)],
+    node: NodeIdx,
+    spot: Spot,
+    canvas: &Canvas,
+    direction: Direction,
+    inwards: bool,
+) -> Option<(usize, usize)> {
+    let vertical = Frame::vertical(direction);
+    // `(flow start, flow end, cross start, cross end)` of a box.
+    let axes = |at: Spot| {
+        if vertical {
+            (at.row, at.row + at.rows, at.col, at.col + at.cols)
+        } else {
+            (at.col, at.col + at.cols, at.row, at.row + at.rows)
+        }
+    };
+    let total = if vertical {
+        canvas.height()
+    } else {
+        usize::from(canvas.width())
+    };
+    let (flow_lo, flow_hi, lo, hi) = axes(spot);
+    let from_start =
+        matches!(direction, Direction::TopToBottom | Direction::LeftToRight) == inwards;
+    let (way_lo, way_hi) = if from_start {
+        (0, flow_lo)
+    } else {
+        (flow_hi, total)
+    };
+    let mut free = vec![true; hi - lo];
+    for &(other, at) in hints {
+        if other == node {
+            continue;
+        }
+        let (a, b, c, d) = axes(at);
+        if a >= way_hi || b <= way_lo {
+            continue;
+        }
+        for cross in c.max(lo)..d.min(hi) {
+            free[cross - lo] = false;
+        }
+    }
+    let mut best: Option<(usize, usize)> = None;
+    let mut start = None;
+    for at in 0..=free.len() {
+        match (free.get(at).copied().unwrap_or(false), start) {
+            (true, None) => start = Some(at),
+            (false, Some(first)) => {
+                if best.is_none_or(|(a, b)| at - first > b - a) {
+                    best = Some((first, at));
+                }
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    best.map(|(a, b)| (lo + a, lo + b))
 }
 
 /// Where a node sits inside its container box, measured along the parent's axes.
@@ -347,6 +587,47 @@ fn reach_of(canvas: &Canvas, spot: Spot, direction: Direction, inwards: bool) ->
         depth: if inwards { near } else { far },
         lo,
         hi: lo + hi,
+    }
+}
+
+/// Washes the inside of each frame, in order, over cells still on the page.
+///
+/// `frames` is innermost first. A cell once visited is claimed, so an outer wash never
+/// reaches into an inner frame; cells of a node that `keep`s the page are skipped; a
+/// node with its own fill is no longer on the page and keeps it.
+fn tint_frames(canvas: &mut Canvas, frames: &[Washed], keep: &[Spot], page: Color) {
+    let cols = usize::from(canvas.width());
+    let mut claimed = vec![false; canvas.height() * cols];
+    let kept = |row: usize, col: usize| {
+        keep.iter().any(|spot| {
+            (spot.row..spot.row + spot.rows).contains(&row)
+                && (spot.col..spot.col + spot.cols).contains(&col)
+        })
+    };
+    for washed in frames {
+        let Spot {
+            row,
+            col,
+            rows,
+            cols: width,
+        } = washed.at;
+        for r in row + 1..(row + rows).saturating_sub(1) {
+            for c in col + 1..(col + width).saturating_sub(1).min(cols) {
+                let Some(flag) = claimed.get_mut(r * cols + c) else {
+                    continue;
+                };
+                if std::mem::replace(flag, true) || kept(r, c) {
+                    continue;
+                }
+                let on_page = canvas
+                    .row(r)
+                    .and_then(|cells| cells.get(c))
+                    .is_some_and(|cell| cell.style().bg == Some(page));
+                if on_page {
+                    canvas.patch_style(r, c, 1, Style::new().bg(washed.tint));
+                }
+            }
+        }
     }
 }
 
@@ -370,13 +651,23 @@ struct Ctx<'a> {
     theme: &'a Theme,
     budget: u16,
     gap: usize,
+    /// The entry stubs added to `spec`, which `art` knows nothing about.
+    stubs: &'a [Stub],
+    /// Edges whose straight line into a container met another box.
+    blocked: RefCell<Vec<Blocked>>,
 }
+
+/// How many times a drawing is split at entry stubs and drawn again: one round per
+/// level of nesting a blocked edge passes into.
+const STUB_ROUNDS: usize = 4;
 
 /// A drawn group: its canvas plus where each node it contains ended up.
 struct Drawn {
     canvas: Canvas,
     /// Where every node it contains ended up inside `canvas`.
     hints: Vec<(NodeIdx, Spot)>,
+    /// Every washed frame inside `canvas`, innermost first.
+    frames: Vec<Washed>,
 }
 
 /// The rectangle one node's box occupies inside a canvas.
@@ -386,6 +677,13 @@ struct Spot {
     col: usize,
     rows: usize,
     cols: usize,
+}
+
+/// A washed frame's rectangle inside a canvas, and its wash.
+#[derive(Debug, Clone, Copy)]
+struct Washed {
+    at: Spot,
+    tint: Color,
 }
 
 impl Spot {
@@ -404,18 +702,61 @@ struct Item {
     canvas: Canvas,
     ports: PortPolicy,
     hints: Vec<(NodeIdx, Spot)>,
+    frames: Vec<Washed>,
     members: Vec<NodeIdx>,
     /// True when the box is a container frame rather than a node itself.
     group: bool,
 }
 
 impl Ctx<'_> {
+    /// The finished drawing with every washed frame applied, innermost first.
+    ///
+    /// Done once on the whole canvas rather than per frame, because the level above a
+    /// frame draws the edges and labels that enter it after the frame is finished, on
+    /// the page background (colour spec §6.3).
+    fn washed(&self, mut drawn: Drawn) -> Canvas {
+        if drawn.frames.is_empty() {
+            return drawn.canvas;
+        }
+        let keep: Vec<Spot> = drawn
+            .hints
+            .iter()
+            .filter(|&&(node, _)| self.stub(node).is_none() && self.art.keeps_page(node))
+            .map(|&(_, spot)| spot)
+            .collect();
+        tint_frames(
+            &mut drawn.canvas,
+            &drawn.frames,
+            &keep,
+            self.theme.palette.bg,
+        );
+        drawn.canvas
+    }
+
+    /// The entry stub `node` is, if it is one.
+    fn stub(&self, node: NodeIdx) -> Option<Stub> {
+        self.stubs.iter().find(|stub| stub.node == node).copied()
+    }
+
     /// Lays out one container and everything below it.
     fn group(&self, group: &GroupSpec, inherited: Direction) -> Drawn {
         let direction = group.direction.unwrap_or(inherited);
         let mut items = Vec::new();
         for &node in &group.nodes {
-            let canvas = self.art.render(node, self.budget, self.theme);
+            let canvas = match self.stub(node) {
+                // A stub is one cell of the line passing through it.
+                Some(_) => {
+                    let mut canvas = Canvas::new(1, 1, self.theme.base());
+                    let line = if Frame::vertical(direction) {
+                        "│"
+                    } else {
+                        "─"
+                    };
+                    canvas.write_str(0, 0, line, self.theme.diagram.line);
+                    canvas
+                }
+                None => self.art.render(node, self.budget, self.theme),
+            };
             let whole = Spot {
                 row: 0,
                 col: 0,
@@ -424,8 +765,12 @@ impl Ctx<'_> {
             };
             items.push(Item {
                 canvas,
-                ports: self.art.ports(node),
+                ports: match self.stub(node) {
+                    Some(_) => PortPolicy::Center,
+                    None => self.art.ports(node),
+                },
                 hints: vec![(node, whole)],
+                frames: Vec::new(),
                 members: vec![node],
                 group: false,
             });
@@ -437,6 +782,7 @@ impl Ctx<'_> {
                 canvas: drawn.canvas,
                 ports: PortPolicy::Spread,
                 hints: drawn.hints,
+                frames: drawn.frames,
                 members,
                 group: true,
             });
@@ -444,8 +790,35 @@ impl Ctx<'_> {
         let inner = self.level(&items, direction);
         match &group.title {
             None => inner,
-            Some(title) => self.frame(inner, title),
+            Some(title) => {
+                let crossed = self.crossed(group, &inner, inherited);
+                self.frame(inner, title, &crossed, &group.style)
+            }
         }
+    }
+
+    /// The nodes of `drawn` that an edge from outside `group` meets through the frame's
+    /// top edge, as their columns inside `drawn`.
+    ///
+    /// Only a vertical parent flow sends edges through the top edge, which is the edge
+    /// the title is written into. Which end of the edge is outside does not matter: an
+    /// edge reversed to break a cycle crosses the other way.
+    fn crossed(&self, group: &GroupSpec, drawn: &Drawn, parent: Direction) -> Vec<(usize, usize)> {
+        if !Frame::vertical(parent) || group.title.is_none() {
+            return Vec::new();
+        }
+        let inside = |node: NodeIdx| drawn.hints.iter().any(|&(other, _)| other == node);
+        drawn
+            .hints
+            .iter()
+            .filter(|&&(node, _)| {
+                self.spec.edges.iter().any(|edge| {
+                    (edge.from == node && !inside(edge.to))
+                        || (edge.to == node && !inside(edge.from))
+                })
+            })
+            .map(|&(_, spot)| (spot.col, spot.cols))
+            .collect()
     }
 
     /// Wraps a drawn container in its titled frame.
@@ -455,45 +828,100 @@ impl Ctx<'_> {
     /// [`Canvas::framed`], because the span that maps the title back to the document has
     /// to name the bytes behind the cells that were really painted: computing the drawn
     /// text once and both drawing and mapping it is the only way the two cannot disagree.
-    fn frame(&self, drawn: Drawn, title: &DrawnLabel) -> Drawn {
+    ///
+    /// `crossed` lists, in the columns of `drawn`, the nodes an edge from outside
+    /// reaches through the top edge. The title is placed so that it leaves each of them
+    /// at least one cell of plain frame to cross; see [`place_title`].
+    ///
+    /// `style` colours the border and title and picks the dash weight; a wash is only
+    /// recorded here and laid on the finished canvas by [`Ctx::washed`].
+    fn frame(
+        &self,
+        drawn: Drawn,
+        title: &DrawnLabel,
+        crossed: &[(usize, usize)],
+        style: &FrameStyle,
+    ) -> Drawn {
         let styles = self.theme.diagram;
-        let mut padded = Canvas::new(drawn.canvas.width(), 1, self.theme.base());
-        padded.append(&drawn.canvas, self.theme.base());
-        padded.push_blank_row(self.theme.base());
-        let padded = padded.indent(1, 1, self.theme.base());
-        // `framed` writes a space, the title and a space into an edge `inner` columns
-        // wide, and draws no title at all below four columns.
-        let inner = usize::from(padded.width());
+        let border = style
+            .ink
+            .map_or(styles.group_border, |ink| styles.group_border.fg(ink));
+        let title_style = style
+            .ink
+            .map_or(styles.group_title, |ink| styles.group_title.fg(ink));
+        let set = if style.heavy {
+            BorderSet::DASHED_HEAVY
+        } else {
+            BorderSet::DASHED
+        };
+        let base = self.theme.base();
+        let mut padded = Canvas::new(drawn.canvas.width(), 1, base);
+        padded.append(&drawn.canvas, base);
+        padded.push_blank_row(base);
+        let padded = padded.indent(1, 1, base);
+        let content = usize::from(padded.width());
+        let title_cols = title
+            .rows
+            .first()
+            .map_or(0, |row| crate::text::display_width(&row.text));
+        let place = place_title(content, title_cols, crossed, usize::from(self.budget));
+        let extra = u16::try_from(place.inner - content).unwrap_or(0);
+        let left = u16::try_from(place.shift).unwrap_or(0);
+        let padded = padded.indent(left, extra.saturating_sub(left), base);
+        let mut canvas = padded.framed(set, border, None, base);
+        // A space, the title and a space, clipped so they never reach the corner.
+        let room = (place.inner + 1).saturating_sub(place.at + 2);
         let head = title
             .rows
             .first()
-            .filter(|_| inner >= 4)
+            .filter(|_| place.inner >= 4)
             .map(|row| Piece {
-                text: crate::text::truncate_to_width(&row.text, inner - 1).to_string(),
+                text: crate::text::truncate_to_width(&row.text, room).to_string(),
                 index: row.index,
                 at: row.at,
             })
             .filter(|row| !row.text.is_empty());
-        let heading = head
-            .as_ref()
-            .map(|row| Line::new(vec![Span::new(row.text.clone(), styles.group_title)]));
-        let mut canvas = padded.framed(
-            BorderSet::DASHED,
-            styles.group_border,
-            heading.as_ref(),
-            self.theme.base(),
-        );
-        // The title lands one column past the border and the space that follows it.
         if let Some(head) = &head {
-            chrome::label_spans(&mut canvas, &title.label, head, 0, 2);
+            let spaced = Line::new(vec![
+                Span::new(" ", border),
+                Span::new(head.text.clone(), title_style),
+                Span::new(" ", border),
+            ]);
+            canvas.write_line(0, place.at, &spaced, border);
+            chrome::label_spans(&mut canvas, &title.label, head, 0, place.at + 1);
         }
-        // The frame adds one row and column of border plus one of padding.
+        // The frame adds one row and column of border plus one of padding, and the
+        // content moved right by `shift` within a frame widened for its title.
         let hints = drawn
             .hints
             .into_iter()
-            .map(|(node, spot)| (node, spot.shifted(2, 2)))
+            .map(|(node, spot)| (node, spot.shifted(2, 2 + place.shift)))
             .collect();
-        Drawn { canvas, hints }
+        // Recorded after everything inside it, which keeps the list innermost first.
+        let mut frames: Vec<Washed> = drawn
+            .frames
+            .into_iter()
+            .map(|washed| Washed {
+                at: washed.at.shifted(2, 2 + place.shift),
+                ..washed
+            })
+            .collect();
+        if let Some(tint) = style.tint {
+            frames.push(Washed {
+                at: Spot {
+                    row: 0,
+                    col: 0,
+                    rows: canvas.height(),
+                    cols: usize::from(canvas.width()),
+                },
+                tint,
+            });
+        }
+        Drawn {
+            canvas,
+            hints,
+            frames,
+        }
     }
 
     /// Lays out one level: the boxes of a container and the edges between them.
@@ -503,12 +931,58 @@ impl Ctx<'_> {
             return Drawn {
                 canvas: Canvas::empty(0),
                 hints: Vec::new(),
+                frames: Vec::new(),
             };
         }
         let owner = self.owners(items);
-        let (raw, mut level_edges, loops) = self.edges(items, &owner, direction);
-        let mut layered = rank::build(items.len(), &raw);
+        let beside = self.beside(items, &owner);
+        // Sideways, beside is along the flow: the tie is an ordinary edge into the rank
+        // before or after the anchor. `RL` counts its ranks leftwards.
+        let ties: Vec<EdgeSpec> = if vertical {
+            Vec::new()
+        } else {
+            let leftwards = direction == Direction::RightToLeft;
+            beside
+                .iter()
+                .map(|tie| {
+                    let (from, to) = if tie.right != leftwards {
+                        (tie.anchor, tie.node)
+                    } else {
+                        (tie.node, tie.anchor)
+                    };
+                    EdgeSpec {
+                        stroke: Stroke::Dotted,
+                        head: Terminator::None,
+                        ..EdgeSpec::arrow(from, to)
+                    }
+                })
+                .collect()
+        };
+        let (raw, mut level_edges, loops) = self.edges(items, &owner, direction, &ties);
+        // The stub of an edge leaving this container takes the last rank, so the line
+        // leaves through the far side with nothing below it.
+        let last: Vec<bool> = items
+            .iter()
+            .map(|item| {
+                !item.group
+                    && item
+                        .members
+                        .iter()
+                        .any(|&node| self.stub(node).is_some_and(|stub| stub.sink))
+            })
+            .collect();
+        let mut layered = rank::build(items.len(), &raw, &last);
         order::reduce(&mut layered);
+        if vertical {
+            for tie in &beside {
+                share_rank(
+                    &mut layered,
+                    owner[tie.node.0],
+                    owner[tie.anchor.0],
+                    tie.right,
+                );
+            }
+        }
         // An edge reversed to break a cycle is drawn against the flow, so its
         // terminators swap ends and its arrow still points where the source said.
         for (edge, reversed) in level_edges.iter_mut().zip(&layered.reversed) {
@@ -518,6 +992,8 @@ impl Ctx<'_> {
                 std::mem::swap(&mut edge.from_reach, &mut edge.to_reach);
             }
         }
+        let grown = self.grown(items, &layered, &level_edges, vertical);
+        let canvas_of = |index: usize| grown[index].as_ref().unwrap_or(&items[index].canvas);
 
         let count = layered.vnodes.len();
         let mut cross_size = vec![1usize; count];
@@ -526,8 +1002,11 @@ impl Ctx<'_> {
         let mut loop_pad = vec![0usize; count];
         let mut ports = vec![PortPolicy::Center; count];
         let mut ruled: Vec<Vec<bool>> = vec![Vec::new(); count];
+        let mut side_in: Vec<Vec<SideCell>> = vec![Vec::new(); count];
+        let mut side_out: Vec<Vec<SideCell>> = vec![Vec::new(); count];
         for (index, item) in items.iter().enumerate() {
-            let (rows, cols) = (item.canvas.height(), usize::from(item.canvas.width()));
+            let canvas = canvas_of(index);
+            let (rows, cols) = (canvas.height(), usize::from(canvas.width()));
             let (cross, flow) = if vertical { (cols, rows) } else { (rows, cols) };
             cross_size[index] = cross;
             flow_size[index] = flow;
@@ -536,7 +1015,9 @@ impl Ctx<'_> {
             place_size[index] = cross + if looped { 3 } else { 0 };
             loop_pad[index] = if looped { 2 } else { 0 };
             ports[index] = item.ports;
-            ruled[index] = ruled_offsets(&item.canvas, vertical);
+            ruled[index] = ruled_offsets(canvas, vertical);
+            side_in[index] = side_cells(canvas, direction, true);
+            side_out[index] = side_cells(canvas, direction, false);
         }
         let cross_gap = if vertical {
             self.gap
@@ -554,6 +1035,8 @@ impl Ctx<'_> {
             loops: &loops,
             loop_pad: &loop_pad,
             ruled: &ruled,
+            side_in: &side_in,
+            side_out: &side_out,
             min_gap: if vertical { 1 } else { 3 },
             vertical,
         };
@@ -569,6 +1052,7 @@ impl Ctx<'_> {
         let styles = self.theme.diagram;
         let mut pen = Pen::new(frame, self.theme.base(), styles.edge_label);
         let mut hints = Vec::new();
+        let mut frames = Vec::new();
         for (index, item) in items.iter().enumerate() {
             let (row, col) = frame.origin(
                 routing.flow[index],
@@ -576,15 +1060,119 @@ impl Ctx<'_> {
                 flow_size[index],
                 cross_size[index],
             );
-            pen.canvas.blit(row, col, &item.canvas, self.theme.base());
+            let canvas = canvas_of(index);
+            pen.canvas.blit(row, col, canvas, self.theme.base());
             for &(node, spot) in &item.hints {
+                let spot = if grown[index].is_some() {
+                    Spot {
+                        rows: canvas.height(),
+                        ..spot
+                    }
+                } else {
+                    spot
+                };
                 hints.push((node, spot.shifted(row, col)));
+            }
+            for washed in &item.frames {
+                frames.push(Washed {
+                    at: washed.at.shifted(row, col),
+                    ..*washed
+                });
             }
         }
         routing.paint(&input, &mut pen);
+        if vertical {
+            for tie in &beside {
+                let (Some(node), Some(anchor)) = (owner[tie.node.0], owner[tie.anchor.0]) else {
+                    continue;
+                };
+                let rect = |item: usize| {
+                    let (row, col) = frame.origin(
+                        routing.flow[item],
+                        cross[item],
+                        flow_size[item],
+                        cross_size[item],
+                    );
+                    (row, col, items[item].canvas.height(), cross_size[item])
+                };
+                let frame = items[anchor].group;
+                let (left, left_frame, right, right_frame) = if tie.right {
+                    (rect(anchor), frame, rect(node), false)
+                } else {
+                    (rect(node), false, rect(anchor), frame)
+                };
+                // Mid-way down the rows both boxes share, from one facing side to the other.
+                let top = left.0.max(right.0);
+                let bottom = (left.0 + left.2).min(right.0 + right.2);
+                let mut start = left.1 + left.3 - 1;
+                let mut end = right.1;
+                // A frame's dashes have no tee, so the tie stops at a frame and touches it.
+                if left_frame {
+                    start += 1;
+                }
+                if right_frame {
+                    end = end.saturating_sub(1);
+                }
+                if bottom > top && end > start {
+                    let row = top + (bottom - top - 1) / 2;
+                    if left_frame {
+                        pen.ink.add(row, start, Dir::Left.mask(), Stroke::Dotted);
+                    }
+                    if right_frame {
+                        pen.ink.add(row, end, Dir::Right.mask(), Stroke::Dotted);
+                    }
+                    pen.ink
+                        .run(row, start, Dir::Right, end - start, Stroke::Dotted);
+                }
+            }
+        }
         let mut canvas = pen.canvas;
         pen.ink.apply(&mut canvas, styles.line, styles.arrow);
-        Drawn { canvas, hints }
+        Drawn {
+            canvas,
+            hints,
+            frames,
+        }
+    }
+
+    /// Per item, its box grown by blank rows when a sideways flow brings more kinds of
+    /// edge end to one of its sides than the side has cells for ([`stretch`]).
+    fn grown(
+        &self,
+        items: &[Item],
+        layered: &rank::Layered,
+        edges: &[LevelEdge],
+        vertical: bool,
+    ) -> Vec<Option<Canvas>> {
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                if vertical || item.group || item.ports != PortPolicy::Spread {
+                    return None;
+                }
+                let kinds = |incoming: bool| {
+                    let mut seen: Vec<Terminator> = Vec::new();
+                    for seg in &layered.segs {
+                        let end = if incoming { seg.b } else { seg.a };
+                        if end != index {
+                            continue;
+                        }
+                        let edge = &edges[seg.edge];
+                        let terminator = if incoming { edge.head } else { edge.tail };
+                        if !seen.contains(&terminator) {
+                            seen.push(terminator);
+                        }
+                    }
+                    seen.len()
+                };
+                // One cell per kind, with a cell of air between neighbours.
+                let wanted = (2 * kinds(true).max(kinds(false))).saturating_sub(1);
+                let inner = item.canvas.height().saturating_sub(2);
+                (wanted > inner)
+                    .then(|| stretch::rows(&item.canvas, wanted - inner, self.theme.base()))
+            })
+            .collect()
     }
 
     /// Maps every node under this container to the item that holds it.
@@ -598,18 +1186,34 @@ impl Ctx<'_> {
         owner
     }
 
-    /// Splits this container's edges into layered edges and self loops.
+    /// The ties of this level whose node and anchor are two different items here,
+    /// the node a plain box.
+    fn beside(&self, items: &[Item], owner: &[Option<usize>]) -> Vec<Beside> {
+        self.spec
+            .beside
+            .iter()
+            .filter(|tie| match (owner[tie.node.0], owner[tie.anchor.0]) {
+                (Some(node), Some(anchor)) => node != anchor && !items[node].group,
+                _ => false,
+            })
+            .copied()
+            .collect()
+    }
+
+    /// Splits this container's edges, followed by `ties`, into layered edges and self
+    /// loops.
     fn edges(
         &self,
         items: &[Item],
         owner: &[Option<usize>],
         direction: Direction,
+        ties: &[EdgeSpec],
     ) -> (Vec<RawEdge>, Vec<LevelEdge>, Vec<(usize, usize)>) {
         let vertical = Frame::vertical(direction);
         let mut raw = Vec::new();
         let mut level = Vec::new();
         let mut pending = Vec::new();
-        for edge in &self.spec.edges {
+        for (index, edge) in self.spec.edges.iter().chain(ties).enumerate() {
             let (Some(from), Some(to)) = (owner[edge.from.0], owner[edge.to.0]) else {
                 continue;
             };
@@ -634,7 +1238,28 @@ impl Ctx<'_> {
                     return None;
                 }
                 let spot = spot(item, node)?;
-                Some(reach_of(&items[item].canvas, spot, direction, inwards))
+                let reach = reach_of(&items[item].canvas, spot, direction, inwards);
+                let clear = clear_span(
+                    &items[item].hints,
+                    node,
+                    spot,
+                    &items[item].canvas,
+                    direction,
+                    inwards,
+                );
+                match clear {
+                    Some((lo, hi)) => Some(Reach { lo, hi, ..reach }),
+                    None => {
+                        // Only an edge crossing this level's frames enters a container.
+                        if from != to && index < self.spec.edges.len() {
+                            self.blocked.borrow_mut().push(Blocked {
+                                edge: index,
+                                inwards,
+                            });
+                        }
+                        None
+                    }
+                }
             };
             let described = LevelEdge {
                 stroke: edge.stroke,

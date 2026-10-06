@@ -15,7 +15,7 @@ expression: "render(&chart(Direction::TopToBottom, nodes, edges), 60)"
      ▼       │                                              
  ┌───────┐   │                                              
  │ Thick │   │                                              
- └──────┳┘   │                                              
+ └──────┰┘   │                                              
         ┗━━┓ ╰─╮                                            
            ┃   │                                            
            ▼   │                                            

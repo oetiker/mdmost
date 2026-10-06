@@ -26,11 +26,34 @@ pub struct SrcLine<'a> {
 ///
 /// Directives may span several lines, so a line opening with `%%{` swallows following
 /// lines until one closes the block with `}%%`.
+///
+/// A markdown string (``"`…`"``) may span several lines too, its line breaks being
+/// breaks in the label. A line that leaves one open is joined with the lines after it
+/// until the string closes, into one [`SrcLine`] numbered after its first line. Only a
+/// markdown string does this: a stray `"` in a plain message must not swallow the rest
+/// of the diagram.
 pub fn preprocess(src: &str) -> Vec<SrcLine<'_>> {
     let mut out = Vec::new();
     let mut in_directive = false;
+    // The first line number and start byte of a statement with a markdown string open.
+    let mut open: Option<(usize, usize)> = None;
     for (index, raw) in src.lines().enumerate() {
         let number = index + 1;
+        if let Some((first, start)) = open {
+            let Some(end) = offset_of(src, raw).map(|at| at + raw.len()) else {
+                continue;
+            };
+            let joined = &src[start..end];
+            if !opens_markdown_string(joined) {
+                open = None;
+                let text = strip_comment(joined).trim();
+                out.push(SrcLine {
+                    number: first,
+                    text,
+                });
+            }
+            continue;
+        }
         let trimmed = raw.trim();
         if in_directive {
             if trimmed.contains("}%%") {
@@ -49,9 +72,34 @@ pub fn preprocess(src: &str) -> Vec<SrcLine<'_>> {
         if text.is_empty() {
             continue;
         }
+        if opens_markdown_string(text)
+            && let Some(start) = offset_of(src, text)
+        {
+            open = Some((number, start));
+            continue;
+        }
+        out.push(SrcLine { number, text });
+    }
+    // A string never closed is handed on as it stands, for the parser to report.
+    if let Some((number, start)) = open {
+        let text = src[start..].trim();
         out.push(SrcLine { number, text });
     }
     out
+}
+
+/// Whether `text` ends inside a markdown string, one opened by ``"` ``.
+fn opens_markdown_string(text: &str) -> bool {
+    let mut quoted = false;
+    let mut markdown = false;
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '"' {
+            quoted = !quoted;
+            markdown = quoted && chars.peek() == Some(&'`');
+        }
+    }
+    quoted && markdown
 }
 
 /// Removes a trailing `%%` comment that is not inside a quoted string.
@@ -237,6 +285,102 @@ fn split_scanned(text: &str, pipes: bool) -> Vec<&str> {
     parts
 }
 
+/// Characters of a class name, as `classDef` and `:::name` write it.
+pub fn is_class_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')
+}
+
+/// Splits a trailing `:::name` class suffix off a node reference such as `A:::c` or
+/// `A[text]:::c`, returning the reference and the class name.
+///
+/// This is the one reader of `:::` for every family that has it, so that the colour
+/// work can keep the name where the parsers drop it today. The suffix counts only at
+/// the top level and only when a class name runs from it to the end: inside a label or
+/// a quoted name `:::` is text, and `A:::foo bar` is handed back whole for the caller
+/// to read or reject as it would any other malformed reference.
+pub fn split_class_suffix(text: &str) -> (&str, Option<&str>) {
+    let text = text.trim();
+    let Some(at) = find_top_level(text, ":::", Nesting::Honour) else {
+        return (text, None);
+    };
+    let name = text[at + 3..].trim_end();
+    if name.is_empty() || !name.chars().all(is_class_char) {
+        return (text, None);
+    }
+    (text[..at].trim_end(), Some(name))
+}
+
+/// Drops the CSS fragments a `;` cut off a styling statement.
+///
+/// `;` ends a statement in Mermaid, also inside `style A fill:#fff;stroke:#000`, so the
+/// splitter hands on `stroke:#000` as a statement of its own. Read as a node or a state
+/// description it would fail the diagram or draw a box nobody wrote. Mermaid itself
+/// ignores such a fragment, and so does this: a statement that reads as a CSS property
+/// (`word:value`) is dropped when it follows a styling statement on the same line, or
+/// another fragment dropped this way. The rule is tied to the styling statement rather
+/// than to the shape alone, because `s2:waiting` on its own is a state description and
+/// `Animal:+int age` a class member. For the same reason a property is read narrowly,
+/// as CSS is written in practice: a lower-case name directly followed by `:`, so that
+/// `class A foo; C : waiting` still gives state `C` its description.
+///
+/// `styling` lists the family's styling keywords in lower case: `class` styles in a
+/// flowchart but declares in a class diagram.
+pub fn drop_css_spill<'a>(statements: Vec<&'a str>, styling: &[&str]) -> Vec<&'a str> {
+    let mut after_styling = false;
+    statements
+        .into_iter()
+        .filter(|statement| {
+            if after_styling && is_css_property(statement) {
+                return false;
+            }
+            let word = split_word(statement).0.to_ascii_lowercase();
+            after_styling = styling.contains(&word.as_str());
+            true
+        })
+        .collect()
+}
+
+/// Whether `text` reads as one CSS property, `name:value`, such as `stroke-width:3px`.
+fn is_css_property(text: &str) -> bool {
+    let Some((name, value)) = text.split_once(':') else {
+        return false;
+    };
+    !name.is_empty()
+        && name.chars().all(|ch| ch.is_ascii_lowercase() || ch == '-')
+        && !value.trim().is_empty()
+        && !value.starts_with(':')
+}
+
+/// Splits `text` at the first top-level `:` that starts a label or a description,
+/// returning the two trimmed halves.
+///
+/// [`split_once_top_level`] with `:` would cut `A:::foo : text` inside the class
+/// suffix and read `::foo : text` as the label. `:::` binds tighter than `:` (colour
+/// spec §3.3), so a `:::` and the class name after it are stepped over here.
+pub fn split_label_colon(text: &str, nesting: Nesting) -> Option<(&str, &str)> {
+    let mut scanner = Scanner::default();
+    // The end of the class suffix currently being stepped over.
+    let mut skip_to = 0;
+    for (at, ch) in text.char_indices() {
+        if at < skip_to {
+            continue;
+        }
+        if !scanner.step(ch, nesting) || ch != ':' {
+            continue;
+        }
+        if text[at..].starts_with(":::") {
+            // A class name is ASCII and holds no quote or bracket the scanner needs.
+            let name = text[at + 3..]
+                .find(|ch: char| !is_class_char(ch))
+                .unwrap_or(text.len() - at - 3);
+            skip_to = at + 3 + name;
+            continue;
+        }
+        return Some((text[..at].trim(), text[at + 1..].trim()));
+    }
+    None
+}
+
 /// Splits `text` at the first top-level `sep`, returning the two trimmed halves.
 pub fn split_once_top_level(text: &str, sep: char, nesting: Nesting) -> Option<(&str, &str)> {
     let mut buf = [0u8; 4];
@@ -387,5 +531,69 @@ mod tests {
         let label = label_at(src, &elsewhere);
         assert_eq!(label.lines, ["Parse"]);
         assert_eq!(label.source, 0..0);
+    }
+
+    #[test]
+    fn split_class_suffix_takes_the_name_off_the_end() {
+        assert_eq!(split_class_suffix("A:::foo"), ("A", Some("foo")));
+        assert_eq!(split_class_suffix("A[x]:::a-b_1"), ("A[x]", Some("a-b_1")));
+        assert_eq!(split_class_suffix(" A :::foo "), ("A", Some("foo")));
+        assert_eq!(split_class_suffix("A"), ("A", None));
+        // Inside a label or a quoted name `:::` is text, not a suffix.
+        assert_eq!(split_class_suffix("A[\"x:::y\"]"), ("A[\"x:::y\"]", None));
+        assert_eq!(split_class_suffix("A[x:::y]"), ("A[x:::y]", None));
+        // Not a class name: left for the caller to report or read as it stands.
+        assert_eq!(split_class_suffix("A:::"), ("A:::", None));
+        assert_eq!(split_class_suffix("A:::foo bar"), ("A:::foo bar", None));
+    }
+
+    #[test]
+    fn split_label_colon_steps_over_a_class_suffix() {
+        let split = |text| split_label_colon(text, Nesting::Honour);
+        assert_eq!(split("A:::foo : text"), Some(("A:::foo", "text")));
+        assert_eq!(
+            split("A:::foo --> B:::bar: go"),
+            Some(("A:::foo --> B:::bar", "go"))
+        );
+        assert_eq!(split("a --> b : x:::y"), Some(("a --> b", "x:::y")));
+        assert_eq!(split("A:::foo"), None);
+        assert_eq!(split("[*] --> A:::foo"), None);
+        assert_eq!(split("A : text"), Some(("A", "text")));
+    }
+
+    #[test]
+    fn drop_css_spill_drops_only_what_follows_a_styling_statement() {
+        let styling = ["style", "classdef"];
+        let split = |text| drop_css_spill(split_statements(text), &styling);
+        assert_eq!(
+            split("style A fill:#fff;stroke:#000; stroke-width: 3px"),
+            ["style A fill:#fff"]
+        );
+        assert_eq!(
+            split("classDef c fill:red;stroke:#000; B"),
+            ["classDef c fill:red", "B"]
+        );
+        // Without a styling statement before it, `word:value` is the family's own
+        // business, such as a state description or a class member.
+        assert_eq!(split("A --> B; s2:waiting"), ["A --> B", "s2:waiting"]);
+        // A statement that is not CSS ends the run, so a later fragment is kept.
+        assert_eq!(
+            split("style A fill:#fff; B; s2:waiting"),
+            ["style A fill:#fff", "B", "s2:waiting"]
+        );
+        // Only a lower-case name directly followed by `:` reads as a property.
+        assert_eq!(
+            split("style A fill:#fff; C : waiting"),
+            ["style A fill:#fff", "C : waiting"]
+        );
+        assert_eq!(
+            split("style A fill:#fff; Up:x"),
+            ["style A fill:#fff", "Up:x"]
+        );
+        // A class suffix is not a property.
+        assert_eq!(
+            split("style A fill:#fff; B:::c"),
+            ["style A fill:#fff", "B:::c"]
+        );
     }
 }
