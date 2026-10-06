@@ -3,9 +3,14 @@
 ## [Unreleased]
 
 ### New
-- Mermaid flowchart, state, class and ER diagrams now draw the colours set with `classDef`, `class`, `cssClass`, `style` and `:::`. Each colour is drawn in the nearest hue of the active theme, so text stays readable on dark and light terminals: `stroke` colours the border, `fill` also tints the inside, and a `stroke-width` of 3px or more draws a heavy outline. A `fill` on a subgraph or composite state tints its whole area.
 
 ### Changed
+
+### Fixed
+
+## 0.7.0 - 2026-10-06
+### New
+- Mermaid flowchart, state, class and ER diagrams now draw the colours set with `classDef`, `class`, `cssClass`, `style` and `:::`. Each colour is drawn in the nearest hue of the active theme, so text stays readable on dark and light terminals: `stroke` colours the border, `fill` also tints the inside, and a `stroke-width` of 3px or more draws a heavy outline. A `fill` on a subgraph or composite state tints its whole area.
 
 ### Fixed
 - In an `LR` or `RL` Mermaid diagram, an arrow and a line with a different end, for example a dotted `-.-` line or a state note's tie, that meet the same side of a box no longer join into one line (`├┴──▶┤`). The box grows taller so each gets its own entry, and the dotted line stays dotted.
