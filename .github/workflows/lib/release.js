@@ -1,4 +1,9 @@
-// repo-infra: workflow-lib v6
+// repo-infra: workflow-lib v8
+//
+// Purpose: The JavaScript the release flow and the publish pieces run (D8).
+// Choose: Always.
+// Supplies: Nothing.
+
 'use strict';
 
 // Decisions of the release flow that builds and tests a release before its
@@ -60,7 +65,7 @@ function normalise(entry) {
 // The build job is read-only. Its one way to write the repository is the
 // release-files artifact, which `finish` commits. These paths would turn that
 // channel into a way to rewrite the changelog, a version or a workflow.
-// `repo_infra.state.refused_release_files` (used by `check`) enforces the same
+// `repo_infra.check.refused_release_files` (used by `check`) enforces the same
 // rule; both must change together.
 function refusedReleaseFiles(entries, versionFiles) {
   const versions = new Set((versionFiles || []).map((f) => normalise(f.path)));

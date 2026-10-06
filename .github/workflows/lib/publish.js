@@ -1,10 +1,11 @@
-// repo-infra: workflow-lib v6
+// repo-infra: workflow-lib v8
 'use strict';
 
-// What the publish job does for a repository with release_build set (D26),
-// decided from the tag and the releases together. Every late review of the
-// spec found a release-stranding state in this machine, so it lives here,
-// with one test per state, and the workflow only acts on the answer.
+// What the publish job does for a repository that builds its release before
+// the merge (D26), decided from the tag and the releases together. Every late
+// review of the spec found a release-stranding state in this machine, so it
+// lives here, with one test per state, and the workflow only acts on the
+// answer.
 //
 // Once the tag exists, the tag is the record of what was built; the
 // release-build.json asset matters only before that (case 3).
