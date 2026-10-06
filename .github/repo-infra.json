@@ -1,7 +1,4 @@
 {
-  "ecosystems": [
-    "rust"
-  ],
   "moving_major_tag": false,
   "version_files": [
     {
@@ -17,16 +14,6 @@
       "verify": "^name = \"mdmost\"\nversion = \"$VERSION\""
     }
   ],
-  "ci": [
-    "ci-man",
-    "ci-rust-musl"
-  ],
-  "ci_local": true,
-  "release_build": [],
-  "publish": [
-    "publish-gitea-packages"
-  ],
-  "build": [],
   "release_files": [
     "Formula/mdmost.rb"
   ],
@@ -64,6 +51,5 @@
     "rpm": {
       "group": ""
     }
-  },
-  "release_build_local": true
+  }
 }

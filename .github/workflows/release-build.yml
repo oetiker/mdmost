@@ -1,24 +1,17 @@
 name: Release build
-# repo-infra: release-build v1
-#
-# Called by Create release PR (release-pr.yml) on the release branch, before
-# the pull request exists (D28). Assembled like ci.yml: this frame, one job
-# block per add-on named in "release_build" in .github/repo-infra.json, and
-# the project's own jobs through release-build-local.yml when
-# "release_build_local" is set.
-#
-# Every file the release ships is an artifact whose name starts with
-# release-asset-; the repository files the build rewrote are the artifact
-# release-files. Both names are reserved for this workflow
-# (references/conventions.md).
 
+# Called by Create release PR on the release branch before the pull request
+# exists (D28). mdmost's own build, release-build-local.yml, makes the
+# binaries, packages and the Homebrew formula.
 on:
   workflow_call:
     inputs:
       version:
+        description: The version being released.
         type: string
         required: true
       ref:
+        description: The release branch head to build.
         type: string
         required: true
 
@@ -26,8 +19,6 @@ permissions:
   contents: read
 
 jobs:
-  # A repository with nothing to build still gets a valid file, and a release
-  # without assets.
   release-version:
     name: Release version
     runs-on: ubuntu-latest
@@ -38,13 +29,6 @@ jobs:
           VERSION: ${{ inputs.version }}
           REF: ${{ inputs.ref }}
 
-  # repo-infra: release-build-local-job v1
-  # The project brings the build, the standard brings the seam (D20's shape,
-  # D28). .github/workflows/release-build-local.yml is the project's own file:
-  # it triggers on workflow_call only with the inputs version and ref, checks
-  # out ref in every actions/checkout, sets timeout-minutes on each of its
-  # jobs, uploads each shipped file as a release-asset-* artifact and the
-  # repository files it rewrote as release-files. references/conventions.md.
   release-build-local:
     uses: ./.github/workflows/release-build-local.yml
     with:
