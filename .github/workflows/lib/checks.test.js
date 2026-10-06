@@ -1,4 +1,4 @@
-// repo-infra: workflow-lib v5
+// repo-infra: workflow-lib v6
 'use strict';
 
 const test = require('node:test');
@@ -56,42 +56,6 @@ test('no checks at all is not ok', async () => {
   assert.equal(state.total, 0);
 });
 
-test('waitForChecks returns as soon as something fails', async () => {
-  const github = fakeGithub([[bad('CI')]]);
-  const state = await checks.waitForChecks(github, PARAMS, {
-    sleep: async () => { throw new Error('should not have slept'); },
-  });
-  assert.equal(state.ok, false);
-  assert.equal(github.calls(), 1);
-});
-
-test('waitForChecks polls until pending clears', async () => {
-  const github = fakeGithub([
-    [running('CI')],
-    [running('CI')],
-    [ok('CI')],
-  ]);
-  let slept = 0;
-  const state = await checks.waitForChecks(github, PARAMS, {
-    sleep: async () => { slept += 1; },
-  });
-  assert.equal(state.ok, true);
-  assert.equal(slept, 2);
-});
-
-test('waitForChecks gives up after the timeout', async () => {
-  const github = fakeGithub([[running('CI')]]);
-  let clock = 0;
-  const state = await checks.waitForChecks(github, PARAMS, {
-    intervalMs: 1000,
-    timeoutMs: 3000,
-    now: () => clock,
-    sleep: async (ms) => { clock += ms; },
-  });
-  assert.equal(state.timedOut, true);
-  assert.equal(state.ok, false);
-});
-
 // --- self-exclusion -------------------------------------------------------
 // A job that waits for the checks on its own commit is itself one of those
 // checks. Without this, the release guard waits for the job doing the waiting.
@@ -109,21 +73,6 @@ test('checkState ignores the check runs it is told to ignore', async () => {
   assert.equal(state.total, 1);
   assert.deepEqual(state.pending.map((c) => c.name), []);
   assert.equal(state.ok, true);
-});
-
-test('waitForChecks does not wait for its own job', async () => {
-  // The deadlock this prevents: the guard polled until its 15 minute timeout
-  // and reported "Still running: Prepare the release pull request".
-  const github = fakeGithub([[
-    withId(1, 'CI', 'completed', 'success'),
-    withId(2, 'Prepare the release pull request', 'in_progress', null),
-  ]]);
-  const state = await checks.waitForChecks(github, PARAMS, {
-    ignoreCheckRunIds: [2],
-    sleep: async () => { throw new Error('should not have slept'); },
-  });
-  assert.equal(state.ok, true);
-  assert.equal(github.calls(), 1);
 });
 
 test('a commit whose only check is the ignored job counts as no checks', async () => {
@@ -244,4 +193,36 @@ test('a genuinely failing check still blocks the retry', async () => {
   const state = await checks.checkState(github, PARAMS, { ignoreCheckRunIds });
   assert.deepEqual(state.failed.map((c) => c.name), ['CI']);
   assert.equal(state.ok, false);
+});
+
+// --- D28: the guard does not wait ------------------------------------------
+
+test('guardVerdict refuses a failed check by name', async () => {
+  const state = await checks.checkState(fakeGithub([[ok('CI'), bad('Changelog')]]), PARAMS);
+  assert.equal(checks.guardVerdict(state), 'Failing checks on this commit: Changelog');
+});
+
+test('guardVerdict does not wait for a running check', async () => {
+  const state = await checks.checkState(fakeGithub([[ok('CI'), running('Slow')]]), PARAMS);
+  assert.equal(checks.guardVerdict(state), null);
+});
+
+test('guardVerdict does not refuse a commit without checks', async () => {
+  // The test job runs ci.yml on this commit plus the release changes.
+  const state = await checks.checkState(fakeGithub([[]]), PARAMS);
+  assert.equal(checks.guardVerdict(state), null);
+});
+
+test('guardVerdict ignores an earlier attempt\'s failed build and test jobs', async () => {
+  const github = fakeGithub([[
+    withId(1, 'CI', 'completed', 'success'),
+    withId(31, 'test / Lint', 'completed', 'failure'),
+    withId(32, 'build / Build the source tarball', 'completed', 'failure'),
+  ]]);
+  const state = await checks.checkState(github, PARAMS, { ignoreCheckRunIds: [31, 32] });
+  assert.equal(checks.guardVerdict(state), null);
+});
+
+test('waitForChecks is gone', () => {
+  assert.equal(checks.waitForChecks, undefined);
 });
