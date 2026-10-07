@@ -20,33 +20,39 @@ permissions:
 
 jobs:
   lib:
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
     uses: ./.github/workflows/ri-ci-lib.yml
     with:
       ref: ${{ inputs.ref }}
 
   rust:
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
     uses: ./.github/workflows/ri-ci-rust.yml
     with:
       ref: ${{ inputs.ref }}
 
   man:
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
     uses: ./.github/workflows/ri-ci-man.yml
     with:
       ref: ${{ inputs.ref }}
 
   rust-musl:
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
     uses: ./.github/workflows/ri-ci-rust-musl.yml
     with:
       ref: ${{ inputs.ref }}
 
   # mdmost's own jobs (D25).
   ci-local:
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
     uses: ./.github/workflows/ci-local.yml
     with:
       ref: ${{ inputs.ref }}
     secrets: inherit
 
   release-pr-current:
+    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
     uses: ./.github/workflows/ri-release-pr-current.yml
     permissions:
       contents: read
