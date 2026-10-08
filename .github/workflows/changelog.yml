@@ -1,5 +1,5 @@
 name: Changelog
-# repo-infra: changelog v5
+# repo-infra: changelog v6
 #
 # Purpose: The changelog-updated required check (D2, D6).
 # Choose: Always.
@@ -91,7 +91,14 @@ jobs:
               // Anyone else's release/* branch: the ordinary rules, label included.
             }
 
-            if (pr.labels.some((label) => label.name === 'no-changelog')) {
+            // The labels as they are now, not as the event saw them. `gh pr create
+            // --label` opens the pull request and labels it in a second call, so
+            // the opened run's payload has no label; its failure could finish
+            // after the skipped labeled run and stay the check's result.
+            const { data: current } = await github.rest.pulls.get({
+              owner, repo, pull_number: pr.number,
+            });
+            if (current.labels.some((label) => label.name === 'no-changelog')) {
               core.notice("Labelled 'no-changelog'.");
               return;
             }
