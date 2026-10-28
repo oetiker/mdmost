@@ -25,7 +25,7 @@ before changing anything under it.
 
 | Patch | File | Upstream | What it fixes |
 | --- | --- | --- | --- |
-| 1 | `src/parsing/parser.rs` | [#706](https://github.com/trishume/syntect/pull/706) by `tontinton`, open and unreviewed since 2026-09-12 — not this project's own work in origin, so not offered upstream again | Two contexts that `set` each other without ever consuming a character loop forever. |
+| 1 | `src/parsing/parser.rs` | [#706](https://github.com/trishume/syntect/pull/706) by `tontinton`, merged 2026-10-27 as `7a1ed1bd`, not yet in a release | Two contexts that `set` each other without ever consuming a character loop forever. |
 | 2 | `src/parsing/parser.rs` | [#202](https://github.com/trishume/syntect/issues/202), where the maintainer offered to accept a `Duration`-based version of `parse_line`; filed as [#708](https://github.com/trishume/syntect/pull/708) | No backstop existed for a `.sublime-syntax` shape that drives the token loop without ever tripping patch 1's guards. |
 
 ### Patch 1: break loops between non-consuming `set`s
@@ -49,33 +49,35 @@ already taken from, in a new `set_states` set threaded alongside the existing
 work already done, so — exactly like the existing push/pop guard — advance one character
 and try again instead.
 
-Two local refinements on top of #706, both because they cost nothing on the hot path and
-close a gap #706 leaves open:
+Two refinements were proposed for #706 in a comment
+(<https://github.com/trishume/syntect/pull/706#issuecomment-5811758916>), and the merged
+#706 carries both:
 
-- **A hash, not a cloned stack.** #706's own key is `(usize, Vec<ContextId>)` — the whole
-  context stack, cloned on every non-consuming `set`. This vendored copy instead hashes
-  the stack into a `u64` (`stack_fingerprint`) and keys on that, avoiding the allocation.
-  Measured below — the difference does not show above run-to-run spread on this machine,
-  for this input, and the change is kept anyway for not allocating on a path that already
-  exists, not for a measured win.
-- **`prototypes` is part of the key, `captures` is not.** #706's key is built from
-  `level.context` alone. Two stack levels that share a `context` but differ in their
-  `with_prototype`s (`StateLevel::prototypes`) are genuinely different parser states, but
-  are equal under #706's key — this vendored copy hashes `prototypes` too, so the two are
-  told apart and a legitimate `set` cannot be broken one character early. This is a
-  behavioural difference from #706, not just an implementation detail, and must survive
-  reconciliation if #706 merges upstream. `captures` is left out of both: `Region` (from
-  the regex backend) is not `Hash`. A fingerprint collision, or two states that differ
-  only in `captures`, makes this guard treat a new state as a repeat and skip its `set`;
-  the wrong stack can then persist for the rest of the parse. The only guarantee is that
-  the parser still advances a character instead, so it can never hang or panic.
+- **A hash, not a cloned stack.** The key is `(usize, u64)`, the `u64` a hash of the
+  stack (`stack_fingerprint` here, `set_state_hash` upstream), so a non-consuming `set`
+  does not allocate. Measured below: the difference does not show above run-to-run
+  spread on this machine, for this input.
+- **`prototypes` is part of the key, `captures` is not.** Two stack levels that share a
+  `context` but differ in their `with_prototype`s (`StateLevel::prototypes`) are
+  different parser states; without `prototypes` in the key, a legitimate `set` is broken
+  one character early. `captures` is left out: `Region` (from the regex backend) is not
+  `Hash`. A hash collision, or two states that differ only in `captures`, makes this
+  guard treat a new state as a repeat and skip its `set`; the wrong stack can then
+  persist for the rest of the parse. The parser still advances a character instead, so
+  it can never hang or panic.
 
-These two refinements were offered to the maintainer as a comment on #706:
-<https://github.com/trishume/syntect/pull/706#issuecomment-5811758916>.
+While merging the second refinement, the #706 author found a gap in it, and the merged
+version closes it. A `set` keeps the prototypes of the level it replaces and appends its
+own `with_prototype`, so in a `set` cycle with a `with_prototype` the list grows on every
+lap, the key changes every time, and the guard never fires. The merged #706 hashes each
+prototype once per level. A repeated prototype can never win over its first occurrence,
+so the state is the same. This copy took the same change and upstream's test for it,
+`can_parse_non_consuming_sets_that_would_loop_with_prototype`, which hangs without it.
 
-**If #706 merges upstream:** both refinements touch the exact lines PR #706 touches
-(`SetStates`'s definition and the `set_states.insert(...)` call). A future re-sync must
-reconcile the two by hand, not re-apply this patch over #706's own version.
+The code differs from upstream `7a1ed1bd` only in names (`stack_fingerprint` for
+`set_state_hash`) and comments; the call site and the hash input are the same. Upstream
+`master` also carries changes after 5.3.0 that this copy does not (branch points,
+`embed`), so a re-sync starts from the next release tag, not from `master`.
 
 `syntect`'s own bundled `JavaScript` syntax does not reproduce the hang: the upstream
 report's own two lines, tried directly against `SyntaxSet::load_defaults_newlines()`'s
@@ -88,7 +90,7 @@ between two contexts named after the real ones) rather than the bundled `JavaScr
 syntax, so it is testing the mechanism the real report hit, not a coincidentally-passing
 unrelated syntax.
 
-**Is the fingerprint worth it?** Two release binaries, built in separate target
+**Is the hash worth it?** These numbers are from before #706 merged. Two release binaries, built in separate target
 directories so the second build does not overwrite the first: one with the fingerprint
 key as implemented above, one with `stack_fingerprint` reverted to #706's own key
 (`SetStates = HashSet<(usize, Vec<ContextId>), ...>`, built from `level.context` alone),
@@ -225,7 +227,7 @@ do
   mkdir "$1" && cd "$1" && git init -q && git fetch --depth 1 "$2" "$3" && git checkout -q FETCH_HEAD && rm -rf .git && cd ..
 done
 cd -
-cargo test -p syntect   # 113 lib + 8 error_handling + 13 doctests = 134 passed, 0 failed
+cargo test -p syntect   # 114 lib + 8 error_handling + 13 doctests = 135 passed, 0 failed
 ```
 
 A branch name would move; the pinned commit will not. If any fetch fails, this step

@@ -97,7 +97,12 @@ type SetStates = HashSet<(usize, u64), BuildHasherDefault<FnvHasher>>;
 /// and cloning a `Vec<ContextId>` each time allocates for nothing. `prototypes` is part
 /// of it because two levels that share a context but differ in their prototypes are
 /// genuinely different states, and conflating them would break a legitimate `set` one
-/// character early. `captures` is left out because `Region` is not hashable. A
+/// character early. Each prototype counts once per level: a `set` keeps the prototypes
+/// of the level it replaces and appends its own `with_prototype`, so a cycle of `set`s
+/// with a `with_prototype` grows the list on every lap. A repeated prototype can never
+/// win over its first occurrence, so the state is the same; hashing every copy would
+/// make each lap look new and the cycle would never break. `captures` is left out
+/// because `Region` is not hashable. A
 /// fingerprint collision, or two states that differ only in `captures`, makes this guard
 /// treat a new state as a repeat and skip its `set`; the wrong stack can then persist for
 /// the rest of the parse. The only guarantee is that the parser still advances a
@@ -106,7 +111,14 @@ fn stack_fingerprint(stack: &[StateLevel]) -> u64 {
     let mut hasher = FnvHasher::default();
     for level in stack {
         level.context.hash(&mut hasher);
-        level.prototypes.hash(&mut hasher);
+        let mut unique_prototypes = 0;
+        for (i, prototype) in level.prototypes.iter().enumerate() {
+            if !level.prototypes[..i].contains(prototype) {
+                prototype.hash(&mut hasher);
+                unique_prototypes += 1;
+            }
+        }
+        hasher.write_usize(unique_prototypes);
     }
     hasher.finish()
 }
@@ -1276,6 +1288,42 @@ contexts:
 
         let line = "test";
         let expect = ["<source.test>, <test.matched>"];
+        expect_scope_stacks(line, &expect, syntax);
+    }
+
+    #[test]
+    fn can_parse_non_consuming_sets_that_would_loop_with_prototype() {
+        let syntax = r#"
+name: test
+scope: source.test
+contexts:
+  main:
+    - match: (?=x)
+      set: a
+  a:
+    # Sets "b" without consuming anything. A "set" keeps the prototypes of
+    # the context it replaces and adds its own, so every lap through here
+    # adds another copy of this prototype.
+    - match: (?=x)
+      set: b
+      with_prototype:
+        - match: z
+          scope: test.prototype
+    - match: y
+      scope: test.a
+  b:
+    # And straight back to "a", which now has the prototype. That is not the
+    # state the first "set" was taken from, so it is taken again. The loop is
+    # caught one lap later, on "b" with the prototype twice, which matches
+    # exactly like "b" with it once.
+    - match: (?=x)
+      set: a
+    - match: y
+      scope: test.b
+"#;
+
+        let line = "xyz";
+        let expect = ["<source.test>, <test.b>", "<source.test>, <test.prototype>"];
         expect_scope_stacks(line, &expect, syntax);
     }
 
