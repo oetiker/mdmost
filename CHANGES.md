@@ -7,6 +7,7 @@
 ### Changed
 
 ### Fixed
+- A code block in a language whose syntax definition has two rules that switch to each other without reading a character, one of them with a `with_prototype`, is now highlighted. Before, it was shown as plain text.
 
 ## 0.7.0 - 2026-10-06
 ### New
