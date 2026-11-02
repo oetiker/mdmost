@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### New
+
+### Changed
+
+### Fixed
+
+## 0.8.0 - 2026-11-02
+### New
 - Releases now include a Windows on ARM archive, `mdmost-<version>-aarch64-pc-windows-msvc.zip`.
 - The Windows archives now carry the `integrations/` folder with the terminal configuration fragments, as the other archives do.
 
