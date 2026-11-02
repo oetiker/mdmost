@@ -1,0 +1,76 @@
+# The .deb and .rpm of mdmost, built by repo-infra's ri-release-nfpm from the
+# static musl archives. The piece fills in VERSION, MTIME and ARCH, and STAGE,
+# the unpacked mdmost/ folder of one archive, before nfpm reads this file.
+# Write no dollar-brace name in a comment either: the piece fills in the whole
+# file and stops at a name it does not know. nfpm adds no automatic
+# requirements, so the static binary depends on nothing.
+#
+# The desktop entry is installed for real, not as an example: the package is a
+# system-wide install, so every user on the machine is offered mdmost for a
+# Markdown file. It only declares the capability; no mimeapps.list is shipped,
+# so the default stays each user's own choice. desktop-file-utils carries a
+# dpkg trigger and an RPM file trigger on /usr/share/applications, so no
+# maintainer script is needed.
+#
+# The terminal fragments cannot be installed the same way. WezTerm and kitty
+# each read one file owned by the user, and neither has a drop-in directory,
+# so they go in as examples, at the path Debian Policy 12.6 names for them.
+name: mdmost
+arch: "${ARCH}"
+platform: linux
+version: "${VERSION}"
+release: "1"
+# nfpm 2.47.0 ignores SOURCE_DATE_EPOCH, so the timestamp is set here.
+mtime: "${MTIME}"
+section: utils
+priority: optional
+maintainer: Tobias Oetiker <tobi@oetiker.ch>
+license: MIT
+homepage: https://github.com/oetiker/mdmost
+description: |
+  Full-screen terminal pager for a single Markdown document
+  A full-screen terminal pager for a single Markdown document. Tables get real
+  borders and negotiated column widths, fenced code is syntax-highlighted, and
+  Mermaid diagrams are laid out as box art rather than shown as source.
+  Rendering is a pure function of the document, width, theme and options, so
+  a resize reflows everything. A single static binary.
+contents:
+  - src: ${STAGE}/mdmost
+    dst: /usr/bin/mdmost
+    file_info:
+      mode: 0755
+  - src: ${STAGE}/man/mdmost.1.gz
+    dst: /usr/share/man/man1/mdmost.1.gz
+    file_info:
+      mode: 0644
+  - src: ${STAGE}/integrations/xdg/mdmost.desktop
+    dst: /usr/share/applications/mdmost.desktop
+    file_info:
+      mode: 0644
+  - src: ${STAGE}/README.md
+    dst: /usr/share/doc/mdmost/README.md
+    file_info:
+      mode: 0644
+  - src: ${STAGE}/integrations/README.md
+    dst: /usr/share/doc/mdmost/examples/README.md
+    file_info:
+      mode: 0644
+  - src: ${STAGE}/integrations/wezterm/md-open.lua
+    dst: /usr/share/doc/mdmost/examples/wezterm/md-open.lua
+    file_info:
+      mode: 0644
+  - src: ${STAGE}/integrations/kitty/open-actions.conf
+    dst: /usr/share/doc/mdmost/examples/kitty/open-actions.conf
+    file_info:
+      mode: 0644
+  - src: ${STAGE}/LICENSE
+    dst: /usr/share/doc/mdmost/copyright
+    packager: deb
+    file_info:
+      mode: 0644
+  - src: ${STAGE}/LICENSE
+    dst: /usr/share/doc/mdmost/LICENSE
+    packager: rpm
+    type: doc
+    file_info:
+      mode: 0644

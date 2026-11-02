@@ -1,29 +1,14 @@
-# Homebrew formula for mdmost. This repository is its own tap:
+# Homebrew formula for mdmost. This repository is its own tap.
 #
-#   brew tap oetiker/mdmost https://github.com/oetiker/mdmost
-#   brew install mdmost
-#
-# The version and the four sha256 lines are rewritten by .github/workflows/release-build.yml
-# after the release artifacts exist. The trailing marker comments are what that
-# rewrite matches on -- do not remove them.
+# The release build rewrites the version line, the four sha256 lines by their
+# marker comments and the bottle block between the BOTTLE markers. Keep the
+# markers, and keep each url line directly above its sha256 line.
 class Mdmost < Formula
   desc "Full-screen terminal pager for a single Markdown document"
   homepage "https://github.com/oetiker/mdmost"
   version "0.7.0"
   license "MIT"
 
-  # Bottles exist for one reason: without one, Homebrew treats this formula as a source
-  # build and refuses to install on a Mac whose Command Line Tools are older than its
-  # macOS, even though nothing here is compiled. The block is rewritten by
-  # .github/workflows/release-build.yml once a release's bottles exist, and the marker
-  # comments are the range that rewrite replaces -- do not remove them. Empty means no
-  # bottle is published yet, which costs nothing but that check.
-  #
-  # One bottle per architecture is enough: on macOS, Homebrew falls back to a bottle
-  # built for an *older* macOS of the same architecture (find_older_compatible_tag in
-  # extend/os/mac/utils/bottles.rb), so these keep working on later releases. That
-  # fallback only reaches upward, which is why the bottles are built on the oldest
-  # runner image available for each architecture.
   # BOTTLE-START
   bottle do
     root_url "https://github.com/oetiker/mdmost/releases/download/v0.7.0"
@@ -56,7 +41,7 @@ class Mdmost < Formula
 
   def install
     bin.install "mdmost"
-    man1.install "man/mdmost.1"
+    Dir["man/*.[1-9]"].each { |page| (man/"man#{page[-1]}").install page }
     # Terminal configuration fragments, as examples. Nothing loads them from here:
     # WezTerm and kitty each read one file owned by the user, so these are copied by
     # hand. See integrations/README.md, and mdmost(1) DEFAULT MARKDOWN VIEWER.
