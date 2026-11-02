@@ -19,27 +19,21 @@ permissions:
   contents: read
 
 jobs:
-  lib:
-    if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
-    uses: ./.github/workflows/ri-ci-lib.yml
-    with:
-      ref: ${{ inputs.ref }}
-
   rust:
     if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
-    uses: ./.github/workflows/ri-ci-rust.yml
+    uses: oposs/repo-infra/.github/workflows/ri-ci-rust.yml@v2
     with:
       ref: ${{ inputs.ref }}
 
   man:
     if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
-    uses: ./.github/workflows/ri-ci-man.yml
+    uses: oposs/repo-infra/.github/workflows/ri-ci-man.yml@v2
     with:
       ref: ${{ inputs.ref }}
 
   rust-musl:
     if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
-    uses: ./.github/workflows/ri-ci-rust-musl.yml
+    uses: oposs/repo-infra/.github/workflows/ri-ci-rust-musl.yml@v2
     with:
       ref: ${{ inputs.ref }}
 
@@ -53,13 +47,23 @@ jobs:
 
   release-pr-current:
     if: ${{ !(github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login == 'github-actions[bot]') }}
-    uses: ./.github/workflows/ri-release-pr-current.yml
+    uses: oposs/repo-infra/.github/workflows/ri-release-pr-current.yml@v2
     permissions:
       contents: read
       pull-requests: read
       checks: write
     with:
       ref: ${{ inputs.ref }}
+
+  # D28 release mode, decided by repo-infra (D33). It runs on every event and
+  # carries no D31 skip: on the release pull request Create release PR opened,
+  # this verdict is what ci-passed decides on.
+  release-verdict:
+    uses: oposs/repo-infra/.github/workflows/ri-release-verdict.yml@v2
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: read
 
   # The single context the ruleset requires (spec D2). It exists so branch
   # protection can name one check that means "this repository's CI passed",
@@ -71,61 +75,44 @@ jobs:
   # check would go green on a red build. It fails open, silently, and looks
   # like it is working.
   #
-  # Release mode (D28): on a release pull request the test results do not
-  # count. Create release PR tested exactly the head that carries the
-  # release-built status, and the head must not be behind main. The verdict
-  # is lib/release.js:releaseModeVerdict, loaded from the base commit, so a
-  # release branch changed by accident cannot pass on library code it changed.
+  # A required check cannot be a called workflow's job: GitHub names that
+  # `<caller job> / <called job>`, and a called workflow cannot read the
+  # caller's needs. So this job stays here and reads release-verdict (D33).
+  # On a release pull request the test results do not count: Create release
+  # PR tested exactly the head that carries the release-built status.
   ci-passed:
     if: always()
-    needs: [lib, rust, man, rust-musl, ci-local, release-pr-current]
+    needs: [rust, man, rust-musl, ci-local, release-pr-current, release-verdict]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
-      pull-requests: read
-      statuses: read
-    # The three release-mode steps run on a pull request from a release/*
-    # branch; this names that condition once.
-    env:
-      RELEASE_BRANCH_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') }}
     steps:
-      - if: env.RELEASE_BRANCH_PR == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: repo-infra-base
-
-      - if: env.RELEASE_BRANCH_PR == 'true'
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-
-      # An API error fails this step and so the job: a release pull request
-      # whose verdict could not be read is never green.
-      - id: release
-        name: Release mode
-        if: env.RELEASE_BRANCH_PR == 'true'
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const lib = `${process.env.GITHUB_WORKSPACE}/repo-infra-base/.github/workflows/lib`;
-            const releaseLib = require(`${lib}/release.js`);
-            const { owner, repo } = context.repo;
-            const verdict = await releaseLib.releaseModeVerdict(github, {
-              owner, repo, pr: context.payload.pull_request,
-            });
-            // A fork's or a person's release/x gets the ordinary rules.
-            if (verdict === null) {
-              core.setOutput('mode', 'ordinary');
-              return;
-            }
-            core.setOutput('mode', 'release');
-            if (!verdict.ok) {
-              core.setFailed(verdict.message);
-              return;
-            }
-            core.notice(verdict.message);
-
-      - if: steps.release.outputs.mode != 'release' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
-        run: exit 1
+      - name: Judge the needed jobs
+        env:
+          VERDICT: ${{ needs.release-verdict.result }}
+          MODE: ${{ needs.release-verdict.outputs.mode }}
+          OK: ${{ needs.release-verdict.outputs.ok }}
+          MESSAGE: ${{ needs.release-verdict.outputs.message }}
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: |
+          if [ "$VERDICT" != success ]; then
+            echo "::error::release-verdict did not succeed ($VERDICT); no verdict, no green"
+            exit 1
+          fi
+          if [ "$MODE" = release ]; then
+            if [ "$OK" != true ]; then
+              echo "::error::$MESSAGE"
+              exit 1
+            fi
+            echo "::notice::$MESSAGE"
+            exit 0
+          fi
+          if [ "$MODE" != ordinary ]; then
+            echo "::error::release-verdict gave an unknown mode ($MODE); no verdict, no green"
+            exit 1
+          fi
+          if [ "$FAILED" = true ]; then
+            echo "::error::a job this one needs failed or was cancelled"
+            exit 1
+          fi

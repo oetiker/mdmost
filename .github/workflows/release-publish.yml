@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   publish:
-    uses: ./.github/workflows/ri-publish-tag.yml
+    uses: oposs/repo-infra/.github/workflows/ri-publish-tag.yml@v2
     permissions:
       contents: write
       pull-requests: read
@@ -28,19 +28,20 @@ jobs:
   gitea:
     needs: [publish]
     if: needs.publish.outputs.release_id != ''
-    uses: ./.github/workflows/ri-publish-gitea.yml
+    uses: oposs/repo-infra/.github/workflows/ri-publish-gitea.yml@v2
     permissions:
       contents: write
     with:
       release_id: ${{ needs.publish.outputs.release_id }}
       head: ${{ needs.publish.outputs.head }}
-    secrets: inherit
+    secrets:
+      GITEA_PACKAGE_TOKEN: ${{ secrets.GITEA_PACKAGE_TOKEN }}
 
   # finalize needs every other job of this file; check verifies it (D30).
   finalize:
     needs: [publish, gitea]
     if: needs.publish.outputs.release_id != ''
-    uses: ./.github/workflows/ri-publish-finalize.yml
+    uses: oposs/repo-infra/.github/workflows/ri-publish-finalize.yml@v2
     permissions:
       contents: write
       actions: write

@@ -1,21 +1,12 @@
 name: Changelog
-# repo-infra: changelog v6
-#
-# Purpose: The changelog-updated required check (D2, D6).
-# Choose: Always.
-# Supplies: CHANGES.md with an Unreleased section; the no-changelog label.
-# Pieces: workflow-lib
+# The changelog.yml of every repository (D2, D6, D33). Copy it word for word;
+# check compares it with this text.
 #
 # Required, not advisory (spec D2). Being required is only safe because the
 # escape hatch below is a JOB-level `if:`. A job skipped by a condition
 # reports Success, while a WORKFLOW skipped by a paths/branches filter stays
 # Pending forever and blocks the merge. Never add paths: or paths-ignore: to
 # this workflow (spec D13).
-#
-# A release pull request is opened by GITHUB_TOKEN, so its runs park until
-# someone approves them. Nobody needs to (D28): Create release PR writes this
-# check itself. This job exists for the case where someone approves them
-# anyway, or presses Update branch, and then agrees with Create release PR.
 
 on:
   pull_request:
@@ -24,105 +15,46 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
-  # D28 release mode: the release-built commit status on the head.
-  statuses: read
 
 jobs:
-  # No `name:`: the check context is the job id, `changelog-updated`, which is
-  # what the ruleset requires. Renaming this job silently un-requires the check.
-  changelog-updated:
-    # The no-changelog label is the deliberate escape hatch for typo and CI-only
-    # changes. Without it every weekly dependabot PR is blocked, since this
-    # check is required. The label must exist in the repository: a label that
-    # does not exist is silently ignored by dependabot.
-    #
-    # release/* always runs: a release pull request is gated on its build, and
-    # the label must not turn that red check green after an Update branch.
+  # The no-changelog label is the deliberate escape hatch for typo and CI-only
+  # changes. Without it every weekly dependabot PR is blocked, since the
+  # check is required. release/* always runs: a release pull request is gated
+  # on its build, and the label must not turn that red check green.
+  changelog:
     if: >-
       startsWith(github.head_ref, 'release/') ||
       !contains(github.event.pull_request.labels.*.name, 'no-changelog')
+    uses: oposs/repo-infra/.github/workflows/ri-changelog.yml@v2
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: read
+
+  # No `name:`: the check context is the job id, `changelog-updated`, which is
+  # what the ruleset requires. Renaming this job silently un-requires the check.
+  #
+  # The same label condition, joined with always(). Without it this job is
+  # skipped when `changelog` fails, and a skipped required check counts as
+  # passed. !cancelled() is not enough: in a cancelled run it skips this job
+  # too. always() runs it there, and the step fails on a cancelled changelog.
+  changelog-updated:
+    if: >-
+      always() && (startsWith(github.head_ref, 'release/') ||
+      !contains(github.event.pull_request.labels.*.name, 'no-changelog'))
+    needs: changelog
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-
-      # The library is loaded from the base commit (D28), so a pull request
-      # that edits lib/changes.js or lib/release.js is judged by main's rules.
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          path: repo-infra-base
-
-      - uses: actions/github-script@v9
-        with:
-          script: |
-            const ws = process.env.GITHUB_WORKSPACE;
-            const baseLib = `${ws}/repo-infra-base/.github/workflows/lib`;
-            // The base's changes.js when it has gateVerdict. The pull request
-            // that installs or upgrades the library finds none there, or one
-            // without it (v0.2.0 shipped workflow-lib v4, before gateVerdict),
-            // and runs its own. The base commit decides which, not the pull
-            // request.
-            const baseChanges = (() => {
-              try {
-                const lib = require(`${baseLib}/changes.js`);
-                return typeof lib.gateVerdict === 'function' ? lib : null;
-              } catch (error) {
-                return null;
-              }
-            })();
-            const changes = baseChanges
-              || require(`${ws}/.github/workflows/lib/changes.js`);
-            const { owner, repo } = context.repo;
-            const pr = context.payload.pull_request;
-
-            if (pr.head.ref.startsWith('release/')) {
-              const releaseLib = require(`${baseLib}/release.js`);
-              const verdict = await releaseLib.releaseModeVerdict(github, { owner, repo, pr });
-              if (verdict !== null) {
-                if (!verdict.ok) {
-                  core.setFailed(verdict.message);
-                  return;
-                }
-                core.notice(verdict.message);
-                return;
-              }
-              // Anyone else's release/* branch: the ordinary rules, label included.
-            }
-
-            // The labels as they are now, not as the event saw them. `gh pr create
-            // --label` opens the pull request and labels it in a second call, so
-            // the opened run's payload has no label; its failure could finish
-            // after the skipped labeled run and stay the check's result.
-            const { data: current } = await github.rest.pulls.get({
-              owner, repo, pull_number: pr.number,
-            });
-            if (current.labels.some((label) => label.name === 'no-changelog')) {
-              core.notice("Labelled 'no-changelog'.");
-              return;
-            }
-
-            // Both sides come from the API rather than from the checkout. On a
-            // pull_request event the checkout is the merge commit, and comparing
-            // against a base that is not in a shallow clone needs fetch-depth: 0.
-            const readOptional = async (path, ref) => {
-              try {
-                const { data } = await github.rest.repos.getContent({ owner, repo, path, ref });
-                return Buffer.from(data.content, 'base64').toString('utf8');
-              } catch (error) {
-                if (error.status === 404) return null;
-                throw error;
-              }
-            };
-
-            const verdict = changes.gateVerdict(
-              await readOptional('CHANGES.md', pr.base.sha),
-              await readOptional('CHANGES.md', pr.head.sha),
-            );
-            if (!verdict.ok) {
-              core.setFailed(verdict.message);
-              return;
-            }
-
-            core.notice(verdict.message);
+      - name: Read the changelog verdict
+        env:
+          RESULT: ${{ needs.changelog.result }}
+          MESSAGE: ${{ needs.changelog.outputs.message }}
+        run: |
+          if [ "$RESULT" != success ]; then
+            echo "::error::changelog did not pass ($RESULT): $MESSAGE"
+            exit 1
+          fi
+          echo "::notice::$MESSAGE"
