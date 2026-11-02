@@ -1,11 +1,24 @@
 version: 2
-# repo-infra: dependabot v2
+# repo-infra: dependabot v3
 #
-# Purpose: Keep the pinned GitHub Actions current.
+# Purpose: Keep the pinned GitHub Actions and the dependencies of the
+#   repository's own code current.
 # Choose: Always.
 # Supplies: The no-changelog label.
+# Produces: Below the github-actions entry, check and apply expect one weekly
+#   entry at directory / for each ecosystem the callers' CI pieces build:
+#   cargo for ri-ci-rust and ri-ci-rust-musl, npm for ri-ci-node-pnpm, bun
+#   for ri-ci-node-bun, pip for ri-ci-python, gomod for ri-ci-go. The other
+#   CI pieces add none, and neither does a call that passes `repository`.
 updates:
   - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - no-changelog
+  - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
