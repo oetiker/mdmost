@@ -6,36 +6,35 @@
 class Mdmost < Formula
   desc "Full-screen terminal pager for a single Markdown document"
   homepage "https://github.com/oetiker/mdmost"
-  version "0.7.0"
+  version "0.8.0"
   license "MIT"
 
   # BOTTLE-START
   bottle do
-    root_url "https://github.com/oetiker/mdmost/releases/download/v0.7.0"
-    sha256 cellar: :any_skip_relocation, arm64_sonoma: "b36aa74268f6bc19658e84743e11b44acf86a31e2f9f7ff6b379d9f95d3b54a2"
-    sha256 cellar: :any_skip_relocation, sequoia: "c3f72a203eaf5a1d948ea87c8fa9fcead79b2e7ddbfb631def07f2c7bf91db4d"
+    root_url "https://github.com/oetiker/mdmost/releases/download/v0.8.0"
+    sha256 cellar: :any_skip_relocation, arm64_big_sur: "ab9efbcb57c3bd64a2cfefefd6708d2300ff09e8e716f8514b2f148baa0d0b28"
   end
   # BOTTLE-END
 
   on_macos do
     on_arm do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-aarch64-apple-darwin.tar.gz"
-      sha256 "3ea7a2d0eb1de1b842ff3a67aaa67dec505378f57c53aa1adc35841ab459e61c" # mac-arm
+      sha256 "0c1359f7d61ada65e39e1cb22f2e4298aa4a0f551348fa007536ffb69357993d" # mac-arm
     end
     on_intel do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-x86_64-apple-darwin.tar.gz"
-      sha256 "b3d10807636dcf6bb23c5a66e3e2486fe7dd2a8da22fff8c2f7d1ec47198b0c2" # mac-x86
+      sha256 "f56bf8c3c9a5f9bf3c357d80b06e1b987b353e66bf696d2c6dfe9a9a84cb65a4" # mac-x86
     end
   end
 
   on_linux do
     on_intel do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-x86_64-unknown-linux-musl.tar.gz"
-      sha256 "c18faa8a45997f7009d448501e0ef9dab961ca72da0f8f70544957d13df6638d" # linux-x86
+      sha256 "98669b5113fa3a83d2dbcb703355a5a5ec3f315032bc52c8e123bf9ab5724761" # linux-x86
     end
     on_arm do
       url "https://github.com/oetiker/mdmost/releases/download/v#{version}/mdmost-#{version}-aarch64-unknown-linux-musl.tar.gz"
-      sha256 "f0138089ddada7c16349373ec4d52db60a4ff50ac538e9ff9cc1632688ddaae8" # linux-arm
+      sha256 "b0e3e86e9b17a36182ef703cc37a2d400300f08c095bab9de7953ad59a31ef95" # linux-arm
     end
   end
 
