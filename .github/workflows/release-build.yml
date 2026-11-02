@@ -1,8 +1,10 @@
 name: Release build
 
 # Called by Create release PR on the release branch before the pull request
-# exists (D28). mdmost's own build, release-build-local.yml, makes the
-# binaries, packages and the Homebrew formula.
+# exists (D28). The three repo-infra release pieces it calls build the
+# archives, the deb and rpm packages from the musl archives, and the bottle
+# with the rewritten Formula/mdmost.rb (D32). Read-only: nothing here writes
+# the repository.
 on:
   workflow_call:
     inputs:
@@ -19,19 +21,32 @@ permissions:
   contents: read
 
 jobs:
-  release-version:
-    name: Release version
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - run: echo "Building v${VERSION} from ${REF}"
-        env:
-          VERSION: ${{ inputs.version }}
-          REF: ${{ inputs.ref }}
-
-  release-build-local:
-    uses: ./.github/workflows/release-build-local.yml
+  # No illumos: arboard pulls in wayland-backend, which does not build there.
+  # Every archive carries integrations/: the formula installs it to pkgshare
+  # and the packages install the desktop entry and the terminal fragments.
+  binaries:
+    uses: oposs/repo-infra/.github/workflows/ri-release-rust-binaries.yml@v2
     with:
       version: ${{ inputs.version }}
       ref: ${{ inputs.ref }}
-    secrets: inherit
+      bin: mdmost
+      extra_paths: integrations
+      targets: x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-apple-darwin aarch64-apple-darwin x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+
+  packages:
+    needs: binaries
+    uses: oposs/repo-infra/.github/workflows/ri-release-nfpm.yml@v2
+    with:
+      version: ${{ inputs.version }}
+      ref: ${{ inputs.ref }}
+      config: nfpm.yaml
+      packagers: '{"deb": {}, "rpm": {}}'
+      archives: x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+
+  homebrew:
+    needs: binaries
+    uses: oposs/repo-infra/.github/workflows/ri-release-homebrew.yml@v2
+    with:
+      version: ${{ inputs.version }}
+      ref: ${{ inputs.ref }}
+      bin: mdmost

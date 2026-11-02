@@ -3,8 +3,11 @@
 ## [Unreleased]
 
 ### New
+- Releases now include a Windows on ARM archive, `mdmost-<version>-aarch64-pc-windows-msvc.zip`.
+- The Windows archives now carry the `integrations/` folder with the terminal configuration fragments, as the other archives do.
 
 ### Changed
+- The Homebrew bottle is built for Apple Silicon only. On an Intel Mac, `brew install mdmost` installs from the release archive and needs Command Line Tools that match the installed macOS.
 
 ### Fixed
 - A code block in a language whose syntax definition has two rules that switch to each other without reading a character, one of them with a `with_prototype`, is now highlighted. Before, it was shown as plain text.
