@@ -257,7 +257,7 @@ cargo test -p syntect -- \
   --skip parsing::syntax_set::tests::can_load \
   --skip dumps::tests::can_dump_and_load \
   --skip dumps::tests::dump_is_deterministic
-# 97 lib + 8 error_handling + 13 doctests = 118 passed, 16 skipped, 0 failed
+# 98 lib + 8 error_handling + 13 doctests = 119 passed, 16 skipped, 0 failed
 ```
 
 **This local skip list is a convenience for a working tree without the fixtures, not
