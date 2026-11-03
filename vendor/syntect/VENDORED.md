@@ -388,6 +388,12 @@ test target and the dev-dependencies those needed stripped (`criterion`, `getopt
   ignored, printing `warning: profiles for the non root package will be ignored` on
   every `cargo` invocation in this workspace, not only ones touching this crate.
   Deleting the tables changes nothing cargo actually builds and silences the warning.
+- The `pretty_assertions` dev-dependency is `1.4.1`, where upstream 5.3.0 has `0.6`.
+  mdmost's own tests already use 1.4.1, and the `0.6` line put a second copy into
+  `Cargo.lock` together with `ansi_term`, `ctor`, `difference` and `output_vt100`, which
+  only it needed (Dependabot PR #38, 2026-11-02). The crate uses only the `assert_eq!`
+  and `assert_ne!` macros, which 1.x keeps. A re-sync keeps 1.x unless upstream's own
+  requirement is newer.
 
 Kept as dev-dependencies, deliberately: `pretty_assertions` (`src/lib.rs` has
 `#[cfg(test)] #[macro_use] extern crate pretty_assertions`), `rayon` (the

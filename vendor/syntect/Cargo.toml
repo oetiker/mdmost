@@ -181,7 +181,7 @@ version = "0.4.5"
 optional = true
 
 [dev-dependencies.pretty_assertions]
-version = "0.6"
+version = "1.4.1"
 
 [dev-dependencies.rayon]
 version = "1.0.0"
