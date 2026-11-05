@@ -133,7 +133,7 @@ version = "1.0"
 optional = true
 
 [dependencies.fancy-regex]
-version = "0.16.2"
+version = "0.20.0"
 optional = true
 
 [dependencies.flate2]
